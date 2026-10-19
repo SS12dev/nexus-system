@@ -35,7 +35,7 @@ async def chat(sessionmaker):
         user = await create_user(
             db, email="shivam@example.com", role=RoleName.owner, status=UserStatus.active,
             name="Shivam",
-        )  # fmt: skip
+        )
         c = Chat(user_id=user.id, title="Planning")
         db.add(c)
         await db.flush()
@@ -46,11 +46,11 @@ async def chat(sessionmaker):
                 content="Compare LangGraph and CrewAI. I always prefer tables for comparisons.",
                 created_at=now,
             )
-        )  # fmt: skip
+        )
         reply = Message(
             chat_id=c.id, role=MessageRole.assistant, status=MessageStatus.complete,
             content="| | LangGraph | CrewAI |", created_at=now + timedelta(seconds=1),
-        )  # fmt: skip
+        )
         db.add(reply)
         await db.commit()
         return user.id, c.id, reply.id
@@ -62,7 +62,7 @@ async def add_memory(sessionmaker, embedder, user_id, content, **kw) -> uuid.UUI
         m = Memory(
             user_id=user_id, kind=MemoryKind.preference, content=content, embedding=vec,
             embedding_model=model, **kw,
-        )  # fmt: skip
+        )
         db.add(m)
         await db.commit()
         return m.id
@@ -83,7 +83,7 @@ async def test_new_preference_is_added_with_its_source(deps, model, chat, sessio
     model.script = [
         js(memories=[{"content": "Prefers tables for comparisons", "kind": "preference",
                       "confidence": 0.9}], forget=[])
-    ]  # fmt: skip
+    ]
     await memory.extract_memories(deps, chat_id, reply_id)
 
     (m,) = await memories(sessionmaker, user_id)
@@ -166,7 +166,7 @@ async def test_turn_uses_memories_and_documents_then_queues_learning(
         f = File(
             user_id=user_id, chat_id=chat_id, name="sales.xlsx", content_type="x", size=1,
             sha256="s", storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=40,
-        )  # fmt: skip
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=user_id, idx=0, content="| North | 1200 |"))
@@ -174,7 +174,7 @@ async def test_turn_uses_memories_and_documents_then_queues_learning(
         reply = Message(
             chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
             content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+        )
         db.add(reply)
         await db.commit()
 
@@ -196,14 +196,14 @@ async def test_tool_calls_read_documents_and_count_every_call(
         f = File(
             user_id=user_id, name="board-deck.pptx", content_type="x", size=1, sha256="s",
             storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=30,
-        )  # fmt: skip
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=user_id, idx=0, content="Q3 target is 5 million"))
         reply = Message(
             chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
             content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+        )
         db.add(reply)
         await db.commit()
     model.script = [
@@ -234,14 +234,14 @@ async def test_tools_cannot_read_other_users_documents(deps, model, chat, sessio
         f = File(
             user_id=other.id, name="theirs.txt", content_type="x", size=1, sha256="s",
             storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=10,
-        )  # fmt: skip
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=other.id, idx=0, content="their secret plan"))
         reply = Message(
             chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
             content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+        )
         db.add(reply)
         await db.commit()
     model.script = [
@@ -295,7 +295,7 @@ async def test_nightly_decays_stale_memories_and_merges_duplicates(
     keep_pinned = await add_memory(
         sessionmaker, embedder, user_id, "Vegetarian", confidence=0.1, pinned=True,
         reinforced_at=old,
-    )  # fmt: skip
+    )
     model.script = ["**About**\n- Uses a MacBook"]
 
     await memory.nightly(deps)

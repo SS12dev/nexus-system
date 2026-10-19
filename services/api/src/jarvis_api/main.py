@@ -10,7 +10,17 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from jarvis_api import ws
 from jarvis_api.queue import ArqJobQueue, JobQueue
-from jarvis_api.routes import admin, auth, chats, files, me, memories
+from jarvis_api.routes import (
+    admin,
+    auth,
+    chats,
+    files,
+    instructions,
+    me,
+    memories,
+    skills,
+    systems,
+)
 from jarvis_common.db import make_engine, make_sessionmaker
 from jarvis_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
@@ -71,6 +81,9 @@ def create_app(
     app.include_router(chats.router)
     app.include_router(files.router)
     app.include_router(memories.router)
+    app.include_router(skills.router)
+    app.include_router(instructions.router)
+    app.include_router(systems.router)
     app.include_router(admin.router)
     app.include_router(ws.router)
 

@@ -130,7 +130,7 @@ async def owner(sessionmaker):
         user = await create_user(
             db, email="shivam@example.com", role=RoleName.owner, status=UserStatus.active,
             name="Shivam",
-        )  # fmt: skip
+        )
         chat = Chat(user_id=user.id, title="t")
         db.add(chat)
         await db.commit()
@@ -146,7 +146,7 @@ async def make_run(sdeps, owner, topology, agents, request="Do the thing", **spe
     spec = AgentSystemSpec.model_validate(
         {"name": f"{topology} team", "goal": "Do the thing well", "topology": topology,
          "agents": agents, **spec_kw}
-    )  # fmt: skip
+    )
     async with sdeps.sessionmaker() as db:
         system = AgentSystem(
             id=uuid.uuid4(),
@@ -247,7 +247,7 @@ async def test_map_reduce_fans_out(sdeps, owner, scripts, seen):
     _, run_id = await make_run(
         sdeps, owner, "parallel_map_reduce",
         [agent("splitter"), agent("worker"), agent("combiner")],
-    )  # fmt: skip
+    )
     await runner.run_system(sdeps, run_id)
     run, _ = await load(sdeps, run_id)
     assert run.status == RunStatus.completed and run.output == "Combined."
@@ -305,7 +305,7 @@ async def test_risky_tool_waits_for_approval_then_runs(sdeps, owner, scripts, se
 
     # Approving with edited arguments; nothing else is pending, so the run can go on.
     assert await decide(sdeps, owner, run_id, "approve", args={"to": ["b@example.com"],
-                        "subject": "Hi", "body": "x"})  # fmt: skip
+                        "subject": "Hi", "body": "x"})
     await runner.continue_run(sdeps, run_id)
     run, _ = await load(sdeps, run_id)
     assert run.status == RunStatus.completed and run.output == "Done emailing."
@@ -424,7 +424,7 @@ async def test_budget_check_refuses_expensive_spec(sdeps, owner):
             sdeps, owner, "critic_loop",
             [agent("doer", tier="max", max_steps=40), agent("critic", tier="max", max_steps=40)],
             max_rounds=10,
-        )  # fmt: skip
+        )
 
 
 async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
@@ -445,7 +445,7 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
     _, run_id = await make_run(
         sdeps, owner, "pipeline",
         [agent("lead", tier="mini"), agent("helper", tier="max")],
-    )  # fmt: skip
+    )
     run, _ = await load(sdeps, run_id)
     await runner.run_system(sdeps, run_id)
     models = seen["models"]

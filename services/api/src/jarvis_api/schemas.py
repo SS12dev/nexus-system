@@ -93,6 +93,8 @@ class FileBrief(BaseModel):
     content_type: str
     size: int
     status: FileStatus
+    origin: str = "upload"
+    version: int = 1
 
 
 class FileOut(FileBrief):
@@ -196,3 +198,52 @@ class ProfileOut(BaseModel):
 
 class ProfileUpdateIn(BaseModel):
     memory_enabled: bool
+
+
+# --- Phase 3: skills, instructions, agent systems, approvals -------------------------------
+
+
+class SkillCreateIn(BaseModel):
+    content: str = Field(min_length=1, max_length=200_000, description="The SKILL.md text")
+    files: dict[str, str] = Field(default_factory=dict)
+    # personal (yours) or, for admins, domain (shared with everyone).
+    scope: str = "personal"
+
+
+class SkillUpdateIn(BaseModel):
+    content: str = Field(min_length=1, max_length=200_000)
+    files: dict[str, str] | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+class SkillStatusIn(BaseModel):
+    status: str = Field(pattern="^(active|disabled)$")
+
+
+class SkillRollbackIn(BaseModel):
+    version: int = Field(ge=1)
+
+
+class InstructionIn(BaseModel):
+    content: str = Field(max_length=20_000)
+
+
+class RunIn(BaseModel):
+    request: str = Field(min_length=1, max_length=20_000)
+    file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    budget_usd: float | None = Field(default=None, gt=0, le=1000)
+    chat_id: uuid.UUID | None = None
+
+
+class TemplateIn(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+
+
+class DecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approve|reject)$")
+    args: dict | None = None
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class GrantsIn(BaseModel):
+    capabilities: list[str] = Field(default_factory=list)
