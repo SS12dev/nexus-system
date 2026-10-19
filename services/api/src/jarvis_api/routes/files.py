@@ -36,6 +36,16 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # attachment so an upload can never run script on Jarvis's origin.
 INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 
+# Slim container images have no /etc/mime.types, so Python's mimetypes misses these.
+OFFICE_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+    ".md": "text/markdown",
+}
+
 
 async def own_file(db: AsyncSession, user: User, file_id: uuid.UUID) -> File:
     f = await db.scalar(select(File).where(File.id == file_id, File.user_id == user.id))
@@ -85,7 +95,12 @@ async def upload(
     if size == 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
 
-    content_type = mimetypes.guess_type(name)[0] or file.content_type or "application/octet-stream"
+    content_type = (
+        OFFICE_TYPES.get(ext)
+        or mimetypes.guess_type(name)[0]
+        or file.content_type
+        or "application/octet-stream"
+    )
     f = File(
         id=uuid.uuid4(),
         user_id=user.id,

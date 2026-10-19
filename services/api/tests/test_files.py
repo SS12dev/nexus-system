@@ -35,6 +35,11 @@ async def test_upload_stores_the_file_and_queues_parsing(owner, queue, storage):
     assert body["id"] in key and storage.objects[key][0].startswith(b"Quarterly")
 
 
+async def test_content_type_comes_from_the_extension(owner):
+    resp = await upload(owner, name="sales.xlsx", data=b"PK fake")
+    assert resp.json()["content_type"].endswith("spreadsheetml.sheet")
+
+
 async def test_upload_rules(owner, settings, monkeypatch):
     assert (await upload(owner, name="tool.exe")).status_code == 415
     assert (await upload(owner, data=b"")).status_code == 400
