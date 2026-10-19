@@ -1,6 +1,6 @@
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import openai
@@ -10,6 +10,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.events import Event, publish
 from jarvis_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
 from jarvis_common.models import (
@@ -22,12 +23,16 @@ from jarvis_common.models import (
     utcnow,
 )
 from jarvis_common.settings import Settings
-from jarvis_orchestrator.graph import build_graph
+from jarvis_orchestrator.context import assemble
+from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
+from jarvis_orchestrator.tools import build_tools
 
 log = logging.getLogger(__name__)
 
 ModelFactory = Callable[..., BaseChatModel]
+# Puts a job on the orchestrator queue: enqueue(function_name, *args, **arq_options).
+Enqueue = Callable[..., Awaitable[object]]
 
 
 @dataclass
@@ -37,6 +42,8 @@ class TurnDeps:
     redis: Redis
     gateway: LiteLLMAdmin
     model_factory: ModelFactory
+    embedder: CachedEmbedder
+    enqueue: Enqueue | None = None
 
 
 class TurnFailed(Exception):
@@ -96,7 +103,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
 
         try:
             await emit("jarvis.state", state="thinking")
-            content, usage = await _generate(deps, db, chat, user, msg, emit)
+            content, usage, learn = await _generate(deps, db, chat, user, msg, emit)
         except Exception as exc:
             if not isinstance(exc, TurnFailed):
                 log.exception("Turn %s failed", assistant_message_id)
@@ -118,8 +125,19 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         await emit("message.completed", message=message_payload(msg))
         await emit("jarvis.state", state="idle")
 
+    if learn and deps.enqueue is not None:
+        try:
+            await deps.enqueue(
+                "extract_memories",
+                str(chat_id),
+                str(assistant_message_id),
+                _job_id=f"memory:{assistant_message_id}",
+            )
+        except Exception:
+            log.exception("Could not queue memory extraction")
 
-async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tuple[str, dict]:
+
+async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tuple[str, dict, bool]:
     if user.status != UserStatus.active:
         raise TurnFailed("Your account is not active.")
     rows = await db.scalars(
@@ -133,6 +151,8 @@ async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tup
         .limit(deps.settings.chat_history_limit)
     )
     history = list(reversed(rows.all()))
+    truncated = len(history) >= deps.settings.chat_history_limit
+    question = next((m.content for m in reversed(history) if m.role == MessageRole.user), "")
     try:
         api_key = await ensure_user_key(db, deps.settings, deps.gateway, user)
     except GatewayError as exc:
@@ -151,11 +171,27 @@ async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tup
             "tags": ["jarvis", "chat", deps.settings.env],
         },
     )
-    graph = build_graph(model)
+    context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
+    # Release the connection while the model runs; tools open their own sessions.
+    await db.commit()
+    tools = build_tools(
+        deps.sessionmaker,
+        deps.embedder,
+        deps.redis,
+        user.id,
+        chat.id,
+        emit,
+        context.memory_enabled,
+    )
+    graph = build_graph(model, tools)
     content = ""
-    usage: dict = {}
+    usage = {"input_tokens": 0, "output_tokens": 0}
     async for chunk, _meta in graph.astream(
-        {"messages": to_langchain(history), "system_prompt": system_prompt(user.name)},
+        {
+            "messages": to_langchain(history),
+            "system_prompt": system_prompt(user.name, context.render()),
+        },
+        {"recursion_limit": RECURSION_LIMIT},
         stream_mode="messages",
     ):
         if not isinstance(chunk, AIMessageChunk):
@@ -167,5 +203,7 @@ async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tup
             content += delta
             await emit("message.delta", message_id=str(msg.id), delta=delta)
         if chunk.usage_metadata:
-            usage = dict(chunk.usage_metadata)
-    return content, usage
+            # One turn can make several model calls (tool rounds); count them all.
+            usage["input_tokens"] += chunk.usage_metadata.get("input_tokens", 0)
+            usage["output_tokens"] += chunk.usage_metadata.get("output_tokens", 0)
+    return content, usage, context.memory_enabled

@@ -10,6 +10,8 @@ dependencies = [
     "asyncpg>=0.30",
     "redis>=5.2",
     "httpx>=0.28",
+    "pgvector>=0.4",
+    "aiobotocore>=2.15",
 ]
 
 [build-system]

@@ -9,16 +9,23 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from jarvis_api import ws
-from jarvis_api.queue import ArqTurnQueue, TurnQueue
-from jarvis_api.routes import admin, auth, chats, me
+from jarvis_api.queue import ArqJobQueue, JobQueue
+from jarvis_api.routes import admin, auth, chats, files, me, memories
 from jarvis_common.db import make_engine, make_sessionmaker
+from jarvis_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.settings import Settings, get_settings
+from jarvis_common.storage import S3Storage, Storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
-def create_app(settings: Settings | None = None, queue: TurnQueue | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    queue: JobQueue | None = None,
+    storage: Storage | None = None,
+    embedder: Embedder | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -28,15 +35,20 @@ def create_app(settings: Settings | None = None, queue: TurnQueue | None = None)
         app.state.sessionmaker = make_sessionmaker(engine)
         app.state.redis = Redis.from_url(settings.redis_url)
         app.state.gateway = LiteLLMAdmin(settings)
+        app.state.storage = storage or S3Storage(settings)
+        inner = embedder or LiteLLMEmbedder(settings)
+        app.state.embedder = CachedEmbedder(inner, settings.embedding_batch_size)
         pool = None
         if queue is None:
             pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-            app.state.queue = ArqTurnQueue(pool)
+            app.state.queue = ArqJobQueue(pool)
         else:
             app.state.queue = queue
         yield
         if pool is not None:
             await pool.aclose()
+        await inner.aclose()
+        await app.state.storage.aclose()
         await app.state.gateway.aclose()
         await app.state.redis.aclose()
         await engine.dispose()
@@ -57,6 +69,8 @@ def create_app(settings: Settings | None = None, queue: TurnQueue | None = None)
     app.include_router(auth.router)
     app.include_router(me.router)
     app.include_router(chats.router)
+    app.include_router(files.router)
+    app.include_router(memories.router)
     app.include_router(admin.router)
     app.include_router(ws.router)
 

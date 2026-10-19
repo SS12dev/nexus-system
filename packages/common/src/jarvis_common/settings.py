@@ -52,6 +52,33 @@ class Settings(BaseSettings):
 
     chat_history_limit: int = 40
 
+    # Object storage (MinIO locally, any S3 API later) for uploads.
+    s3_endpoint_url: str = "http://localhost:9000"
+    s3_access_key: str = "jarvis"
+    s3_secret_key: str = ""
+    s3_bucket: str = "jarvis"
+    s3_region: str = "us-east-1"
+    max_upload_mb: int = 50
+
+    # Embeddings go through LiteLLM too. The default alias points at bge-m3 in Ollama on the
+    # host, so they cost nothing; see infra/litellm/config.yaml.
+    embedding_model: str = "jarvis-embed"
+    embedding_batch_size: int = 32
+
+    # Memory. Extraction, summaries and the profile use the cheapest tier.
+    memory_model: str = "jarvis-nano"
+    # Memories, past-chat summaries and document chunks put in the prompt each turn.
+    memory_top_k: int = 8
+    episode_top_k: int = 2
+    chunk_top_k: int = 6
+    # Attached documents shorter than this go into the prompt whole instead of as excerpts.
+    inline_document_chars: int = 16000
+    # A chat is summarised once it has been quiet this long.
+    episode_idle_minutes: int = 20
+    # Nightly memory upkeep (decay, merge, profile rebuild), in UTC. 21:30 UTC is 03:00 IST.
+    memory_nightly_hour_utc: int = 21
+    memory_nightly_minute_utc: int = 30
+
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_client_id and self.oidc_client_secret)

@@ -5,7 +5,14 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
-from jarvis_common.models import MessageRole, MessageStatus, RoleName, UserStatus
+from jarvis_common.models import (
+    FileStatus,
+    MemoryKind,
+    MessageRole,
+    MessageStatus,
+    RoleName,
+    UserStatus,
+)
 
 Usd = Annotated[
     Decimal, Field(ge=0, le=100000), AfterValidator(lambda v: v.quantize(Decimal("0.01")))
@@ -78,6 +85,42 @@ class ChatUpdateIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class FileBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    content_type: str
+    size: int
+    status: FileStatus
+
+
+class FileOut(FileBrief):
+    error: str | None
+    parser: str | None
+    chunk_count: int
+    char_count: int
+    chat_id: uuid.UUID | None
+    created_at: datetime
+
+
+class FileUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class FileTextOut(BaseModel):
+    text: str
+    offset: int
+    total_chars: int
+
+
+class SearchHitOut(BaseModel):
+    file: FileBrief
+    heading: str | None
+    snippet: str
+    score: float
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -92,13 +135,64 @@ class MessageOut(BaseModel):
     trace_id: str | None
     error: str | None
     created_at: datetime
+    attachments: list[FileBrief] = []
 
 
 class SendMessageIn(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
+    file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
 
 
 class SendMessageOut(BaseModel):
     chat: ChatOut
     user_message: MessageOut
     assistant_message: MessageOut
+
+
+class MemoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: MemoryKind
+    content: str
+    confidence: float
+    pinned: bool
+    source: str
+    source_chat_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    reinforced_at: datetime
+
+
+class MemoryEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    op: str
+    actor: str
+    content: str | None
+    message_id: uuid.UUID | None
+    created_at: datetime
+
+
+class MemoryCreateIn(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    kind: MemoryKind = MemoryKind.fact
+    pinned: bool = False
+
+
+class MemoryUpdateIn(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=1000)
+    kind: MemoryKind | None = None
+    pinned: bool | None = None
+
+
+class ProfileOut(BaseModel):
+    content: str
+    memory_enabled: bool
+    built_at: datetime | None
+    stale: bool
+    memory_count: int
+
+
+class ProfileUpdateIn(BaseModel):
+    memory_enabled: bool

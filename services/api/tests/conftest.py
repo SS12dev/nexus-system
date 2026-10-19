@@ -9,12 +9,22 @@ from jarvis_api.main import create_app
 class RecordingQueue:
     def __init__(self):
         self.turns: list[tuple[uuid.UUID, uuid.UUID]] = []
+        self.parses: list[uuid.UUID] = []
+        self.profiles: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
         if self.fail:
             raise ConnectionError("redis down")
         self.turns.append((chat_id, assistant_message_id))
+
+    async def enqueue_parse(self, file_id):
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.parses.append(file_id)
+
+    async def enqueue_profile_rebuild(self, user_id):
+        self.profiles.append(user_id)
 
 
 @pytest.fixture
@@ -23,8 +33,8 @@ def queue():
 
 
 @pytest.fixture
-async def app(settings, engine, gateway, queue):
-    app = create_app(settings, queue=queue)
+async def app(settings, engine, gateway, queue, storage, fake_embedder):
+    app = create_app(settings, queue=queue, storage=storage, embedder=fake_embedder)
     async with app.router.lifespan_context(app):
         app.state.gateway = gateway
         yield app

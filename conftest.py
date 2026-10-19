@@ -2,7 +2,10 @@
 set TEST_DATABASE_URL and TEST_REDIS_URL to point elsewhere."""
 
 import asyncio
+import hashlib
+import math
 import os
+import re
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -14,14 +17,20 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from jarvis_common.db import make_engine, make_sessionmaker
+from jarvis_common.embeddings import CachedEmbedder, EmbeddingError
+from jarvis_common.models import EMBEDDING_DIM
 from jarvis_common.settings import Settings
+from jarvis_common.storage import MemoryStorage
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/jarvis_test"
 )
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 DEV_TOKEN = "test-dev-token"
-TABLES = "audit_log, messages, chats, budgets, api_keys, sessions, user_roles, users"
+TABLES = (
+    "memory_events, memories, episodes, profiles, attachments, file_chunks, files, "
+    "embedding_cache, audit_log, messages, chats, budgets, api_keys, sessions, user_roles, users"
+)
 
 
 @pytest.fixture(scope="session")
@@ -104,3 +113,49 @@ class FakeGateway:
 @pytest.fixture
 def gateway() -> FakeGateway:
     return FakeGateway()
+
+
+class FakeEmbedder:
+    """Bag-of-words vectors: texts sharing words point the same way, so similarity search
+    behaves sensibly in tests without a model."""
+
+    model = "fake-embed"
+
+    def __init__(self):
+        self.calls = 0
+        self.down = False
+
+    async def embed(self, texts: list[str]) -> tuple[list[list[float]], str]:
+        if self.down:
+            raise EmbeddingError("embedder down")
+        self.calls += 1
+        out = []
+        for t in texts:
+            vec = [0.0] * EMBEDDING_DIM
+            for word in re.findall(r"[a-z0-9]+", t.lower()):
+                h = int(hashlib.md5(word.encode()).hexdigest(), 16)
+                vec[h % EMBEDDING_DIM] += 1.0
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            vec = [x / norm for x in vec]
+            if not any(vec):
+                vec[0] = 1.0
+            out.append(vec)
+        return out, self.model
+
+    async def aclose(self) -> None:
+        pass
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def embedder(fake_embedder) -> CachedEmbedder:
+    return CachedEmbedder(fake_embedder)
+
+
+@pytest.fixture
+def storage() -> MemoryStorage:
+    return MemoryStorage()

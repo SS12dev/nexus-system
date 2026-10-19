@@ -1,14 +1,10 @@
 import asyncio
 import json
 import uuid
-from collections.abc import AsyncIterator
 
 import httpx
 import openai
 import pytest
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from sqlalchemy import select
 
 from jarvis_common.events import user_channel
@@ -22,46 +18,11 @@ from jarvis_common.models import (
     User,
     UserStatus,
 )
-from jarvis_orchestrator.turn import TurnDeps, run_turn
-
-
-class ScriptedModel(BaseChatModel):
-    """Streams a fixed reply word by word and records what it was sent."""
-
-    reply: str = "Hello there, Shivam."
-    error: Exception | None = None
-    seen: list = []
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted"
-
-    def _generate(self, messages, stop=None, run_manager=None, **kw) -> ChatResult:
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(self.reply))])
-
-    async def _astream(
-        self, messages: list[BaseMessage], stop=None, run_manager=None, **kw
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        self.seen.append(messages)
-        if self.error:
-            raise self.error
-        words = self.reply.split(" ")
-        for i, word in enumerate(words):
-            text = word if i == len(words) - 1 else word + " "
-            chunk = ChatGenerationChunk(message=AIMessageChunk(content=text))
-            if run_manager:
-                await run_manager.on_llm_new_token(text, chunk=chunk)
-            yield chunk
-        yield ChatGenerationChunk(
-            message=AIMessageChunk(
-                content="",
-                usage_metadata={"input_tokens": 12, "output_tokens": 4, "total_tokens": 16},
-            )
-        )
+from jarvis_orchestrator.turn import run_turn
 
 
 @pytest.fixture
-async def setup(sessionmaker, settings, gateway, redis):
+async def setup(sessionmaker, deps, model):
     """A user with a chat holding one question and a streaming placeholder for the reply."""
     from jarvis_api.users import create_user
 
@@ -97,21 +58,7 @@ async def setup(sessionmaker, settings, gateway, redis):
         await db.commit()
         ids = (user.id, chat.id, reply.id)
 
-    model = ScriptedModel(seen=[])
-    factory_calls: list[dict] = []
-
-    def factory(**kwargs):
-        factory_calls.append(kwargs)
-        return model
-
-    deps = TurnDeps(
-        settings=settings,
-        sessionmaker=sessionmaker,
-        redis=redis,
-        gateway=gateway,
-        model_factory=factory,
-    )
-    return deps, model, factory_calls, ids
+    return deps, model, deps.factory_calls, ids
 
 
 async def run_and_collect(deps, redis, user_id, chat_id, msg_id) -> list[dict]:
