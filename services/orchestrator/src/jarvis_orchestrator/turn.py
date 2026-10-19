@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import openai
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -23,10 +24,13 @@ from jarvis_common.models import (
     utcnow,
 )
 from jarvis_common.settings import Settings
+from jarvis_common.storage import Storage
 from jarvis_orchestrator.context import assemble
 from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
+from jarvis_orchestrator.sandbox import SandboxClient
 from jarvis_orchestrator.tools import build_tools
+from jarvis_orchestrator.web import WebClient
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +48,11 @@ class TurnDeps:
     model_factory: ModelFactory
     embedder: CachedEmbedder
     enqueue: Enqueue | None = None
+    storage: Storage | None = None
+    sandbox: SandboxClient | None = None
+    web: WebClient | None = None
+    # Where agent-system runs keep their LangGraph checkpoints (Postgres in production).
+    checkpointer: BaseCheckpointSaver | None = None
 
 
 class TurnFailed(Exception):

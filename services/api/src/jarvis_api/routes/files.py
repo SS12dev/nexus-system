@@ -3,7 +3,6 @@ file belongs to one user; other users get a 404."""
 
 import hashlib
 import logging
-import mimetypes
 import uuid
 from pathlib import PurePath
 from urllib.parse import quote
@@ -24,7 +23,7 @@ from jarvis_api.deps import (
 )
 from jarvis_api.routes.chats import own_chat
 from jarvis_api.schemas import FileBrief, FileOut, FileTextOut, FileUpdateIn, SearchHitOut
-from jarvis_common.library import SUPPORTED_EXTENSIONS, document_text
+from jarvis_common.library import SUPPORTED_EXTENSIONS, content_type_for, document_text
 from jarvis_common.models import File, FileChunk, FileStatus, User
 from jarvis_common.search import hybrid_search
 from jarvis_common.storage import file_key
@@ -36,15 +35,6 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # attachment so an upload can never run script on Jarvis's origin.
 INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 
-# Slim container images have no /etc/mime.types, so Python's mimetypes misses these.
-OFFICE_TYPES = {
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xls": "application/vnd.ms-excel",
-    ".csv": "text/csv",
-    ".md": "text/markdown",
-}
 
 
 async def own_file(db: AsyncSession, user: User, file_id: uuid.UUID) -> File:
@@ -95,12 +85,7 @@ async def upload(
     if size == 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
 
-    content_type = (
-        OFFICE_TYPES.get(ext)
-        or mimetypes.guess_type(name)[0]
-        or file.content_type
-        or "application/octet-stream"
-    )
+    content_type = content_type_for(name, file.content_type)
     f = File(
         id=uuid.uuid4(),
         user_id=user.id,
