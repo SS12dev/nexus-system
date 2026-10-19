@@ -52,7 +52,8 @@ x-langfuse-env: &langfuse-env
 services:
   # --- Edge ------------------------------------------------------------------
   traefik:
-    image: traefik:v3.5
+    # v3.6+ negotiates the Docker API version; older releases fail against Docker Engine 29.
+    image: traefik:v3.6
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
