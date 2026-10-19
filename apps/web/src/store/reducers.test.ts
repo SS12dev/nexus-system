@@ -104,3 +104,83 @@ describe("phase 2 events", () => {
     expect(s.memoryVersion).toBe(1);
   });
 });
+
+describe("agent systems", () => {
+  const run = {
+    id: "r1",
+    system_id: "s1",
+    chat_id: "c1",
+    status: "running" as const,
+    input: "go",
+    budget_usd: 0.5,
+    cost_usd: 0,
+    estimate_usd: 0.1,
+    input_tokens: 0,
+    output_tokens: 0,
+    steps: 0,
+    agents: { writer: { status: "idle" } },
+    output: null,
+    error: null,
+    trace_id: null,
+    created_at: "2026-10-19T00:00:00Z",
+    started_at: null,
+    finished_at: null,
+  };
+  const system = {
+    id: "s1",
+    name: "Team",
+    goal: "g",
+    topology: "single" as const,
+    lifetime: "ephemeral" as const,
+    status: "running" as const,
+    chat_id: "c1",
+    template_id: null,
+    nodes: [{ id: "writer", name: "Writer", role: "writer", tier: "mini" as const, lead: true }],
+    edges: [],
+    created_at: "2026-10-19T00:00:00Z",
+    updated_at: "2026-10-19T00:00:00Z",
+    run,
+  };
+
+  it("follows a system, its run and each agent's live status", () => {
+    let s = applyEvent(initialState, { type: "system.created", chat_id: "c1", data: { system } });
+    s = applyEvent(s, {
+      type: "agent.status",
+      chat_id: "c1",
+      data: { system_id: "s1", run_id: "r1", agent: "writer", status: "working", tool: "run_code" },
+    });
+    expect(s.systems.s1.run?.agents.writer).toMatchObject({ status: "working", tool: "run_code" });
+    // A system update without a run keeps the run already known.
+    const { run: _r, ...bare } = system;
+    s = applyEvent(s, { type: "system.updated", chat_id: "c1", data: { system: bare } });
+    expect(s.systems.s1.run?.id).toBe("r1");
+    s = applyEvent(s, {
+      type: "run.updated",
+      chat_id: "c1",
+      data: { run: { ...run, status: "completed", cost_usd: 0.04 } },
+    });
+    expect(s.systems.s1.run).toMatchObject({ status: "completed", cost_usd: 0.04 });
+    s = applyEvent(s, { type: "system.deleted", data: { system: { id: "s1" } } });
+    expect(s.systems.s1).toBeUndefined();
+  });
+
+  it("keeps agent tool calls out of Jarvis's own activity", () => {
+    const s = applyEvent(initialState, {
+      type: "tool.call",
+      chat_id: "c1",
+      data: { name: "web_search", run_id: "r1", agent: "writer" },
+    });
+    expect(s.activity).toBeNull();
+  });
+
+  it("uses attachments carried by a completed message", () => {
+    let s = addMessages(initialState, "c1", [msg()]);
+    const file = { id: "f1", name: "report.docx", content_type: "x", size: 1, status: "ready" as const };
+    s = applyEvent(s, {
+      type: "message.completed",
+      chat_id: "c1",
+      data: { message: msg({ status: "complete", attachments: [file] }) },
+    });
+    expect(s.messages.c1[0].attachments).toEqual([file]);
+  });
+});

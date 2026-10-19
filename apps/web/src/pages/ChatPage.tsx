@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ApprovalCard } from "../components/ApprovalCard";
+import { isLive } from "../components/RunControls";
+import { SystemCard } from "../components/SystemCard";
 import { useNavigate, useParams } from "react-router";
 import { Composer } from "../components/Composer";
 import { MessageView } from "../components/MessageView";
@@ -17,7 +20,10 @@ export function ChatPage() {
   const connected = useStore((s) => s.connected);
   const jarvis = useStore((s) => s.jarvis);
   const activity = useStore((s) => s.activity);
-  const { setMessages, mergeFetched, addMessages, upsertChat } = useStore.getState();
+  const allSystems = useStore((s) => s.systems);
+  const allApprovals = useStore((s) => s.approvals);
+  const { setMessages, mergeFetched, addMessages, upsertChat, upsertSystems, upsertApprovals } =
+    useStore.getState();
   const [error, setError] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -29,11 +35,27 @@ export function ChatPage() {
       .messages(chatId)
       .then((list) => mergeFetched(chatId, list))
       .catch(() => navigate("/", { replace: true }));
-  }, [chatId, connected, navigate, mergeFetched]);
+    // Teams started from this chat, and steps waiting for approval.
+    api.systems({ chat_id: chatId }).then(upsertSystems).catch(() => {});
+    api.approvals(chatId).then(upsertApprovals).catch(() => {});
+  }, [chatId, connected, navigate, mergeFetched, upsertSystems, upsertApprovals]);
+
+  const systems = useMemo(
+    () =>
+      Object.values(allSystems)
+        .filter((s) => (s.run?.chat_id ?? s.chat_id) === chatId && s.run)
+        .sort((a, b) => (a.run!.created_at < b.run!.created_at ? -1 : 1)),
+    [allSystems, chatId],
+  );
+  const approvals = useMemo(
+    () => Object.values(allApprovals).filter((a) => a.chat_id === chatId && a.status === "pending"),
+    [allApprovals, chatId],
+  );
+  const liveSystems = systems.filter((s) => isLive(s.run));
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages]);
+  }, [messages, liveSystems.length, approvals.length]);
 
   const send = async (content: string, fileIds: string[]): Promise<boolean> => {
     setError("");
@@ -81,6 +103,12 @@ export function ChatPage() {
           <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
             {messages.map((m) => (
               <MessageView key={m.id} message={m} activity={activity} />
+            ))}
+            {liveSystems.map((s) => (
+              <SystemCard key={s.id} system={s} />
+            ))}
+            {approvals.map((a) => (
+              <ApprovalCard key={a.id} approval={a} systemName={allSystems[a.system_id]?.name} />
             ))}
             <div ref={bottom} />
           </div>

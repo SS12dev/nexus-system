@@ -1,9 +1,11 @@
 import {
+  Bot,
   Brain,
   FolderOpen,
   LogOut,
   Menu,
   MessageSquarePlus,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -27,6 +29,10 @@ export function Shell() {
   const removeChat = useStore((s) => s.removeChat);
   const jarvis = useStore((s) => s.jarvis);
   const connected = useStore((s) => s.connected);
+  const waiting = useStore(
+    (s) => Object.values(s.approvals).filter((a) => a.status === "pending").length,
+  );
+  const upsertApprovals = useStore((s) => s.upsertApprovals);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { chatId } = useParams();
@@ -37,6 +43,11 @@ export function Shell() {
   }, [setChats]);
 
   useEffect(() => setOpen(false), [pathname]);
+
+  // Steps waiting for approval show as a badge wherever the user is.
+  useEffect(() => {
+    if (connected) api.approvals().then(upsertApprovals).catch(() => {});
+  }, [connected, upsertApprovals]);
 
   const remove = async (id: string) => {
     if (!confirm("Delete this chat?")) return;
@@ -107,6 +118,20 @@ export function Shell() {
           </NavLink>
           <NavLink to="/memory" className={navClass}>
             <Brain size={16} /> Memory
+          </NavLink>
+          <NavLink to="/agents" className={navClass}>
+            <Bot size={16} /> Agents
+            {waiting > 0 && (
+              <span
+                className="ml-auto rounded-full bg-rose-500 px-1.5 text-xs text-white"
+                title="Steps waiting for your approval"
+              >
+                {waiting}
+              </span>
+            )}
+          </NavLink>
+          <NavLink to="/skills" className={navClass}>
+            <Sparkles size={16} /> Skills
           </NavLink>
           {hasRole(user, "admin") && (
             <NavLink to="/people" className={navClass}>

@@ -35,6 +35,8 @@ export interface FileBrief {
   content_type: string;
   size: number;
   status: FileStatus;
+  origin?: "upload" | "generated";
+  version?: number;
 }
 
 export interface FileItem extends FileBrief {
@@ -99,16 +101,222 @@ export interface Message {
   attachments?: FileBrief[];
 }
 
+// --- Skills -----------------------------------------------------------------------------
+
+export type SkillScope = "core" | "domain" | "personal" | "learned";
+export type SkillStatus = "draft" | "active" | "disabled";
+
+export interface Skill {
+  id: string;
+  slug: string;
+  scope: SkillScope;
+  name: string;
+  description: string;
+  version: number;
+  status: SkillStatus;
+  source: string | null;
+  owner_id: string | null;
+  uses: number;
+  successes: number;
+  failures: number;
+  flagged: boolean;
+  files: string[];
+  last_used_at: string | null;
+  updated_at: string;
+  can_edit: boolean;
+}
+
+export interface SkillDetail extends Skill {
+  content: string;
+  file_contents: Record<string, string>;
+  recent_uses?: { run_id: string | null; agent: string; outcome: string | null; at: string }[];
+}
+
+export interface SkillVersion {
+  version: number;
+  note: string | null;
+  content: string;
+  files: string[];
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface Instructions {
+  safety: string;
+  global: string;
+  roles: { role: string; shipped: string; extra: string }[];
+  user: string;
+}
+
+// --- Agent systems ------------------------------------------------------------------------
+
+export type Topology =
+  | "single"
+  | "pipeline"
+  | "supervisor_workers"
+  | "parallel_map_reduce"
+  | "critic_loop";
+export type Tier = "nano" | "mini" | "pro" | "max";
+export type SystemStatus = "idle" | "running" | "awaiting_approval" | "paused" | "archived";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "awaiting_approval"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface AgentNode {
+  id: string;
+  name: string;
+  role: string;
+  tier: Tier;
+  lead: boolean;
+}
+
+export interface AgentEdge {
+  from: string;
+  to: string;
+  kind: "handoff" | "delegate" | "map" | "reduce" | "review" | "feedback";
+}
+
+export interface AgentLive {
+  status: string;
+  tier?: Tier;
+  steps?: number;
+  tool?: string;
+  item?: string;
+}
+
+export interface Run {
+  id: string;
+  system_id: string;
+  chat_id: string | null;
+  status: RunStatus;
+  input: string;
+  budget_usd: number;
+  cost_usd: number;
+  estimate_usd: number | null;
+  input_tokens: number;
+  output_tokens: number;
+  steps: number;
+  agents: Record<string, AgentLive>;
+  output: string | null;
+  error: string | null;
+  trace_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface AgentSystem {
+  id: string;
+  name: string;
+  goal: string;
+  topology: Topology;
+  lifetime: "ephemeral" | "persistent" | "template";
+  status: SystemStatus;
+  chat_id: string | null;
+  template_id: string | null;
+  nodes: AgentNode[];
+  edges: AgentEdge[];
+  created_at: string;
+  updated_at: string;
+  run?: Run;
+}
+
+export interface AgentSpecJson {
+  id: string;
+  name: string;
+  role: string;
+  instructions: string;
+  tier: Tier;
+  tools: string[];
+  skills: string[];
+  max_steps: number | null;
+}
+
+export interface SystemDetail extends AgentSystem {
+  spec: {
+    name: string;
+    goal: string;
+    topology: Topology;
+    agents: AgentSpecJson[];
+    deliverables: string[];
+    max_rounds: number;
+    approval: { required_for: string[] };
+    budget_usd: number | null;
+  };
+  runs: Run[];
+}
+
+export interface Approval {
+  id: string;
+  run_id: string;
+  system_id: string;
+  chat_id: string | null;
+  agent: string;
+  tool: string;
+  args: Record<string, unknown>;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  decided_args: Record<string, unknown> | null;
+  note: string | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
+export interface RunEventItem {
+  type: string;
+  agent: string | null;
+  data: Record<string, unknown>;
+  at: string;
+}
+
+export interface RunDetail {
+  run: Run;
+  system: AgentSystem;
+  events: RunEventItem[];
+  approvals: Approval[];
+  files: { id: string; name: string; content_type: string; size: number; version: number }[];
+}
+
+export interface ToolEntry {
+  name: string;
+  title: string;
+  risk: "read" | "write" | "exec" | "outbound" | "destructive";
+  description: string;
+  allowed: boolean;
+  asks_first: boolean;
+}
+
+export interface Grants {
+  granted: string[];
+  effective: string[];
+}
+
+type RunScoped = { system_id: string; run_id: string; agent?: string };
+
 export type ServerEvent =
   | { type: "jarvis.state"; chat_id: string | null; data: { state: JarvisState } }
   | { type: "message.delta"; chat_id: string; data: { message_id: string; delta: string } }
   | { type: "message.completed"; chat_id: string; data: { message: Message } }
   | { type: "message.failed"; chat_id: string; data: { message: Message } }
   | { type: "chat.updated"; chat_id: string; data: { chat: Chat } }
-  | { type: "tool.call"; chat_id: string; data: { name: string; query?: string } }
+  | { type: "tool.call"; chat_id: string | null; data: { name: string; query?: string; agent?: string; run_id?: string } }
   | { type: "file.updated"; chat_id?: null; data: { file: FileItem } }
   | { type: "memory.updated"; chat_id?: null; data: { op: string; memory: Memory | { id: string } } }
   | { type: "profile.updated"; chat_id?: null; data: { content: string } }
+  | { type: "system.created" | "system.updated"; chat_id?: string | null; data: { system: AgentSystem } }
+  | { type: "system.deleted"; chat_id?: string | null; data: { system: { id: string } } }
+  | { type: "run.updated"; chat_id?: string | null; data: { run: Run } }
+  | { type: "agent.status"; chat_id?: string | null; data: RunScoped & AgentLive & { agent: string } }
+  | { type: "approval.requested"; chat_id?: string | null; data: RunScoped & { approval: Approval } }
+  | { type: "approval.resolved"; chat_id?: string | null; data: { approval: Approval; run_continues: boolean } }
+  | { type: "artifact.created"; chat_id?: string | null; data: { file: FileItem } }
+  | { type: "skill.updated"; chat_id?: null; data: { skill: Skill } }
+  | { type: "file.deleted"; chat_id?: null; data: { id: string } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };

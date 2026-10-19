@@ -4,11 +4,13 @@ import { Shell } from "./components/Shell";
 import { api, ApiError } from "./lib/api";
 import { useEventSocket } from "./lib/socket";
 import { hasRole } from "./lib/types";
+import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
 import { PeoplePage } from "./pages/PeoplePage";
+import { SkillsPage } from "./pages/SkillsPage";
 import { useStore } from "./store/chat";
 
 export function App() {
@@ -48,6 +50,9 @@ export function App() {
         <Route path="c/:chatId" element={<ChatPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="memory" element={<MemoryPage />} />
+        <Route path="agents" element={<AgentsPage />} />
+        <Route path="agents/:systemId" element={<AgentsPage />} />
+        <Route path="skills" element={<SkillsPage />} />
         {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
