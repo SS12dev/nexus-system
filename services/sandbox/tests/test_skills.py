@@ -4,6 +4,7 @@ import base64
 import io
 import json
 
+import pytest
 from docx import Document
 from openpyxl import load_workbook
 from pptx import Presentation
@@ -42,6 +43,16 @@ def out(result, path) -> bytes:
     return base64.b64decode(result["files"][path])
 
 
+def _has_pango() -> bool:
+    try:
+        import weasyprint  # noqa: F401
+    except OSError:
+        return False
+    return True
+
+
+# WeasyPrint needs Pango, which the sandbox image installs; on a Mac: brew install pango.
+@pytest.mark.skipif(not _has_pango(), reason="WeasyPrint needs the Pango system library")
 async def test_chart_then_pdf_report(run, b64, skill_files):
     files = {
         **skill_files("pdf", "charts"),

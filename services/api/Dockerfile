@@ -11,10 +11,13 @@ COPY packages/common/pyproject.toml packages/common/
 COPY services/api/pyproject.toml services/api/
 COPY services/orchestrator/pyproject.toml services/orchestrator/
 COPY services/doc-worker/pyproject.toml services/doc-worker/
+COPY services/sandbox/pyproject.toml services/sandbox/
 RUN uv sync --frozen --no-dev --package jarvis-api --no-install-workspace
 
 COPY packages/common packages/common
 COPY services/api services/api
+# Shipped instruction layers, shown on the Skills page.
+COPY library library
 RUN uv sync --frozen --no-dev --package jarvis-api
 
 RUN useradd --system --uid 10001 jarvis

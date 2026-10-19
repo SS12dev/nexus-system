@@ -29,6 +29,21 @@ x-jarvis-env: &jarvis-env
   MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-jarvis-embed}
   MEMORY_MODEL: ${MEMORY_MODEL:-jarvis-nano}
+  # Agent systems
+  DESIGN_MODEL: ${DESIGN_MODEL:-jarvis-pro}
+  DEFAULT_RUN_BUDGET_USD: ${DEFAULT_RUN_BUDGET_USD:-0.50}
+  MAX_RUN_BUDGET_USD: ${MAX_RUN_BUDGET_USD:-5}
+  MAX_TIER_ROLES: ${MAX_TIER_ROLES:-owner,admin}
+  SANDBOX_URL: http://sandbox:8100
+  SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+  WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
+  TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+  BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://jarvis:${POSTGRES_PASSWORD}@postgres:5432/langfuse
@@ -120,9 +135,36 @@ services:
   orchestrator:
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
     environment: *jarvis-env
+    # The only service that can reach the sandbox.
+    networks: [default, sandbox]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      sandbox: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Runs agent code. Its network is internal, so jobs can't reach the internet, Jarvis's
+  # databases or your LAN; the root filesystem is read-only and jobs run in /tmp.
+  sandbox:
+    build: { context: ., dockerfile: services/sandbox/Dockerfile }
+    environment:
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-1536}
+      SANDBOX_CONCURRENCY: "4"
+    networks: [sandbox]
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 3g
+    cpus: 2
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   doc-worker:
@@ -271,6 +313,11 @@ services:
       - "127.0.0.1:${LANGFUSE_PORT:-3000}:3000"
     depends_on: *langfuse-deps
     restart: unless-stopped
+
+networks:
+  default:
+  sandbox:
+    internal: true
 
 volumes:
   postgres:

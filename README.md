@@ -4,12 +4,15 @@ Jarvis is a supervisor agent you chat with. It answers simple asks itself and, f
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Jarvis: Architecture & Research".
 
-This repository is at **phase 2, Memory and documents**. Phase 1 gave sign-in with invites and
-roles, private chats per user, Jarvis streaming replies over a WebSocket, every model call going
-through LiteLLM with a per-user budget, and every call traced with its cost in Langfuse. Phase 2
-adds long-term memory (a profile of you, facts and preferences, summaries of past chats) and a
-document library: upload PDF, Word, PowerPoint, Excel and more in a chat or on the Library page
-and ask Jarvis about them. All of it runs on one machine with Docker Compose.
+This repository is at **phase 3, Agent systems and the skills library**. Phase 1 gave sign-in
+with invites and roles, private chats per user, Jarvis streaming replies over a WebSocket, every
+model call going through LiteLLM with a per-user budget, and every call traced with its cost in
+Langfuse. Phase 2 adds long-term memory (a profile of you, facts and preferences, summaries of
+past chats) and a document library: upload PDF, Word, PowerPoint, Excel and more in a chat or on
+the Library page and ask Jarvis about them. Phase 3 lets Jarvis build teams of sub-agents for
+bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
+shared skills library, per-run budgets, and your approval before anything risky. All of it runs
+on one machine with Docker Compose.
 
 ## Quick start
 
@@ -138,14 +141,78 @@ text hash, and every stored vector records its model, so swapping the embedder (
 OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 [infra/litellm/config.yaml](infra/litellm/config.yaml)) re-embeds everything in the background.
 
+## Agent systems
+
+For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Jarvis
+calls `build_agent_system`. The architect model (`DESIGN_MODEL`, jarvis-pro) writes an
+AgentSystemSpec: a small team, a topology, each agent's role, instructions, model tier, tools and
+skills. The spec is validated against what you may use, compiled to a LangGraph graph and run on
+the orchestrator queue; the team's card in the chat shows each agent live, and the result and
+files are posted in the chat when it finishes. One-off teams are archived after their run;
+"keep it" saves one as a template Jarvis reuses for similar asks.
+
+- **Topologies:** single agent, pipeline, lead and workers (`supervisor_workers`), parallel
+  map-reduce, and worker with critic.
+- **Model tiers:** the spec picks nano, mini or pro per agent. jarvis-max is only for a team's
+  lead, and only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
+  tier up; non-lead agents drop a tier once 80% of the run's budget is spent.
+- **Budgets:** each run gets its own LiteLLM key capped at its budget (`DEFAULT_RUN_BUDGET_USD`,
+  at most `MAX_RUN_BUDGET_USD` and what you have left this period), and a run whose estimate
+  doesn't fit is refused before it starts. The key is revoked when the run ends; its cost counts
+  against your budget and is shown on the card and the Agents page, with the Langfuse trace id.
+- **Approvals:** sending email and deleting documents always pause the run for you: approve,
+  edit the arguments, or reject, on the card in the chat or the Agents page. Every decision is in
+  the audit log. Runs can also be paused, resumed and stopped. A parked run is checkpointed in
+  Postgres, so it survives restarts.
+- **Tools** (the Tool Registry, `/api/tools`): web search and page reading, the user's documents
+  and memory, saving files, `run_code`, `send_email`, `delete_document`. Members get running code
+  and sending only when an admin ticks them on the People page; owners and admins have both.
+- **Agents page:** every team, its graph, agents, runs with cost and timeline, files made, and
+  the steps waiting for you.
+
+Web search uses Tavily or Brave when `TAVILY_API_KEY` or `BRAVE_API_KEY` is set (both have free
+tiers), else DuckDuckGo's HTML page, which needs no key but is less reliable. Email needs the
+`SMTP_*` settings (Gmail works with an app password).
+
+### The sandbox
+
+`run_code` runs Python or bash in the `sandbox` service: a read-only container on an internal
+network (no internet, no access to Jarvis's databases or your LAN), all capabilities dropped,
+memory, CPU and process limits, and per-job CPU, memory, file-size and time limits. The task's
+files go in `in/`, the agent's skills in `skills/`, and whatever it writes to `out/` is saved to
+your Library as a generated file (saving the same name again makes a new version). It has
+pypdf, pdfplumber, ReportLab, WeasyPrint, python-docx, python-pptx, openpyxl, pandas and
+matplotlib.
+
+## Skills and instructions
+
+Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a one-line
+description, plus `scripts/` and `references/`. Agents see only the names and descriptions; they
+load a skill's instructions with `skills_load` when a task needs it and read its files with
+`skills_read_file`, so prompts stay small. Core skills ship in [library/core](library/core) and
+are synced into the database when the orchestrator starts: PDF (Markdown to PDF, merge, split,
+watermark, forms), Word, PowerPoint, Excel, charts and web research, each tested in the sandbox.
+
+The **Skills** page lists core, shared, your own and learned skills, with editing, version
+history, rollback, enable/disable and import (a `SKILL.md` or a `.zip`). Imported skills, and
+skills Jarvis drafts after a long successful run, stay off until reviewed; skills whose runs
+keep failing are flagged. Its Instructions tab holds the layers every agent gets, in order: the
+shipped safety rules ([library/instructions](library/instructions)), global and per-role
+instructions (admins), then your own house style.
+
 ## Repository layout
 
 ```
-apps/web/               React + Vite + Tailwind PWA (login, chat, Library, Memory, People)
-services/api/           FastAPI: auth, chats, files, memories, admin, WebSocket; Alembic migrations
-services/orchestrator/  arq worker: the LangGraph Jarvis graph, its tools and the memory jobs
+apps/web/               React + Vite + Tailwind PWA (chat, Library, Memory, Agents, Skills, People)
+services/api/           FastAPI: auth, chats, files, memories, skills, agents, approvals, admin,
+                        WebSocket; Alembic migrations
+services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent systems (design,
+                        compile, run, approvals), the memory and learned-skill jobs
+services/sandbox/       FastAPI: runs agent code with no network and resource limits
 services/doc-worker/    arq worker: parses, chunks and embeds uploads
-packages/common/        settings, models, events, storage, embeddings, hybrid search
+packages/common/        settings, models, events, storage, embeddings, hybrid search, the agent
+                        system spec, tool catalogue and skills helpers
+library/                core skills and the shipped instruction layers
 infra/                  LiteLLM config, Postgres init, Cloudflare Tunnel notes
 compose.yaml            the whole stack
 ```
@@ -182,6 +249,6 @@ Schema changes: edit `packages/common/src/jarvis_common/models.py`, then
 
 ## Roadmap
 
-1. Foundation · 2. **Memory and documents** (this) · 3. Agent systems, tools and the skills
-library · 4. The 3D orb · 5. Production hardening (Cloudflare Access, admin console, dashboards,
+1. Foundation · 2. Memory and documents · 3. **Agent systems, tools and the skills library**
+(this) · 4. The 3D orb · 5. Production hardening (Cloudflare Access, admin console, dashboards,
 backups) · 6. Move to a server, voice
