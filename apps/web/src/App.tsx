@@ -1,0 +1,52 @@
+import { useEffect, useState } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router";
+import { Shell } from "./components/Shell";
+import { api, ApiError } from "./lib/api";
+import { useEventSocket } from "./lib/socket";
+import { hasRole } from "./lib/types";
+import { ChatPage } from "./pages/ChatPage";
+import { LoginPage } from "./pages/LoginPage";
+import { PeoplePage } from "./pages/PeoplePage";
+import { useStore } from "./store/chat";
+
+export function App() {
+  const user = useStore((s) => s.user);
+  const setUser = useStore((s) => s.setUser);
+  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+
+  useEffect(() => {
+    api
+      .me()
+      .then(setUser)
+      .catch((e) => {
+        if (!(e instanceof ApiError && e.status === 401)) console.error(e);
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
+  }, [setUser]);
+
+  useEventSocket(!!user);
+
+  if (loading) {
+    return <div className="grid h-full place-items-center text-slate-500">Loading…</div>;
+  }
+  if (!user) {
+    return location.pathname === "/login" ? (
+      <LoginPage />
+    ) : (
+      <Navigate to={`/login${location.search}`} replace />
+    );
+  }
+
+  return (
+    <Routes>
+      <Route element={<Shell />}>
+        <Route index element={<ChatPage />} />
+        <Route path="c/:chatId" element={<ChatPage />} />
+        {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
