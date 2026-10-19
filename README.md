@@ -20,7 +20,7 @@ docker compose up -d --build
 | What | Where |
 | --- | --- |
 | Jarvis | http://localhost:8080 |
-| Langfuse (traces, cost) | http://localhost:3000, login from `LANGFUSE_ADMIN_EMAIL` / `LANGFUSE_ADMIN_PASSWORD` |
+| Langfuse (traces, cost) | http://localhost:3000 (`LANGFUSE_PORT`), login from `LANGFUSE_ADMIN_EMAIL` / `LANGFUSE_ADMIN_PASSWORD` |
 | LiteLLM admin API | http://localhost:4000, `LITELLM_MASTER_KEY` |
 | MinIO console | http://localhost:9001 |
 

@@ -228,7 +228,7 @@ services:
     image: langfuse/langfuse:3
     environment:
       <<: *langfuse-env
-      NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:3000}
+      NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:${LANGFUSE_PORT:-3000}}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET in .env}
       # Creates the org, project, API keys and an admin login on first start.
       LANGFUSE_INIT_ORG_ID: jarvis
@@ -242,7 +242,7 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:?set LANGFUSE_ADMIN_PASSWORD in .env}
       AUTH_DISABLE_SIGNUP: "true"
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${LANGFUSE_PORT:-3000}:3000"
     depends_on: *langfuse-deps
     restart: unless-stopped
 
