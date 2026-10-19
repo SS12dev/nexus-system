@@ -16,6 +16,7 @@ export function ChatPage() {
   const messages = useStore((s) => (chatId ? (s.messages[chatId] ?? EMPTY) : EMPTY));
   const connected = useStore((s) => s.connected);
   const jarvis = useStore((s) => s.jarvis);
+  const activity = useStore((s) => s.activity);
   const { setMessages, mergeFetched, addMessages, upsertChat } = useStore.getState();
   const [error, setError] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
@@ -34,7 +35,7 @@ export function ChatPage() {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
-  const send = async (content: string): Promise<boolean> => {
+  const send = async (content: string, fileIds: string[]): Promise<boolean> => {
     setError("");
     try {
       let id = chatId;
@@ -45,7 +46,7 @@ export function ChatPage() {
         id = chat.id;
         navigate(`/c/${id}`);
       }
-      const res = await api.send(id, content);
+      const res = await api.send(id, content, fileIds);
       upsertChat(res.chat);
       addMessages(id, [res.user_message, res.assistant_message]);
       return true;
@@ -69,12 +70,17 @@ export function ChatPage() {
               <p className="text-lg text-slate-300">
                 Hi{user.name ? ` ${user.name.split(" ")[0]}` : ""}, what can I do for you?
               </p>
+              {canChat && (
+                <p className="mt-2 text-sm text-slate-500">
+                  Attach or drop PDFs, Word, PowerPoint or Excel files to ask about them.
+                </p>
+              )}
             </div>
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
             {messages.map((m) => (
-              <MessageView key={m.id} message={m} />
+              <MessageView key={m.id} message={m} activity={activity} />
             ))}
             <div ref={bottom} />
           </div>
@@ -82,6 +88,8 @@ export function ChatPage() {
       </div>
       {error && <p className="mx-auto max-w-3xl px-4 pb-2 text-sm text-rose-400">{error}</p>}
       <Composer
+        key={chatId ?? "new"}
+        chatId={chatId}
         onSend={send}
         disabled={!canChat || busy}
         placeholder={canChat ? undefined : "Viewers can read chats but not send messages"}

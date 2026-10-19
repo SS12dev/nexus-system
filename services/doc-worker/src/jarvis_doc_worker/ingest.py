@@ -106,7 +106,7 @@ async def _reuse_or_parse(deps: DocDeps, db: AsyncSession, f: File) -> list[File
     ]
     db.add_all(chunks)
     f.parser = parser
-    f.char_count = sum(len(p.content) for p in pieces)
+    f.char_count = len("\n\n".join(p.content for p in pieces))
     await db.flush()
     try:
         vectors, model = await deps.embedder.embed(db, [p.embedding_text() for p in pieces])

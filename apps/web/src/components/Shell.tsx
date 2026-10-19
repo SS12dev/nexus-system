@@ -1,10 +1,24 @@
-import { LogOut, Menu, MessageSquarePlus, Trash2, Users, X } from "lucide-react";
+import {
+  Brain,
+  FolderOpen,
+  LogOut,
+  Menu,
+  MessageSquarePlus,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate, useParams } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { api } from "../lib/api";
 import { hasRole } from "../lib/types";
 import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
+
+const navClass = ({ isActive }: { isActive: boolean }) =>
+  `flex items-center gap-2 rounded-md px-2 py-1.5 ${
+    isActive ? "bg-edge text-white" : "text-slate-300 hover:bg-edge/50"
+  }`;
 
 export function Shell() {
   const user = useStore((s) => s.user)!;
@@ -16,12 +30,13 @@ export function Shell() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { chatId } = useParams();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     api.chats().then(setChats).catch(console.error);
   }, [setChats]);
 
-  useEffect(() => setOpen(false), [chatId]);
+  useEffect(() => setOpen(false), [pathname]);
 
   const remove = async (id: string) => {
     if (!confirm("Delete this chat?")) return;
@@ -87,14 +102,18 @@ export function Shell() {
           ))}
         </nav>
         <div className="border-t border-edge p-3 text-sm">
+          <NavLink to="/library" className={navClass}>
+            <FolderOpen size={16} /> Library
+          </NavLink>
+          <NavLink to="/memory" className={navClass}>
+            <Brain size={16} /> Memory
+          </NavLink>
           {hasRole(user, "admin") && (
-            <NavLink
-              to="/people"
-              className="mb-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-slate-300 hover:bg-edge/50"
-            >
+            <NavLink to="/people" className={navClass}>
               <Users size={16} /> People
             </NavLink>
           )}
+          <div className="mb-2" />
           <div className="flex items-center gap-2 px-2">
             <div className="min-w-0 flex-1">
               <div className="truncate">{user.name || user.email}</div>

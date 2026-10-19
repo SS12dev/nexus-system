@@ -10,6 +10,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages/common/pyproject.toml packages/common/
 COPY services/api/pyproject.toml services/api/
 COPY services/orchestrator/pyproject.toml services/orchestrator/
+COPY services/doc-worker/pyproject.toml services/doc-worker/
 RUN uv sync --frozen --no-dev --package jarvis-api --no-install-workspace
 
 COPY packages/common packages/common

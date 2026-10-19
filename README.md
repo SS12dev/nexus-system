@@ -4,18 +4,25 @@ Jarvis is a supervisor agent you chat with. It answers simple asks itself and, f
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Jarvis: Architecture & Research".
 
-This repository is at **phase 1, Foundation**: sign-in with invites and roles, private chats per
-user, Jarvis streaming replies over a WebSocket, every model call going through LiteLLM with a
-per-user budget, and every call traced with its cost in Langfuse. All of it runs on one machine
-with Docker Compose.
+This repository is at **phase 2, Memory and documents**. Phase 1 gave sign-in with invites and
+roles, private chats per user, Jarvis streaming replies over a WebSocket, every model call going
+through LiteLLM with a per-user budget, and every call traced with its cost in Langfuse. Phase 2
+adds long-term memory (a profile of you, facts and preferences, summaries of past chats) and a
+document library: upload PDF, Word, PowerPoint, Excel and more in a chat or on the Library page
+and ask Jarvis about them. All of it runs on one machine with Docker Compose.
 
 ## Quick start
 
 ```sh
 ./scripts/init-env.sh          # writes .env with random secrets
 $EDITOR .env                   # add OPENAI_API_KEY, and Google OIDC or DEV_LOGIN_ENABLED=true
+brew install ollama            # local embeddings for memory and document search (free)
+ollama pull bge-m3             # then keep Ollama running (the menu bar app, or `ollama serve`)
 docker compose up -d --build
 ```
+
+The first build takes a while: the doc-worker image includes Docling with CPU PyTorch and its
+models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without OCR.
 
 | What | Where |
 | --- | --- |
@@ -70,6 +77,7 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 | `jarvis-mini` | gpt-5.4-mini | plain chat (phase 1 default), most sub-agents |
 | `jarvis-pro` | gpt-5.4 | planning and designing agent systems |
 | `jarvis-max` | gpt-5.5 | escalation only |
+| `jarvis-embed` | bge-m3 in Ollama on the host | memory and document search |
 
 LiteLLM runs in Compose with an exact-match Redis cache and sends every generation to Langfuse.
 To use another LiteLLM (for example on a server later), set `LITELLM_BASE_URL` and its
@@ -78,22 +86,66 @@ per chat and attributed to the user's id.
 
 ## How a message flows
 
-1. The web app posts the message to `POST /api/chats/{id}/messages`. The API stores it and an
-   empty reply, then queues the turn on Redis (arq).
-2. An orchestrator worker runs the Jarvis LangGraph graph with the chat history, calling LiteLLM
-   with the user's own key.
-3. Tokens are published on the user's Redis channel as `message.delta` events. Every API replica
-   holding a WebSocket for that user forwards them, so replicas can scale behind Traefik.
-4. The finished reply, with token counts, is stored and sent as `message.completed`.
+1. The web app posts the message, with the ids of any attached files, to
+   `POST /api/chats/{id}/messages`. The API stores it and an empty reply, then queues the turn on
+   Redis (arq).
+2. An orchestrator worker assembles context: your profile, the memories and past-chat summaries
+   closest to the message, and the documents attached to the chat (whole if short, otherwise the
+   best-matching excerpts).
+3. It runs the Jarvis LangGraph graph, calling LiteLLM with the user's own key. Jarvis can call
+   its own tools in a loop: `search_documents`, `read_document`, `list_documents`,
+   `search_memory` and `remember`. Each tool sees only that user's data.
+4. Tokens are published on the user's Redis channel as `message.delta` events (and tool use as
+   `tool.call`). Every API replica holding a WebSocket for that user forwards them, so replicas can
+   scale behind Traefik.
+5. The finished reply, with token counts, is stored and sent as `message.completed`, and a
+   memory job is queued for the turn.
+
+## Memory
+
+| Layer | What | When it is written | When it is read |
+| --- | --- | --- | --- |
+| Profile | A short impression of you, in sections | Nightly, on "Rebuild now", and soon after your first memories | Every turn, at the top of the prompt |
+| Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
+| Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
+
+After each turn `jarvis-nano` proposes memories from the exchange. Each is compared with its
+nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
+memory's confidence, contradictions update it, and "forget that" deletes it. Pinned memories are
+never changed by Jarvis. Each night, memories no chat has confirmed in 60 days lose confidence
+(and go below 0.2), near duplicates are merged, and stale profiles are rebuilt; set the time with
+`MEMORY_NIGHTLY_HOUR_UTC` (default 21:30 UTC, 03:00 IST).
+
+On the **Memory** page you see the profile and every memory with where it came from and its
+history, and can add, edit, pin and delete them. Deleting is real deletion; you can also turn
+learning off or forget everything.
+
+Search is hybrid everywhere: pgvector cosine similarity and Postgres full-text search fused by
+reciprocal rank, so it still works by keyword if the embedder is down.
+
+## Documents
+
+Upload in a chat (paperclip, drag and drop, or paste) or on the **Library** page. Files go to
+MinIO through the API (up to `MAX_UPLOAD_MB`), and the doc-worker parses them: Docling for PDFs
+and images, MarkItDown for Word, PowerPoint, Excel, CSV and HTML. The text is chunked by heading
+and sheet, embedded and indexed; see [services/doc-worker](services/doc-worker/README.md). The
+Library page lists, searches inside, previews the extracted text, renames, downloads and deletes
+files.
+
+Embeddings go through LiteLLM under the `jarvis-embed` alias, which points at bge-m3 in Ollama
+on the Mac (Docker on macOS can't use the GPU, so Ollama runs natively). Vectors are cached by
+text hash, and every stored vector records its model, so swapping the embedder (for example to
+OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
+[infra/litellm/config.yaml](infra/litellm/config.yaml)) re-embeds everything in the background.
 
 ## Repository layout
 
 ```
-apps/web/               React + Vite + Tailwind PWA (login, chat, People)
-services/api/           FastAPI: auth, chats, admin, WebSocket; Alembic migrations
-services/orchestrator/  arq worker running the LangGraph Jarvis graph
-services/doc-worker/    phase 2 (documents)
-packages/common/        settings, SQLAlchemy models, events, LiteLLM admin client
+apps/web/               React + Vite + Tailwind PWA (login, chat, Library, Memory, People)
+services/api/           FastAPI: auth, chats, files, memories, admin, WebSocket; Alembic migrations
+services/orchestrator/  arq worker: the LangGraph Jarvis graph, its tools and the memory jobs
+services/doc-worker/    arq worker: parses, chunks and embeds uploads
+packages/common/        settings, models, events, storage, embeddings, hybrid search
 infra/                  LiteLLM config, Postgres init, Cloudflare Tunnel notes
 compose.yaml            the whole stack
 ```
@@ -118,15 +170,18 @@ npm test && npm run typecheck
 
 Run the API and worker on the host against the Compose services with the matching URLs, e.g.
 `DATABASE_URL=postgresql+asyncpg://jarvis:<password>@localhost:5432/jarvis`,
-`REDIS_URL=redis://localhost:6379/0` (publish Redis's port first) and
-`LITELLM_BASE_URL=http://localhost:4000`, then `uv run uvicorn jarvis_api.app:app --reload` in
-`services/api` and `uv run arq jarvis_orchestrator.worker.WorkerSettings`.
+`REDIS_URL=redis://localhost:6379/0` (publish Redis's port first),
+`LITELLM_BASE_URL=http://localhost:4000` and `S3_ENDPOINT_URL=http://localhost:9000` with
+`S3_SECRET_KEY` (publish MinIO's port 9000 first), then `uv run uvicorn jarvis_api.app:app
+--reload` in `services/api`, `uv run arq jarvis_orchestrator.worker.WorkerSettings` and
+`uv run arq jarvis_doc_worker.worker.WorkerSettings`. Without Docling installed the doc-worker
+falls back to MarkItDown for PDFs.
 
 Schema changes: edit `packages/common/src/jarvis_common/models.py`, then
 `uv run alembic revision --autogenerate -m "..."` in `services/api`.
 
 ## Roadmap
 
-1. **Foundation** (this) · 2. Memory and documents · 3. Agent systems, tools and the skills
+1. Foundation · 2. **Memory and documents** (this) · 3. Agent systems, tools and the skills
 library · 4. The 3D orb · 5. Production hardening (Cloudflare Access, admin console, dashboards,
 backups) · 6. Move to a server, voice

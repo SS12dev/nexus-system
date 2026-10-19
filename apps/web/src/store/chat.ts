@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import type { Chat, Message, ServerEvent, User } from "../lib/types";
+import type { Chat, FileItem, Message, ServerEvent, User } from "../lib/types";
 import {
   addMessages,
   applyEvent,
   initialState,
   mergeFetched,
   upsertChat,
+  upsertFile,
   type ChatState,
 } from "./reducers";
 
@@ -21,6 +22,7 @@ interface Store extends ChatState {
   mergeFetched: (chatId: string, messages: Message[]) => void;
   addMessages: (chatId: string, messages: Message[]) => void;
   handleEvent: (event: ServerEvent) => void;
+  upsertFile: (file: FileItem) => void;
 }
 
 export const useStore = create<Store>((set) => ({
@@ -41,4 +43,5 @@ export const useStore = create<Store>((set) => ({
   mergeFetched: (chatId, messages) => set((s) => mergeFetched(s, chatId, messages)),
   addMessages: (chatId, messages) => set((s) => addMessages(s, chatId, messages)),
   handleEvent: (event) => set((s) => applyEvent(s, event)),
+  upsertFile: (file) => set((s) => ({ files: upsertFile(s.files, file) })),
 }));

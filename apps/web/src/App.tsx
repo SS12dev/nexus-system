@@ -5,7 +5,9 @@ import { api, ApiError } from "./lib/api";
 import { useEventSocket } from "./lib/socket";
 import { hasRole } from "./lib/types";
 import { ChatPage } from "./pages/ChatPage";
+import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MemoryPage } from "./pages/MemoryPage";
 import { PeoplePage } from "./pages/PeoplePage";
 import { useStore } from "./store/chat";
 
@@ -44,6 +46,8 @@ export function App() {
       <Route element={<Shell />}>
         <Route index element={<ChatPage />} />
         <Route path="c/:chatId" element={<ChatPage />} />
+        <Route path="library" element={<LibraryPage />} />
+        <Route path="memory" element={<MemoryPage />} />
         {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
