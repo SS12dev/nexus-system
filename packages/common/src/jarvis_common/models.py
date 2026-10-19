@@ -89,8 +89,91 @@ class MemoryKind(enum.StrEnum):
     instruction = "instruction"
 
 
-def _enum(cls: type[enum.Enum], name: str) -> Enum:
-    return Enum(cls, name=name, native_enum=False, length=16, validate_strings=True)
+class FileOrigin(enum.StrEnum):
+    upload = "upload"
+    # Made by Jarvis or an agent, for example a report written in the sandbox.
+    generated = "generated"
+
+
+class SkillScope(enum.StrEnum):
+    # Shipped with Jarvis in library/core; shared by every user.
+    core = "core"
+    # Playbooks shared by every user once an admin enables them, e.g. imported ones.
+    domain = "domain"
+    # One user's own skills.
+    personal = "personal"
+    # Drafted by Jarvis after a hard run; the user approves them.
+    learned = "learned"
+
+
+class SkillStatus(enum.StrEnum):
+    # Waiting for review: learned and imported skills start here and can't be used yet.
+    draft = "draft"
+    active = "active"
+    disabled = "disabled"
+
+
+class InstructionLayer(enum.StrEnum):
+    # Added to every agent's prompt, after the shipped safety rules.
+    global_ = "global"
+    # For agents with a given role, such as researcher or writer.
+    role = "role"
+    # One user's house style, for their own agents and Jarvis.
+    user = "user"
+
+
+class Capability(enum.StrEnum):
+    """Tool rights beyond reading and writing in the user's own library. Owners and admins have
+    them all; members get them per user on the People page."""
+
+    # Run code in the sandbox.
+    exec = "exec"
+    # Act outside Jarvis, such as sending email. Always asks for approval first.
+    outbound = "outbound"
+
+
+class SystemLifetime(enum.StrEnum):
+    # Archived once its run finishes.
+    ephemeral = "ephemeral"
+    # Stays, and can be run again.
+    persistent = "persistent"
+    # A saved recipe with no live agents.
+    template = "template"
+
+
+class SystemStatus(enum.StrEnum):
+    idle = "idle"
+    running = "running"
+    awaiting_approval = "awaiting_approval"
+    paused = "paused"
+    archived = "archived"
+
+
+class RunStatus(enum.StrEnum):
+    queued = "queued"
+    running = "running"
+    awaiting_approval = "awaiting_approval"
+    paused = "paused"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class ApprovalStatus(enum.StrEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
+def _enum(cls: type[enum.Enum], name: str, length: int = 16) -> Enum:
+    return Enum(
+        cls,
+        name=name,
+        native_enum=False,
+        length=length,
+        validate_strings=True,
+        values_callable=lambda members: [m.value for m in members],
+    )
 
 
 class User(Base):
@@ -265,6 +348,18 @@ class File(Base):
     parser: Mapped[str | None] = mapped_column(String(32))
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     char_count: Mapped[int] = mapped_column(Integer, default=0)
+    origin: Mapped[FileOrigin] = mapped_column(
+        _enum(FileOrigin, "file_origin"), default=FileOrigin.upload, server_default="upload"
+    )
+    # The agent run that generated it, if any.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    # Versions of a generated file share the first version's id here; version counts from 1.
+    version_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL")
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -440,4 +535,269 @@ class Episode(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+    )
+
+
+# --- Skills and instructions -------------------------------------------------------------------
+
+
+class Skill(Base):
+    """One skill in the Agent Skills format: a SKILL.md (frontmatter name and description, then
+    instructions) plus optional text files such as scripts/ and references/. Shared skills have
+    no owner; personal and learned ones belong to one user."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # "<scope>/<name>", the id agents use, e.g. core/pdf.
+    slug: Mapped[str] = mapped_column(String(128))
+    scope: Mapped[SkillScope] = mapped_column(_enum(SkillScope, "skill_scope"))
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text)
+    # The whole SKILL.md, frontmatter included.
+    content: Mapped[str] = mapped_column(Text)
+    # Other files of the skill by relative path, e.g. {"scripts/merge.py": "..."}.
+    files: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[SkillStatus] = mapped_column(_enum(SkillStatus, "skill_status"))
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # library (shipped), user, jarvis (learned) or import.
+    source: Mapped[str] = mapped_column(String(16))
+    # Hash of the shipped files, so a startup sync only touches skills that changed.
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
+    tsv = _tsv("name || ' ' || description")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index(
+            "ix_skills_shared_slug", "slug", unique=True, postgresql_where=text("owner_id IS NULL")
+        ),
+        Index(
+            "ix_skills_owner_slug",
+            "owner_id",
+            "slug",
+            unique=True,
+            postgresql_where=text("owner_id IS NOT NULL"),
+        ),
+        Index("ix_skills_tsv", "tsv", postgresql_using="gin"),
+    )
+
+
+class SkillVersion(Base):
+    """Every saved version of a skill, so an edit can be rolled back."""
+
+    __tablename__ = "skill_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    skill_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    files: Mapped[dict] = mapped_column(JSON, default=dict)
+    note: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("skill_id", "version"),)
+
+
+class SkillUsage(Base):
+    """An agent loaded a skill during a run; the outcome is set when the run ends."""
+
+    __tablename__ = "skill_usages"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    skill_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE")
+    )
+    agent: Mapped[str] = mapped_column(String(64))
+    # success or failure, once the run has ended.
+    outcome: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_skill_usages_run", "run_id"),)
+
+
+class Instruction(Base):
+    """A layer of standing instructions for agents: global (admins), per agent role (admins), or
+    one user's own. Shipped defaults live in library/instructions; these rows add to them."""
+
+    __tablename__ = "instructions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    layer: Mapped[InstructionLayer] = mapped_column(_enum(InstructionLayer, "instruction_layer"))
+    # The agent role for the role layer; empty otherwise.
+    key: Mapped[str] = mapped_column(String(64), default="")
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    content: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index(
+            "ix_instructions_shared",
+            "layer",
+            "key",
+            unique=True,
+            postgresql_where=text("user_id IS NULL"),
+        ),
+        Index(
+            "ix_instructions_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
+    )
+
+
+class ToolGrant(Base):
+    __tablename__ = "tool_grants"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    capability: Mapped[Capability] = mapped_column(
+        _enum(Capability, "capability"), primary_key=True
+    )
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# --- Agent systems -----------------------------------------------------------------------------
+
+
+class AgentSystem(Base):
+    """A team of sub-agents Jarvis designed. The spec (see jarvis_common.spec) is the whole
+    definition: agents, their tools, skills and model tiers, and the topology joining them."""
+
+    __tablename__ = "agent_systems"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    name: Mapped[str] = mapped_column(String(200))
+    goal: Mapped[str] = mapped_column(Text)
+    spec: Mapped[dict] = mapped_column(JSON)
+    topology: Mapped[str] = mapped_column(String(32))
+    lifetime: Mapped[SystemLifetime] = mapped_column(_enum(SystemLifetime, "system_lifetime"))
+    status: Mapped[SystemStatus] = mapped_column(_enum(SystemStatus, "system_status", 24))
+    # The template it was made from, or the system a template was saved from.
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_systems.id", ondelete="SET NULL")
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
+    tsv = _tsv("name || ' ' || goal")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_agent_systems_user", "user_id", "updated_at"),
+        Index("ix_agent_systems_tsv", "tsv", postgresql_using="gin"),
+    )
+
+
+class AgentRun(Base):
+    """One run of a system. Its LangGraph checkpoints use the run id as the thread id, so a run
+    paused for approval resumes where it stopped."""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    system_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_systems.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    input: Mapped[str] = mapped_column(Text, default="")
+    # Library files the run starts with.
+    file_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[RunStatus] = mapped_column(_enum(RunStatus, "run_status", 24))
+    budget_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal(0))
+    estimate_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    # Live state per agent for the UI: {agent_id: {"status", "tier", "steps"}}.
+    agents: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str] = mapped_column(String(64))
+    # The run's own LiteLLM key, capped at budget_usd; revoked and cleared when the run ends.
+    key_secret: Mapped[str | None] = mapped_column(Text)
+    # The chat message that carries the result, once posted.
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_agent_runs_system", "system_id", "created_at"),
+        Index("ix_agent_runs_user", "user_id", "created_at"),
+    )
+
+
+class RunEvent(Base):
+    """What happened in a run, for the Agents page timeline."""
+
+    __tablename__ = "run_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(String(32))
+    agent: Mapped[str | None] = mapped_column(String(64))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_run_events_run", "run_id", "created_at"),)
+
+
+class Approval(Base):
+    """A risky tool call waiting for the user. The run pauses until every one is decided."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"))
+    system_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_systems.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    agent: Mapped[str] = mapped_column(String(64))
+    tool: Mapped[str] = mapped_column(String(64))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    args: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Why it needs approval, in words for the card.
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[ApprovalStatus] = mapped_column(_enum(ApprovalStatus, "approval_status"))
+    # The arguments the user approved, if they edited them.
+    decided_args: Mapped[dict | None] = mapped_column(JSON)
+    note: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "tool_call_id"),
+        Index("ix_approvals_user_status", "user_id", "status"),
     )

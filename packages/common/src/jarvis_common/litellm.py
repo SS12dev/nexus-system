@@ -54,6 +54,26 @@ class LiteLLMAdmin:
         )
         return data["key"]
 
+    async def generate_run_key(
+        self, user: User, run_id: uuid.UUID, max_usd: Decimal, models: list[str]
+    ) -> str:
+        """A key for one agent-system run, capped at the run's budget. Calls with it are still
+        attributed to the user in LiteLLM and Langfuse."""
+        data = await self._post(
+            "/key/generate",
+            {
+                "key_alias": f"jarvis-run-{run_id}",
+                "user_id": str(user.id),
+                "models": models,
+                "max_budget": float(max_usd),
+                "metadata": {"run_id": str(run_id), "source": "jarvis-orchestrator"},
+            },
+        )
+        return data["key"]
+
+    async def delete_key(self, key: str) -> None:
+        await self._post("/key/delete", {"keys": [key]})
+
     async def update_budget(self, key: str, max_usd: Decimal, duration: str) -> None:
         await self._post(
             "/key/update",

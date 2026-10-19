@@ -79,6 +79,50 @@ class Settings(BaseSettings):
     memory_nightly_hour_utc: int = 21
     memory_nightly_minute_utc: int = 30
 
+    # Skills library: shipped skills and instructions, read at startup (library/ in the repo).
+    library_path: str = "library"
+
+    # Agent systems. Jarvis designs them with jarvis-pro; each run gets its own LiteLLM key.
+    design_model: str = "jarvis-pro"
+    default_run_budget_usd: float = 0.50
+    max_run_budget_usd: float = 5.00
+    # Agents working at once in a parallel_map_reduce system, and items it may fan out to.
+    max_parallel_agents: int = 4
+    max_map_items: int = 8
+    # Model calls one agent may make in one turn of a run before it has to stop.
+    agent_max_steps: int = 12
+    # Roles whose systems may use jarvis-max for the lead agent when asked for the best model.
+    max_tier_roles: str = "owner,admin"
+    # After a run with at least this many tool calls, Jarvis offers to save what it learned
+    # as a skill (0 turns it off).
+    learn_after_tool_calls: int = 15
+
+    # Sandbox for agent code: no network, CPU and memory caps, one work folder per call.
+    sandbox_url: str = "http://sandbox:8100"
+    sandbox_token: str = ""
+    sandbox_timeout_s: int = 120
+
+    # Web search: tavily or brave when a key is set, otherwise DuckDuckGo (free, no key).
+    web_search_provider: Literal["auto", "tavily", "brave", "duckduckgo"] = "auto"
+    tavily_api_key: str = ""
+    brave_api_key: str = ""
+
+    # Email for agents (always needs approval). Any SMTP server, e.g. Gmail with an app password.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
+    @property
+    def smtp_enabled(self) -> bool:
+        return bool(self.smtp_host and (self.smtp_from or self.smtp_username))
+
+    @property
+    def max_tier_role_list(self) -> list[str]:
+        return [r.strip() for r in self.max_tier_roles.split(",") if r.strip()]
+
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_client_id and self.oidc_client_secret)
