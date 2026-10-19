@@ -95,13 +95,17 @@ class RunContext:
 
     async def publish(self, type_: str, **data) -> None:
         payload = {"system_id": str(self.system_id), "run_id": str(self.run_id), **data}
-        await publish(self.deps.redis, self.user.id, Event(type=type_, chat_id=self.chat_id,
-                                                           data=payload))  # fmt: skip
+        await publish(
+            self.deps.redis, self.user.id, Event(type=type_, chat_id=self.chat_id, data=payload)
+        )
 
     async def record(self, type_: str, agent: str | None, **data) -> None:
         async with self.deps.sessionmaker() as db:
-            db.add(RunEvent(run_id=self.run_id, user_id=self.user.id, type=type_, agent=agent,
-                            data=data))  # fmt: skip
+            db.add(
+                RunEvent(
+                    run_id=self.run_id, user_id=self.user.id, type=type_, agent=agent, data=data
+                )
+            )
             await db.commit()
 
     async def emit_tool(self, agent: str, type_: str, **data) -> None:
@@ -336,14 +340,25 @@ def build_agent(
                 continue
             tool = by_name.get(name)
             if tool is None:
-                out.append(ToolMessage(f"You don't have a tool called {name}.", tool_call_id=cid,
-                                       name=name, status="error"))  # fmt: skip
+                out.append(
+                    ToolMessage(
+                        f"You don't have a tool called {name}.",
+                        tool_call_id=cid,
+                        name=name,
+                        status="error",
+                    )
+                )
                 continue
             a = decided.get(cid)
             if a is not None and a.status == ApprovalStatus.rejected:
                 note = f" Their note: {a.note}" if a.note else ""
-                out.append(ToolMessage(f"The user rejected this {name} call.{note} Adjust your "
-                                       "plan accordingly.", tool_call_id=cid, name=name))  # fmt: skip
+                out.append(
+                    ToolMessage(
+                        f"The user rejected this {name} call.{note} Adjust your plan accordingly.",
+                        tool_call_id=cid,
+                        name=name,
+                    )
+                )
                 continue
             args = (a.decided_args if a is not None and a.decided_args else None) or call["args"]
             await rc.agent_status(agent.id, "working", tool=name)
@@ -400,4 +415,3 @@ def final_text(state: AgentState) -> str:
         if isinstance(m, AIMessage) and text_of(m).strip():
             return text_of(m)
     return ""
-

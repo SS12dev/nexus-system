@@ -76,13 +76,17 @@ def brief(rc: RunContext, files: list[tuple[str, str]], request: str) -> str:
         listing = "\n".join(f"- {name} (id {fid})" for fid, name in files)
         parts.append(f"<files>\nThe user's files for this task:\n{listing}\n</files>")
     if spec.deliverables:
-        parts.append("<deliverables>\n" + "\n".join(f"- {d}" for d in spec.deliverables)
-                     + "\n</deliverables>")  # fmt: skip
+        parts.append(
+            "<deliverables>\n"
+            + "\n".join(f"- {d}" for d in spec.deliverables)
+            + "\n</deliverables>"
+        )
     return "\n\n".join(parts)
 
 
-async def run_agent(rc: RunContext, graphs: dict, agent_id: str, messages: list[AnyMessage],
-                    **status) -> AgentState:  # fmt: skip
+async def run_agent(
+    rc: RunContext, graphs: dict, agent_id: str, messages: list[AnyMessage], **status
+) -> AgentState:
     await rc.agent_status(agent_id, "running", **status)
     state = await graphs[agent_id].ainvoke(
         {"messages": messages, "steps": 0, "done": None, "escalated": False}
@@ -170,11 +174,17 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                 ]
                 turns = counts.get(lead.id, 0) + 1
                 if turns >= max_lead_turns:
-                    transcript = [*transcript, HumanMessage(
-                        "No more delegations are possible. Call finish with the final result.")]  # fmt: skip
+                    transcript = [
+                        *transcript,
+                        HumanMessage(
+                            "No more delegations are possible. Call finish with the final result."
+                        ),
+                    ]
                 st = await run_agent(rc, graphs, lead.id, transcript)
-                update: dict = {"transcripts": {lead.id: st["messages"]},
-                                "counts": {lead.id: turns}}  # fmt: skip
+                update: dict = {
+                    "transcripts": {lead.id: st["messages"]},
+                    "counts": {lead.id: turns},
+                }
                 done = st.get("done") or {}
                 args = done.get("args") or {}
                 if done.get("tool") == "delegate" and turns < max_lead_turns:
@@ -187,8 +197,15 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                         if worker in worker_ids
                         else f"there is no worker called {worker!r}"
                     )
-                    update["transcripts"] = {lead.id: [*st["messages"], HumanMessage(
-                        f"That delegation didn't happen: {why}. Delegate differently or finish.")]}  # fmt: skip
+                    update["transcripts"] = {
+                        lead.id: [
+                            *st["messages"],
+                            HumanMessage(
+                                f"That delegation didn't happen: {why}. "
+                                "Delegate differently or finish."
+                            ),
+                        ]
+                    }
                     update["route"] = {"to": lead.id}
                     return update
                 update["route"] = None
@@ -198,17 +215,30 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             def worker_node(w_id: str):
                 async def node(state: SystemState) -> dict:
                     assignment = (state.get("route") or {}).get("task", "")
-                    st = await run_agent(rc, graphs, w_id, [HumanMessage(
-                        f"{task}\n\n<assignment from=\"{lead.id}\">\n{assignment}\n</assignment>"
-                        "\n\nDo only this assignment and reply with your result.")])  # fmt: skip
+                    st = await run_agent(
+                        rc,
+                        graphs,
+                        w_id,
+                        [
+                            HumanMessage(
+                                f'{task}\n\n<assignment from="{lead.id}">\n'
+                                f"{assignment}\n</assignment>"
+                                "\n\nDo only this assignment and reply with your result."
+                            )
+                        ],
+                    )
                     out = final_text(st)
                     counts = state.get("counts") or {}
                     transcript = (state.get("transcripts") or {}).get(lead.id, [])
                     return {
                         "outputs": {w_id: out},
                         "counts": {w_id: counts.get(w_id, 0) + 1},
-                        "transcripts": {lead.id: [*transcript, HumanMessage(
-                            f'<result from="{w_id}">\n{out}\n</result>')]},  # fmt: skip
+                        "transcripts": {
+                            lead.id: [
+                                *transcript,
+                                HumanMessage(f'<result from="{w_id}">\n{out}\n</result>'),
+                            ]
+                        },
                         "route": None,
                     }
 
@@ -238,9 +268,18 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             graphs[combiner.id] = build_agent(rc, combiner)
 
             async def split(state: SystemState) -> dict:
-                st = await run_agent(rc, graphs, splitter.id, [HumanMessage(
-                    f"{task}\n\nSplit this into at most {limit} independent sub-tasks and call "
-                    "submit_items.")])  # fmt: skip
+                st = await run_agent(
+                    rc,
+                    graphs,
+                    splitter.id,
+                    [
+                        HumanMessage(
+                            f"{task}\n\nSplit this into at most {limit} independent sub-tasks "
+                            "and call "
+                            "submit_items."
+                        )
+                    ],
+                )
                 done = st.get("done") or {}
                 items = [str(x).strip() for x in (done.get("args") or {}).get("items", [])]
                 items = [x for x in items if x][:limit] or [final_text(st) or rc.spec.goal]
@@ -248,16 +287,27 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
 
             def fan_out(state: SystemState) -> list[Send]:
                 items = state.get("items") or []
-                return [Send(worker.id, {"index": i, "item": it, "total": len(items)})
-                        for i, it in enumerate(items)]  # fmt: skip
+                return [
+                    Send(worker.id, {"index": i, "item": it, "total": len(items)})
+                    for i, it in enumerate(items)
+                ]
 
             async def work(payload: dict) -> dict:
                 i, item, total = payload["index"], payload["item"], payload["total"]
                 async with rc.parallel:
-                    st = await run_agent(rc, graphs, worker.id, [HumanMessage(
-                        f"{task}\n\n<item number=\"{i + 1}\" of=\"{total}\">\n{item}\n</item>\n\n"
-                        "Do only this item and reply with your result.")],
-                        item=f"{i + 1}/{total}")  # fmt: skip
+                    st = await run_agent(
+                        rc,
+                        graphs,
+                        worker.id,
+                        [
+                            HumanMessage(
+                                f'{task}\n\n<item number="{i + 1}" of="{total}">\n'
+                                f"{item}\n</item>\n\n"
+                                "Do only this item and reply with your result."
+                            )
+                        ],
+                        item=f"{i + 1}/{total}",
+                    )
                 return {"results": [(i, item, final_text(st))]}
 
             async def combine(state: SystemState) -> dict:
@@ -265,9 +315,18 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                     f'<result item="{i + 1}" task="{item[:200]}">\n{out}\n</result>'
                     for i, item, out in sorted(state.get("results") or [])
                 )
-                st = await run_agent(rc, graphs, combiner.id, [HumanMessage(
-                    f"{task}\n\nResults for each part:\n\n{parts}\n\nCombine them into the final "
-                    "result.")])  # fmt: skip
+                st = await run_agent(
+                    rc,
+                    graphs,
+                    combiner.id,
+                    [
+                        HumanMessage(
+                            f"{task}\n\nResults for each part:\n\n{parts}\n\n"
+                            "Combine them into the final "
+                            "result."
+                        )
+                    ],
+                )
                 out = final_text(st)
                 return {"outputs": {combiner.id: out}, "final": out}
 
@@ -292,15 +351,25 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             async def do(state: SystemState) -> dict:
                 transcript = (state.get("transcripts") or {}).get(doer.id) or [HumanMessage(task)]
                 st = await run_agent(rc, graphs, doer.id, transcript)
-                return {"transcripts": {doer.id: st["messages"]},
-                        "outputs": {doer.id: final_text(st)}}  # fmt: skip
+                return {
+                    "transcripts": {doer.id: st["messages"]},
+                    "outputs": {doer.id: final_text(st)},
+                }
 
             async def review(state: SystemState) -> dict:
                 rounds = (state.get("counts") or {}).get(critic.id, 0) + 1
                 work = (state.get("outputs") or {}).get(doer.id, "")
-                st = await run_agent(rc, graphs, critic.id, [HumanMessage(
-                    f"{task}\n\n<work round=\"{rounds}\" by=\"{doer.id}\">\n{work}\n</work>\n\n"
-                    "Review it against the goal and call verdict.")])  # fmt: skip
+                st = await run_agent(
+                    rc,
+                    graphs,
+                    critic.id,
+                    [
+                        HumanMessage(
+                            f'{task}\n\n<work round="{rounds}" by="{doer.id}">\n{work}\n</work>\n\n'
+                            "Review it against the goal and call verdict."
+                        )
+                    ],
+                )
                 done = st.get("done") or {}
                 args = done.get("args") or {}
                 approved = bool(args.get("approved", done.get("tool") != "verdict"))
@@ -311,9 +380,16 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                     update["route"] = None
                 else:
                     transcript = (state.get("transcripts") or {}).get(doer.id, [])
-                    update["transcripts"] = {doer.id: [*transcript, HumanMessage(
-                        f"<review by=\"{critic.id}\">\n{feedback}\n</review>\n\nRevise your work "
-                        "to address this and reply with the full revised result.")]}  # fmt: skip
+                    update["transcripts"] = {
+                        doer.id: [
+                            *transcript,
+                            HumanMessage(
+                                f'<review by="{critic.id}">\n{feedback}\n</review>\n\n'
+                                "Revise your work "
+                                "to address this and reply with the full revised result."
+                            ),
+                        ]
+                    }
                     update["route"] = {"to": doer.id}
                 return update
 

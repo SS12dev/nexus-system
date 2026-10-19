@@ -71,8 +71,11 @@ async def continue_run(deps, run_id: uuid.UUID) -> None:
 
 async def _announce(deps, system: AgentSystem, run: AgentRun, deleted: bool = False) -> None:
     payload = system_payload(system, run)
-    await publish(deps.redis, system.user_id,
-                  Event(type="run.updated", chat_id=run.chat_id, data={"run": run_payload(run)}))  # fmt: skip
+    await publish(
+        deps.redis,
+        system.user_id,
+        Event(type="run.updated", chat_id=run.chat_id, data={"run": run_payload(run)}),
+    )
     await publish(
         deps.redis,
         system.user_id,
@@ -122,8 +125,9 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
             except GatewayError as exc:
                 log.warning("No run key for %s: %s", run_id, exc)
                 await db.commit()
-                await finish(deps, run_id, RunStatus.failed,
-                             error="Jarvis couldn't reach the model gateway.")  # fmt: skip
+                await finish(
+                    deps, run_id, RunStatus.failed, error="Jarvis couldn't reach the model gateway."
+                )
                 return
             run.key_secret = key
         elif not settings.litellm_virtual_keys:
@@ -139,8 +143,9 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
         file_ids = [uuid.UUID(f) for f in run.file_ids or []]
         files = []
         if file_ids:
-            rows = await db.scalars(select(File).where(File.id.in_(file_ids),
-                                                       File.user_id == user.id))  # fmt: skip
+            rows = await db.scalars(
+                select(File).where(File.id.in_(file_ids), File.user_id == user.id)
+            )
             files = [(str(f.id), f.name) for f in rows.all()]
         library = Path(settings.library_path)
         visible = {s.slug: s for s in await usable_skills(db, user.id)}
@@ -154,7 +159,7 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
             infos = [BY_NAME[t] for t in a.tools if t in allowed and t in BY_NAME]
             prompts[a.id] = agent_prompt(spec, a, layers, granted_skills, infos, user.name)
         await db.commit()
-        user_id, chat_id, request, trace_id = user.id, run.chat_id, run.input, run.trace_id
+        chat_id, request, trace_id = run.chat_id, run.input, run.trace_id
         budget = float(run.budget_usd)
         await _announce(deps, system, run)
 
@@ -176,24 +181,44 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
     app = compile_system(rc, files, request).compile(checkpointer=deps.checkpointer)
     config = {"configurable": {"thread_id": str(run_id)}, "recursion_limit": RECURSION_LIMIT}
     try:
-        if resume:
-            snapshot = await app.aget_state(config)
-            interrupts = [i for t in snapshot.tasks for i in t.interrupts]
-            if not interrupts and not snapshot.next:
-                result = snapshot.values
-            else:
-                result = await app.ainvoke(Command(resume={i.id: True for i in interrupts}), config)
-        else:
-            result = await app.ainvoke({"outputs": {}, "transcripts": {}, "counts": {},
-                                        "results": []}, config)  # fmt: skip
+        result = await _invoke(app, config, resume)
+        # Parked on approvals or a pause. A decision or resume may have landed while this job
+        # was still running (its own continue_run is then deduplicated), so check before
+        # parking and carry on in this job if nothing is outstanding any more.
+        while interrupts := result.get("__interrupt__") or []:
+            async with deps.sessionmaker() as db:
+                run = await db.get(AgentRun, run_id)
+                system = await db.get(AgentSystem, run.system_id)
+                pending = await db.scalar(
+                    select(func.count()).where(
+                        Approval.run_id == run_id, Approval.status == ApprovalStatus.pending
+                    )
+                )
+                if run.status == RunStatus.cancelled:
+                    raise RunCancelled
+                kinds = {(i.value or {}).get("kind") for i in interrupts}
+                if pending:
+                    status = RunStatus.awaiting_approval
+                elif "pause" in kinds and run.status == RunStatus.paused:
+                    status = RunStatus.paused
+                else:
+                    status = None
+                if status is not None:
+                    run.status = status
+                    system.status = SystemStatus(status.value)
+                    await db.commit()
+                    await _announce(deps, system, run)
+                    return
+            result = await _invoke(app, config, True)
     except RunCancelled:
         await finish(deps, run_id, RunStatus.cancelled, error="Stopped by the user.")
         return
     except openai.APIStatusError as exc:
         text = str(exc).lower()
         if "budget" in text or "exceeded" in text:
-            await finish(deps, run_id, RunStatus.failed,
-                         error="The run reached its budget before finishing.")  # fmt: skip
+            await finish(
+                deps, run_id, RunStatus.failed, error="The run reached its budget before finishing."
+            )
         else:
             log.exception("Run %s failed", run_id)
             await finish(deps, run_id, RunStatus.failed, error="A model call failed.")
@@ -203,23 +228,18 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
         await finish(deps, run_id, RunStatus.failed, error="Something went wrong in the run.")
         return
 
-    interrupts = result.get("__interrupt__") or []
-    if interrupts:
-        kinds = {(i.value or {}).get("kind") for i in interrupts}
-        status = RunStatus.awaiting_approval if "approval" in kinds else RunStatus.paused
-        async with deps.sessionmaker() as db:
-            run = await db.get(AgentRun, run_id)
-            system = await db.get(AgentSystem, run.system_id)
-            # A cancel that landed while the job ran wins.
-            if run.status != RunStatus.cancelled:
-                run.status = status
-                system.status = SystemStatus(status.value)
-            await db.commit()
-            await _announce(deps, system, run)
-        if run.status == RunStatus.cancelled:
-            await finish(deps, run_id, RunStatus.cancelled, error="Stopped by the user.")
-        return
     await finish(deps, run_id, RunStatus.completed, output=result.get("final") or "")
+
+
+async def _invoke(app, config: dict, resume: bool) -> dict:
+    if not resume:
+        start = {"outputs": {}, "transcripts": {}, "counts": {}, "results": []}
+        return await app.ainvoke(start, config)
+    snapshot = await app.aget_state(config)
+    interrupts = [i for t in snapshot.tasks for i in t.interrupts]
+    if not interrupts and not snapshot.next:
+        return snapshot.values
+    return await app.ainvoke(Command(resume={i.id: True for i in interrupts}), config)
 
 
 async def finish(
@@ -246,7 +266,9 @@ async def finish(
         await db.execute(
             update(Approval)
             .where(Approval.run_id == run_id, Approval.status == ApprovalStatus.pending)
-            .values(status=ApprovalStatus.rejected, note="The run ended first.", decided_at=utcnow())
+            .values(
+                status=ApprovalStatus.rejected, note="The run ended first.", decided_at=utcnow()
+            )
         )
         outcome = "success" if status == RunStatus.completed else "failure"
         usages = (await db.scalars(select(SkillUsage).where(SkillUsage.run_id == run_id))).all()
@@ -288,9 +310,11 @@ async def finish(
         if message is not None:
             payload = message_payload(message)
             payload["attachments"] = [file_payload(f) for f in files]
-            await publish(deps.redis, run.user_id, Event(type="message.completed",
-                                                         chat_id=run.chat_id,
-                                                         data={"message": payload}))  # fmt: skip
+            await publish(
+                deps.redis,
+                run.user_id,
+                Event(type="message.completed", chat_id=run.chat_id, data={"message": payload}),
+            )
     if deps.checkpointer is not None:
         try:
             await deps.checkpointer.adelete_thread(str(run_id))

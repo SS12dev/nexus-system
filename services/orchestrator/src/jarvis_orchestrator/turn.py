@@ -2,6 +2,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import openai
 from langchain_core.language_models import BaseChatModel
@@ -13,23 +14,33 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.events import Event, publish
+from jarvis_common.library import file_payload
 from jarvis_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
 from jarvis_common.models import (
+    AgentRun,
+    AgentSystem,
+    Attachment,
     Chat,
     Message,
     MessageRole,
     MessageStatus,
+    SystemLifetime,
+    SystemStatus,
     User,
     UserStatus,
     utcnow,
 )
 from jarvis_common.settings import Settings
+from jarvis_common.skills import catalogue, instruction_layers, usable_skills
 from jarvis_common.storage import Storage
+from jarvis_common.systems import ACTIVE_RUN, granted_capabilities
+from jarvis_common.toolinfo import TOOLS, allowed_tools
 from jarvis_orchestrator.context import assemble
 from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
 from jarvis_orchestrator.sandbox import SandboxClient
-from jarvis_orchestrator.tools import build_tools
+from jarvis_orchestrator.systems.manage import system_tools
+from jarvis_orchestrator.tools import ToolContext, build_tools
 from jarvis_orchestrator.web import WebClient
 
 log = logging.getLogger(__name__)
@@ -112,7 +123,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
 
         try:
             await emit("jarvis.state", state="thinking")
-            content, usage, learn = await _generate(deps, db, chat, user, msg, emit)
+            content, usage, learn, saved = await _generate(deps, db, chat, user, msg, emit)
         except Exception as exc:
             if not isinstance(exc, TurnFailed):
                 log.exception("Turn %s failed", assistant_message_id)
@@ -130,8 +141,14 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         msg.input_tokens = usage.get("input_tokens")
         msg.output_tokens = usage.get("output_tokens")
         chat.updated_at = utcnow()
+        # Files Jarvis made in this turn (save_file, run_code) are attached to its reply.
+        for f in saved:
+            db.add(Attachment(message_id=msg.id, file_id=f.id))
         await db.commit()
-        await emit("message.completed", message=message_payload(msg))
+        payload = message_payload(msg)
+        if saved:
+            payload["attachments"] = [file_payload(f) for f in saved]
+        await emit("message.completed", message=payload)
         await emit("jarvis.state", state="idle")
 
     if learn and deps.enqueue is not None:
@@ -146,7 +163,42 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
             log.exception("Could not queue memory extraction")
 
 
-async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tuple[str, dict, bool]:
+async def systems_context(db, user_id: uuid.UUID, chat_id: uuid.UUID) -> str:
+    """Saved systems and templates, and runs from this chat, so Jarvis can refer to them."""
+    saved = (
+        await db.scalars(
+            select(AgentSystem)
+            .where(
+                AgentSystem.user_id == user_id,
+                AgentSystem.lifetime != SystemLifetime.ephemeral,
+                AgentSystem.status != SystemStatus.archived,
+            )
+            .order_by(AgentSystem.updated_at.desc())
+            .limit(12)
+        )
+    ).all()
+    runs = (
+        await db.execute(
+            select(AgentRun, AgentSystem)
+            .join(AgentSystem, AgentSystem.id == AgentRun.system_id)
+            .where(AgentRun.chat_id == chat_id, AgentRun.user_id == user_id)
+            .order_by(AgentRun.created_at.desc())
+            .limit(6)
+        )
+    ).all()
+    lines = [f"- {s.name} (system {s.id}, {s.lifetime})" for s in saved]
+    for r, s in runs:
+        state = "in progress" if r.status in ACTIVE_RUN else "ended"
+        lines.append(
+            f"- run {r.id} of {s.name} (system {s.id}, {s.lifetime}, {s.status}): {r.status}, "
+            f"{state}, ${float(r.cost_usd or 0):.2f} of ${float(r.budget_usd):.2f}"
+        )
+    return "<agent_systems>\n" + "\n".join(lines) + "\n</agent_systems>" if lines else ""
+
+
+async def _generate(
+    deps, db, chat: Chat, user: User, msg: Message, emit
+) -> tuple[str, dict, bool, list]:
     if user.status != UserStatus.active:
         raise TurnFailed("Your account is not active.")
     rows = await db.scalars(
@@ -181,24 +233,42 @@ async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tup
         },
     )
     context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
+    allowed = allowed_tools(user, await granted_capabilities(db, user.id))
+    # Outbound and destructive tools are for agents in a system, where every call is approved.
+    names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
+    extra = []
+    layers = await instruction_layers(db, Path(deps.settings.library_path), user, None)
+    if layers.user:
+        extra.append(f"<user_instructions>\n{layers.user}\n</user_instructions>")
+    skills = await usable_skills(db, user.id)
+    if skills:
+        extra.append(
+            "<skills>\nSkills in the shared library (load one with skills_load before a task "
+            f"it covers):\n{catalogue(skills)}\n</skills>"
+        )
+    if allowed:
+        extra.append(await systems_context(db, user.id, chat.id))
+    rendered = "\n\n".join(x for x in [context.render(), *extra] if x)
     # Release the connection while the model runs; tools open their own sessions.
     await db.commit()
-    tools = build_tools(
-        deps.sessionmaker,
-        deps.embedder,
-        deps.redis,
-        user.id,
-        chat.id,
-        emit,
-        context.memory_enabled,
+    ctx = ToolContext(
+        deps=deps,
+        user_id=user.id,
+        chat_id=chat.id,
+        emit=emit,
+        memory_enabled=context.memory_enabled,
+        file_ids=[f.id for f in context.chat_files],
     )
+    tools = build_tools(ctx, names)
+    if allowed:
+        tools += system_tools(ctx, user, allowed, msg.trace_id)
     graph = build_graph(model, tools)
     content = ""
     usage = {"input_tokens": 0, "output_tokens": 0}
     async for chunk, _meta in graph.astream(
         {
             "messages": to_langchain(history),
-            "system_prompt": system_prompt(user.name, context.render()),
+            "system_prompt": system_prompt(user.name, rendered),
         },
         {"recursion_limit": RECURSION_LIMIT},
         stream_mode="messages",
@@ -215,4 +285,4 @@ async def _generate(deps, db, chat: Chat, user: User, msg: Message, emit) -> tup
             # One turn can make several model calls (tool rounds); count them all.
             usage["input_tokens"] += chunk.usage_metadata.get("input_tokens", 0)
             usage["output_tokens"] += chunk.usage_metadata.get("output_tokens", 0)
-    return content, usage, context.memory_enabled
+    return content, usage, context.memory_enabled, ctx.saved

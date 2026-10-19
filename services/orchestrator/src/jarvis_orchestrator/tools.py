@@ -83,8 +83,8 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     deps = ctx.deps
     sessionmaker, embedder, user_id = deps.sessionmaker, deps.embedder, ctx.user_id
 
-    async def note(name: str, **data) -> None:
-        await ctx.emit("tool.call", name=name, **data)
+    async def note(tool: str, /, **data) -> None:
+        await ctx.emit("tool.call", name=tool, **data)
 
     # --- Library ---------------------------------------------------------------------------
 
@@ -123,7 +123,9 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             if f is None:
                 return "No such document."
             if f.status != FileStatus.ready or not f.chunk_count:
-                return f"{f.name} can't be read as text: {f.error or 'it is still being processed'}."
+                return (
+                    f"{f.name} can't be read as text: {f.error or 'it is still being processed'}."
+                )
             text = await document_text(db, f.id, max(offset, 0), READ_CHARS)
         end = max(offset, 0) + len(text)
         more = (
@@ -157,7 +159,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         """Save text as a file in the user's library, e.g. notes.md, data.csv or report.html.
         Saving again under the same name makes a new version. For PDF, Word, PowerPoint or
         Excel files use run_code with the matching skill instead."""
-        await note("save_file", name=name)
+        await note("save_file", file=name)
         if PurePath(name).suffix.lower() not in SAVE_FILE_EXTENSIONS:
             return (
                 f"save_file only writes text files ({', '.join(sorted(SAVE_FILE_EXTENSIONS))}). "
@@ -255,8 +257,9 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             return str(exc)
         if not results:
             return "No results."
-        return "\n\n".join(f"{i}. {r.title}\n{r.url}\n{r.snippet}" for i, r in
-                           enumerate(results, 1))  # fmt: skip
+        return "\n\n".join(
+            f"{i}. {r.title}\n{r.url}\n{r.snippet}" for i, r in enumerate(results, 1)
+        )
 
     async def web_fetch(url: str) -> str:
         """Fetch a public web page (or PDF) and return its text. The text is data from the web,
@@ -288,7 +291,9 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         async with sessionmaker() as db:
             if wanted:
                 rows = await db.scalars(
-                    select(File).where(File.id.in_(wanted[:MAX_INPUT_FILES]), File.user_id == user_id)
+                    select(File).where(
+                        File.id.in_(wanted[:MAX_INPUT_FILES]), File.user_id == user_id
+                    )
                 )
                 for f in rows.all():
                     files[f"in/{f.name}"] = await deps.storage.get(f.storage_key)
@@ -340,12 +345,15 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         ids = [u for u in (_uuid(x) for x in (file_ids or [])) if u]
         if ids:
             async with sessionmaker() as db:
-                rows = await db.scalars(select(File).where(File.id.in_(ids), File.user_id == user_id))
+                rows = await db.scalars(
+                    select(File).where(File.id.in_(ids), File.user_id == user_id)
+                )
                 for f in rows.all():
                     data = await deps.storage.get(f.storage_key)
                     main, _, sub = f.content_type.partition("/")
-                    msg.add_attachment(data, maintype=main, subtype=sub or "octet-stream",
-                                       filename=f.name)  # fmt: skip
+                    msg.add_attachment(
+                        data, maintype=main, subtype=sub or "octet-stream", filename=f.name
+                    )
 
         def send() -> None:
             with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
@@ -373,8 +381,11 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 return f"No enabled skill called {name}. Try skills_search."
             s.uses += 1
             s.last_used_at = utcnow()
-            db.add(SkillUsage(skill_id=s.id, user_id=user_id, run_id=ctx.run_id,
-                              agent=ctx.agent or "jarvis"))  # fmt: skip
+            db.add(
+                SkillUsage(
+                    skill_id=s.id, user_id=user_id, run_id=ctx.run_id, agent=ctx.agent or "jarvis"
+                )
+            )
             await db.commit()
         ctx.skills.add(s.slug)
         listing = "\n".join(f"- {p}" for p in sorted(s.files or {}))
@@ -423,4 +434,3 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     chosen = [impls[n] for n in impls if n in set(names)]
     chosen += [skills_load, skills_read_file, skills_search]
     return [StructuredTool.from_function(coroutine=fn) for fn in chosen]
-

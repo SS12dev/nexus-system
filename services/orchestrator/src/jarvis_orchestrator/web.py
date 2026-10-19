@@ -40,8 +40,26 @@ class _Text(HTMLParser):
     """HTML to readable text: drops scripts, styles and navigation, keeps block breaks."""
 
     SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "form", "iframe"}
-    BLOCK = {"p", "div", "br", "li", "tr", "section", "article", "h1", "h2", "h3", "h4", "h5",
-             "h6", "table", "ul", "ol", "pre", "blockquote"}  # fmt: skip
+    BLOCK = {
+        "p",
+        "div",
+        "br",
+        "li",
+        "tr",
+        "section",
+        "article",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "table",
+        "ul",
+        "ol",
+        "pre",
+        "blockquote",
+    }
 
     def __init__(self):
         super().__init__(convert_charrefs=True)

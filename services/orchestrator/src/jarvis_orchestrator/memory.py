@@ -9,9 +9,7 @@
   profiles.
 """
 
-import json
 import logging
-import re
 import uuid
 from datetime import timedelta
 
@@ -24,6 +22,7 @@ from jarvis_common.events import Event, publish
 from jarvis_common.litellm import ensure_user_key
 from jarvis_common.memory import get_profile, mark_profile_stale, memory_payload, record
 from jarvis_common.models import (
+    AgentSystem,
     Chat,
     Episode,
     Memory,
@@ -32,11 +31,13 @@ from jarvis_common.models import (
     MessageRole,
     MessageStatus,
     Profile,
+    Skill,
     User,
     UserStatus,
     utcnow,
 )
 from jarvis_common.search import hybrid_search
+from jarvis_orchestrator.llm import parse_json
 from jarvis_orchestrator.prompts import EPISODE, MEMORY_DECIDE, MEMORY_EXTRACT, PROFILE
 from jarvis_orchestrator.turn import TurnDeps
 
@@ -51,22 +52,6 @@ MIN_CONFIDENCE = 0.2
 # Two memories closer than this (cosine distance) are treated as duplicates.
 DUPLICATE_DISTANCE = 0.06
 PROFILE_MEMORIES = 80
-
-
-def parse_json(raw: str) -> dict:
-    raw = raw.strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", raw, re.S)
-        if not match:
-            return {}
-        try:
-            data = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
-    return data if isinstance(data, dict) else {}
 
 
 async def _ask(
@@ -205,8 +190,10 @@ async def apply_candidates(
     # Existing memories near each candidate (and near each forget request), numbered for the
     # model so it never has to copy a UUID.
     existing: dict[uuid.UUID, Memory] = {}
-    for query, vec in [*((c["content"], v) for c, v in zip(candidates, vectors, strict=True)),
-                       *((f, None) for f in forget)]:  # fmt: skip
+    for query, vec in [
+        *((c["content"], v) for c, v in zip(candidates, vectors, strict=True)),
+        *((f, None) for f in forget),
+    ]:
         hits = await hybrid_search(db, "memories", user.id, query, vec, NEIGHBOURS)
         if hits:
             rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
@@ -515,14 +502,21 @@ async def nightly(deps: TurnDeps) -> None:
 
 
 async def embed_missing(deps: TurnDeps, limit: int = 256) -> int:
-    """Embed memories and episodes saved while the embedder was down, or made by an old model."""
+    """Embed rows saved while the embedder was down, made by an old model, or (skills, agent
+    systems) whose text changed."""
     done = 0
     async with deps.sessionmaker() as db:
         try:
             model = await deps.embedder.current_model(db)
         except EmbeddingError:
             return 0
-        for table in (Memory, Episode):
+        texts = {
+            Memory: lambda r: r.content,
+            Episode: lambda r: r.content,
+            Skill: lambda r: f"{r.name}: {r.description}",
+            AgentSystem: lambda r: f"{r.name}: {r.goal}",
+        }
+        for table, text_of in texts.items():
             rows = (
                 await db.scalars(
                     select(table)
@@ -533,7 +527,7 @@ async def embed_missing(deps: TurnDeps, limit: int = 256) -> int:
             if not rows:
                 continue
             try:
-                vectors, model = await deps.embedder.embed(db, [r.content for r in rows])
+                vectors, model = await deps.embedder.embed(db, [text_of(r) for r in rows])
             except EmbeddingError:
                 return done
             for r, vec in zip(rows, vectors, strict=True):

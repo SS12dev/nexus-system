@@ -36,7 +36,6 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 
 
-
 async def own_file(db: AsyncSession, user: User, file_id: uuid.UUID) -> File:
     f = await db.scalar(select(File).where(File.id == file_id, File.user_id == user.id))
     if f is None:

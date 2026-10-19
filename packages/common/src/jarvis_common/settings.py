@@ -101,6 +101,8 @@ class Settings(BaseSettings):
     sandbox_url: str = "http://sandbox:8100"
     sandbox_token: str = ""
     sandbox_timeout_s: int = 120
+    # Longest a single run_system or continue_run job may take.
+    run_job_timeout_s: int = 1800
 
     # Web search: tavily or brave when a key is set, otherwise DuckDuckGo (free, no key).
     web_search_provider: Literal["auto", "tavily", "brave", "duckduckgo"] = "auto"

@@ -3,28 +3,55 @@
 import logging
 import uuid
 from functools import partial
+from pathlib import Path
 
-from arq import cron
+from arq import cron, func
 from arq.connections import RedisSettings
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
 from jarvis_common.db import make_engine, make_sessionmaker
 from jarvis_common.embeddings import CachedEmbedder, LiteLLMEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.settings import get_settings
+from jarvis_common.skills import sync_library
+from jarvis_common.storage import S3Storage
 from jarvis_orchestrator import memory
 from jarvis_orchestrator.llm import chat_model
+from jarvis_orchestrator.sandbox import SandboxClient
+from jarvis_orchestrator.systems import learn, runner
 from jarvis_orchestrator.turn import TurnDeps
 from jarvis_orchestrator.turn import run_turn as _run_turn
+from jarvis_orchestrator.web import WebClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def psycopg_url(url: str) -> str:
+    """The checkpointer uses psycopg; the app's URL names the asyncpg driver."""
+    return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
 async def startup(ctx: dict) -> None:
     engine = make_engine(settings.database_url)
     ctx["engine"] = engine
+    # Agent-system runs keep their LangGraph checkpoints here, so a run parked on an approval
+    # or a pause survives restarts.
+    pool = AsyncConnectionPool(
+        psycopg_url(settings.database_url),
+        min_size=1,
+        max_size=8,
+        open=False,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    )
+    await pool.open()
+    ctx["pool"] = pool
+    checkpointer = AsyncPostgresSaver(pool)
+    await checkpointer.setup()
     ctx["deps"] = TurnDeps(
         settings=settings,
         sessionmaker=make_sessionmaker(engine),
@@ -34,7 +61,15 @@ async def startup(ctx: dict) -> None:
         embedder=CachedEmbedder(LiteLLMEmbedder(settings), settings.embedding_batch_size),
         # arq's own pool, already connected when startup runs.
         enqueue=ctx["redis"].enqueue_job,
+        storage=S3Storage(settings),
+        sandbox=SandboxClient(settings),
+        web=WebClient(settings),
+        checkpointer=checkpointer,
     )
+    async with ctx["deps"].sessionmaker() as db:
+        changed = await sync_library(db, Path(settings.library_path))
+    if changed:
+        log.info("Skills library: %d core skills added or updated", changed)
 
 
 async def shutdown(ctx: dict) -> None:
@@ -42,6 +77,10 @@ async def shutdown(ctx: dict) -> None:
     await deps.embedder.inner.aclose()
     await deps.gateway.aclose()
     await deps.redis.aclose()
+    await deps.storage.aclose()
+    await deps.sandbox.aclose()
+    await deps.web.aclose()
+    await ctx["pool"].close()
     await ctx["engine"].dispose()
 
 
@@ -57,6 +96,18 @@ async def rebuild_profile(ctx: dict, user_id: str) -> None:
     await memory.rebuild_profile(ctx["deps"], uuid.UUID(user_id))
 
 
+async def run_system(ctx: dict, run_id: str) -> None:
+    await runner.run_system(ctx["deps"], uuid.UUID(run_id))
+
+
+async def continue_run(ctx: dict, run_id: str) -> None:
+    await runner.continue_run(ctx["deps"], uuid.UUID(run_id))
+
+
+async def draft_skill(ctx: dict, run_id: str) -> None:
+    await learn.draft_skill(ctx["deps"], uuid.UUID(run_id))
+
+
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -70,7 +121,17 @@ async def nightly(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [run_turn, extract_memories, rebuild_profile]
+    functions = [
+        run_turn,
+        extract_memories,
+        rebuild_profile,
+        draft_skill,
+        # A run can take a while; when it parks on an approval or a pause the job ends and a
+        # later continue_run picks it up from its checkpoint. keep_result=0 so the shared
+        # run:<id> job id only blocks a second job while one is queued or running.
+        func(run_system, timeout=settings.run_job_timeout_s, keep_result=0),
+        func(continue_run, timeout=settings.run_job_timeout_s, keep_result=0),
+    ]
     cron_jobs = [
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
         cron(

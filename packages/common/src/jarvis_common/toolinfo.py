@@ -55,12 +55,14 @@ TOOLS: list[ToolInfo] = [
         "Send email",
         "outbound",
         "Send an email, optionally with library files attached. Asks the user first.",
+        jarvis=False,
     ),
     ToolInfo(
         "delete_document",
         "Delete a document",
         "destructive",
         "Delete a document from the user's library. Asks the user first.",
+        jarvis=False,
     ),
 ]
 

@@ -53,7 +53,9 @@ class SandboxClient:
         except httpx.HTTPError as exc:
             raise SandboxError("The sandbox isn't reachable right now.") from exc
         if resp.status_code >= 400:
-            raise SandboxError(f"The sandbox refused the job ({resp.status_code}): {resp.text[:300]}")
+            raise SandboxError(
+                f"The sandbox refused the job ({resp.status_code}): {resp.text[:300]}"
+            )
         data = resp.json()
         return SandboxResult(
             exit_code=data["exit_code"],

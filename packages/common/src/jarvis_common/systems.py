@@ -12,8 +12,11 @@ from jarvis_common.models import (
     AgentRun,
     AgentSystem,
     Approval,
+    ApprovalStatus,
+    AuditLog,
     Capability,
     RunStatus,
+    SystemStatus,
     ToolGrant,
     User,
     utcnow,
@@ -180,3 +183,89 @@ async def new_run(
     )
     db.add(run)
     return run
+
+
+# --- Run control and approvals (used by the API and by Jarvis's tools) ---------------------
+
+ACTIVE_RUN = (RunStatus.queued, RunStatus.running, RunStatus.awaiting_approval, RunStatus.paused)
+
+
+class ControlProblem(ValueError):
+    """Why a pause, resume, cancel or decision can't be applied; safe to show."""
+
+
+def control_run(run: AgentRun, system: AgentSystem, action: str) -> bool:
+    """Apply pause, resume or cancel to a run (not committed). Returns True when the
+    orchestrator must be asked to continue the run (a parked run resuming or being cancelled).
+    A running job notices a pause or cancel itself before its next model call."""
+    if action == "pause":
+        if run.status != RunStatus.running:
+            raise ControlProblem(f"Only a running run can be paused; this one is {run.status}.")
+        run.status = RunStatus.paused
+        system.status = SystemStatus.paused
+        return False
+    if action == "resume":
+        if run.status != RunStatus.paused:
+            raise ControlProblem(f"Only a paused run can be resumed; this one is {run.status}.")
+        run.status = RunStatus.running
+        system.status = SystemStatus.running
+        return True
+    if action == "cancel":
+        if run.status not in ACTIVE_RUN:
+            raise ControlProblem(f"This run already ended ({run.status}).")
+        run.status = RunStatus.cancelled
+        return True
+    raise ControlProblem(f"Unknown action {action}.")
+
+
+async def decide_approval(
+    db: AsyncSession,
+    approval: Approval,
+    actor: User,
+    decision: str,
+    *,
+    args: dict | None = None,
+    note: str | None = None,
+) -> bool:
+    """Approve (optionally with edited arguments) or reject a paused tool call, and audit it
+    (not committed). Returns True when nothing in the run is pending any more, so it can go on."""
+    if approval.status != ApprovalStatus.pending:
+        raise ControlProblem("This request was already decided.")
+    if decision not in ("approve", "reject"):
+        raise ControlProblem("Decide with approve or reject.")
+    approval.status = ApprovalStatus.approved if decision == "approve" else ApprovalStatus.rejected
+    if decision == "approve" and args is not None and args != approval.args:
+        approval.decided_args = args
+    approval.note = (note or "").strip()[:1000] or None
+    approval.decided_by = actor.id
+    approval.decided_at = utcnow()
+    db.add(
+        AuditLog(
+            actor_id=actor.id,
+            action=f"approval.{approval.status}",
+            target=str(approval.id),
+            data={
+                "run_id": str(approval.run_id),
+                "agent": approval.agent,
+                "tool": approval.tool,
+                "args": approval.args,
+                "edited_args": approval.decided_args,
+                "note": approval.note,
+            },
+        )
+    )
+    await db.flush()
+    pending = await db.scalar(
+        select(func.count()).where(
+            Approval.run_id == approval.run_id, Approval.status == ApprovalStatus.pending
+        )
+    )
+    if pending:
+        return False
+    run = await db.get(AgentRun, approval.run_id)
+    if run is not None and run.status == RunStatus.awaiting_approval:
+        run.status = RunStatus.running
+        system = await db.get(AgentSystem, run.system_id)
+        if system is not None:
+            system.status = SystemStatus.running
+    return True
