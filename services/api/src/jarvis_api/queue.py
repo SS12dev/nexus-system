@@ -3,13 +3,17 @@ from typing import Protocol
 
 from arq import ArqRedis
 
+from jarvis_common.queues import DOCS_QUEUE
 
-class TurnQueue(Protocol):
+
+class JobQueue(Protocol):
     async def enqueue_turn(self, chat_id: uuid.UUID, assistant_message_id: uuid.UUID) -> None: ...
+    async def enqueue_parse(self, file_id: uuid.UUID) -> None: ...
+    async def enqueue_profile_rebuild(self, user_id: uuid.UUID) -> None: ...
 
 
-class ArqTurnQueue:
-    """Hands a Jarvis turn to the orchestrator workers through the arq Redis queue."""
+class ArqJobQueue:
+    """Hands work to the orchestrator and doc-worker through the arq Redis queues."""
 
     def __init__(self, pool: ArqRedis):
         self.pool = pool
@@ -21,3 +25,12 @@ class ArqTurnQueue:
             str(assistant_message_id),
             _job_id=f"turn:{assistant_message_id}",
         )
+
+    async def enqueue_parse(self, file_id: uuid.UUID) -> None:
+        await self.pool.enqueue_job(
+            "parse_file", str(file_id), _job_id=f"parse:{file_id}", _queue_name=DOCS_QUEUE
+        )
+
+    async def enqueue_profile_rebuild(self, user_id: uuid.UUID) -> None:
+        # No fixed job id: arq keeps finished job ids around, which would block a second rebuild.
+        await self.pool.enqueue_job("rebuild_profile", str(user_id))

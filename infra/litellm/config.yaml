@@ -17,6 +17,16 @@ model_list:
     litellm_params:
       model: openai/gpt-5.5
       api_key: os.environ/OPENAI_API_KEY
+  # Embeddings for memory and document search: bge-m3 in Ollama on the host, free and local
+  # (`ollama pull bge-m3`). Vectors must be 1024 wide. To use OpenAI instead, swap in:
+  #   model: openai/text-embedding-3-small
+  #   api_key: os.environ/OPENAI_API_KEY
+  #   dimensions: 1024
+  # then restart the workers; a background job re-embeds everything with the new model.
+  - model_name: jarvis-embed
+    litellm_params:
+      model: ollama/bge-m3
+      api_base: os.environ/OLLAMA_BASE_URL
 
 litellm_settings:
   # Every generation, with cost, goes to Langfuse (LANGFUSE_* env vars).

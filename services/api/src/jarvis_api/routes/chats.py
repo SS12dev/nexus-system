@@ -11,11 +11,21 @@ from jarvis_api.schemas import (
     ChatCreateIn,
     ChatOut,
     ChatUpdateIn,
+    FileBrief,
     MessageOut,
     SendMessageIn,
     SendMessageOut,
 )
-from jarvis_common.models import Chat, Message, MessageRole, MessageStatus, User, utcnow
+from jarvis_common.models import (
+    Attachment,
+    Chat,
+    File,
+    Message,
+    MessageRole,
+    MessageStatus,
+    User,
+    utcnow,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -28,6 +38,29 @@ async def own_chat(db: AsyncSession, user: User, chat_id: uuid.UUID) -> Chat:
     if chat is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Chat not found")
     return chat
+
+
+async def attachments_for(
+    db: AsyncSession, message_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[File]]:
+    if not message_ids:
+        return {}
+    rows = await db.execute(
+        select(Attachment.message_id, File)
+        .join(File, File.id == Attachment.file_id)
+        .where(Attachment.message_id.in_(message_ids))
+        .order_by(File.created_at)
+    )
+    out: dict[uuid.UUID, list[File]] = {}
+    for message_id, f in rows.all():
+        out.setdefault(message_id, []).append(f)
+    return out
+
+
+def message_out(msg: Message, files: list[File] | None = None) -> MessageOut:
+    out = MessageOut.model_validate(msg)
+    out.attachments = [FileBrief.model_validate(f) for f in files or []]
+    return out
 
 
 @router.get("", response_model=list[ChatOut])
@@ -67,7 +100,9 @@ async def list_messages(chat_id: uuid.UUID, user: CurrentUser, db: DbDep):
     rows = await db.scalars(
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
-    return rows.all()
+    messages = rows.all()
+    files = await attachments_for(db, [m.id for m in messages if m.role == MessageRole.user])
+    return [message_out(m, files.get(m.id)) for m in messages]
 
 
 @router.post(
@@ -91,6 +126,17 @@ async def send_message(
     )
     if busy:
         raise HTTPException(status.HTTP_409_CONFLICT, "Jarvis is still answering in this chat")
+    files: list[File] = []
+    if body.file_ids:
+        files = list(
+            (
+                await db.scalars(
+                    select(File).where(File.id.in_(body.file_ids), File.user_id == user.id)
+                )
+            ).all()
+        )
+        if len(files) != len(set(body.file_ids)):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
 
     now = utcnow()
     user_msg = Message(
@@ -114,6 +160,10 @@ async def send_message(
         chat.title = body.content.strip().splitlines()[0][:80] or "New chat"
     chat.updated_at = now
     db.add_all([user_msg, assistant_msg])
+    await db.flush()
+    for f in files:
+        db.add(Attachment(message_id=user_msg.id, file_id=f.id))
+        f.chat_id = f.chat_id or chat.id
     await db.commit()
 
     try:
@@ -127,6 +177,6 @@ async def send_message(
 
     return SendMessageOut(
         chat=ChatOut.model_validate(chat),
-        user_message=MessageOut.model_validate(user_msg),
-        assistant_message=MessageOut.model_validate(assistant_msg),
+        user_message=message_out(user_msg, files),
+        assistant_message=message_out(assistant_msg),
     )

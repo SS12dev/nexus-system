@@ -13,6 +13,11 @@ EventType = Literal[
     "message.completed",
     "message.failed",
     "chat.updated",
+    "tool.call",
+    "file.updated",
+    "file.deleted",
+    "memory.updated",
+    "profile.updated",
 ]
 
 JarvisState = Literal["idle", "thinking", "speaking"]
