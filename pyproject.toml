@@ -1,0 +1,47 @@
+[project]
+name = "jarvis-system"
+version = "0.1.0"
+description = "Jarvis: a supervisor agent that builds and runs sub-agent systems"
+requires-python = ">=3.12"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/common", "services/api", "services/orchestrator"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.8",
+    "httpx>=0.28",
+    "fakeredis>=2.26",
+    "jarvis-common",
+    "jarvis-api",
+    "jarvis-orchestrator",
+]
+
+[tool.uv.sources]
+jarvis-common = { workspace = true }
+jarvis-api = { workspace = true }
+jarvis-orchestrator = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["apps"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["services/api/tests", "services/orchestrator/tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff.lint.isort]
+known-first-party = ["jarvis_common", "jarvis_api", "jarvis_orchestrator"]

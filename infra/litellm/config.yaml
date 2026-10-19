@@ -1,0 +1,44 @@
+# LiteLLM proxy for Jarvis. Agents only ever name the jarvis-* aliases, so swapping a model is a
+# change here, not in code. Prices and tiers: see the architecture doc.
+model_list:
+  - model_name: jarvis-nano     # routing, intent, memory extraction, titles, summaries
+    litellm_params:
+      model: openai/gpt-5.4-nano
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: jarvis-mini     # most sub-agents, tool calling, RAG answers, plain chat
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: jarvis-pro      # planning, designing agent systems, hard reasoning
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: jarvis-max      # escalation only
+    litellm_params:
+      model: openai/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  # Every generation, with cost, goes to Langfuse (LANGFUSE_* env vars).
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  # Exact-match cache only: semantic caching misfires on agentic traffic.
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    namespace: litellm.cache
+    ttl: 3600
+  drop_params: true
+  # jarvis-mini falls back to jarvis-nano if it is down.
+  fallbacks: [{"jarvis-mini": ["jarvis-nano"]}]
+
+router_settings:
+  num_retries: 2
+  timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Virtual keys, budgets and spend logs live here.
+  database_url: os.environ/DATABASE_URL
