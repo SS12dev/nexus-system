@@ -100,6 +100,11 @@ compose.yaml            the whole stack
 
 ## Developing
 
+`./scripts/check.sh` runs everything CI runs, on your machine: ruff, the backend tests against
+throwaway Postgres and Valkey containers, the web typecheck, tests and build, and the Compose
+config and image builds (`--no-images` skips the builds). Run it before merging while GitHub
+Actions is unavailable.
+
 ```sh
 uv sync                                   # Python workspace (Python 3.12+)
 docker compose up -d postgres redis litellm langfuse-web langfuse-worker
