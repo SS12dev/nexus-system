@@ -3,6 +3,7 @@ it as a template, pause/resume/stop a run, delete it. A run itself happens on th
 queue (runner.py); these tools return straight away so Jarvis can tell the user what started."""
 
 import logging
+import re
 import uuid
 
 from langchain_core.tools import BaseTool
@@ -32,6 +33,20 @@ from jarvis_orchestrator.systems.design import DesignFailed, describe, design
 from jarvis_orchestrator.tools import CALL_ID, ToolContext, as_tools
 
 log = logging.getLogger(__name__)
+
+
+# Words that mean the user wants a team kept for later. "Keep it cheap" or "keeping the budget
+# small" must not count, so "keep" needs the team (or a template) as its object.
+KEEP_WORDS = re.compile(
+    r"\b(keep (this|the|that|a|my) (team|agents?)|keep it as a template|save (it|this|that|the "
+    r"team|this team|that team) ?(as a template|for later)?|reuse|re-use|template|for next time|"
+    r"every (day|week|month|morning|evening)|daily|weekly|monthly)\b",
+    re.I,
+)
+
+
+def asked_to_keep(words: str) -> bool:
+    return bool(KEEP_WORDS.search(words or ""))
 
 
 def _uuid(value: str | None) -> uuid.UUID | None:
@@ -157,9 +172,13 @@ def system_tools(
         files to work from
         (default: this chat's files). budget_usd: the user's budget in USD; when they ask to
         keep it cheap without a figure, pass 0.25; otherwise leave it out. best_model:
-        only when the user asked for the best model. keep: true when the user wants to reuse
-        this team (otherwise it is discarded after the run unless they keep it)."""
+        only when the user asked for the best model. keep: true only when the user said to keep
+        or reuse this team; otherwise leave it out: the team is removed after the run and the
+        user is asked whether to keep it."""
         await note("build_agent_system")
+        # A kept team never goes away on its own, so keeping one takes the user's own words.
+        if keep and asked.strip() and not asked_to_keep(asked):
+            keep = False
         if asked.strip() and asked.strip() not in request:
             request = (
                 f"{request}\n\nThe user's own words: {asked.strip()[:4000]}\nWhere the text "

@@ -34,6 +34,7 @@ x-jarvis-env: &jarvis-env
   MEMORY_MODEL: ${MEMORY_MODEL:-jarvis-nano}
   # Agent systems
   DESIGN_MODEL: ${DESIGN_MODEL:-jarvis-pro}
+  ROUTE_MODEL: ${ROUTE_MODEL-jarvis-nano}
   DEFAULT_RUN_BUDGET_USD: ${DEFAULT_RUN_BUDGET_USD:-0.50}
   MAX_RUN_BUDGET_USD: ${MAX_RUN_BUDGET_USD:-5}
   MAX_TIER_ROLES: ${MAX_TIER_ROLES:-owner,admin}

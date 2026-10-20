@@ -51,13 +51,25 @@ const mem = (id: string, over: Partial<Memory> = {}): Memory => ({
 const dist = (p: number[]) => Math.hypot(p[0], p[1], p[2]);
 
 describe("liveSystems", () => {
-  it("leaves archived systems out and keeps the oldest first", () => {
+  const run = (status: string) => ({ status }) as unknown as AgentSystem["run"];
+
+  it("keeps teams with a run in progress, oldest first", () => {
     const list = liveSystems({
-      b: sys({ id: "b", created_at: "2026-10-20T02:00:00Z" }),
-      a: sys({ id: "a", created_at: "2026-10-20T01:00:00Z" }),
-      z: sys({ id: "z", status: "archived" }),
+      b: sys({ id: "b", created_at: "2026-10-20T02:00:00Z", run: run("running") }),
+      a: sys({ id: "a", created_at: "2026-10-20T01:00:00Z", run: run("awaiting_approval") }),
+      p: sys({ id: "p", created_at: "2026-10-20T03:00:00Z", run: run("paused") }),
+      z: sys({ id: "z", status: "archived", run: run("running") }),
     });
-    expect(list.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(list.map((s) => s.id)).toEqual(["a", "b", "p"]);
+  });
+
+  it("leaves out saved teams whose run has finished, and teams that never ran", () => {
+    const list = liveSystems({
+      kept: sys({ id: "kept", lifetime: "persistent", status: "idle", run: run("completed") }),
+      failed: sys({ id: "failed", lifetime: "template", status: "idle", run: run("failed") }),
+      never: sys({ id: "never", lifetime: "template", status: "idle" }),
+    });
+    expect(list).toEqual([]);
   });
 });
 

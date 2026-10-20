@@ -92,6 +92,10 @@ class Settings(BaseSettings):
 
     # Agent systems. Jarvis designs them with jarvis-pro; each run gets its own LiteLLM key.
     design_model: str = "jarvis-pro"
+    # Before Jarvis answers, this model decides whether the message is work for a team (empty
+    # turns the router off). Messages shorter than route_min_chars skip it.
+    route_model: str = "jarvis-nano"
+    route_min_chars: int = 40
     default_run_budget_usd: float = 0.50
     max_run_budget_usd: float = 5.00
     # Agents working at once in a parallel_map_reduce system, and items it may fan out to.

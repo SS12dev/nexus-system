@@ -115,11 +115,14 @@ const cross = (a: Vec3, b: Vec3): Vec3 => [
 
 // --- Agent systems ----------------------------------------------------------------------------
 
-/** Systems that belong around the orb: anything not archived, oldest first so a new team
- * takes the next free slot and existing ones stay put. */
+const WORKING_RUN = new Set(["queued", "running", "awaiting_approval", "paused"]);
+
+/** Systems that belong around the orb: teams with a run in progress (or paused, or waiting for
+ * an approval), oldest first so a new team takes the next free slot and existing ones stay put.
+ * A team retracts into the orb when its run ends; saved teams wait on the Agents page. */
 export function liveSystems(systems: Record<string, AgentSystem>): AgentSystem[] {
   return Object.values(systems)
-    .filter((s) => s.status !== "archived")
+    .filter((s) => s.status !== "archived" && !!s.run && WORKING_RUN.has(s.run.status))
     .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
 }
 

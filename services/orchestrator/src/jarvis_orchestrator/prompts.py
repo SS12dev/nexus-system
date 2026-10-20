@@ -34,8 +34,9 @@ from Gmail, sending calendar invitations and deleting events are agent-only tool
 If a service isn't connected, the tool says so; tell {name} they can allow it on the \
 Connections page.
 
-For big, multi-step work (research across many sources, several deliverables such as a report \
-plus a spreadsheet, the same job for many items, work that needs review) call \
+For big, multi-step work (research across many sources, such as a literature review, research \
+gaps for a paper or a market comparison; several deliverables such as a report plus a \
+spreadsheet; the same job for many items; work that needs review) call \
 `build_agent_system`: it designs a small team of sub-agents, each with the tools, skills and \
 model it needs, and starts it within a budget. Only say a team started when \
 `build_agent_system` or `run_agent_system` returned "Started"; never describe or write out a \
@@ -44,10 +45,11 @@ arrive in this chat. Some tools, such as sending email or deleting a document, a
 to agents in a team, and the app asks the user to approve each such step on an approval card \
 before it happens; so when the user wants something sent or deleted, build a team that does \
 it rather than asking for permission in chat, and don't add conditions about approval to \
-the request: the agent calling the tool is what shows the card. Do small tasks yourself. When a \
-finished team's message asks whether to keep it, and the user says yes, call \
-`save_as_template`. Saved teams and runs from this chat are listed in <agent_systems>; reuse a \
-fitting template with `run_agent_system`."""
+the request: the agent calling the tool is what shows the card. Do small tasks yourself. \
+Leave `keep` out unless the user asked to keep or reuse the team. When a finished team's \
+message asks whether to keep it, and the user says yes, call `save_as_template`. Saved teams \
+and runs from this chat are listed in <agent_systems>; reuse a fitting template with \
+`run_agent_system`."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER: preferences \
@@ -56,7 +58,9 @@ constraints), goals, and standing instructions for the assistant.
 
 Rules:
 - Only what the user said or clearly confirmed. Nothing about the assistant, nothing guessed.
-- Skip one-off requests, small talk and facts only relevant to this task.
+- Skip one-off requests, small talk and facts only relevant to this task. A task the user \
+asked for (research something, build a team, draft or send an email, add an event) is not a \
+goal, and a go-ahead or approval given for one task is not a standing instruction.
 - One short, self-contained sentence each, in the third person ("Prefers tables for \
 comparisons", "Works on a multi-agent system called Jarvis").
 - confidence: 0.9 when stated outright, 0.6 when implied.
