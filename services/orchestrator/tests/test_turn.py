@@ -18,7 +18,7 @@ from jarvis_common.models import (
     User,
     UserStatus,
 )
-from jarvis_orchestrator.turn import run_turn
+from jarvis_orchestrator.turn import finished, run_turn, track_step
 
 
 @pytest.fixture
@@ -162,3 +162,23 @@ async def test_unknown_message_is_ignored(setup):
     deps, model, _calls, (_u, chat_id, _m) = setup
     await asyncio.wait_for(run_turn(deps, chat_id, uuid.uuid4()), 5)
     assert model.seen == []
+
+
+def test_track_step_pairs_calls_with_their_outcome():
+    steps: list[dict] = []
+    track_step(steps, "tool.call", {"name": "web_search", "call_id": "a", "query": "x" * 500})
+    track_step(steps, "tool.call", {"name": "run_code", "call_id": "b", "code": ["not kept"]})
+    track_step(steps, "message.delta", {"delta": "hi"})
+    track_step(steps, "tool.done", {"name": "run_code", "call_id": "b", "ok": False, "ms": 9})
+    track_step(steps, "tool.done", {"name": "web_search", "call_id": "a", "ok": True, "ms": 4})
+    # A tool that never announced itself still shows up once it ends.
+    track_step(steps, "tool.done", {"name": "skills_load", "call_id": "c", "ok": True, "ms": 1})
+    assert [(s["id"], s["status"]) for s in steps] == [
+        ("a", "done"),
+        ("b", "failed"),
+        ("c", "done"),
+    ]
+    assert len(steps[0]["args"]["query"]) == 200 and steps[1]["args"] == {}
+    # Steps still open when the turn ends never reported back.
+    track_step(steps, "tool.call", {"name": "web_fetch", "call_id": "d"})
+    assert finished(steps)[-1]["status"] == "failed"

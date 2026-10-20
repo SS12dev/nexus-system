@@ -159,6 +159,7 @@ class MessageOut(BaseModel):
     output_tokens: int | None
     trace_id: str | None
     error: str | None
+    steps: list[dict] | None = None
     created_at: datetime
     attachments: list[FileBrief] = []
 

@@ -4,8 +4,11 @@ are is in jarvis_common.toolinfo; which ones a given caller gets is decided by i
 and grants (and, for agents, the system spec)."""
 
 import asyncio
+import contextvars
+import functools
 import logging
 import smtplib
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -46,6 +49,11 @@ MAX_INPUT_FILES = 10
 SAVE_FILE_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".html", ".xml", ".yaml", ".yml"}
 
 Emit = Callable[..., Awaitable[None]]
+ToolFn = Callable[..., Awaitable[str]]
+
+# The tool call running in this task, so its tool.call and tool.done events pair up in the UI.
+CALL_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("tool_call_id", default=None)
+SUMMARY_CHARS = 160
 
 
 @dataclass
@@ -79,13 +87,53 @@ def _uuid(value: str) -> uuid.UUID | None:
         return None
 
 
+def summarize(result: object) -> str:
+    """The first non-empty line of a tool's result, short enough for a step in the chat."""
+    line = next((x.strip() for x in str(result).splitlines() if x.strip()), "")
+    return line if len(line) <= SUMMARY_CHARS else line[: SUMMARY_CHARS - 1] + "…"
+
+
+def instrument(ctx: ToolContext, fn: ToolFn) -> ToolFn:
+    """Wrap a tool so every call gets an id and ends with a tool.done event (how long it took,
+    whether it worked, the gist of the result). The tool's own tool.call carries the same id."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        call_id = uuid.uuid4().hex[:12]
+        token = CALL_ID.set(call_id)
+        started = time.monotonic()
+        try:
+            result = await fn(*args, **kwargs)
+        except Exception as exc:
+            await _done(ctx, fn.__name__, call_id, started, False, summarize(exc))
+            raise
+        finally:
+            CALL_ID.reset(token)
+        await _done(ctx, fn.__name__, call_id, started, True, summarize(result))
+        return result
+
+    return wrapper
+
+
+async def _done(ctx: ToolContext, name: str, call_id: str, started: float, ok: bool, summary: str):
+    ms = round((time.monotonic() - started) * 1000)
+    try:
+        await ctx.emit("tool.done", name=name, call_id=call_id, ok=ok, ms=ms, summary=summary)
+    except Exception:
+        log.warning("Could not report the end of %s", name, exc_info=True)
+
+
+def as_tools(ctx: ToolContext, fns: list[ToolFn]) -> list[BaseTool]:
+    return [StructuredTool.from_function(coroutine=instrument(ctx, fn)) for fn in fns]
+
+
 def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]:
     """Tools by name, plus the skills tools, which every caller gets."""
     deps = ctx.deps
     sessionmaker, embedder, user_id = deps.sessionmaker, deps.embedder, ctx.user_id
 
     async def note(tool: str, /, **data) -> None:
-        await ctx.emit("tool.call", name=tool, **data)
+        await ctx.emit("tool.call", name=tool, call_id=CALL_ID.get(), **data)
 
     # --- Library ---------------------------------------------------------------------------
 
@@ -455,4 +503,4 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     }
     chosen = [impls[n] for n in impls if n in set(names)]
     chosen += [skills_load, skills_read_file, skills_search]
-    return [StructuredTool.from_function(coroutine=fn) for fn in chosen]
+    return as_tools(ctx, chosen)
