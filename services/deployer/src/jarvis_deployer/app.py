@@ -15,6 +15,8 @@ through Traefik and takes a screenshot with the workbench image's Playwright.
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -36,7 +38,18 @@ WORKSPACES = Path(os.environ.get("WORKSPACES", "/workspaces"))
 APPS_NETWORK = os.environ.get("APPS_NETWORK", "jarvis_apps")
 EGRESS_NETWORK = os.environ.get("APPS_EGRESS_NETWORK", "jarvis_apps_egress")
 APPS_DOMAIN = os.environ.get("APPS_DOMAIN", "apps.localhost")
-APPS_URL = os.environ.get("APPS_URL", "http://{host}:8080")
+# Where people open an app: https on a real domain (the tunnel), Traefik's port on *.localhost.
+APPS_URL = os.environ.get("APPS_URL") or (
+    "http://{host}:" + os.environ.get("JARVIS_HTTP_PORT", "8080")
+    if APPS_DOMAIN.endswith("localhost")
+    else "https://{host}"
+)
+# Never an app's name: Jarvis's own and the usual service names, plus RESERVED_HOSTNAMES.
+RESERVED = {"jarvis", "www", "mail", "api", "admin", "traefik"} | {
+    h.strip().lower() for h in os.environ.get("RESERVED_HOSTNAMES", "").split(",") if h.strip()
+}
+# The Traefik middleware that lets only signed-in, allowed people into a private app.
+AUTH_MIDDLEWARE = os.environ.get("APPS_AUTH_MIDDLEWARE", "app-auth@docker")
 TRAEFIK_URL = os.environ.get("TRAEFIK_URL", "http://traefik")
 SHOT_IMAGE = os.environ.get("SCREENSHOT_IMAGE", "jarvis-workbench:latest")
 APP_MEMORY_MB = int(os.environ.get("APP_MEMORY_MB", "512"))
@@ -47,16 +60,19 @@ SHOT_TIMEOUT_S = int(os.environ.get("SCREENSHOT_TIMEOUT_S", "90"))
 LOG_CHARS = 4000
 
 ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 # Each template's image runs as this user (none of them as root).
 USERS = {"static": "101", "fastapi": "10010", "node": "1000"}
 # Loads the app through Traefik (as a visitor would) and prints {"png", "errors"} as JSON.
 SHOT_JS = """
 const { chromium } = require('/usr/local/lib/node_modules/@playwright/test');
 (async () => {
-  const [url, host] = process.argv.slice(1);
+  const [url, host, preview] = process.argv.slice(1);
   const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${host} traefik`] });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 800 },
+    extraHTTPHeaders: { 'X-Jarvis-Preview': preview },
+  });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -84,7 +100,15 @@ api = APIRouter(dependencies=[Depends(check_token)])
 def slug_ok(slug: str) -> str:
     if not SLUG.match(slug):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "App names are a-z, 0-9 and -.")
+    if slug in RESERVED:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{slug} is a reserved name.")
     return slug
+
+
+def preview_key(host: str) -> str:
+    """Lets the deployer's own health check and screenshot past a private app's sign-in check.
+    The API works out the same value; each one opens only its own host."""
+    return hmac.new(TOKEN.encode(), f"preview:{host}".encode(), hashlib.sha256).hexdigest()
 
 
 class DeployIn(BaseModel):
@@ -95,6 +119,10 @@ class DeployIn(BaseModel):
     project: str = Field(pattern=ID.pattern)
     stack: str | None = None
     internet: bool = False
+    # Behind the sign-in check: only its owner and Jarvis's owner can open it.
+    private: bool = True
+    # False: start it again from its current images (a change of visibility), no build.
+    build: bool = True
 
 
 class DeployOut(BaseModel):
@@ -132,6 +160,11 @@ def container_spec(body: DeployIn, slug: str, part: Part, tag: str) -> dict:
             f"traefik.http.routers.{router}.entrypoints": "web",
             # Above Jarvis's own routes, so /api on an app's host is the app's back end.
             f"traefik.http.routers.{router}.priority": "1100" if part.prefix else "1000",
+            **(
+                {f"traefik.http.routers.{router}.middlewares": AUTH_MIDDLEWARE}
+                if body.private
+                else {}
+            ),  # fmt: skip
             f"traefik.http.services.{router}.loadbalancer.server.port": str(part.port),
         },
         "HostConfig": {
@@ -163,7 +196,8 @@ async def healthy(slug: str, ps: list[Part]) -> tuple[bool, str]:
                 waiting = True
                 break
             try:
-                resp = await probe.get(TRAEFIK_URL + p.health, headers={"Host": host_for(slug)})
+                headers = {"Host": host_for(slug), "X-Jarvis-Preview": preview_key(host_for(slug))}
+                resp = await probe.get(TRAEFIK_URL + p.health, headers=headers)
             except httpx.HTTPError as exc:
                 detail = f"the {p.name} didn't answer ({exc.__class__.__name__})"
                 waiting = True
@@ -187,7 +221,7 @@ async def screenshot(body: DeployIn, slug: str) -> dict:
     spec = {
         "Image": SHOT_IMAGE,
         "User": "10003",
-        "Cmd": ["node", "-e", SHOT_JS, f"http://{host}/", host],
+        "Cmd": ["node", "-e", SHOT_JS, f"http://{host}/", host, preview_key(host)],
         # The workbench image's proxy settings point at egress-proxy, which isn't on this network.
         "Env": [
             "HOME=/tmp",
@@ -245,9 +279,15 @@ async def deploy(slug: str, body: DeployIn):
     except BuildProblem as exc:
         return DeployOut(ok=False, url=url, stack=stack, error=str(exc))
     labels = {"jarvis.app": body.app_id, "jarvis.owner": body.owner}
+    if not body.build:
+        for p in ps:
+            if not await docker.image_id(f"jarvis-app-{slug}-{p.name}:latest"):
+                return DeployOut(
+                    ok=False, url=url, stack=stack, error="It has no image yet; redeploy it."
+                )
     # Build everything first, so the running version stays up while the new one builds.
     old_images = []
-    for p in ps:
+    for p in ps if body.build else []:
         tag = f"jarvis-app-{slug}-{p.name}:latest"
         old = await docker.image_id(tag)
         try:
@@ -298,7 +338,8 @@ async def deploy(slug: str, body: DeployIn):
             error=f"The app started but failed its health check: {why}.",
             logs=logs[-LOG_CHARS:],
         )
-    shot = await screenshot(body, slug)
+    # A change of visibility shows the same app: no new screenshot.
+    shot = await screenshot(body, slug) if body.build else {}
     return DeployOut(
         ok=True,
         url=url,

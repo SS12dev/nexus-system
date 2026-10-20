@@ -20,6 +20,8 @@ from typing import Literal
 from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import select
 
+from jarvis_common.apps import set_visibility
+from jarvis_common.deployer import DeployerError
 from jarvis_common.events import Event, publish
 from jarvis_common.library import document_text
 from jarvis_common.memory import mark_profile_stale, memory_payload, record
@@ -31,8 +33,10 @@ from jarvis_common.models import (
     Memory,
     MemoryKind,
     Project,
+    RoleName,
     Skill,
     SkillUsage,
+    User,
     utcnow,
 )
 from jarvis_common.search import hybrid_search
@@ -580,6 +584,35 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             return f"Sending failed: {exc.__class__.__name__}: {str(exc)[:200]}"
         return f"Sent to {', '.join(to)}."
 
+    async def app_visibility(app: str, public: bool) -> str:
+        """Make one of the user's running apps (by name or address) public, so anyone with the
+        link can open it, or private, so only they can, after signing in to Jarvis."""
+        await note("app_visibility", app=app, public=public)
+        if deps.deployer is None:
+            return "Apps aren't set up on this server."
+        wanted = app.strip().lower().removeprefix("https://").removeprefix("http://")
+        wanted = wanted.split("/")[0].split(".")[0]
+        async with sessionmaker() as db:
+            owner = await db.get(User, user_id)
+            query = select(Project).where(Project.app_slug.is_not(None))
+            if owner.role != RoleName.owner:
+                query = query.where(Project.user_id == user_id)
+            rows = (await db.scalars(query.order_by(Project.updated_at.desc()))).all()
+            found = [p for p in rows if wanted in (p.app_slug, p.name.lower())]
+            if not found:
+                return f"No running app called {app}."
+            row = found[0]
+            try:
+                result = await set_visibility(db, deps.deployer, row, public)
+            except DeployerError as exc:
+                return f"That didn't work: {exc}"
+            if result is not None and not result.ok:
+                return f"That didn't work: {result.error}"
+            url = row.live_url or row.app_slug
+        if public:
+            return f"{row.name} is now public: anyone with the link can open {url}."
+        return f"{row.name} is private again: only its owner can open {url}, after signing in."
+
     async def github_transfer(project: str, github_user: str) -> str:
         """Move one of the user's software projects (by name or repo name) from Jarvis's
         GitHub organisation to a GitHub account, e.g. the user's own. GitHub emails that
@@ -685,6 +718,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "ws_commit": ws_commit,
         "send_email": send_email,
         "github_transfer": github_transfer,
+        "app_visibility": app_visibility,
         **build_google_tools(ctx, note),
     }
     chosen = [impls[n] for n in impls if n in set(names)]

@@ -1,13 +1,14 @@
 """The Apps page's API with a fake deployer: who sees which apps, the member limit, and stop,
-restart, redeploy, internet access and delete."""
+restart, redeploy, internet access, public or private, and delete."""
 
 import uuid
 
 import pytest
 from sqlalchemy import select
 
-from jarvis_common.deployer import DeployerError
-from jarvis_common.models import Project
+from jarvis_common.apps import app_name
+from jarvis_common.deployer import DeployerError, DeployResult
+from jarvis_common.models import Project, User
 
 
 class FakeDeployer:
@@ -15,6 +16,7 @@ class FakeDeployer:
         self.calls: list[tuple[str, str]] = []
         self.live: list[dict] = []
         self.down = False
+        self.deploys: list[dict] = []
 
     async def _do(self, action: str, slug: str):
         if self.down:
@@ -34,6 +36,11 @@ class FakeDeployer:
 
     async def delete(self, slug):
         await self._do("delete", slug)
+
+    async def deploy(self, slug, **kw):
+        await self._do("deploy", slug)
+        self.deploys.append(kw)
+        return DeployResult(ok=True, url=f"http://{slug}.apps.localhost:8080")
 
     async def aclose(self):
         pass
@@ -144,3 +151,38 @@ async def test_deployer_errors_are_explained(owner, people, sessionmaker, deploy
     deployer.down = True
     resp = await owner.post(f"/api/apps/{app_id}/stop")
     assert resp.status_code == 502 and "isn't reachable" in resp.json()["detail"]
+
+
+async def test_public_and_private(owner, people, sessionmaker, deployer):
+    owner_id, member_id, member = people
+    app_id = await add_app(sessionmaker, member_id, "snake-priya")
+    assert (await owner.get("/api/apps")).json()[0]["public"] is False
+    resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": True})
+    assert resp.status_code == 200 and resp.json()["public"] is True
+    # The same images again, without the sign-in check in front.
+    assert deployer.calls == [("deploy", "snake-priya")]
+    assert deployer.deploys[0]["build"] is False and deployer.deploys[0]["private"] is False
+    resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": False})
+    assert resp.json()["public"] is False and deployer.deploys[1]["private"] is True
+    # Only the app's owner (or Jarvis's) may change it.
+    mine = await add_app(sessionmaker, owner_id, "2048")
+    assert (
+        await member.post(f"/api/apps/{mine}/visibility", json={"public": True})
+    ).status_code == 404
+    deployer.down = True
+    resp = await owner.post(f"/api/apps/{app_id}/visibility", json={"public": True})
+    assert resp.status_code == 502
+
+
+async def test_delete_frees_the_name(owner, people, sessionmaker, deployer, settings):
+    owner_id, _, _ = people
+    app_id = await add_app(sessionmaker, owner_id, "2048")
+    async with sessionmaker() as db:
+        other = Project(user_id=uuid.UUID(owner_id), workbench_id="w-other", name="2048")
+        db.add(other)
+        await db.commit()
+        me = await db.get(User, uuid.UUID(owner_id))
+        assert (await app_name(db, settings, other, me)) != "2048"
+    assert (await owner.delete(f"/api/apps/{app_id}")).status_code == 204
+    async with sessionmaker() as db:
+        assert (await app_name(db, settings, other, me)) == "2048"

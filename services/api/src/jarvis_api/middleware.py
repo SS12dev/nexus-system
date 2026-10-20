@@ -106,7 +106,8 @@ class GuardMiddleware:
             wait = await hit(redis, "auth", ip, self.settings.rate_limit_auth_per_minute, 60)
             if wait is not None:
                 return 429, f"Too many sign-in attempts. Try again in {wait} s.", wait
-        if path.startswith(("/api", "/auth")):
+        # Traefik asks /auth/app/check for every request to a private app, assets included.
+        if path.startswith(("/api", "/auth")) and path != "/auth/app/check":
             wait = await hit(redis, "ip", ip, self.settings.rate_limit_api_per_minute, 60)
             if wait is not None:
                 return 429, f"Too many requests. Try again in {wait} s.", wait

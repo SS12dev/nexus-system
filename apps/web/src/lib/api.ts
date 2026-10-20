@@ -106,6 +106,8 @@ export const api = {
     request<AppItem>(`/api/apps/${id}/${action}`, { method: "POST" }),
   setAppInternet: (id: string, internet: boolean) =>
     request<AppItem>(`/api/apps/${id}`, { method: "PATCH", body: json({ internet }) }),
+  setAppPublic: (id: string, isPublic: boolean) =>
+    request<AppItem>(`/api/apps/${id}/visibility`, { method: "POST", body: json({ public: isPublic }) }),
   deleteApp: (id: string) => request<void>(`/api/apps/${id}`, { method: "DELETE" }),
   uploadFile: (file: File, chatId?: string) => {
     const form = new FormData();

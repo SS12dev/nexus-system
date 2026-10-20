@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appActions, appState } from "./apps";
+import { appActions, appAudience, appState } from "./apps";
 import type { AppItem } from "./types";
 
 const base: AppItem = {
@@ -15,6 +15,8 @@ const base: AppItem = {
   deployed_at: "2026-10-21T10:00:00Z",
   deploy_error: null,
   internet: false,
+  public: false,
+  screenshot_file_id: null,
 };
 
 describe("apps", () => {
@@ -22,6 +24,11 @@ describe("apps", () => {
     expect(appState(base).label).toBe("Running");
     expect(appState({ ...base, state: "building" }).label).toBe("Deploying");
     expect(appState({ ...base, state: null }).label).toBe("Not deployed");
+  });
+
+  it("say who can open them", () => {
+    expect(appAudience(base)).toMatch(/^Private/);
+    expect(appAudience({ ...base, public: true })).toMatch(/^Public/);
   });
 
   it("offer only the buttons that make sense", () => {

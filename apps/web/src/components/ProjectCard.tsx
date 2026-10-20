@@ -1,5 +1,6 @@
 import { ExternalLink, FolderGit2, GitBranch, Globe } from "lucide-react";
 import { Link } from "react-router";
+import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import type { Project } from "../lib/types";
 
@@ -22,6 +23,13 @@ export function ProjectCard({ project: p }: { project: Project }) {
   const where = projectWhere(p);
   return (
     <div className="rounded-xl border border-edge bg-panel p-3">
+      {p.screenshot_file_id && (
+        <img
+          src={api.fileUrl(p.screenshot_file_id, true)}
+          alt={`${p.name}, as last deployed`}
+          className="mb-3 aspect-[16/10] w-full rounded-lg border border-edge object-cover object-top"
+        />
+      )}
       <div className="flex items-center gap-2">
         <FolderGit2 size={18} className="shrink-0 text-sky-300" />
         <span className="truncate font-medium">{p.name}</span>
@@ -50,9 +58,12 @@ export function ProjectCard({ project: p }: { project: Project }) {
         <span className="flex items-center gap-1">
           <Globe size={12} />
           {p.live_url ? (
-            <a href={p.live_url} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">
-              {p.live_url.replace(/^https?:\/\//, "")}
-            </a>
+            <>
+              <a href={p.live_url} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">
+                {p.live_url.replace(/^https?:\/\//, "")}
+              </a>
+              <span>{p.public ? "(public)" : "(private)"}</span>
+            </>
           ) : (
             "Live link coming once deploys are switched on"
           )}

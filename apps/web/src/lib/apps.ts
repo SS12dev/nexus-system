@@ -13,6 +13,11 @@ export function appState(a: AppItem): { label: string; style: string } {
   return APP_STATE[a.state ?? ""] ?? { label: "Not deployed", style: "text-slate-500" };
 }
 
+/** Who can open an app, in words. */
+export function appAudience(a: Pick<AppItem, "public">): string {
+  return a.public ? "Public: anyone with the link" : "Private: only its owner, after signing in";
+}
+
 /** Which buttons make sense for an app in its current state. */
 export function appActions(a: AppItem): { stop: boolean; restart: boolean; redeploy: boolean } {
   const busy = a.state === "building";

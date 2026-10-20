@@ -1,6 +1,6 @@
 """The dev team's deploy stage with a fake deployer: a deployed app's link and screenshot in the
 reply, a failed health check going back to the builders first, the reviewer's and the tests'
-gate, and the member limit."""
+gate, the member limit, app names, and Jarvis's tool for making an app public or private."""
 
 import base64
 import uuid
@@ -25,6 +25,7 @@ from jarvis_common.spec import AgentSystemSpec
 from jarvis_common.systems import new_run
 from jarvis_orchestrator.deploy import deploy_project
 from jarvis_orchestrator.systems import runner
+from jarvis_orchestrator.tools import ToolContext, build_tools
 from jarvis_orchestrator.workbench import CommandResult
 
 PNG = base64.b64encode(b"\x89PNG fake").decode()
@@ -133,8 +134,9 @@ async def test_an_approved_green_app_is_deployed_with_a_screenshot(ddeps, owner,
         "project": project.workbench_id,
         "stack": "static",
         "internet": False,
+        "private": True,
     }
-    assert f"- Live link: {URL}" in final
+    assert f"- Live link: {URL} (private: only you can open it" in final
     assert (project.app_slug, project.app_state, project.live_url) == ("2048", "running", URL)
     assert project.deployed_at is not None and project.deploy_error is None
     # The screenshot comes with the team's result.
@@ -220,4 +222,55 @@ async def test_members_can_run_three_apps(ddeps, sessionmaker):
         row.app_state = "stopped"
         await db.commit()
     assert (await deploy_project(ddeps, fourth.id)).ok
-    assert ddeps.deployer.deploys[0][0] == "priya-2048"
+    assert ddeps.deployer.deploys[0][0] == "2048-priya"
+
+
+async def test_names_are_kept_and_taken_ones_get_a_suffix(ddeps, owner, sessionmaker):
+    user, _ = owner
+    async with sessionmaker() as db:
+        db.add(Project(user_id=user.id, workbench_id="old", name="2048", app_slug="2048"))
+        new = Project(user_id=user.id, workbench_id="new", name="2048")
+        db.add(new)
+        await db.commit()
+    assert (await deploy_project(ddeps, new.id)).ok
+    first = ddeps.deployer.deploys[0][0]
+    assert first.startswith("2048-") and len(first) == len("2048-k7")
+    # A redeploy keeps the name it got.
+    assert (await deploy_project(ddeps, new.id)).ok
+    assert ddeps.deployer.deploys[1][0] == first
+
+
+async def test_reserved_names_are_never_picked(ddeps, owner, sessionmaker, monkeypatch):
+    user, _ = owner
+    monkeypatch.setattr(ddeps.settings, "reserved_hostnames", "plex, Nas")
+    async with sessionmaker() as db:
+        rows = [Project(user_id=user.id, workbench_id=n, name=n) for n in ("Jarvis", "plex")]
+        db.add_all(rows)
+        await db.commit()
+    for row in rows:
+        assert (await deploy_project(ddeps, row.id)).ok
+    names = [slug for slug, _ in ddeps.deployer.deploys]
+    assert names[0].startswith("jarvis-") and names[1].startswith("plex-")
+
+
+async def test_the_visibility_tool(ddeps, owner, sessionmaker):
+    user, chat_id = owner
+    async with sessionmaker() as db:
+        db.add(Project(user_id=user.id, workbench_id="w1", name="2048", app_slug="2048",
+                       app_state="running", live_url=URL))  # fmt: skip
+        await db.commit()
+
+    async def emit(*a, **k):
+        pass
+
+    ctx = ToolContext(deps=ddeps, user_id=user.id, chat_id=chat_id, emit=emit)
+    tool = {t.name: t for t in build_tools(ctx, ["app_visibility"])}["app_visibility"]
+    assert "No running app called snake" in await tool.ainvoke({"app": "snake", "public": True})
+    out = await tool.ainvoke({"app": "https://2048.servhub.cc/", "public": True})
+    assert out == f"2048 is now public: anyone with the link can open {URL}."
+    slug, args = ddeps.deployer.deploys[-1]
+    assert slug == "2048" and args["build"] is False and args["private"] is False
+    out = await tool.ainvoke({"app": "2048", "public": False})
+    assert "private again" in out and ddeps.deployer.deploys[-1][1]["private"] is True
+    async with sessionmaker() as db:
+        assert (await db.scalar(select(Project))).public is False

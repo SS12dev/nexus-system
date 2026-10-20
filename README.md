@@ -292,9 +292,13 @@ moves to it only when the reviewer approved and every test passed. "Move it to m
 transfers a repo to your own account, after you approve it on a card (owner only).
 
 When the reviewer approved and every test passed, the `deployer` runs the app as a container and
-the reply gives its link, `http://<name>.apps.localhost:8080` (open it in Chrome or Firefox on
-this Mac), with a screenshot. The **Apps** page lists them with stop, restart, redeploy and delete;
-members can run three at once. How apps are built and boxed in: [docs/containers.md](docs/containers.md).
+the reply gives its link, `https://<name>.servhub.cc` (`2048`, or `2048-priya` for other people),
+with a screenshot. Apps are private: only their owner and Jarvis's owner can open them, after
+signing in to Jarvis. "Make it public" (in chat or on the **Apps** page) shares the link with
+anyone. The Apps page lists them with stop, restart, redeploy, public or private and delete;
+members can run three at once. How addresses and sign-in work, and moving them to another
+server: [docs/app-urls.md](docs/app-urls.md). How apps are built and boxed in:
+[docs/containers.md](docs/containers.md).
 
 ## Skills and instructions
 

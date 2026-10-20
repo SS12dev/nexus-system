@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis_api.deps import CurrentUser, DbDep, DeployerDep, OwnerUser, QueueDep, SettingsDep
+from jarvis_common import apps
 from jarvis_common.deployer import DeployerError
 from jarvis_common.models import Project, RoleName, User, utcnow
 from jarvis_common.settings import Settings
@@ -34,10 +35,16 @@ class AppOut(BaseModel):
     deployed_at: datetime | None
     deploy_error: str | None
     internet: bool
+    public: bool
+    screenshot_file_id: uuid.UUID | None
 
 
 class InternetIn(BaseModel):
     internet: bool
+
+
+class VisibilityIn(BaseModel):
+    public: bool
 
 
 def out(p: Project, owner: User, live: dict[str, str]) -> AppOut:
@@ -58,6 +65,8 @@ def out(p: Project, owner: User, live: dict[str, str]) -> AppOut:
         deployed_at=p.deployed_at,
         deploy_error=p.deploy_error,
         internet=p.internet,
+        public=p.public,
+        screenshot_file_id=p.screenshot_file_id,
     )
 
 
@@ -149,6 +158,22 @@ async def set_internet(app_id: uuid.UUID, body: InternetIn, user: OwnerUser, db:
     row, owner = await own_app(db, user, app_id)
     row.internet, row.updated_at = body.internet, utcnow()
     await db.commit()
+    return out(row, owner, {})
+
+
+@router.post("/{app_id}/visibility", response_model=AppOut)
+async def set_visibility(
+    app_id: uuid.UUID, body: VisibilityIn, user: CurrentUser, db: DbDep, deployer: DeployerDep
+):
+    """Public: anyone with the link. Private: only its owner and Jarvis's owner, after signing
+    in. Takes effect at once; the app isn't rebuilt."""
+    row, owner = await own_app(db, user, app_id)
+    try:
+        result = await apps.set_visibility(db, deployer, row, body.public)
+    except DeployerError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    if result is not None and not result.ok:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, result.error or "It didn't restart.")
     return out(row, owner, {})
 
 

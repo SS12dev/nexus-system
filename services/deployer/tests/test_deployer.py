@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+
+import httpx
 import pytest
 
 import jarvis_deployer.app as module
@@ -117,7 +121,7 @@ async def test_stop_restart_list_and_delete(deployer, fake_docker, traefik, tmp_
     assert (await deployer.post("/apps/2048/stop")).status_code == 404
 
 
-@pytest.mark.parametrize("slug", ["../x", "UPPER", "a" * 60])
+@pytest.mark.parametrize("slug", ["../x", "UPPER", "a" * 64, "jarvis", "traefik"])
 async def test_bad_names_and_paths_are_refused(deployer, fake_docker, slug):
     resp = await deployer.post(f"/apps/{slug}/deploy", json=BODY)
     assert resp.status_code in (400, 404)
@@ -148,3 +152,45 @@ async def test_a_backend_route_answered_by_the_front_end_is_not_healthy(
     node_project(tmp_path)
     out = (await deployer.post("/apps/2048/deploy", json=BODY)).json()
     assert not out["ok"] and "/api/health answered 200" in out["error"]
+
+
+async def test_apps_are_private_unless_asked_and_the_checks_get_past_sign_in(
+    deployer, fake_docker, monkeypatch, tmp_path
+):
+    static_project(tmp_path)
+    monkeypatch.setattr(module, "TOKEN", "s3cret")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("x-jarvis-preview", ""))
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(module, "probe", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    auth = {"Authorization": "Bearer s3cret"}
+    assert (await deployer.post("/apps/2048/deploy", json=BODY, headers=auth)).json()["ok"]
+    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    assert labels["traefik.http.routers.app-2048-web.middlewares"] == "app-auth@docker"
+    # The health check and the screenshot carry the key for this host alone.
+    key = hmac.new(b"s3cret", b"preview:2048.apps.localhost", hashlib.sha256).hexdigest()
+    assert seen and set(seen) == {key}
+    assert fake_docker.created["jarvis-shot-2048"]["Cmd"][-2:] == ["2048.apps.localhost", key]
+    resp = await deployer.post("/apps/2048/deploy", json={**BODY, "private": False}, headers=auth)
+    assert resp.json()["ok"]
+    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    assert not any(k.endswith(".middlewares") for k in labels)
+
+
+async def test_making_public_or_private_reuses_the_images(deployer, fake_docker, traefik, tmp_path):
+    static_project(tmp_path)
+    # Nothing built yet: nothing to reuse.
+    out = (await deployer.post("/apps/2048/deploy", json={**BODY, "build": False})).json()
+    assert not out["ok"] and "no image yet" in out["error"]
+    await deployer.post("/apps/2048/deploy", json=BODY)
+    fake_docker.containers.pop("jarvis-shot-2048", None)
+    out = (
+        await deployer.post("/apps/2048/deploy", json={**BODY, "build": False, "private": False})
+    ).json()
+    assert out["ok"] and out["screenshot"] is None
+    assert len(fake_docker.builds) == 1
+    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    assert "traefik.http.routers.app-2048-web.middlewares" not in labels

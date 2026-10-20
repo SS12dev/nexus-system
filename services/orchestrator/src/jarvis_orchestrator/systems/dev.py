@@ -97,7 +97,12 @@ def repo_line(release: dict) -> str:
 
 def live_line(release: dict) -> str:
     if release.get("live_url"):
-        return release["live_url"]
+        if release.get("public"):
+            return release["live_url"]
+        return (
+            f"{release['live_url']} (private: only you can open it, after signing in; say "
+            '"make it public" to share it)'
+        )
     if release.get("live_note"):
         return release["live_note"]
     return "added here once deploys are switched on"
@@ -366,6 +371,7 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             )
             if result.ok:
                 facts["live_url"] = result.url
+                facts["public"] = await releasing.is_public(rc, uuid.UUID(facts["project_id"]))
             elif dev.get("deploy_retries", 0) < DEPLOY_RETRIES and result.logs:
                 # Back to the builders with what went wrong; the user hears only the outcome.
                 fixes = (

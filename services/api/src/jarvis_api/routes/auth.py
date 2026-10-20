@@ -123,6 +123,10 @@ async def callback(request: Request, db: DbDep, settings: SettingsDep):
     # Services were granted but Google kept the refresh token back (it sends one only on first
     # consent): go once through the consent screen to get it. The connect flow never loops.
     next_url = "/" if complete else "/auth/google/connect"
+    # Signing in on the way to a private app: back to it (app_access.start set this).
+    after = request.session.pop("after_login", None)
+    if complete and isinstance(after, str) and after.startswith("/auth/app/start?"):
+        next_url = after
     response = RedirectResponse(next_url, status.HTTP_303_SEE_OTHER)
     set_session_cookie(response, settings, request, session_token)
     return response

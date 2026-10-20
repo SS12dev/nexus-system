@@ -139,3 +139,9 @@ async def publish(rc: RunContext, dev: dict) -> dict:
         row.updated_at = utcnow()
         await db.commit()
     return {"repo_url": repo.url, "branch": branch, "merged": merged, "merge_note": note}
+
+
+async def is_public(rc: RunContext, project_id) -> bool:
+    async with rc.deps.sessionmaker() as db:
+        row = await db.get(Project, project_id)
+        return bool(row and row.public)

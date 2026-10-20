@@ -830,6 +830,12 @@ class Project(Base):
     deploy_error: Mapped[str | None] = mapped_column(Text)
     # Apps have no internet unless their project opts in.
     internet: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Private apps open only for their owner and Jarvis's owner, after signing in to Jarvis.
+    public: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The last deploy's screenshot, a file in the owner's library.
+    screenshot_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
