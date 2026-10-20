@@ -77,6 +77,8 @@ export const api = {
     request<User>("/auth/dev-login", { method: "POST", body: json({ email, token }) }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: () => request<User>("/api/me"),
+  nameAssistant: (assistant_name: string) =>
+    request<User>("/api/me", { method: "PATCH", body: json({ assistant_name }) }),
   googleAccess: () => request<GoogleAccess>("/api/me/google"),
   disconnectGoogle: () => request<void>("/api/me/google", { method: "DELETE" }),
   sessions: () => request<SessionInfo[]>("/api/me/sessions"),

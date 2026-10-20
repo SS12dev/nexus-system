@@ -82,3 +82,19 @@ async def test_open_signup_joins_as_member(sessionmaker, settings):
         assert newcomer.role == "member"
         actions = (await db.scalars(select(AuditLog.action))).all()
         assert actions.count("user.joined") == 2
+
+
+async def test_users_name_their_own_assistant(owner, client_for, invite):
+    assert (await owner.get("/api/me")).json()["assistant_name"] is None
+    resp = await owner.patch("/api/me", json={"assistant_name": "  Orion   Prime "})
+    assert resp.status_code == 200
+    assert resp.json()["assistant_name"] == "Orion Prime"
+
+    await invite(owner, "ada@example.com")
+    ada = await client_for("ada@example.com")
+    assert (await ada.get("/api/me")).json()["assistant_name"] is None
+    await ada.patch("/api/me", json={"assistant_name": "Friday"})
+    assert (await owner.get("/api/me")).json()["assistant_name"] == "Orion Prime"
+
+    for bad in ["", "   ", "<b>x</b>", "-dash", "x" * 25]:
+        assert (await owner.patch("/api/me", json={"assistant_name": bad})).status_code == 422

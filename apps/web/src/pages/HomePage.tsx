@@ -2,10 +2,12 @@ import { Composer } from "../components/Composer";
 import { hasRole } from "../lib/types";
 import { useSend } from "../lib/useSend";
 import { useStore } from "../store/chat";
+import { useAssistantName } from "../lib/assistant";
 
 /** The home screen's chat dock, under the orb (see JarvisLayout). Sending opens the chat
  * beside the orb. */
 export function HomePage() {
+  const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const { send, error } = useSend();
   const canChat = hasRole(user, "member");
@@ -15,7 +17,7 @@ export function HomePage() {
       <Composer
         onSend={send}
         disabled={!canChat}
-        placeholder={canChat ? "Ask Jarvis anything" : "Viewers can read chats but not send messages"}
+        placeholder={canChat ? `Ask ${assistant} anything` : "Viewers can read chats but not send messages"}
       />
     </div>
   );

@@ -405,7 +405,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         await note("send_email", to=to, subject=subject)
         settings = deps.settings
         if not settings.smtp_enabled:
-            return "Email isn't set up on this Jarvis (SMTP_HOST and SMTP_FROM in .env)."
+            return "Email isn't set up on this server (SMTP_HOST and SMTP_FROM in .env)."
         msg = EmailMessage()
         msg["From"] = settings.smtp_from or settings.smtp_username
         msg["To"] = ", ".join(to)

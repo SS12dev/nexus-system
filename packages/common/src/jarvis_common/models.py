@@ -32,6 +32,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 # needs either the same width (OpenAI's text-embedding-3 models take a `dimensions` parameter) or
 # a migration.
 EMBEDDING_DIM = 1024
+# What a user's assistant is called until they pick a name of their own.
+DEFAULT_ASSISTANT_NAME = "Jarvis"
+ASSISTANT_NAME_MAX = 24
 
 
 def utcnow() -> datetime:
@@ -183,6 +186,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True)
     name: Mapped[str | None] = mapped_column(String(200))
     avatar_url: Mapped[str | None] = mapped_column(String(1000))
+    # The name the user gave their assistant; None until they choose one after first sign-in.
+    assistant_name: Mapped[str | None] = mapped_column(String(ASSISTANT_NAME_MAX))
     oidc_sub: Mapped[str | None] = mapped_column(String(255), unique=True)
     status: Mapped[UserStatus] = mapped_column(_enum(UserStatus, "user_status"))
     invited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
@@ -190,6 +195,11 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     roles: Mapped[list["Role"]] = relationship(secondary="user_roles", lazy="selectin")
+
+    @property
+    def assistant(self) -> str:
+        """What this user's assistant is called."""
+        return self.assistant_name or DEFAULT_ASSISTANT_NAME
 
     @property
     def role(self) -> RoleName:

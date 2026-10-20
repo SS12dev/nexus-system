@@ -119,7 +119,7 @@ async def test_missing_refresh_token_goes_through_consent_once(client_for, googl
     assert google_app.fake.redirects[-1]["login_hint"] == "owner@example.com"
     google_app.fake.next_token = token(f"{GMAIL} {CALENDAR}", refresh="refresh-2")
     resp = await client.get("/auth/callback")
-    assert resp.headers["location"] == "/connections"
+    assert resp.headers["location"] == "/settings"
     assert (await client.get("/api/me/google")).json()["granted"] == ["gmail", "calendar"]
 
 
@@ -129,7 +129,7 @@ async def test_connect_refuses_another_google_account(client_for, google_app):
     await client.get("/auth/google/connect")
     google_app.fake.next_token = token(GMAIL, sub="google-other")
     resp = await client.get("/auth/callback")
-    assert resp.headers["location"] == "/connections?error=google_other_account"
+    assert resp.headers["location"] == "/settings?error=google_other_account"
     assert (await client.get("/api/me/google")).json()["granted"] == []
 
 

@@ -150,7 +150,7 @@ async def test_ungranted_service_says_how_to_allow_it(deps, user, sessionmaker, 
     await grant(sessionmaker, settings, user, ["gmail"])
     tools = tools_for(deps, user, Google({}))
     out = await tools["tasks_list"].ainvoke({})
-    assert "Google Tasks isn't connected" in out and "Connections page" in out
+    assert "Google Tasks isn't connected" in out and "Settings page" in out
 
 
 async def test_gmail_search_and_read(deps, user, sessionmaker, settings):

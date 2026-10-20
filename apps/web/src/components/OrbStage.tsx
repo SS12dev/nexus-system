@@ -19,6 +19,7 @@ import { hasWebGL, usePerf } from "../orb/perf";
 import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
+import { useAssistantName } from "../lib/assistant";
 
 const OrbScene = lazy(() => import("../orb/OrbScene"));
 
@@ -48,6 +49,7 @@ export function OrbStage({
   onCollapse?: (collapsed: boolean) => void;
   className?: string;
 }) {
+  const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const jarvis = useStore((s) => s.jarvis);
   const activity = useStore((s) => s.activity);
@@ -130,8 +132,8 @@ export function OrbStage({
         <button
           onClick={() => onCollapse?.(false)}
           className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-edge hover:text-white"
-          aria-label="Show Jarvis"
-          title="Show Jarvis"
+          aria-label={`Show ${assistant}`}
+          title={`Show ${assistant}`}
         >
           <ChevronDown size={16} className="lg:hidden" />
           <Maximize2 size={15} className="hidden lg:block" />
@@ -200,8 +202,8 @@ export function OrbStage({
             <button
               onClick={() => onCollapse?.(true)}
               className="rounded-lg border border-edge bg-panel/80 p-1.5 text-slate-400 backdrop-blur hover:text-white"
-              aria-label="Hide Jarvis"
-              title="Hide Jarvis"
+              aria-label={`Hide ${assistant}`}
+              title={`Hide ${assistant}`}
             >
               <ChevronUp size={15} className="lg:hidden" />
               <Minimize2 size={14} className="hidden lg:block" />
@@ -341,6 +343,7 @@ function ListView({
   memories: Memory[];
   artifacts: { id: string; name: string; created_at: string }[];
 }) {
+  const assistant = useAssistantName();
   const kinds = Object.entries(
     memories.reduce<Record<string, number>>((acc, m) => ({ ...acc, [m.kind]: (acc[m.kind] ?? 0) + 1 }), {}),
   );
@@ -353,7 +356,7 @@ function ListView({
             <Bot size={15} /> Teams
           </h2>
           {clusters.length === 0 && (
-            <p className="text-sm text-slate-500">No teams right now. Jarvis builds one when an ask needs it.</p>
+            <p className="text-sm text-slate-500">No teams right now. {assistant} builds one when an ask needs it.</p>
           )}
           <div className="space-y-2">
             {clusters.map((c) => (
@@ -382,7 +385,7 @@ function ListView({
           </h2>
           <Link to="/memory" className="block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40">
             {memories.length === 0
-              ? "Nothing yet. Jarvis learns as you chat."
+              ? `Nothing yet. ${assistant} learns as you chat.`
               : kinds.map(([k, n]) => `${n} ${k}${n > 1 ? "s" : ""}`).join(" · ")}
           </Link>
         </section>
@@ -390,7 +393,7 @@ function ListView({
           <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
             <Box size={15} /> Artifacts
           </h2>
-          {newest.length === 0 && <p className="text-sm text-slate-500">Files Jarvis and its teams make show here.</p>}
+          {newest.length === 0 && <p className="text-sm text-slate-500">Files {assistant} and its teams make show here.</p>}
           <div className="space-y-1">
             {newest.map((f) => (
               <a key={f.id} href={api.fileUrl(f.id, true)} target="_blank" rel="noreferrer" className="block truncate rounded-md px-2 py-1.5 text-sm text-slate-300 hover:bg-edge/50">

@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
 import { useStore } from "../store/chat";
+import { useAssistantName } from "../lib/assistant";
 
 const KINDS: MemoryKind[] = ["preference", "fact", "goal", "instruction"];
 const KIND_STYLE: Record<MemoryKind, string> = {
@@ -16,6 +17,7 @@ const KIND_STYLE: Record<MemoryKind, string> = {
 };
 
 export function MemoryPage() {
+  const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const canEdit = hasRole(user, "member");
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -93,7 +95,7 @@ export function MemoryPage() {
       <div className="mx-auto max-w-4xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Memory</h1>
         <p className="mb-6 text-sm text-slate-400">
-          What Jarvis has learned about you from your chats, and the profile it builds from it.
+          What {assistant} has learned about you from your chats, and the profile it builds from it.
           Edit, pin or delete anything; deleting is permanent. Only you can see this.
         </p>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
@@ -129,7 +131,7 @@ export function MemoryPage() {
               </div>
             ) : (
               <p className="text-sm text-slate-400">
-                Jarvis writes this once it has learned a few things about you.
+                {assistant} writes this once it has learned a few things about you.
               </p>
             )}
             {canEdit && (
@@ -141,7 +143,7 @@ export function MemoryPage() {
                     run(async () => setProfile(await api.setMemoryEnabled(e.target.checked)))
                   }
                 />
-                Learn from my chats and use what Jarvis remembers
+                Learn from my chats and use what {assistant} remembers
               </label>
             )}
           </section>
@@ -152,7 +154,7 @@ export function MemoryPage() {
             <input
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Tell Jarvis something to remember"
+              placeholder={`Tell ${assistant} something to remember`}
               maxLength={1000}
               className="min-w-56 flex-1 rounded-md border border-edge bg-panel px-3 py-2"
             />
@@ -191,7 +193,7 @@ export function MemoryPage() {
         <div className="space-y-2">
           {memories.length === 0 && (
             <p className="text-slate-400">
-              {query ? "Nothing found." : "Nothing yet. Jarvis learns as you chat."}
+              {query ? "Nothing found." : `Nothing yet. ${assistant} learns as you chat.`}
             </p>
           )}
           {memories.map((m) => (

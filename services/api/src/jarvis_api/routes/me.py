@@ -6,7 +6,7 @@ from sqlalchemy import select
 from jarvis_api.appsettings import maintenance_notice
 from jarvis_api.cache import cached_spend
 from jarvis_api.deps import CurrentUser, DbDep, GatewayDep, RedisDep, SettingsDep
-from jarvis_api.schemas import BudgetOut, GoogleAccessOut, MeOut, SessionOut, UserOut
+from jarvis_api.schemas import BudgetOut, GoogleAccessOut, MeIn, MeOut, SessionOut, UserOut
 from jarvis_api.sessions import hash_token, revoke_all
 from jarvis_common import google
 from jarvis_common.litellm import active_key, get_budget
@@ -25,9 +25,27 @@ async def me(
     spend = await cached_spend(redis, gateway, key.secret) if key else None
     return MeOut(
         **UserOut.model_validate(user).model_dump(),
+        assistant_name=user.assistant_name,
         budget=BudgetOut(max_usd=budget.max_usd, duration=budget.duration, spend_usd=spend),
         notice=await maintenance_notice(db),
     )
+
+
+@router.patch("/me", response_model=MeOut)
+async def update_me(
+    body: MeIn,
+    user: CurrentUser,
+    db: DbDep,
+    settings: SettingsDep,
+    gateway: GatewayDep,
+    redis: RedisDep,
+) -> MeOut:
+    """Name (or rename) the user's assistant."""
+    if body.assistant_name != user.assistant_name:
+        user.assistant_name = body.assistant_name
+        db.add(AuditLog(actor_id=user.id, action="user.assistant_named", target=str(user.id)))
+        await db.commit()
+    return await me(user, db, settings, gateway, redis)
 
 
 @router.get("/me/sessions", response_model=list[SessionOut])
