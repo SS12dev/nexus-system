@@ -66,6 +66,8 @@ def create_app(
     app = FastAPI(title="Jarvis API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.oauth = auth.make_oauth(settings)
+    # Client for Google's token endpoints; None makes a short-lived one per call. Tests swap it.
+    app.state.google_http = None
     # Holds only the OIDC state and nonce during the login redirect; sign-in uses its own cookie.
     app.add_middleware(
         SessionMiddleware,

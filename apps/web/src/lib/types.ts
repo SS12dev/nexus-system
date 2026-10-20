@@ -20,6 +20,13 @@ export interface User {
   budget: Budget;
 }
 
+export interface GoogleAccess {
+  available: boolean;
+  requested: string[];
+  granted: string[];
+  connected_at: string | null;
+}
+
 export interface Chat {
   id: string;
   title: string | null;

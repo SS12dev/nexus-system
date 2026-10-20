@@ -45,9 +45,47 @@ ClickHouse (for Langfuse) is the heaviest container.
   every callback URL you will use, for example `http://localhost:8080/auth/callback` and
   `https://jarvis.servhub.cc/auth/callback`. Put the client id and secret in `OIDC_CLIENT_ID` and
   `OIDC_CLIENT_SECRET`. Any OIDC provider works; set `OIDC_ISSUER`.
+  Google sign-in also asks for the Google services in `GOOGLE_SERVICES`; see below.
 - **Dev sign-in.** With `DEV_LOGIN_ENABLED=true`, the login page also accepts an email plus
   `DEV_LOGIN_TOKEN`. It follows the same invite rules, but anyone with the token can sign in as
   any invited user, so keep it off on a public hostname.
+
+### Google services (Gmail, Calendar, Contacts, Tasks)
+
+With Google sign-in, the same consent screen also asks for the services in `GOOGLE_SERVICES`
+(default `gmail,calendar,contacts,tasks`; `drive` is also available, read-only). Each one has
+its own checkbox, so people can untick any of them and still sign in. Jarvis keeps a refresh
+token per user, encrypted with a key derived from `SECRET_KEY` (changing it disconnects
+everyone until they sign in again). Each person sees what they allowed on the **Connections**
+page, can allow more there, or disconnect, which also revokes the token at Google.
+
+| Service | Scope | Google's class |
+|---|---|---|
+| gmail | `gmail.modify` (read, label, draft, send; no permanent delete) | restricted |
+| calendar | `calendar` | sensitive |
+| contacts | `contacts.readonly` | sensitive |
+| tasks | `tasks` | sensitive |
+| drive | `drive.readonly` | restricted |
+
+One-time setup in Google Cloud, on the project that holds the OAuth client:
+
+1. **APIs & Services → Library:** enable Gmail API, Google Calendar API, People API and Google
+   Tasks API (and Google Drive API if you add `drive`).
+2. **Google Auth Platform → Data Access → Add or remove scopes:** add the scopes in the table
+   for the services you ask for.
+3. **Audience:** choose how the app is published:
+   - **In production, unverified (recommended for you and a few invitees).** Everyone sees a
+     "Google hasn't verified this app" screen and clicks *Advanced → Go to Jarvis*. Refresh
+     tokens last until revoked. Google caps an unverified app with sensitive or restricted
+     scopes at 100 users, ever.
+   - **Testing.** Only people listed as test users (up to 100) can sign in, and Google expires
+     their refresh tokens after 7 days, so agents lose Gmail and Calendar access weekly until
+     the person signs in again.
+   - **Verified.** Needed only to open Jarvis to the public: sensitive scopes need Google's
+     review, and restricted ones (Gmail, Drive) also a yearly third-party security assessment.
+     Not worth it for a private Jarvis.
+
+To sign in with name and email only, set `GOOGLE_SERVICES=` (empty).
 
 ### On your phone
 

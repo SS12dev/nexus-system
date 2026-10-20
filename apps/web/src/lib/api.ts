@@ -3,6 +3,7 @@ import type {
   Approval,
   Chat,
   FileItem,
+  GoogleAccess,
   Grants,
   Instructions,
   Memory,
@@ -64,6 +65,8 @@ export const api = {
     request<User>("/auth/dev-login", { method: "POST", body: json({ email, token }) }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: () => request<User>("/api/me"),
+  googleAccess: () => request<GoogleAccess>("/api/me/google"),
+  disconnectGoogle: () => request<void>("/api/me/google", { method: "DELETE" }),
 
   chats: () => request<Chat[]>("/api/chats"),
   createChat: () => request<Chat>("/api/chats", { method: "POST", body: json({}) }),

@@ -19,6 +19,7 @@ x-jarvis-env: &jarvis-env
   OIDC_ISSUER: ${OIDC_ISSUER:-https://accounts.google.com}
   OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
   OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+  GOOGLE_SERVICES: ${GOOGLE_SERVICES-gmail,calendar,contacts,tasks}
   DEV_LOGIN_ENABLED: ${DEV_LOGIN_ENABLED:-false}
   DEV_LOGIN_TOKEN: ${DEV_LOGIN_TOKEN:-}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}

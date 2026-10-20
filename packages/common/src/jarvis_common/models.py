@@ -236,6 +236,26 @@ class Session(Base):
     user: Mapped[User] = relationship(lazy="joined")
 
 
+class GoogleGrant(Base):
+    """Google services a user let Jarvis use at sign-in. Tokens are encrypted with a key derived
+    from SECRET_KEY (see jarvis_common.google)."""
+
+    __tablename__ = "google_grants"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Space separated, as Google returns them.
+    scopes: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str] = mapped_column(Text)
+    access_token: Mapped[str | None] = mapped_column(Text)
+    access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class ApiKey(Base):
     """A credential Jarvis holds on a user's behalf, such as their LiteLLM virtual key."""
 

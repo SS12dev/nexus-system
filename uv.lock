@@ -1506,6 +1506,7 @@ source = { editable = "packages/common" }
 dependencies = [
     { name = "aiobotocore" },
     { name = "asyncpg" },
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "pgvector" },
     { name = "pydantic" },
@@ -1519,6 +1520,7 @@ dependencies = [
 requires-dist = [
     { name = "aiobotocore", specifier = ">=2.15" },
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "pgvector", specifier = ">=0.4" },
     { name = "pydantic", specifier = ">=2.9" },

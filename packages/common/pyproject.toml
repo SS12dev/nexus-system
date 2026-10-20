@@ -13,6 +13,7 @@ dependencies = [
     "pgvector>=0.4",
     "aiobotocore>=2.15",
     "pyyaml>=6.0",
+    "cryptography>=43",
 ]
 
 [build-system]
