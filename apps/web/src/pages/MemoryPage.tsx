@@ -1,8 +1,9 @@
-import { Brain, ChevronDown, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
@@ -190,18 +191,19 @@ export function MemoryPage() {
               maxLength={1000}
               className="min-w-56 flex-1 rounded-md border border-edge bg-panel px-3 py-2"
             />
-            <select
+            <Select
+              size="md"
               value={kind}
               onChange={(e) => setKind(e.target.value as MemoryKind)}
               aria-label="Type of memory"
-              className="rounded-md border border-edge bg-panel px-3 py-2"
+              className="w-40"
             >
               {KINDS.map((k) => (
                 <option key={k} value={k}>
                   {KIND_INFO[k].label}
                 </option>
               ))}
-            </select>
+            </Select>
             <button className="rounded-md bg-sky-500 px-4 py-2 font-medium text-ink">Add</button>
             <p className="w-full text-xs text-slate-500">
               <span className={`mr-1.5 rounded px-1.5 py-0.5 ${KIND_STYLE[kind]}`}>
@@ -322,22 +324,20 @@ function MemoryRow({
           )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {canEdit ? (
-              <span className={`relative inline-flex items-center rounded ${KIND_STYLE[m.kind]}`}>
-                <select
-                  value={m.kind}
-                  onChange={(e) => onChange({ kind: e.target.value as MemoryKind })}
-                  aria-label="Type of memory"
-                  title={`${KIND_INFO[m.kind].help} Click to change the type.`}
-                  className="cursor-pointer appearance-none bg-transparent py-0.5 pr-5 pl-1.5"
-                >
-                  {KINDS.map((k) => (
-                    <option key={k} value={k} className="bg-panel text-slate-100">
-                      {KIND_INFO[k].label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={11} className="pointer-events-none absolute right-1" />
-              </span>
+              <Select
+                size="xs"
+                tone={KIND_STYLE[m.kind]}
+                value={m.kind}
+                onChange={(e) => onChange({ kind: e.target.value as MemoryKind })}
+                aria-label="Type of memory"
+                title={`${KIND_INFO[m.kind].help} Click to change the type.`}
+              >
+                {KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_INFO[k].label}
+                  </option>
+                ))}
+              </Select>
             ) : (
               <span className={`rounded px-1.5 py-0.5 ${KIND_STYLE[m.kind]}`} title={KIND_INFO[m.kind].help}>
                 {KIND_INFO[m.kind].label}
