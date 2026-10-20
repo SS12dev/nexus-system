@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowLeft, History, Plus, Search, Sparkles, Upload } fro
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { InstructionsPanel } from "../components/InstructionsPanel";
 import { Markdown } from "../components/Markdown";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import {
@@ -199,15 +200,15 @@ export function SkillsPage() {
                   }}
                 />
                 {isAdmin && (
-                  <select
+                  <Select
                     value={newScope}
                     onChange={(e) => setNewScope(e.target.value as "personal" | "domain")}
-                    className="rounded-md border border-edge bg-panel px-2 text-sm"
-                    aria-label="New skills are"
+                    aria-label="Who new skills are for"
+                    title="Who skills you create or import are for"
                   >
-                    <option value="personal">for me</option>
-                    <option value="domain">shared</option>
-                  </select>
+                    <option value="personal">For me</option>
+                    <option value="domain">For everyone</option>
+                  </Select>
                 )}
               </div>
             )}

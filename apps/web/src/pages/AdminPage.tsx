@@ -90,12 +90,17 @@ function PeopleFilter({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !box.current?.contains(e.target as Node))
+      if (e instanceof KeyboardEvent) {
+        // Escape closes and hands focus back to the button, like a native dropdown.
+        if (e.key !== "Escape") return;
         setOpen(false);
+        trigger.current?.focus();
+      } else if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", close);
@@ -123,10 +128,12 @@ function PeopleFilter({
     <div ref={box} className="relative">
       <div className="flex items-center rounded-md border border-edge bg-panel">
         <button
+          ref={trigger}
           onClick={() => setOpen(!open)}
           aria-expanded={open}
-          aria-haspopup="listbox"
-          className="flex max-w-56 items-center gap-1.5 px-2 py-1"
+          aria-haspopup="dialog"
+          aria-label={`Show data for: ${summary}`}
+          className="flex max-w-56 items-center gap-1.5 rounded-md py-1 pr-2 pl-2.5 hover:bg-edge/40"
         >
           <Users size={14} className="shrink-0 text-slate-400" />
           <span className="truncate">{summary}</span>
@@ -144,7 +151,11 @@ function PeopleFilter({
         )}
       </div>
       {open && (
-        <div className="absolute right-0 z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-edge bg-panel p-2 shadow-xl">
+        <div
+          role="dialog"
+          aria-label="Choose people"
+          className="absolute right-0 z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-edge bg-panel p-2 shadow-xl"
+        >
           {people.length > 6 && (
             <input
               autoFocus
@@ -163,7 +174,7 @@ function PeopleFilter({
           >
             Everyone
           </button>
-          <ul role="listbox" aria-multiselectable className="max-h-72 overflow-y-auto">
+          <ul aria-label="People" className="max-h-72 overflow-y-auto">
             {shown.map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-md px-2 hover:bg-edge/60">
                 <input

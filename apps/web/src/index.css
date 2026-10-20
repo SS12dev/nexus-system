@@ -14,6 +14,21 @@ body,
   height: 100%;
 }
 
+/* Native controls (checkboxes, pickers, scrollbars) drawn for the dark theme, ticked in the
+   accent colour, with one keyboard focus ring everywhere. */
+html {
+  color-scheme: dark;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-glow);
+  cursor: pointer;
+}
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid rgb(56 189 248);
+  outline-offset: 1px;
+}
+
 body {
   @apply bg-ink text-slate-100 antialiased;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
