@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 from jarvis_common.models import (
+    ASSISTANT_NAME_MAX,
     FileStatus,
     MemoryKind,
     MessageRole,
@@ -39,9 +40,24 @@ class BudgetOut(BaseModel):
 
 
 class MeOut(UserOut):
+    # None until the user names their assistant, which the app asks for after first sign-in.
+    assistant_name: str | None
     budget: BudgetOut
     # Set while an admin has maintenance mode on.
     notice: str | None = None
+
+
+def _assistant_name(value: str) -> str:
+    name = " ".join(value.split())
+    if not name or not all(c.isalnum() or c in " .'-" for c in name) or not name[0].isalnum():
+        raise ValueError("Use letters, numbers, spaces, dots, hyphens or apostrophes")
+    return name
+
+
+class MeIn(BaseModel):
+    assistant_name: Annotated[
+        str, Field(min_length=1, max_length=ASSISTANT_NAME_MAX), AfterValidator(_assistant_name)
+    ]
 
 
 class SessionOut(BaseModel):

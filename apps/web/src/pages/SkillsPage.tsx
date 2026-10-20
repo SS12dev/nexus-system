@@ -12,6 +12,7 @@ import {
   type SkillVersion,
 } from "../lib/types";
 import { useStore } from "../store/chat";
+import { useAssistantName } from "../lib/assistant";
 
 const SCOPE_LABEL: Record<SkillScope, string> = {
   core: "Core",
@@ -41,6 +42,7 @@ description: What this skill does and when an agent should use it, in one senten
 `;
 
 export function SkillsPage() {
+  const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const canWrite = hasRole(user, "member");
   const isAdmin = hasRole(user, "admin");
@@ -118,9 +120,9 @@ export function SkillsPage() {
       <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-6">
         <h1 className="mb-1 text-xl font-semibold">Skills</h1>
         <p className="mb-4 text-sm text-slate-400">
-          Tested instructions and scripts Jarvis and its agents load when a task needs them, such
+          Tested instructions and scripts {assistant} and its agents load when a task needs them, such
           as making a PDF or a spreadsheet, so they don't work it out from scratch each time.
-          Skills Jarvis drafts from its own runs, and ones you import, stay off until reviewed.
+          Skills {assistant} drafts from its own runs, and ones you import, stay off until reviewed.
         </p>
         <div className="mb-4 flex gap-2 text-sm">
           {(["skills", "instructions"] as const).map((t) => (
@@ -312,7 +314,7 @@ export function SkillsPage() {
                 {selected.status === "draft" && (
                   <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
                     {selected.scope === "learned"
-                      ? "Jarvis drafted this from one of its runs. Read it, edit if needed, then enable it."
+                      ? `${assistant} drafted this from one of its runs. Read it, edit if needed, then enable it.`
                       : "This skill is off until it is reviewed and enabled."}
                   </p>
                 )}
@@ -456,6 +458,7 @@ function InstructionsPanel({
   canWrite: boolean;
   onError: (msg: string) => void;
 }) {
+  const assistant = useAssistantName();
   const [data, setData] = useState<Instructions | null>(null);
   const [saved, setSaved] = useState("");
 
@@ -478,7 +481,7 @@ function InstructionsPanel({
     <div className="max-w-3xl space-y-6">
       <p className="text-sm text-slate-400">
         Every agent gets these in order: the safety rules, the house conventions and global
-        instructions, then its role's, then yours. Jarvis itself follows the conventions, global
+        instructions, then its role's, then yours. {assistant} itself follows the conventions, global
         instructions and yours. Later layers add detail but can't override the safety rules.
       </p>
       <Layer
@@ -509,7 +512,7 @@ function InstructionsPanel({
       )}
       <Layer
         title="Global instructions"
-        hint="Optional. Extra rules for Jarvis and every agent of every user, you and anyone you invite, added after the house conventions. Leave it empty unless something should apply to everyone; your own preferences go in Your instructions."
+        hint={`Optional. Extra rules for ${assistant} and every agent of every user, you and anyone you invite, added after the house conventions. Leave it empty unless something should apply to everyone; your own preferences go in Your instructions.`}
         placeholder={isAdmin ? "e.g. Never book anything that costs money without asking first." : "None set."}
         value={data.global}
         editable={isAdmin}

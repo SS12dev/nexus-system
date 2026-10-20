@@ -164,7 +164,7 @@ class Google:
         except GoogleNotConnected:
             raise GoogleError(
                 f"{SERVICE_TITLES[service]} isn't connected. The user can allow it on the "
-                "Connections page in Jarvis."
+                "Settings page."
             ) from None
         client = self.deps.google_http
         own = client is None

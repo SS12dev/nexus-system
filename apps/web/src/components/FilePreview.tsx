@@ -2,6 +2,7 @@ import { Download, ExternalLink, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { formatSize } from "../lib/format";
+import { useAssistantName } from "../lib/assistant";
 import type { FileBrief } from "../lib/types";
 import { FileIcon } from "./FileChip";
 import { Markdown } from "./Markdown";
@@ -18,6 +19,7 @@ export function originalKind(file: Pick<FileBrief, "content_type">): "image" | "
 /** A side panel showing a file: the original for PDFs and images, otherwise the text Jarvis
  * read from it, with a download button either way. */
 export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () => void }) {
+  const assistant = useAssistantName();
   const kind = originalKind(file);
   const [view, setView] = useState<"original" | "text">(kind ? "original" : "text");
 
@@ -71,7 +73,7 @@ export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () =>
                 aria-pressed={view === v}
                 className={`rounded-md px-2.5 py-0.5 ${view === v ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
               >
-                {v === "original" ? "File" : "What Jarvis read"}
+                {v === "original" ? "File" : `What ${assistant} read`}
               </button>
             ))}
           </div>
@@ -118,6 +120,7 @@ function Original({ file, kind }: { file: FileBrief; kind: "image" | "pdf" }) {
 
 /** The text Jarvis extracted from the file, which is what it reads when answering. */
 function ReadText({ file }: { file: FileBrief }) {
+  const assistant = useAssistantName();
   const [text, setText] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
@@ -142,7 +145,9 @@ function ReadText({ file }: { file: FileBrief }) {
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       {!ready ? (
         <p className="text-sm text-slate-500">
-          {file.status === "failed" ? "Jarvis couldn't read this file." : "Jarvis is still reading this file…"}
+          {file.status === "failed"
+            ? `${assistant} couldn't read this file.`
+            : `${assistant} is still reading this file…`}
         </p>
       ) : error ? (
         <p className="text-sm text-rose-400">{error}</p>

@@ -390,7 +390,7 @@ async def _generate(
     async for chunk, meta in graph.astream(
         {
             "messages": to_langchain(history),
-            "system_prompt": system_prompt(user.name, rendered),
+            "system_prompt": system_prompt(user.name, user.assistant, rendered),
             "force_tool": force_tool,
         },
         {"recursion_limit": RECURSION_LIMIT},

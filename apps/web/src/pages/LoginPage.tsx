@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
 import { Orb } from "../components/Orb";
 import { api } from "../lib/api";
+import { APP_NAME } from "../lib/assistant";
 
 const ERRORS: Record<string, string> = {
   not_invited: "That account hasn't been invited yet. Ask an admin for an invite.",
@@ -19,7 +20,7 @@ export function LoginPage() {
   const [error, setError] = useState(ERRORS[params.get("error") ?? ""] ?? "");
 
   useEffect(() => {
-    api.authConfig().then(setConfig).catch(() => setError("Jarvis's API is not reachable."));
+    api.authConfig().then(setConfig).catch(() => setError(`${APP_NAME}'s API is not reachable.`));
   }, []);
 
   const devLogin = async (e: FormEvent) => {
@@ -38,8 +39,8 @@ export function LoginPage() {
         <div className="mb-6 flex justify-center">
           <Orb state="idle" size={96} />
         </div>
-        <h1 className="mb-1 text-2xl font-semibold">Jarvis</h1>
-        <p className="mb-8 text-sm text-slate-400">Sign in to talk to your supervisor agent.</p>
+        <h1 className="mb-1 text-2xl font-semibold">{APP_NAME}</h1>
+        <p className="mb-8 text-sm text-slate-400">Sign in to talk to your assistant.</p>
         {error && <p className="mb-4 rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-300">{error}</p>}
         {config?.oidc_enabled && (
           <a

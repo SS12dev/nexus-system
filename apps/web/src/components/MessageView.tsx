@@ -2,8 +2,10 @@ import type { Message } from "../lib/types";
 import { FileChip } from "./FileChip";
 import { Markdown } from "./Markdown";
 import { ToolSteps } from "./ToolSteps";
+import { useAssistantName } from "../lib/assistant";
 
 export function MessageView({ message, activity }: { message: Message; activity?: string | null }) {
+  const assistant = useAssistantName();
   if (message.role === "user") {
     return (
       <div className="flex flex-col items-end gap-2">
@@ -26,7 +28,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
     <div className="max-w-full">
       {!!message.steps?.length && <ToolSteps steps={message.steps} live={streaming} />}
       {waiting ? (
-        <div className="flex items-center gap-3 py-3" aria-label="Jarvis is thinking">
+        <div className="flex items-center gap-3 py-3" aria-label={`${assistant} is thinking`}>
           <div className="flex gap-1">
             {[0, 1, 2].map((i) => (
               <span
@@ -51,7 +53,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
         </div>
       )}
       {message.status === "failed" && (
-        <p className="mt-1 text-sm text-rose-400">{message.error ?? "Jarvis couldn't answer."}</p>
+        <p className="mt-1 text-sm text-rose-400">{message.error ?? `${assistant} couldn't answer.`}</p>
       )}
       {message.status === "complete" && message.output_tokens != null && (
         <p className="mt-1 text-xs text-slate-600">

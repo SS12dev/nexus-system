@@ -13,6 +13,8 @@ export interface User {
   email: string;
   name: string | null;
   avatar_url: string | null;
+  /** What the user calls their assistant; null until they choose (only on /api/me). */
+  assistant_name?: string | null;
   role: Role;
   status: UserStatus;
   created_at: string;
