@@ -189,7 +189,13 @@ export function LibraryPage() {
                 <FileIcon name={f.name} size={20} />
                 <div className="min-w-40 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate">{f.name}</span>
+                    {f.status === "ready" ? (
+                      <button onClick={() => setPreview(f)} className="truncate text-left hover:text-sky-300">
+                        {f.name}
+                      </button>
+                    ) : (
+                      <span className="truncate">{f.name}</span>
+                    )}
                     <StatusIcon status={f.status} />
                   </div>
                   <div className={`text-xs ${f.status === "failed" ? "text-rose-400" : "text-slate-500"}`}>

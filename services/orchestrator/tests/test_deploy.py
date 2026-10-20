@@ -66,10 +66,10 @@ def done(tool, **args):
     return {"tool": tool, "args": args}
 
 
-def scripts_for(scripts: dict, approved=True, failed=0, reviews=1) -> None:
+def scripts_for(scripts: dict, approved=True, failed=0, reviews=1, passed=14) -> None:
     scripts["researcher"] = [done("submit_brief", stack="static", summary="A 2048 game.")]
     scripts["architect"] = [done("submit_plan", summary="Grid and score.")]
-    scripts["tester"] = [done("submit_tests", passed=14, failed=failed, summary="Ran.")] * 4
+    scripts["tester"] = [done("submit_tests", passed=passed, failed=failed, summary="Ran.")] * 4
     review = done("submit_review", approved=approved, fixes="1. fix", summary="A 2048 game.")
     scripts["reviewer"] = [review] * (reviews + 3)
 
@@ -182,12 +182,18 @@ async def test_a_second_failure_is_reported(ddeps, owner, scripts):
 
 
 @pytest.mark.parametrize(
-    "approved,failed,why",
-    [(False, 0, "the reviewer hasn't approved it"), (True, 3, "not every test passed")],
+    "approved,passed,failed,why",
+    [
+        (False, 14, 0, "the reviewer hasn't approved it"),
+        (True, 14, 3, "not every test passed"),
+        (True, 0, 0, "no tests ran"),
+    ],
 )
-async def test_only_approved_green_apps_are_deployed(ddeps, owner, scripts, approved, failed, why):
+async def test_only_approved_green_apps_are_deployed(
+    ddeps, owner, scripts, approved, passed, failed, why
+):
     user, chat_id = owner
-    scripts_for(scripts, approved=approved, failed=failed)
+    scripts_for(scripts, approved=approved, passed=passed, failed=failed)
     run_id = await dev_run(ddeps, user, chat_id)
     await runner.run_system(ddeps, run_id)
 

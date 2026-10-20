@@ -11,6 +11,7 @@ import {
   parseCsv,
   prettyJson,
   previewKind,
+  readableText,
   type PreviewKind,
 } from "../lib/preview";
 import type { FileBrief } from "../lib/types";
@@ -404,7 +405,7 @@ function ReadText({ file }: { file: FileBrief }) {
       ) : text == null ? (
         <p className="text-sm text-slate-500">Loading…</p>
       ) : text.trim() ? (
-        <Markdown size="sm">{text}</Markdown>
+        <Markdown size="sm">{readableText(text)}</Markdown>
       ) : (
         <p className="text-sm text-slate-500">No text in this file.</p>
       )}

@@ -115,6 +115,7 @@ async def test_status_page(app, owner, redis):
     by_name = {s["name"]: s for s in data["services"]}
     assert by_name["Postgres"]["ok"] and by_name["Valkey (cache and queues)"]["ok"]
     assert by_name["Orchestrator worker"]["ok"]
+    assert by_name["Orchestrator worker"]["detail"] == "0 running, 0 failed"
     assert not by_name["Document worker"]["ok"]
     assert data["people"]["active"] == 1
     assert data["backup"]["stale"] is True

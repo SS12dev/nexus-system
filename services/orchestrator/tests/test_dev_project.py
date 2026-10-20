@@ -162,6 +162,8 @@ async def test_static_app_end_to_end(sdeps, owner, scripts, seen, wb):
     for fact in ("A playable 2048.", "static web app with Vite", "14 passing",
                  "approved in round 1", "Repo: added here", "Live link: added here"):  # fmt: skip
         assert fact in final, fact
+    # Software always gets the house team, so it is never offered as a template.
+    assert "template" not in final
     # A static app needs no backend.
     assert "backend" not in seen and run.agents["backend"]["status"] == "skipped"
     # Every workbench call went to this system's project, for this user.
