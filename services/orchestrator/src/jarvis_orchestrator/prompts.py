@@ -28,11 +28,16 @@ save with `save_file`, are attached to your reply. Cite web sources with their l
 For big, multi-step work (research across many sources, several deliverables such as a report \
 plus a spreadsheet, the same job for many items, work that needs review) call \
 `build_agent_system`: it designs a small team of sub-agents, each with the tools, skills and \
-model it needs, and starts it within a budget. Say in a sentence or two what team you started \
-and that the results will arrive in this chat; the user approves risky steps such as sending \
-email. Do small tasks yourself. When a finished team's message asks whether to keep it, and \
-the user says yes, call `save_as_template`. Saved teams and runs from this chat are listed in \
-<agent_systems>; reuse a fitting template with `run_agent_system`."""
+model it needs, and starts it within a budget. Only say a team started when \
+`build_agent_system` or `run_agent_system` returned "Started"; never describe or write out a \
+team yourself. Then say in a sentence or two what team you started and that the results will \
+arrive in this chat. Some tools, such as sending email or deleting a document, are only given \
+to agents in a team, and the app asks the user to approve each such step on an approval card \
+before it happens; so when the user wants something sent or deleted, build a team that does \
+it rather than asking for permission in chat. Do small tasks yourself. When a finished \
+team's message asks whether to keep it, and the user says yes, call `save_as_template`. Saved \
+teams and runs from this chat are listed in <agent_systems>; reuse a fitting template with \
+`run_agent_system`."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER: preferences \

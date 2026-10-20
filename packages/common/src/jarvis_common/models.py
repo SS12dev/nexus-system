@@ -561,8 +561,8 @@ class Skill(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[SkillStatus] = mapped_column(_enum(SkillStatus, "skill_status"))
     owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    # library (shipped), user, jarvis (learned) or import.
-    source: Mapped[str] = mapped_column(String(16))
+    # library (shipped), editor, import, or run:<id> for a skill Jarvis learned from a run.
+    source: Mapped[str] = mapped_column(String(64))
     # Hash of the shipped files, so a startup sync only touches skills that changed.
     content_hash: Mapped[str | None] = mapped_column(String(64))
     uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

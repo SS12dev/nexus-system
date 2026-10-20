@@ -265,7 +265,7 @@ async def _generate(
     graph = build_graph(model, tools)
     content = ""
     usage = {"input_tokens": 0, "output_tokens": 0}
-    async for chunk, _meta in graph.astream(
+    async for chunk, meta in graph.astream(
         {
             "messages": to_langchain(history),
             "system_prompt": system_prompt(user.name, rendered),
@@ -273,7 +273,9 @@ async def _generate(
         {"recursion_limit": RECURSION_LIMIT},
         stream_mode="messages",
     ):
-        if not isinstance(chunk, AIMessageChunk):
+        # Tools that call a model themselves (designing an agent system) stream too; only
+        # Jarvis's own answer belongs in the chat, and their cost is billed where they run.
+        if not isinstance(chunk, AIMessageChunk) or meta.get("langgraph_node") != "respond":
             continue
         delta = chunk.text if isinstance(chunk.text, str) else chunk.text()
         if delta:

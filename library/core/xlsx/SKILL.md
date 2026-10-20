@@ -38,6 +38,8 @@ python skills/core/xlsx/scripts/build_workbook.py book.json out/data.xlsx
 
 - Headers are bold on a shaded row, panes freeze below them and autofilter is on.
 - `format` is any Excel number format (`#,##0`, `0.0%`, `$#,##0.00`, `yyyy-mm-dd`).
+- Pass numbers as JSON numbers. Strings that are plainly numbers (`"45,990"`, `"-3.5"`) are
+  stored as numbers anyway, and ISO dates (`"2026-01-31"`) as dates; text like `"007"` stays text.
 - A cell value starting with `=` is a formula (`"=C2*D2"`); `totals` adds a total row with
   `sum`, `average`, `min`, `max` or `count` formulas, so the sheet stays live.
 - `chart` adds a native Excel chart (`bar`, `col`, `line`, `pie`) next to the data;

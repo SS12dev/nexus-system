@@ -173,7 +173,7 @@ async def test_xlsx_build_inspect(run, b64, skill_files):
                     {"header": "GWh", "format": "#,##0"},
                     {"header": "Since"},
                 ],
-                "rows": [["CATL", 400, "2011-12-16"], ["BYD", 250, "1995-02-10"]],
+                "rows": [["CATL", 400, "2011-12-16"], ["BYD", "1,250", "1995-02-10"]],
                 "totals": {"GWh": "sum"},
                 "chart": {"type": "col", "categories": "Supplier", "values": ["GWh"]},
             }
@@ -187,6 +187,7 @@ async def test_xlsx_build_inspect(run, b64, skill_files):
     result = await run(code, files, language="bash")
     ws = load_workbook(io.BytesIO(out(result, "out/b.xlsx")))["Suppliers"]
     assert ws["B4"].value == "=SUM(B2:B3)"
+    assert ws["B3"].value == 1250  # a number sent as text is stored as a number
     assert ws.freeze_panes == "A2" and len(ws._charts) == 1
     assert "=SUM(B2:B3)" in result["stdout"]
 

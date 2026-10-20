@@ -147,7 +147,8 @@ def system_tools(
         or many items handled in parallel; answer simple things yourself. request: the whole
         task in the user's words plus everything you know that matters. deliverables: files
         wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's files to work from
-        (default: this chat's files). budget_usd: only when the user gave one. best_model:
+        (default: this chat's files). budget_usd: the user's budget in USD; when they ask to
+        keep it cheap without a figure, pass 0.25; otherwise leave it out. best_model:
         only when the user asked for the best model. keep: true when the user wants to reuse
         this team (otherwise it is discarded after the run unless they keep it)."""
         await note("build_agent_system")
@@ -179,6 +180,8 @@ def system_tools(
                     db, system, request, ids, budget_usd
                 )
             spec = result.spec
+            # The budget is the user's call (or the default), never the architect's.
+            spec.budget_usd = None
             spec.lifetime = "persistent" if keep else "ephemeral"
             if deliverables and not spec.deliverables:
                 spec.deliverables = deliverables[:10]
@@ -266,6 +269,8 @@ def system_tools(
                 return str(exc)
             system = await db.get(AgentSystem, system.id)
             spec = result.spec
+            # The budget is the user's call (or the default), never the architect's.
+            spec.budget_usd = None
             spec.lifetime = current.lifetime
             system.spec = spec.model_dump()
             system.name, system.goal, system.topology = spec.name, spec.goal, spec.topology

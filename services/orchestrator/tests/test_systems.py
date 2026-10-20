@@ -25,6 +25,8 @@ from jarvis_common.models import (
     RoleName,
     RunEvent,
     RunStatus,
+    Skill,
+    SkillStatus,
     SystemLifetime,
     SystemStatus,
     UserStatus,
@@ -32,6 +34,7 @@ from jarvis_common.models import (
 from jarvis_common.spec import AgentSystemSpec
 from jarvis_common.systems import BudgetProblem, control_run, decide_approval, new_run
 from jarvis_orchestrator.systems import runner
+from jarvis_orchestrator.systems.learn import draft_skill
 from jarvis_orchestrator.systems.manage import system_tools
 from jarvis_orchestrator.tools import ToolContext
 from jarvis_orchestrator.turn import TurnDeps
@@ -217,6 +220,29 @@ async def test_single_agent_saves_file_and_posts_result(sdeps, owner, scripts, s
         assert att.file_id == files[0].id
         events = (await db.scalars(select(RunEvent).where(RunEvent.run_id == run_id))).all()
         assert {"tool.call", "agent.status"} <= {e.type for e in events}
+
+
+async def test_finished_run_drafts_a_learned_skill(sdeps, owner, scripts):
+    scripts["solo"] = ["Done."]
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo")])
+    await runner.run_system(sdeps, run_id)
+    scripts["jarvis.draft_skill"] = [
+        json.dumps(
+            {
+                "name": "EV market report",
+                "description": "Research EV sales: sources first, then a report",
+                "body": "# EV report\n1. Search.\n2. Write.",
+            }
+        )
+    ]
+    skill = await draft_skill(sdeps, run_id)
+    assert skill is not None
+    async with sdeps.sessionmaker() as db:
+        saved = await db.get(Skill, skill.id)
+    assert saved.status == SkillStatus.draft and saved.source == f"run:{run_id}"
+    assert saved.owner_id == owner[0].id
+    # Once per run.
+    assert await draft_skill(sdeps, run_id) is None
 
 
 async def test_pipeline_hands_output_forward(sdeps, owner, scripts, seen):
@@ -504,6 +530,7 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
             agent("writer", role="writer", tools=["run_code"], skills=["core/docx"]),
         ],
         "deliverables": ["report.docx", "data.xlsx"],
+        "budget_usd": 40,  # the architect's guess is ignored
     }
     bad = {**spec, "agents": [agent("researcher", tools=["teleport"]), spec["agents"][1]]}
     scripts["jarvis.design_system"] = [json.dumps({"spec": bad}), json.dumps({"spec": spec})]
@@ -527,6 +554,7 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
         system = await db.get(AgentSystem, run.system_id)
     assert system.lifetime == SystemLifetime.ephemeral and system.chat_id == chat_id
     assert run.status == RunStatus.queued and run.trace_id == "trace1"
+    assert run.budget_usd == Decimal(str(sdeps.settings.default_run_budget_usd))
     assert ("run_system", str(run.id)) in enqueued.jobs
 
     # Keeping it as a template, then listing it.

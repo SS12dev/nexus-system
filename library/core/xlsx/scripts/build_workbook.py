@@ -19,6 +19,8 @@ HEADER_FONT = Font(bold=True, color="0F2A4A")
 THIN = Side(style="thin", color="C8CED8")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISO_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$")
+# "45,990", "-3.5", "1e6": numbers that arrived as text. Not "007" or "+44 20...".
+NUMBER = re.compile(r"^-?(0|[1-9]\d{0,2}(,\d{3})+|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?$|^-?0?\.\d+$")
 TOTALS = {"sum": "SUM", "average": "AVERAGE", "min": "MIN", "max": "MAX", "count": "COUNT"}
 
 
@@ -28,6 +30,10 @@ def cell_value(v):
             return date.fromisoformat(v)
         if ISO_DATETIME.match(v):
             return datetime.fromisoformat(v)
+        t = v.strip()
+        if NUMBER.match(t):
+            n = float(t.replace(",", ""))
+            return int(n) if n.is_integer() and "." not in t and "e" not in t.lower() else n
     return v
 
 

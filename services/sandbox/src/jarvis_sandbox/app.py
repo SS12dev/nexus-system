@@ -72,7 +72,10 @@ def _limits(cpu_s: int) -> None:
     os.setsid()
     mem = MEMORY_MB * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s + 1))
-    resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
+    except (ValueError, OSError):
+        pass  # macOS can't cap address space; the container's memory limit still applies
     size = MAX_FILE_MB * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_FSIZE, (size, size))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))

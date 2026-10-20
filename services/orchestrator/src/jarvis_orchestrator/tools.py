@@ -112,14 +112,22 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         return "\n\n---\n\n".join(out)
 
     async def read_document(file_id: str, offset: int = 0) -> str:
-        """Read a document's text by id, about 12,000 characters at a time. Use offset to read
-        further into long documents."""
+        """Read a document's text by id (or exact file name, for the latest version), about
+        12,000 characters at a time. Use offset to read further into long documents."""
         await note("read_document", file_id=file_id)
         fid = _uuid(file_id)
-        if fid is None:
-            return "That isn't a document id."
+        mine = File.user_id == user_id
+        if fid is not None:
+            find = select(File).where(File.id == fid, mine)
+        else:
+            find = (
+                select(File)
+                .where(File.name == file_id.strip(), mine)
+                .order_by(File.created_at.desc())
+                .limit(1)
+            )
         async with sessionmaker() as db:
-            f = await db.scalar(select(File).where(File.id == fid, File.user_id == user_id))
+            f = await db.scalar(find)
             if f is None:
                 return "No such document."
             if f.status != FileStatus.ready or not f.chunk_count:
@@ -281,20 +289,32 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         """Run Python or bash in the sandbox: no network, document libraries installed (pypdf,
         pdfplumber, reportlab, weasyprint, python-docx, python-pptx, openpyxl, pandas,
         matplotlib). Files: the given library file ids (default: the files this task started
-        with) are in in/ under their names; your skills are unpacked in skills/<scope>/<name>/;
+        with plus files saved earlier in this run) are in in/ under their names; your skills
+        are unpacked in skills/<scope>/<name>/;
         everything written to out/ is saved to the user's library. Each call starts fresh."""
         await note("run_code", language=language)
         if deps.sandbox is None:
             return "The sandbox isn't available."
-        wanted = [u for u in (_uuid(x) for x in (file_ids or [])) if u] or ctx.file_ids
+        wanted = [u for u in (_uuid(x) for x in (file_ids or [])) if u]
         files: dict[str, bytes] = {}
         async with sessionmaker() as db:
+            if not wanted:
+                wanted = list(ctx.file_ids)
+                if ctx.run_id is not None:
+                    # What earlier steps of this run made (a report a later agent converts).
+                    made = await db.scalars(
+                        select(File.id)
+                        .where(File.run_id == ctx.run_id, File.user_id == user_id)
+                        .order_by(File.created_at.desc())
+                    )
+                    wanted += [i for i in made.all() if i not in wanted]
             if wanted:
                 rows = await db.scalars(
-                    select(File).where(
-                        File.id.in_(wanted[:MAX_INPUT_FILES]), File.user_id == user_id
-                    )
+                    select(File)
+                    .where(File.id.in_(wanted[:MAX_INPUT_FILES]), File.user_id == user_id)
+                    .order_by(File.created_at)
                 )
+                # Oldest first, so the latest version of a name wins.
                 for f in rows.all():
                     files[f"in/{f.name}"] = await deps.storage.get(f.storage_key)
             for slug in sorted(ctx.skills):

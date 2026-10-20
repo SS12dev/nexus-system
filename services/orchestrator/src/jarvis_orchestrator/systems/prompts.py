@@ -126,6 +126,9 @@ when to stop. Don't restate generic rules; agents already get safety rules and t
 - tools: give each agent only the tools it needs, chosen from AVAILABLE TOOLS. An agent that \
 makes PDF, Word, PowerPoint, Excel or chart files needs run_code and the matching core skill.
 - skills: grant matching skills from AVAILABLE SKILLS by id (e.g. core/pdf).
+- If the request asks for something to be emailed or a document deleted, give the agent that \
+does it send_email or delete_document; the user approves each such step on an approval card \
+in the app, so don't leave it out or plan to ask in chat.
 - approval.required_for: add tools that should pause for the user beyond the ones that \
 always do (send_email, delete_document always ask).
 - deliverables: the files or outputs the user should get back, e.g. ["report.docx"].
