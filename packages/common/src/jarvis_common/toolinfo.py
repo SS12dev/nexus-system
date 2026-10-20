@@ -3,7 +3,8 @@ orchestrator holds the implementations; the API uses this list for the Agents pa
 
 Risk levels:
 - read: looks at the user's own data or the public web.
-- write: adds to the user's own library.
+- write: adds to or changes the user's own data (library, own Gmail drafts and labels, own
+  calendar events without guests, tasks).
 - exec: runs code in the sandbox. Needs the exec capability.
 - outbound: acts outside Jarvis, such as sending email. Needs the outbound capability, and
   always asks the user first.
@@ -29,6 +30,8 @@ class ToolInfo:
     description: str
     # Jarvis itself can call it in a chat (not only agents in a system).
     jarvis: bool = True
+    # The Google service it acts on; offered only to users who granted it.
+    service: str | None = None
 
 
 TOOLS: list[ToolInfo] = [
@@ -54,7 +57,8 @@ TOOLS: list[ToolInfo] = [
         "send_email",
         "Send email",
         "outbound",
-        "Send an email, optionally with library files attached. Asks the user first.",
+        "Send an email from Jarvis's own mail account (SMTP), optionally with library files "
+        "attached. Prefer gmail_send when the user has Gmail connected. Asks the user first.",
         jarvis=False,
     ),
     ToolInfo(
@@ -63,6 +67,96 @@ TOOLS: list[ToolInfo] = [
         "destructive",
         "Delete a document from the user's library. Asks the user first.",
         jarvis=False,
+    ),
+    ToolInfo(
+        "gmail_search",
+        "Search Gmail",
+        "read",
+        "Search the user's Gmail with Gmail search syntax; returns senders, subjects, snippets.",
+        service="gmail",
+    ),
+    ToolInfo("gmail_read", "Read an email", "read", "Read one email by id.", service="gmail"),
+    ToolInfo(
+        "gmail_draft",
+        "Draft an email",
+        "write",
+        "Save an email or reply as a draft in the user's Gmail, without sending it.",
+        service="gmail",
+    ),
+    ToolInfo(
+        "gmail_update_labels",
+        "Label email",
+        "write",
+        "Archive, mark read, star or label an email in the user's Gmail.",
+        service="gmail",
+    ),
+    ToolInfo(
+        "gmail_send",
+        "Send from Gmail",
+        "outbound",
+        "Send an email or reply from the user's own Gmail, optionally with library files "
+        "attached. Asks the user first.",
+        jarvis=False,
+        service="gmail",
+    ),
+    ToolInfo(
+        "calendar_list_events",
+        "Read calendar",
+        "read",
+        "List events on the user's Google Calendar for a time range.",
+        service="calendar",
+    ),
+    ToolInfo(
+        "calendar_create_event",
+        "Add calendar event",
+        "write",
+        "Add an event without guests to the user's calendar.",
+        service="calendar",
+    ),
+    ToolInfo(
+        "calendar_update_event",
+        "Change calendar event",
+        "write",
+        "Change the time, title or notes of a calendar event that has no other guests.",
+        service="calendar",
+    ),
+    ToolInfo(
+        "calendar_invite",
+        "Send calendar invite",
+        "outbound",
+        "Create an event and email invitations to guests. Asks the user first.",
+        jarvis=False,
+        service="calendar",
+    ),
+    ToolInfo(
+        "calendar_delete_event",
+        "Delete calendar event",
+        "destructive",
+        "Delete an event from the user's calendar, telling any guests. Asks the user first.",
+        jarvis=False,
+        service="calendar",
+    ),
+    ToolInfo(
+        "contacts_search",
+        "Search contacts",
+        "read",
+        "Find people in the user's Google Contacts with their emails and phones.",
+        service="contacts",
+    ),
+    ToolInfo(
+        "tasks_list",
+        "List tasks",
+        "read",
+        "List the user's Google Tasks.",
+        service="tasks",
+    ),
+    ToolInfo("tasks_add", "Add a task", "write", "Add a Google Task.", service="tasks"),
+    ToolInfo(
+        "tasks_complete",
+        "Complete a task",
+        "write",
+        "Mark a Google Task as done.",
+        service="tasks",
     ),
 ]
 
@@ -92,6 +186,12 @@ def allowed_tools(user: User, granted: set[Capability]) -> set[str]:
         return set()
     caps = capabilities(user, granted)
     return {t.name for t in TOOLS if (need := RISK_CAPABILITY[t.risk]) is None or need in caps}
+
+
+def connected_only(names: set[str], services: set[str] | list[str]) -> set[str]:
+    """Drop tools for Google services the user hasn't granted."""
+    keep = {None, *services}
+    return {n for n in names if (info := BY_NAME.get(n)) is None or info.service in keep}
 
 
 def needs_approval(tool: str, extra: set[str] | list[str] = ()) -> bool:

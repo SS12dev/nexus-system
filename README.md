@@ -87,6 +87,18 @@ One-time setup in Google Cloud, on the project that holds the OAuth client:
 
 To sign in with name and email only, set `GOOGLE_SERVICES=` (empty).
 
+What Jarvis and agents can do with them (only for services the person allowed):
+
+| Service | Jarvis in chat | Agents only, approved on a card first |
+|---|---|---|
+| Gmail | search, read, save drafts, archive / mark read / star / label | send (`gmail_send`) |
+| Calendar | list events, add or change own events without guests | send invitations, delete events |
+| Contacts | search | |
+| Tasks | list, add, complete | |
+
+Nothing can trash mail or mark it as spam. Calendar times without an offset are read in the
+calendar's own time zone.
+
 ### On your phone
 
 Jarvis is an installable PWA. For Google sign-in from a phone, publish it through the Cloudflare

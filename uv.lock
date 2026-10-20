@@ -1560,6 +1560,7 @@ dependencies = [
     { name = "langgraph-checkpoint-postgres" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pypdf" },
+    { name = "tzdata" },
 ]
 
 [package.metadata]
@@ -1572,6 +1573,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pypdf", specifier = ">=5.1" },
+    { name = "tzdata", specifier = ">=2024.1" },
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ import uuid
 from functools import partial
 from pathlib import Path
 
+import httpx
 from arq import cron, func
 from arq.connections import RedisSettings
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -64,6 +65,7 @@ async def startup(ctx: dict) -> None:
         storage=S3Storage(settings),
         sandbox=SandboxClient(settings),
         web=WebClient(settings),
+        google_http=httpx.AsyncClient(timeout=30),
         checkpointer=checkpointer,
     )
     async with ctx["deps"].sessionmaker() as db:
@@ -80,6 +82,7 @@ async def shutdown(ctx: dict) -> None:
     await deps.storage.aclose()
     await deps.sandbox.aclose()
     await deps.web.aclose()
+    await deps.google_http.aclose()
     await ctx["pool"].close()
     await ctx["engine"].dispose()
 

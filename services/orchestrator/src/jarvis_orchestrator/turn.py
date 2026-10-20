@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import openai
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.events import Event, publish
+from jarvis_common.google import get_grant, services_in
 from jarvis_common.library import file_payload
 from jarvis_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
 from jarvis_common.models import (
@@ -34,7 +36,7 @@ from jarvis_common.settings import Settings
 from jarvis_common.skills import catalogue, instruction_layers, usable_skills
 from jarvis_common.storage import Storage
 from jarvis_common.systems import ACTIVE_RUN, granted_capabilities
-from jarvis_common.toolinfo import TOOLS, allowed_tools
+from jarvis_common.toolinfo import TOOLS, allowed_tools, connected_only
 from jarvis_orchestrator.context import assemble
 from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
@@ -62,6 +64,8 @@ class TurnDeps:
     storage: Storage | None = None
     sandbox: SandboxClient | None = None
     web: WebClient | None = None
+    # Shared client for Google's APIs (Gmail, Calendar, ...); None opens one per call.
+    google_http: httpx.AsyncClient | None = None
     # Where agent-system runs keep their LangGraph checkpoints (Postgres in production).
     checkpointer: BaseCheckpointSaver | None = None
 
@@ -234,6 +238,8 @@ async def _generate(
     )
     context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
     allowed = allowed_tools(user, await granted_capabilities(db, user.id))
+    grant = await get_grant(db, deps.settings, user.id)
+    allowed = connected_only(allowed, services_in(grant.scopes) if grant else [])
     # Outbound and destructive tools are for agents in a system, where every call is approved.
     names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
     extra = []
