@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis_api.deps import AdminUser, CurrentUser, DbDep, MemberUser, SettingsDep
 from jarvis_api.schemas import InstructionIn
 from jarvis_common.models import AuditLog, Instruction, InstructionLayer, User, utcnow
-from jarvis_common.skills import shipped_instructions
+from jarvis_common.skills import shipped_instructions, shipped_shared
 from jarvis_common.spec import AGENT_ID
 
 router = APIRouter(prefix="/api/instructions", tags=["instructions"])
@@ -53,6 +53,7 @@ async def get_instructions(user: CurrentUser, db: DbDep, settings: SettingsDep):
     extra = {r.key: r.content for r in rows if r.layer == InstructionLayer.role}
     return {
         "safety": safety,
+        "shared": shipped_shared(Path(settings.library_path)),
         "global": next((r.content for r in rows if r.layer == InstructionLayer.global_), ""),
         "roles": [
             {"role": k, "shipped": shipped.get(k, ""), "extra": extra.get(k, "")}

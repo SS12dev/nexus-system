@@ -152,6 +152,7 @@ export const api = {
       method: "POST",
       body: json({ version }),
     }),
+  shareSkill: (id: string) => request<SkillDetail>(`/api/skills/${id}/share`, { method: "POST" }),
   deleteSkill: (id: string) => request<void>(`/api/skills/${id}`, { method: "DELETE" }),
 
   instructions: () => request<Instructions>("/api/instructions"),

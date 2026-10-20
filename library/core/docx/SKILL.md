@@ -1,6 +1,8 @@
 ---
 name: docx
 description: Create Word documents (.docx) from Markdown with real headings, lists, tables and images, and edit existing ones (replace text keeping formatting, inspect structure, append sections). Use whenever a task produces or changes a .docx file.
+metadata:
+  category: documents
 ---
 
 # Word documents

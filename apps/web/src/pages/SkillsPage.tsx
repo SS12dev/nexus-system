@@ -21,6 +21,9 @@ const SCOPE_LABEL: Record<SkillScope, string> = {
   learned: "Learned",
 };
 
+// Shelves in the order the library uses (jarvis_common.skills.CATEGORIES).
+const SHELVES = ["documents", "research", "writing", "data", "productivity", "agents", "engineering", "other"];
+
 const STATUS_STYLE: Record<Skill["status"], string> = {
   active: "bg-emerald-500/15 text-emerald-300",
   draft: "bg-amber-500/15 text-amber-300",
@@ -51,6 +54,7 @@ export function SkillsPage() {
   const [versions, setVersions] = useState<SkillVersion[] | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [tab, setTab] = useState<"skills" | "instructions">("skills");
+  const [shelf, setShelf] = useState<string | null>(null);
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -103,6 +107,8 @@ export function SkillsPage() {
   };
 
   const groups: SkillScope[] = ["core", "domain", "personal", "learned"];
+  const shelves = SHELVES.filter((c) => skills.some((s) => s.category === c));
+  const shown = shelf ? skills.filter((s) => s.category === shelf) : skills;
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -182,8 +188,24 @@ export function SkillsPage() {
                   )}
                 </div>
               )}
+              {shelves.length > 1 && (
+                <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Shelves">
+                  {[null, ...shelves].map((c) => (
+                    <button
+                      key={c ?? "all"}
+                      onClick={() => setShelf(c)}
+                      aria-pressed={shelf === c}
+                      className={`rounded-full border px-2.5 py-0.5 text-xs capitalize ${
+                        shelf === c ? "border-sky-500/60 bg-edge text-white" : "border-edge text-slate-400 hover:bg-edge/50"
+                      }`}
+                    >
+                      {c ?? "all"} ({c ? skills.filter((s) => s.category === c).length : skills.length})
+                    </button>
+                  ))}
+                </div>
+              )}
               {groups.map((g) => {
-                const items = skills.filter((s) => s.scope === g);
+                const items = shown.filter((s) => s.scope === g);
                 if (!items.length) return null;
                 return (
                   <div key={g} className="mb-4">
@@ -251,6 +273,7 @@ export function SkillsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-semibold">{selected.name}</h2>
                     <code className="text-xs text-slate-500">{selected.slug}</code>
+                    <span className="rounded bg-edge px-1.5 text-xs text-slate-300 capitalize">{selected.category}</span>
                     <span className={`rounded px-1.5 text-xs ${STATUS_STYLE[selected.status]}`}>
                       {selected.status}
                     </span>
@@ -298,6 +321,22 @@ export function SkillsPage() {
                       >
                         <History size={14} /> History
                       </button>
+                      {isAdmin && selected.owner_id === user.id && (
+                        <button
+                          onClick={() => {
+                            if (!confirm(`Share ${selected.name} with everyone? It moves to the shared library, turned on.`))
+                              return;
+                            act(async () => {
+                              setSelected(await api.shareSkill(selected.id));
+                              setVersions(null);
+                              await load();
+                            });
+                          }}
+                          className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                        >
+                          Share with everyone
+                        </button>
+                      )}
                       {selected.scope !== "core" && (
                         <button
                           onClick={() => {
@@ -419,8 +458,9 @@ function InstructionsPanel({
   return (
     <div className="max-w-3xl space-y-6">
       <p className="text-sm text-slate-400">
-        Every agent gets these in order: the safety rules, then global instructions, then its
-        role's, then yours. Later layers add detail but can't override the safety rules.
+        Every agent gets these in order: the safety rules, the house conventions and global
+        instructions, then its role's, then yours. Jarvis itself follows the conventions, global
+        instructions and yours. Later layers add detail but can't override the safety rules.
       </p>
       <Layer
         title="Your instructions"
@@ -434,6 +474,12 @@ function InstructionsPanel({
         <summary className="cursor-pointer text-sm font-medium">Safety rules (shipped, read only)</summary>
         <pre className="mt-2 text-xs whitespace-pre-wrap text-slate-400">{data.safety}</pre>
       </details>
+      {data.shared && (
+        <details className="rounded-md border border-edge p-3">
+          <summary className="cursor-pointer text-sm font-medium">House conventions (shipped, read only)</summary>
+          <pre className="mt-2 text-xs whitespace-pre-wrap text-slate-400">{data.shared}</pre>
+        </details>
+      )}
       <Layer
         title="Global instructions"
         hint="For every agent of every user."

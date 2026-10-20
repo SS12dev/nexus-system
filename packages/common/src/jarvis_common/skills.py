@@ -40,6 +40,11 @@ MAX_DESCRIPTION = 1024
 # Skill files are text (scripts, references, templates); anything bigger or binary is skipped.
 MAX_FILE_BYTES = 200_000
 MAX_FILES = 40
+# Shelves of the library, in the order the Skills page and prompts list them. A skill names
+# its shelf in frontmatter (metadata: category: research); anything else goes under "other".
+CATEGORIES = (
+    "documents", "research", "writing", "data", "productivity", "agents", "engineering", "other",
+)  # fmt: skip
 TEXT_SUFFIXES = {
     ".md", ".txt", ".py", ".sh", ".json", ".yaml", ".yml", ".csv", ".html", ".css", ".js",
     ".toml", ".xml", ".sql", ".tex",
@@ -62,6 +67,10 @@ class ParsedSkill:
     def body(self) -> str:
         return split_frontmatter(self.content)[1]
 
+    @property
+    def category(self) -> str:
+        return category_of(self.meta)
+
 
 def split_frontmatter(text: str) -> tuple[dict, str]:
     text = text.lstrip("﻿")
@@ -75,6 +84,19 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     if not isinstance(meta, dict):
         raise SkillError("SKILL.md frontmatter must be a mapping")
     return meta, text[m.end() :]
+
+
+def category_of(meta: dict) -> str:
+    extra = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+    value = str(extra.get("category") or meta.get("category") or "").strip().lower()
+    return value if value in CATEGORIES else "other"
+
+
+def skill_category(content: str) -> str:
+    try:
+        return category_of(split_frontmatter(content)[0])
+    except SkillError:
+        return "other"
 
 
 def parse_skill(content: str, files: dict[str, str] | None = None) -> ParsedSkill:
@@ -167,6 +189,7 @@ def skill_payload(s: Skill, *, full: bool = False) -> dict:
         "scope": s.scope,
         "name": s.name,
         "description": s.description,
+        "category": skill_category(s.content),
         "version": s.version,
         "status": s.status,
         "source": s.source,
@@ -293,11 +316,37 @@ async def find_skill(db: AsyncSession, user_id: uuid.UUID, name: str) -> Skill |
 
 
 def catalogue(skills: list[Skill]) -> str:
-    """The progressive-disclosure listing put in a prompt: only slug and description."""
-    return "\n".join(f"- {s.slug}: {s.description}" for s in skills)
+    """The progressive-disclosure listing put in a prompt: only slug and description, grouped
+    by shelf once the library spans more than one."""
+    shelves: dict[str, list[Skill]] = {}
+    for s in skills:
+        shelves.setdefault(skill_category(s.content), []).append(s)
+    if len(shelves) <= 1:
+        return "\n".join(f"- {s.slug}: {s.description}" for s in skills)
+    parts = []
+    for shelf in sorted(shelves, key=CATEGORIES.index):
+        parts.append(f"{shelf}:")
+        parts += [f"- {s.slug}: {s.description}" for s in shelves[shelf]]
+    return "\n".join(parts)
+
+
+def shelf_index(skills: list[Skill]) -> str:
+    """One line per shelf with its skill names: what the library holds, in a few tokens."""
+    shelves: dict[str, list[str]] = {}
+    for s in skills:
+        shelves.setdefault(skill_category(s.content), []).append(s.slug)
+    return "\n".join(
+        f"- {shelf}: {', '.join(shelves[shelf])}" for shelf in sorted(shelves, key=CATEGORIES.index)
+    )
 
 
 # --- Instructions --------------------------------------------------------------------------
+
+
+def shipped_shared(library: Path) -> str:
+    """library/instructions/shared.md: house conventions for Jarvis and every agent."""
+    path = library / "instructions" / "shared.md"
+    return path.read_text("utf-8").strip() if path.is_file() else ""
 
 
 def shipped_instructions(library: Path) -> tuple[str, dict[str, str]]:
@@ -349,14 +398,21 @@ async def instruction_layers(
         )
     ).all()
     layers = Layers(safety=safety)
+    shared, admin_global = shipped_shared(library), ""
     role_rows = {}
     for r in rows:
         if r.layer == InstructionLayer.global_ and r.user_id is None:
-            layers.global_extra = r.content.strip()
+            admin_global = r.content.strip()
         elif r.layer == InstructionLayer.role and r.user_id is None:
             role_rows[r.key] = r.content.strip()
         elif r.layer == InstructionLayer.user and r.user_id == user.id:
             layers.user = r.content.strip()
+    layers.global_extra = "\n\n".join(x for x in (shared, admin_global) if x)
     if role:
         layers.role = "\n\n".join(x for x in (shipped_roles.get(role), role_rows.get(role)) if x)
     return layers
+
+
+def role_names(library: Path) -> list[str]:
+    """Roles with shipped instructions, for the team designer to choose from."""
+    return sorted(shipped_instructions(library)[1])

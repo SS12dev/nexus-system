@@ -19,6 +19,10 @@ dependencies = [
     "numpy>=2.1",
     "matplotlib>=3.9",
     "pillow>=11.0",
+    "scipy>=1.14",
+    "scikit-learn>=1.6",
+    # Time zones for scheduling scripts; the slim image has no system zoneinfo.
+    "tzdata>=2024.1",
 ]
 
 [build-system]

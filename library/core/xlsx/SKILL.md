@@ -1,6 +1,8 @@
 ---
 name: xlsx
 description: Create Excel workbooks (.xlsx) from JSON with styled headers, number formats, formulas, totals, frozen panes, filters, column widths and native charts, and read or edit existing workbooks with openpyxl while keeping formulas. Use whenever a task produces or changes a .xlsx file or needs a spreadsheet of results.
+metadata:
+  category: documents
 ---
 
 # Excel workbooks

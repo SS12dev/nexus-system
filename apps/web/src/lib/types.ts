@@ -141,6 +141,7 @@ export interface Skill {
   scope: SkillScope;
   name: string;
   description: string;
+  category: string;
   version: number;
   status: SkillStatus;
   source: string | null;
@@ -172,6 +173,7 @@ export interface SkillVersion {
 
 export interface Instructions {
   safety: string;
+  shared: string;
   global: string;
   roles: { role: string; shipped: string; extra: string }[];
   user: string;

@@ -1,6 +1,8 @@
 ---
 name: charts
 description: Make clean, readable chart images (bar, horizontal bar, stacked bar, line, area, pie/donut, scatter) as PNG or SVG from a small JSON spec, for reports, decks and spreadsheets. Use when a task needs a chart or graph.
+metadata:
+  category: documents
 ---
 
 # Charts

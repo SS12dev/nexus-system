@@ -7,6 +7,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis_common.litellm import ensure_user_key
 from jarvis_common.memory import get_profile
 from jarvis_common.models import AgentSystem, SystemLifetime, SystemStatus, User
-from jarvis_common.skills import usable_skills
+from jarvis_common.skills import role_names, usable_skills
 from jarvis_common.spec import AgentSystemSpec, check_spec
 from jarvis_common.toolinfo import TOOLS
 from jarvis_orchestrator.llm import parse_json
@@ -98,6 +99,7 @@ async def design(
         profile.content if profile.memory_enabled else "",
         best_model,
         current.model_dump() if current is not None else None,
+        role_names(Path(settings.library_path)),
     )
     api_key = await ensure_user_key(db, settings, deps.gateway, user)
     model = deps.model_factory(

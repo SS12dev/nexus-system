@@ -23,7 +23,7 @@ RUN uv sync --frozen --no-dev --package jarvis-sandbox --no-install-workspace
 
 COPY services/sandbox services/sandbox
 RUN uv sync --frozen --no-dev --package jarvis-sandbox \
-    && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas"
+    && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas, scipy, sklearn, zoneinfo; zoneinfo.ZoneInfo('Asia/Kolkata')"
 
 RUN useradd --system --uid 10002 sandbox
 USER sandbox

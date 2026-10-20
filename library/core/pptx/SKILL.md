@@ -1,6 +1,8 @@
 ---
 name: pptx
 description: Build PowerPoint decks (.pptx) from a JSON outline (title, bullet, image, chart, table, two-column and section slides with speaker notes), optionally on the user's own template, and edit existing decks (inspect, replace text, delete slides). Use whenever a task produces or changes a .pptx file.
+metadata:
+  category: documents
 ---
 
 # PowerPoint decks

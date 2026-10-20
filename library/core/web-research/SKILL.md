@@ -1,6 +1,8 @@
 ---
 name: web-research
 description: A method for researching a topic on the web and reporting it with sources - search strategy, choosing and reading sources, cross-checking facts, and recording citations. Use for any task that needs current facts from the web, market or competitor scans, or "find out about X".
+metadata:
+  category: research
 ---
 
 # Web research

@@ -335,11 +335,11 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     async def run_code(
         code: str, language: Literal["python", "bash"] = "python", file_ids: list[str] | None = None
     ) -> str:
-        """Run Python or bash in the sandbox: no network, document libraries installed (pypdf,
-        pdfplumber, reportlab, weasyprint, python-docx, python-pptx, openpyxl, pandas,
-        matplotlib). Files: the given library file ids (default: the files this task started
-        with plus files saved earlier in this run) are in in/ under their names; your skills
-        are unpacked in skills/<scope>/<name>/;
+        """Run Python or bash in the sandbox: no network, document and data libraries installed
+        (pypdf, pdfplumber, reportlab, weasyprint, python-docx, python-pptx, openpyxl, pandas,
+        numpy, scipy, scikit-learn, matplotlib, pillow). Files: the given library file ids
+        (default: the files this task started with plus files saved earlier in this run) are in
+        in/ under their names; your skills are unpacked in skills/<scope>/<name>/;
         everything written to out/ is saved to the user's library. Each call starts fresh."""
         await note("run_code", language=language)
         if deps.sandbox is None:
