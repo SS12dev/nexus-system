@@ -68,6 +68,7 @@ export function LibraryPage() {
     run(async () => {
       await api.deleteFile(f.id);
       setIds((xs) => xs.filter((x) => x !== f.id));
+      useStore.getState().handleEvent({ type: "file.deleted", data: { id: f.id } });
     });
   };
 

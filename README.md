@@ -4,15 +4,17 @@ Jarvis is a supervisor agent you chat with. It answers simple asks itself and, f
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Jarvis: Architecture & Research".
 
-This repository is at **phase 3, Agent systems and the skills library**. Phase 1 gave sign-in
+This repository is at **phase 4, the 3D orb**. Phase 1 gave sign-in
 with invites and roles, private chats per user, Jarvis streaming replies over a WebSocket, every
 model call going through LiteLLM with a per-user budget, and every call traced with its cost in
 Langfuse. Phase 2 adds long-term memory (a profile of you, facts and preferences, summaries of
 past chats) and a document library: upload PDF, Word, PowerPoint, Excel and more in a chat or on
 the Library page and ask Jarvis about them. Phase 3 lets Jarvis build teams of sub-agents for
 bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
-shared skills library, per-run budgets, and your approval before anything risky. All of it runs
-on one machine with Docker Compose.
+shared skills library, per-run budgets, and your approval before anything risky. Phase 4 makes
+the home screen a 3D orb: Jarvis in the middle, its live agent teams growing out of it and
+pulling back in, and your memories and artifacts inside it. All of it runs on one machine with
+Docker Compose.
 
 ## Quick start
 
@@ -200,10 +202,38 @@ keep failing are flagged. Its Instructions tab holds the layers every agent gets
 shipped safety rules ([library/instructions](library/instructions)), global and per-role
 instructions (admins), then your own house style.
 
+## The orb
+
+The home screen is a React Three Fiber scene ([apps/web/src/orb](apps/web/src/orb)) with the chat
+box docked underneath; sending a message opens the chat.
+
+- **The orb** is a shader sphere whose colour, churn and pulse follow what Jarvis is doing: blue
+  and calm when idle, violet while thinking, bright and pulsing while answering.
+- **Around it**, every team that isn't archived is a cluster tied to the orb by an edge: the
+  lead hangs from the orb, workers from the lead (a pipeline is a chain). Agents are coloured
+  by their live status (working, using a tool, waiting for your approval, done), and a spark
+  runs down the edge to a busy agent. A new team grows out of the orb, agent by agent; when a
+  team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
+  springs, so nothing jumps.
+- **Inside it**, memories are particles clustered by kind (preferences, facts, goals,
+  instructions), pinned ones brighter; artifacts (files Jarvis or a team made) are small
+  crystals. A new one grows in with a flash.
+- **Tap** an agent, memory or crystal for a card that opens the team, the memory on the Memory
+  page, or the file. Drag to turn, pinch or scroll to zoom.
+- **Phones** get fewer particles, no bloom, a lower pixel ratio and a 30 fps cap, and teams sit
+  on a tighter band on portrait screens. **List** (top right) shows the same teams, memories and
+  artifacts as plain lists; it is also what shows when the device has no WebGL. With
+  reduced motion turned on in the OS, nothing spins or pulses and objects snap into place.
+
+Everything is driven by the existing WebSocket events (`jarvis.state`, `system.*`, `run.updated`,
+`agent.status`, `approval.*`, `memory.updated`, `artifact.created`, `file.*`), with a fresh fetch
+on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
+
 ## Repository layout
 
 ```
-apps/web/               React + Vite + Tailwind PWA (chat, Library, Memory, Agents, Skills, People)
+apps/web/               React + Vite + Tailwind PWA (orb home, chat, Library, Memory, Agents,
+                        Skills, People); the 3D scene is in src/orb
 services/api/           FastAPI: auth, chats, files, memories, skills, agents, approvals, admin,
                         WebSocket; Alembic migrations
 services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent systems (design,
@@ -249,6 +279,6 @@ Schema changes: edit `packages/common/src/jarvis_common/models.py`, then
 
 ## Roadmap
 
-1. Foundation · 2. Memory and documents · 3. **Agent systems, tools and the skills library**
-(this) · 4. The 3D orb · 5. Production hardening (Cloudflare Access, admin console, dashboards,
+1. Foundation · 2. Memory and documents · 3. Agent systems, tools and the skills library ·
+4. **The 3D orb** (this) · 5. Production hardening (Cloudflare Access, admin console, dashboards,
 backups) · 6. Move to a server, voice

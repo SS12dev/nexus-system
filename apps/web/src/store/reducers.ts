@@ -65,6 +65,17 @@ export function upsertSystems(state: ChatState, systems: AgentSystem[]): ChatSta
   return { ...state, systems: next };
 }
 
+/** Take a fresh list of the user's non-archived systems as the truth: any system the store
+ * still has as live that the list leaves out was deleted or archived while the socket was down. */
+export function syncLiveSystems(state: ChatState, systems: AgentSystem[]): ChatState {
+  const ids = new Set(systems.map((s) => s.id));
+  const next = upsertSystems(state, systems);
+  const kept = Object.fromEntries(
+    Object.entries(next.systems).filter(([id, s]) => ids.has(id) || s.status === "archived"),
+  );
+  return { ...next, systems: kept };
+}
+
 export function upsertApprovals(state: ChatState, approvals: Approval[]): ChatState {
   const next = { ...state.approvals };
   for (const a of approvals) next[a.id] = a;
@@ -81,6 +92,13 @@ function upsertMessage(list: Message[] = [], message: Message): Message[] {
 
 export function upsertFile(files: Record<string, FileItem>, file: FileItem) {
   return { ...files, [file.id]: file };
+}
+
+export function syncFiles(current: Record<string, FileItem>, fetched: FileItem[]) {
+  const next: Record<string, FileItem> = {};
+  for (const f of Object.values(current)) if (f.status === "processing") next[f.id] = f;
+  for (const f of fetched) next[f.id] = f;
+  return next;
 }
 
 export function upsertChat(chats: Chat[], chat: Chat): Chat[] {
@@ -153,6 +171,12 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       };
     case "skill.updated":
       return { ...state, skillsVersion: state.skillsVersion + 1 };
+    case "artifact.created":
+      return { ...state, files: upsertFile(state.files, event.data.file) };
+    case "file.deleted": {
+      const { [event.data.id]: _gone, ...files } = state.files;
+      return { ...state, files };
+    }
     case "file.updated": {
       const file = event.data.file;
       // Attachment chips in loaded chats follow the file's status too.

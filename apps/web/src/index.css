@@ -19,7 +19,8 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-/* Placeholder for the phase 4 3D orb: colour and pulse follow Jarvis's state. */
+/* Small 2D orb for the sidebar, headers and the 3D scene's loading state: colour and pulse
+   follow Jarvis's state. */
 .orb {
   border-radius: 9999px;
   background: radial-gradient(circle at 50% 40%, #e0f2fe, #38bdf8 35%, #1e3a8a 75%, transparent);
@@ -43,4 +44,19 @@ body {
   .orb {
     animation: none !important;
   }
+}
+
+/* Team names floating over the 3D network. */
+.orb-label {
+  white-space: nowrap;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  color: rgb(226 232 240);
+  background: rgb(11 16 32 / 0.7);
+  border: 1px solid rgb(28 37 64);
+  user-select: none;
 }
