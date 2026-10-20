@@ -151,7 +151,12 @@ async def new_run(
     spec asked for, else the default, capped by the per-run maximum and what the user has
     left this period; the estimate must fit in it."""
     spec = AgentSystemSpec.model_validate(system.spec)
-    wanted = budget_usd or spec.budget_usd or settings.default_run_budget_usd
+    default = (
+        settings.dev_run_budget_usd
+        if spec.topology == "dev_project"
+        else settings.default_run_budget_usd
+    )
+    wanted = budget_usd or spec.budget_usd or default
     budget = min(wanted, settings.max_run_budget_usd)
     left = await remaining_usd(db, settings, gateway, user)
     if left <= 0.01:

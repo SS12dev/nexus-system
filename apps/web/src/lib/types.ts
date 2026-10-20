@@ -188,7 +188,8 @@ export type Topology =
   | "pipeline"
   | "supervisor_workers"
   | "parallel_map_reduce"
-  | "critic_loop";
+  | "critic_loop"
+  | "dev_project";
 export type Tier = "nano" | "mini" | "pro" | "max";
 export type SystemStatus = "idle" | "running" | "awaiting_approval" | "paused" | "archived";
 export type RunStatus =
@@ -206,6 +207,8 @@ export interface AgentNode {
   role: string;
   tier: Tier;
   lead: boolean;
+  /** dev_project only: Brief, Plan, Build, Test or Review. */
+  stage?: string;
 }
 
 export interface AgentEdge {

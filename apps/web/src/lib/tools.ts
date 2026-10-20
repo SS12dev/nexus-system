@@ -1,3 +1,5 @@
+import type { AgentLive, AgentNode } from "./types";
+
 /** How tools read in the UI: what Jarvis or an agent is doing while one runs. */
 export const TOOL_LABEL: Record<string, string> = {
   search_documents: "Searching your documents",
@@ -79,4 +81,15 @@ export const AGENT_LABEL: Record<string, string> = {
   paused: "Paused",
   done: "Done",
   failed: "Failed",
+  skipped: "Not needed",
 };
+
+const BUSY = ["running", "thinking", "working", "waiting"];
+
+/** A software team's current stage, from whichever agent is busy, e.g. "Build · round 2". */
+export function currentStage(nodes: AgentNode[], live: Record<string, AgentLive> = {}): string {
+  const busy = nodes.find((n) => n.stage && BUSY.includes(live[n.id]?.status ?? ""));
+  if (!busy) return "";
+  const item = live[busy.id]?.item;
+  return item ? `${busy.stage} · ${item}` : (busy.stage ?? "");
+}

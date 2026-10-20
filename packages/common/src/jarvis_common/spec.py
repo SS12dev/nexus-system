@@ -10,6 +10,8 @@ Topologies, and how the agents list is read for each:
   handles each item (in parallel copies), the third combines their results.
 - critic_loop: exactly two agents. The first does the work, the second reviews it and sends it
   back with feedback until it passes or max_rounds is reached.
+- dev_project: Jarvis's fixed software team (jarvis_common.devteam) working in one workbench
+  project: brief, plan, build, test and review, with fixes going back to the builders.
 """
 
 import re
@@ -17,8 +19,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from jarvis_common.devteam import DEV_IDS, MAX_ROUNDS, STAGES, dev_agents
+
 Tier = Literal["nano", "mini", "pro", "max"]
-Topology = Literal["single", "pipeline", "supervisor_workers", "parallel_map_reduce", "critic_loop"]
+Topology = Literal[
+    "single", "pipeline", "supervisor_workers", "parallel_map_reduce", "critic_loop", "dev_project"
+]
 Lifetime = Literal["ephemeral", "persistent", "template"]
 
 TOPOLOGIES: tuple[str, ...] = (
@@ -27,6 +33,7 @@ TOPOLOGIES: tuple[str, ...] = (
     "supervisor_workers",
     "parallel_map_reduce",
     "critic_loop",
+    "dev_project",
 )
 TIERS: tuple[str, ...] = ("nano", "mini", "pro", "max")
 TIER_MODEL: dict[str, str] = {t: f"jarvis-{t}" for t in TIERS}
@@ -46,6 +53,8 @@ EST_OUTPUT_TOKENS = 700
 EST_STEP_SHARE = 0.5
 
 AGENT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+# A workbench project id (the workbench's own rule).
+PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def tier_up(tier: str) -> str:
@@ -99,6 +108,33 @@ class AgentSystemSpec(BaseModel):
     max_rounds: int = Field(default=3, ge=1, le=10)
     # What the user should get back, e.g. ["report.docx", "data.xlsx"].
     deliverables: list[str] = Field(default_factory=list, max_length=10)
+    # dev_project: the workbench project the team works in. An earlier project's id continues
+    # that project; empty starts a new one (named after the system when it is saved).
+    project: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _house_team(cls, data):
+        """A dev_project always gets the house team, whatever agents were sent; a spec that
+        already has it keeps its own copy (tiers or instructions changed on purpose)."""
+        if isinstance(data, dict) and data.get("topology") == "dev_project":
+            data = dict(data)
+            agents = data.get("agents")
+            ids = (
+                [a.get("id") for a in agents if isinstance(a, dict)]
+                if isinstance(agents, list)
+                else []
+            )
+            if ids != list(DEV_IDS):
+                data["agents"] = dev_agents()
+            data["max_rounds"] = min(int(data.get("max_rounds") or MAX_ROUNDS), MAX_ROUNDS)
+        return data
+
+    @field_validator("project")
+    @classmethod
+    def _project(cls, v: str | None) -> str | None:
+        v = (v or "").strip().lower()
+        return v if PROJECT_ID.match(v) else None
 
     @model_validator(mode="after")
     def _shape(self):
@@ -112,6 +148,7 @@ class AgentSystemSpec(BaseModel):
             "supervisor_workers": n >= 2,
             "parallel_map_reduce": n == 3,
             "critic_loop": n == 2,
+            "dev_project": ids == list(DEV_IDS),
         }
         if not need[self.topology]:
             rule = {
@@ -120,6 +157,7 @@ class AgentSystemSpec(BaseModel):
                 "supervisor_workers": "a lead and at least 1 worker",
                 "parallel_map_reduce": "exactly 3 agents: splitter, worker, combiner",
                 "critic_loop": "exactly 2 agents: worker, critic",
+                "dev_project": "the house team: " + ", ".join(DEV_IDS),
             }[self.topology]
             raise ValueError(f"{self.topology} needs {rule}, got {n}")
         return self
@@ -153,13 +191,28 @@ class AgentSystemSpec(BaseModel):
                     {"from": a[0], "to": a[1], "kind": "review"},
                     {"from": a[1], "to": a[0], "kind": "feedback"},
                 ]
+            case "dev_project":
+                return [
+                    {"from": "researcher", "to": "architect", "kind": "handoff"},
+                    {"from": "architect", "to": "frontend", "kind": "handoff"},
+                    {"from": "architect", "to": "backend", "kind": "handoff"},
+                    {"from": "frontend", "to": "tester", "kind": "handoff"},
+                    {"from": "backend", "to": "tester", "kind": "handoff"},
+                    {"from": "tester", "to": "reviewer", "kind": "review"},
+                    {"from": "reviewer", "to": "frontend", "kind": "feedback"},
+                    {"from": "reviewer", "to": "backend", "kind": "feedback"},
+                ]
         return []
 
     def nodes(self) -> list[dict]:
-        return [
+        out = [
             {"id": x.id, "name": x.name, "role": x.role, "tier": x.tier, "lead": i == 0}
             for i, x in enumerate(self.agents)
         ]
+        if self.topology == "dev_project":
+            for n in out:
+                n["stage"] = STAGES[n["id"]]
+        return out
 
     def estimate_usd(self, default_steps: int, map_items: int) -> float:
         """A rough upper-middle estimate of what a run costs, for the budget check."""
@@ -171,6 +224,9 @@ class AgentSystemSpec(BaseModel):
             if self.topology == "parallel_map_reduce" and i == 1:
                 copies = map_items
             elif self.topology == "critic_loop":
+                copies = self.max_rounds
+            elif self.topology == "dev_project" and i >= 2:
+                # Build, test and review run once per review round.
                 copies = self.max_rounds
             elif self.topology == "supervisor_workers":
                 # The lead takes a turn after every delegation; each worker gets up to max_rounds.

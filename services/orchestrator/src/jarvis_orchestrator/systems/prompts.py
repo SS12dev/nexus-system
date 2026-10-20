@@ -55,6 +55,21 @@ def position(spec: AgentSystemSpec, agent: AgentSpec) -> str:
                 f"You review the work of {names[ids[0]]} against the goal and call `verdict`: "
                 "approve work that is good enough, or give specific feedback to fix."
             )
+        case "dev_project":
+            return (
+                "You are in a software team working in one project folder that every agent "
+                "shares: the researcher writes BRIEF.md, the architect PLAN.md, the frontend and "
+                "backend builders build it side by side, the tester tests it and the reviewer "
+                "approves it or sends fixes back to the builders. "
+                + {
+                    "researcher": "You write the brief.",
+                    "architect": "You write the plan; the user sees it in the chat.",
+                    "frontend": "You build the front end.",
+                    "backend": "You build the back end.",
+                    "tester": "You test what the builders made.",
+                    "reviewer": "You review the work; your verdict decides whether it ships.",
+                }.get(agent.id, "")
+            )
     return ""
 
 
@@ -123,6 +138,11 @@ task into independent items; a copy of the worker handles each item in parallel;
 merges results. For "do X for each of N things".
 - critic_loop: exactly 2 agents: [worker, critic]. The critic reviews and sends work back \
 until it passes (max_rounds). For output where quality matters more than cost.
+- dev_project: Jarvis's software team, for ANY request to build, fix or extend software \
+(an app, website, game, tool, script or bot). Its agents are fixed: send "agents": [] and only \
+give name (the app's short name, e.g. "2048"), goal and project. project: to change or extend \
+one of the user's EXISTING PROJECTS (a follow-up such as "add a high score table"), its id; \
+for a new app, null.
 
 ## Model tiers (cost rises about 5x per step)
 - nano: classify, extract, short summaries.
@@ -150,13 +170,14 @@ always do (send_email, delete_document always ask).
 (what to buy, what the research says, how to do something), the answer goes in the chat: \
 leave deliverables empty and don't have agents write the answer into a file.
 - Keep it small: 1 to 4 agents usually; at most 8.
+- Software to build, fix or extend always gets dev_project, never another topology.
 - If one of the user's SAVED TEMPLATES fits the request, reply with {"template_id": "<id>"} \
 instead of a spec.
 
 Reply with JSON only: {"spec": {"name": str, "goal": str, "topology": str, "agents": [{"id": \
 str, "name": str, "role": str, "instructions": str, "tier": str, "tools": [str], "skills": \
 [str], "max_steps": int|null}], "approval": {"required_for": [str]}, "max_rounds": int, \
-"deliverables": [str]}} or {"template_id": str}."""
+"deliverables": [str], "project": str|null}} or {"template_id": str}."""
 
 
 DEFAULT_ROLES = ("researcher", "writer", "analyst", "reviewer", "planner", "coder")
@@ -173,8 +194,17 @@ def design_request(
     best_model: bool,
     current: dict | None = None,
     roles: list[str] | None = None,
+    projects: list[tuple[str, str, str]] | None = None,
+    software: bool = False,
 ) -> str:
     parts = [f"REQUEST:\n{request}"]
+    if software:
+        parts.append("This request is software to build, fix or extend: use dev_project.")
+    if projects:
+        parts.append(
+            "EXISTING PROJECTS (id: name: goal), newest first:\n"
+            + "\n".join(f"- {i}: {n}: {g[:200]}" for i, n, g in projects)
+        )
     if deliverables:
         parts.append("DELIVERABLES WANTED: " + ", ".join(deliverables))
     if files:

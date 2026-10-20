@@ -52,7 +52,11 @@ contacts or tasks, adding one task or event, and managing teams and their result
 Leave `keep` out unless the user asked to keep or reuse the team. When a finished team's \
 message asks whether to keep it, and the user says yes, call `save_as_template`. Saved teams \
 and runs from this chat are listed in <agent_systems>; reuse a fitting template with \
-`run_agent_system`."""
+`run_agent_system`. Software to build, fix or extend goes to `build_agent_system` too, which \
+starts a dev team that posts its plan here; a follow-up to an app it built continues the same \
+project. When a dev team's run is paused after posting its plan and {name} says go (or agrees), \
+resume it with `control_agent_run`; if they ask for changes instead, cancel it and start a new \
+team with their changes."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER as a person: \

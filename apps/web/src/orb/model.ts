@@ -20,6 +20,7 @@ export const NODE_COLOR: Record<string, string> = {
   paused: "#a78bfa",
   done: "#10b981",
   failed: "#ef4444",
+  skipped: "#334155",
 };
 
 export const KIND_COLOR: Record<MemoryKind, string> = {
@@ -156,7 +157,7 @@ export function agentTargets(
   const u = norm(cross(out, up));
   const v = cross(out, u);
   if (count <= 1) return [anchor];
-  if (topology === "pipeline" || topology === "critic_loop") {
+  if (topology === "pipeline" || topology === "critic_loop" || topology === "dev_project") {
     // A chain reads as a line, first agent nearest the orb's left.
     const step = 0.55;
     return Array.from({ length: count }, (_, i) =>
@@ -204,7 +205,7 @@ export function buildClusters(
     const ordered = [...s.nodes].sort((a, b) => Number(b.lead) - Number(a.lead));
     const targets = agentTargets(anchor, ordered.length, s.topology);
     const leadKey = ordered[0] ? `${s.id}:${ordered[0].id}` : null;
-    const chain = s.topology === "pipeline" || s.topology === "critic_loop";
+    const chain = s.topology === "pipeline" || s.topology === "critic_loop" || s.topology === "dev_project";
     const nodes: OrbNode[] = ordered.map((n, j) => {
       const key = `${s.id}:${n.id}`;
       const live = s.run?.agents?.[n.id];

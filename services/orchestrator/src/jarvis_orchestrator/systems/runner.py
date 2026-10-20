@@ -235,7 +235,7 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
 
 async def _invoke(app, config: dict, resume: bool) -> dict:
     if not resume:
-        start = {"outputs": {}, "transcripts": {}, "counts": {}, "results": []}
+        start = {"outputs": {}, "transcripts": {}, "counts": {}, "results": [], "dev": {}}
         return await app.ainvoke(start, config)
     snapshot = await app.aget_state(config)
     interrupts = [i for t in snapshot.tasks for i in t.interrupts]

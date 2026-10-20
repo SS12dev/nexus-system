@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prove the workbench's network is boxed in. Starts egress-proxy, workbench, postgres and redis
-# in a throwaway Compose project (jarvis-netcheck, removed at the end; your running Jarvis is
-# not touched), then from inside the workbench checks that:
+# in a throwaway Compose project (jarvis-netcheck, removed at the end, with no published ports;
+# your running Jarvis is not touched), then from inside the workbench checks that:
 #   - npm, PyPI and GitHub answer through the proxy,
 #   - any other site is refused by the proxy,
 #   - nothing is reachable directly: not postgres or redis (running, and reachable from the
@@ -11,8 +11,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-dc() { docker compose -p jarvis-netcheck --env-file .env.example "$@"; }
-trap 'dc down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
+# Publish no ports, so this runs next to a live Jarvis that already holds 5432 and the rest.
+override=$(mktemp)
+printf 'services:\n  postgres:\n    ports: !reset []\n' > "$override"
+dc() { docker compose -p jarvis-netcheck --env-file .env.example -f compose.yaml -f "$override" "$@"; }
+trap 'dc down -v --remove-orphans >/dev/null 2>&1 || true; rm -f "$override"' EXIT
 
 dc up -d --build --wait workbench postgres redis
 
