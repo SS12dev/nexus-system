@@ -96,7 +96,10 @@ def agent_prompt(
         f"- Today is {today}.\n"
         "- Every model and tool call costs the user money; work efficiently and stop when done.\n"
         "- Your final reply is your result and is passed on as it is: make it complete and "
-        "self-contained, and name any files you saved.\n"
+        "self-contained. The user reads the final result in the chat, not in files, so it must "
+        "contain the actual answer (the recommendation, findings, comparison table, plan or "
+        "draft itself), never just a description of a file. Name any files you saved in one "
+        "line at the end; they are extras to open.\n"
         "- In run_code, the task's files are in in/; save deliverables to out/ (they go to the "
         "user's library).\n"
         "</working>"
@@ -142,7 +145,9 @@ does it send_email or delete_document; the user approves each such step on an ap
 in the app, so don't leave it out or plan to ask in chat.
 - approval.required_for: add tools that should pause for the user beyond the ones that \
 always do (send_email, delete_document always ask).
-- deliverables: the files or outputs the user should get back, e.g. ["report.docx"].
+- deliverables: files the user asked for, e.g. ["report.docx"]. When they asked a question \
+(what to buy, what the research says, how to do something), the answer goes in the chat: \
+leave deliverables empty and don't have agents write the answer into a file.
 - Keep it small: 1 to 4 agents usually; at most 8.
 - If one of the user's SAVED TEMPLATES fits the request, reply with {"template_id": "<id>"} \
 instead of a spec.
