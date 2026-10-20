@@ -18,6 +18,8 @@ COPY packages/common packages/common
 COPY services/api services/api
 # Shipped instruction layers, shown on the Skills page.
 COPY library library
+# Absolute, so it resolves whatever the working directory is.
+ENV LIBRARY_PATH=/app/library
 RUN uv sync --frozen --no-dev --package jarvis-api
 
 RUN useradd --system --uid 10001 jarvis

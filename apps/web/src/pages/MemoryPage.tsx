@@ -1,7 +1,7 @@
 import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
 import { Link, useSearchParams } from "react-router";
+import { Markdown } from "../components/Markdown";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
@@ -124,9 +124,7 @@ export function MemoryPage() {
               )}
             </div>
             {profile.content ? (
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown>{profile.content}</ReactMarkdown>
-              </div>
+              <Markdown size="sm">{profile.content}</Markdown>
             ) : (
               <p className="text-sm text-slate-400">
                 Jarvis writes this once it has learned a few things about you.

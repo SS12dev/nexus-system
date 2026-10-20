@@ -18,6 +18,8 @@ COPY packages/common packages/common
 COPY services/orchestrator services/orchestrator
 # Core skills (synced into the database at startup) and instruction layers.
 COPY library library
+# Absolute, so it resolves whatever the working directory is.
+ENV LIBRARY_PATH=/app/library
 RUN uv sync --frozen --no-dev --package jarvis-orchestrator
 
 RUN useradd --system --uid 10001 jarvis

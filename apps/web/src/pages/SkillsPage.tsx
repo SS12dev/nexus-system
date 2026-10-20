@@ -1,7 +1,6 @@
-import { AlertTriangle, History, Plus, Search, Sparkles, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, History, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "../components/Markdown";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import {
@@ -57,6 +56,9 @@ export function SkillsPage() {
   const [shelf, setShelf] = useState<string | null>(null);
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const detail = useRef<HTMLElement>(null);
+  // Each new skill or draft starts at the top of the reading pane.
+  useEffect(() => detail.current?.scrollTo({ top: 0 }), [selected?.id, draft == null]);
 
   const act = async (fn: () => Promise<void>) => {
     setError("");
@@ -109,9 +111,11 @@ export function SkillsPage() {
   const groups: SkillScope[] = ["core", "domain", "personal", "learned"];
   const shelves = SHELVES.filter((c) => skills.some((s) => s.category === c));
   const shown = shelf ? skills.filter((s) => s.category === shelf) : skills;
+  // On a phone the list and the skill take turns filling the screen.
+  const reading = selected != null || draft != null;
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-6">
         <h1 className="mb-1 text-xl font-semibold">Skills</h1>
         <p className="mb-4 text-sm text-slate-400">
           Tested instructions and scripts Jarvis and its agents load when a task needs them, such
@@ -130,300 +134,315 @@ export function SkillsPage() {
           ))}
         </div>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
-
-        {tab === "instructions" ? (
-          <InstructionsPanel isAdmin={isAdmin} canWrite={canWrite} onError={setError} />
-        ) : (
-          <div className="grid gap-6 md:grid-cols-[20rem_1fr]">
-            <aside>
-              <form onSubmit={search} className="mb-3 flex gap-2">
-                <div className="relative flex-1">
-                  <Search size={14} className="absolute top-2.5 left-2 text-slate-500" />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search skills"
-                    className="w-full rounded-md border border-edge bg-panel py-1.5 pr-2 pl-7 text-sm"
-                  />
-                </div>
-              </form>
-              {canWrite && (
-                <div className="mb-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => {
-                      setSelected(null);
-                      setDraft(TEMPLATE);
-                    }}
-                    className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                  >
-                    <Plus size={14} /> New
-                  </button>
-                  <button
-                    onClick={() => fileInput.current?.click()}
-                    className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                  >
-                    <Upload size={14} /> Import
-                  </button>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept=".md,.zip"
-                    hidden
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) importFile(f);
-                      e.target.value = "";
-                    }}
-                  />
-                  {isAdmin && (
-                    <select
-                      value={newScope}
-                      onChange={(e) => setNewScope(e.target.value as "personal" | "domain")}
-                      className="rounded-md border border-edge bg-panel px-2 text-sm"
-                      aria-label="New skills are"
-                    >
-                      <option value="personal">for me</option>
-                      <option value="domain">shared</option>
-                    </select>
-                  )}
-                </div>
-              )}
-              {shelves.length > 1 && (
-                <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Shelves">
-                  {[null, ...shelves].map((c) => (
-                    <button
-                      key={c ?? "all"}
-                      onClick={() => setShelf(c)}
-                      aria-pressed={shelf === c}
-                      className={`rounded-full border px-2.5 py-0.5 text-xs capitalize ${
-                        shelf === c ? "border-sky-500/60 bg-edge text-white" : "border-edge text-slate-400 hover:bg-edge/50"
-                      }`}
-                    >
-                      {c ?? "all"} ({c ? skills.filter((s) => s.category === c).length : skills.length})
-                    </button>
-                  ))}
-                </div>
-              )}
-              {groups.map((g) => {
-                const items = shown.filter((s) => s.scope === g);
-                if (!items.length) return null;
-                return (
-                  <div key={g} className="mb-4">
-                    <h2 className="mb-1 text-xs font-medium tracking-wide text-slate-500 uppercase">
-                      {SCOPE_LABEL[g]}
-                    </h2>
-                    <ul className="space-y-1">
-                      {items.map((s) => (
-                        <li key={s.id}>
-                          <button
-                            onClick={() => open(s.id)}
-                            className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
-                              selected?.id === s.id ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Sparkles size={13} className="shrink-0 text-sky-300" />
-                              <span className="truncate font-medium">{s.name}</span>
-                              {s.flagged && (
-                                <AlertTriangle size={13} className="shrink-0 text-amber-300" aria-label="Often fails" />
-                              )}
-                              <span className={`ml-auto rounded px-1.5 text-[10px] ${STATUS_STYLE[s.status]}`}>
-                                {s.status}
-                              </span>
-                            </div>
-                            <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{s.description}</p>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </aside>
-
-            <section className="min-w-0">
-              {draft != null ? (
-                <div className="space-y-3">
-                  <h2 className="font-medium">{selected ? `Edit ${selected.name}` : "New skill"}</h2>
-                  <p className="text-xs text-slate-500">
-                    SKILL.md: a name and a one-sentence description (all an agent sees until it
-                    loads the skill), then the instructions. Saving makes a new version.
-                  </p>
-                  <textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    rows={24}
-                    className="w-full rounded-md border border-edge bg-panel p-3 font-mono text-xs"
-                    aria-label="SKILL.md"
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={save} className="rounded-md bg-sky-600 px-3 py-1.5 text-sm hover:bg-sky-500">
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setDraft(null)}
-                      className="rounded-md border border-edge px-3 py-1.5 text-sm hover:bg-edge/60"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : selected ? (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-semibold">{selected.name}</h2>
-                    <code className="text-xs text-slate-500">{selected.slug}</code>
-                    <span className="rounded bg-edge px-1.5 text-xs text-slate-300 capitalize">{selected.category}</span>
-                    <span className={`rounded px-1.5 text-xs ${STATUS_STYLE[selected.status]}`}>
-                      {selected.status}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      v{selected.version} · used {selected.uses}× · {selected.successes} ok /{" "}
-                      {selected.failures} failed
-                    </span>
-                  </div>
-                  {selected.flagged && (
-                    <p className="flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                      <AlertTriangle size={14} /> Runs using this skill keep failing. Review it.
-                    </p>
-                  )}
-                  {selected.status === "draft" && (
-                    <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                      {selected.scope === "learned"
-                        ? "Jarvis drafted this from one of its runs. Read it, edit if needed, then enable it."
-                        : "This skill is off until it is reviewed and enabled."}
-                    </p>
-                  )}
-                  {selected.can_edit && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setDraft(selected.content)}
-                        className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() =>
-                          act(async () => {
-                            const next = selected.status === "active" ? "disabled" : "active";
-                            await api.setSkillStatus(selected.id, next);
-                            setSelected({ ...selected, status: next });
-                            await load();
-                          })
-                        }
-                        className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                      >
-                        {selected.status === "active" ? "Disable" : "Enable"}
-                      </button>
-                      <button
-                        onClick={() => act(async () => setVersions(await api.skillVersions(selected.id)))}
-                        className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                      >
-                        <History size={14} /> History
-                      </button>
-                      {isAdmin && selected.owner_id === user.id && (
-                        <button
-                          onClick={() => {
-                            if (!confirm(`Share ${selected.name} with everyone? It moves to the shared library, turned on.`))
-                              return;
-                            act(async () => {
-                              setSelected(await api.shareSkill(selected.id));
-                              setVersions(null);
-                              await load();
-                            });
-                          }}
-                          className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                        >
-                          Share with everyone
-                        </button>
-                      )}
-                      {selected.scope !== "core" && (
-                        <button
-                          onClick={() => {
-                            if (!confirm(`Delete ${selected.name}?`)) return;
-                            act(async () => {
-                              await api.deleteSkill(selected.id);
-                              setSelected(null);
-                              await load();
-                            });
-                          }}
-                          className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-rose-500/20"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {versions && (
-                    <ul className="space-y-1 rounded-md border border-edge p-3 text-sm">
-                      {versions.map((v) => (
-                        <li key={v.version} className="flex items-center gap-3">
-                          <span className="w-10 text-slate-400">v{v.version}</span>
-                          <span className="flex-1 truncate">{v.note || "–"}</span>
-                          <span className="text-xs text-slate-500">{formatDate(v.created_at)}</span>
-                          {v.version !== selected.version && selected.can_edit && (
-                            <button
-                              onClick={() =>
-                                act(async () => {
-                                  setSelected(await api.rollbackSkill(selected.id, v.version));
-                                  setVersions(await api.skillVersions(selected.id));
-                                })
-                              }
-                              className="text-xs text-sky-300 hover:underline"
-                            >
-                              Restore
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <div className="prose prose-invert prose-sm max-w-none rounded-md border border-edge bg-panel p-4">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {selected.content.replace(/^---[\s\S]*?\n---\s*\n/, "")}
-                    </ReactMarkdown>
-                  </div>
-                  {selected.files.length > 0 && (
-                    <div>
-                      <h3 className="mb-1 text-sm font-medium">Files</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selected.files.map((f) => (
-                          <button
-                            key={f}
-                            onClick={() => setOpenFile(openFile === f ? null : f)}
-                            className={`rounded-md border px-2 py-0.5 font-mono text-xs ${
-                              openFile === f ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
-                            }`}
-                          >
-                            {f}
-                          </button>
-                        ))}
-                      </div>
-                      {openFile && (
-                        <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-edge bg-ink p-3 text-xs">
-                          {selected.file_contents[openFile]}
-                        </pre>
-                      )}
-                    </div>
-                  )}
-                  {!!selected.recent_uses?.length && (
-                    <div className="text-xs text-slate-400">
-                      <h3 className="mb-1 text-sm font-medium text-slate-200">Your recent uses</h3>
-                      {selected.recent_uses.map((u, i) => (
-                        <div key={i}>
-                          {formatDate(u.at)} · {u.agent} · {u.outcome ?? "running"}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="hidden text-sm text-slate-500 md:block">Pick a skill to read it.</p>
-              )}
-            </section>
-          </div>
-        )}
       </div>
+
+      {tab === "instructions" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-6xl px-4 pb-6">
+            <InstructionsPanel isAdmin={isAdmin} canWrite={canWrite} onError={setError} />
+          </div>
+        </div>
+      ) : (
+        // The list and the reading pane scroll on their own, so picking a skill far down the
+        // list shows it right beside the list, not at the top of the page.
+        <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 grid-rows-[minmax(0,1fr)] gap-6 px-4 md:grid-cols-[20rem_minmax(0,1fr)]">
+          <aside className={`min-h-0 overflow-y-auto pr-1 pb-6 ${reading ? "hidden md:block" : ""}`}>
+            <form onSubmit={search} className="mb-3 flex gap-2">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute top-2.5 left-2 text-slate-500" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search skills"
+                  className="w-full rounded-md border border-edge bg-panel py-1.5 pr-2 pl-7 text-sm"
+                />
+              </div>
+            </form>
+            {canWrite && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    setSelected(null);
+                    setDraft(TEMPLATE);
+                  }}
+                  className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                >
+                  <Plus size={14} /> New
+                </button>
+                <button
+                  onClick={() => fileInput.current?.click()}
+                  className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                >
+                  <Upload size={14} /> Import
+                </button>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".md,.zip"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) importFile(f);
+                    e.target.value = "";
+                  }}
+                />
+                {isAdmin && (
+                  <select
+                    value={newScope}
+                    onChange={(e) => setNewScope(e.target.value as "personal" | "domain")}
+                    className="rounded-md border border-edge bg-panel px-2 text-sm"
+                    aria-label="New skills are"
+                  >
+                    <option value="personal">for me</option>
+                    <option value="domain">shared</option>
+                  </select>
+                )}
+              </div>
+            )}
+            {shelves.length > 1 && (
+              <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Shelves">
+                {[null, ...shelves].map((c) => (
+                  <button
+                    key={c ?? "all"}
+                    onClick={() => setShelf(c)}
+                    aria-pressed={shelf === c}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs capitalize ${
+                      shelf === c ? "border-sky-500/60 bg-edge text-white" : "border-edge text-slate-400 hover:bg-edge/50"
+                    }`}
+                  >
+                    {c ?? "all"} ({c ? skills.filter((s) => s.category === c).length : skills.length})
+                  </button>
+                ))}
+              </div>
+            )}
+            {groups.map((g) => {
+              const items = shown.filter((s) => s.scope === g);
+              if (!items.length) return null;
+              return (
+                <div key={g} className="mb-4">
+                  <h2 className="mb-1 text-xs font-medium tracking-wide text-slate-500 uppercase">
+                    {SCOPE_LABEL[g]}
+                  </h2>
+                  <ul className="space-y-1">
+                    {items.map((s) => (
+                      <li key={s.id}>
+                        <button
+                          onClick={() => open(s.id)}
+                          className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                            selected?.id === s.id ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Sparkles size={13} className="shrink-0 text-sky-300" />
+                            <span className="truncate font-medium">{s.name}</span>
+                            {s.flagged && (
+                              <AlertTriangle size={13} className="shrink-0 text-amber-300" aria-label="Often fails" />
+                            )}
+                            <span className={`ml-auto rounded px-1.5 text-[10px] ${STATUS_STYLE[s.status]}`}>
+                              {s.status}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{s.description}</p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </aside>
+
+          <section ref={detail} className={`min-h-0 min-w-0 overflow-y-auto pb-6 ${reading ? "" : "hidden md:block"}`}>
+            {reading && (
+              <button
+                onClick={() => {
+                  setSelected(null);
+                  setDraft(null);
+                }}
+                className="mb-3 flex items-center gap-1 text-sm text-slate-400 hover:text-white md:hidden"
+              >
+                <ArrowLeft size={14} /> All skills
+              </button>
+            )}
+            {draft != null ? (
+              <div className="space-y-3">
+                <h2 className="font-medium">{selected ? `Edit ${selected.name}` : "New skill"}</h2>
+                <p className="text-xs text-slate-500">
+                  SKILL.md: a name and a one-sentence description (all an agent sees until it
+                  loads the skill), then the instructions. Saving makes a new version.
+                </p>
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={24}
+                  className="w-full rounded-md border border-edge bg-panel p-3 font-mono text-xs"
+                  aria-label="SKILL.md"
+                />
+                <div className="flex gap-2">
+                  <button onClick={save} className="rounded-md bg-sky-600 px-3 py-1.5 text-sm hover:bg-sky-500">
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setDraft(null)}
+                    className="rounded-md border border-edge px-3 py-1.5 text-sm hover:bg-edge/60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : selected ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold">{selected.name}</h2>
+                  <code className="text-xs text-slate-500">{selected.slug}</code>
+                  <span className="rounded bg-edge px-1.5 text-xs text-slate-300 capitalize">{selected.category}</span>
+                  <span className={`rounded px-1.5 text-xs ${STATUS_STYLE[selected.status]}`}>
+                    {selected.status}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    v{selected.version} · used {selected.uses}× · {selected.successes} ok /{" "}
+                    {selected.failures} failed
+                  </span>
+                </div>
+                {selected.flagged && (
+                  <p className="flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                    <AlertTriangle size={14} /> Runs using this skill keep failing. Review it.
+                  </p>
+                )}
+                {selected.status === "draft" && (
+                  <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                    {selected.scope === "learned"
+                      ? "Jarvis drafted this from one of its runs. Read it, edit if needed, then enable it."
+                      : "This skill is off until it is reviewed and enabled."}
+                  </p>
+                )}
+                {selected.can_edit && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setDraft(selected.content)}
+                      className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() =>
+                        act(async () => {
+                          const next = selected.status === "active" ? "disabled" : "active";
+                          await api.setSkillStatus(selected.id, next);
+                          setSelected({ ...selected, status: next });
+                          await load();
+                        })
+                      }
+                      className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                    >
+                      {selected.status === "active" ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      onClick={() => act(async () => setVersions(await api.skillVersions(selected.id)))}
+                      className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                    >
+                      <History size={14} /> History
+                    </button>
+                    {isAdmin && selected.owner_id === user.id && (
+                      <button
+                        onClick={() => {
+                          if (!confirm(`Share ${selected.name} with everyone? It moves to the shared library, turned on.`))
+                            return;
+                          act(async () => {
+                            setSelected(await api.shareSkill(selected.id));
+                            setVersions(null);
+                            await load();
+                          });
+                        }}
+                        className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
+                      >
+                        Share with everyone
+                      </button>
+                    )}
+                    {selected.scope !== "core" && (
+                      <button
+                        onClick={() => {
+                          if (!confirm(`Delete ${selected.name}?`)) return;
+                          act(async () => {
+                            await api.deleteSkill(selected.id);
+                            setSelected(null);
+                            await load();
+                          });
+                        }}
+                        className="rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-rose-500/20"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                )}
+                {versions && (
+                  <ul className="space-y-1 rounded-md border border-edge p-3 text-sm">
+                    {versions.map((v) => (
+                      <li key={v.version} className="flex items-center gap-3">
+                        <span className="w-10 text-slate-400">v{v.version}</span>
+                        <span className="flex-1 truncate">{v.note || "–"}</span>
+                        <span className="text-xs text-slate-500">{formatDate(v.created_at)}</span>
+                        {v.version !== selected.version && selected.can_edit && (
+                          <button
+                            onClick={() =>
+                              act(async () => {
+                                setSelected(await api.rollbackSkill(selected.id, v.version));
+                                setVersions(await api.skillVersions(selected.id));
+                              })
+                            }
+                            className="text-xs text-sky-300 hover:underline"
+                          >
+                            Restore
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Markdown size="sm" className="rounded-md border border-edge bg-panel p-4">
+                  {selected.content.replace(/^---[\s\S]*?\n---\s*\n/, "")}
+                </Markdown>
+                {selected.files.length > 0 && (
+                  <div>
+                    <h3 className="mb-1 text-sm font-medium">Files</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {selected.files.map((f) => (
+                        <button
+                          key={f}
+                          onClick={() => setOpenFile(openFile === f ? null : f)}
+                          className={`rounded-md border px-2 py-0.5 font-mono text-xs ${
+                            openFile === f ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
+                          }`}
+                        >
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                    {openFile && (
+                      <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-edge bg-ink p-3 text-xs">
+                        {selected.file_contents[openFile]}
+                      </pre>
+                    )}
+                  </div>
+                )}
+                {!!selected.recent_uses?.length && (
+                  <div className="text-xs text-slate-400">
+                    <h3 className="mb-1 text-sm font-medium text-slate-200">Your recent uses</h3>
+                    {selected.recent_uses.map((u, i) => (
+                      <div key={i}>
+                        {formatDate(u.at)} · {u.agent} · {u.outcome ?? "running"}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="hidden text-sm text-slate-500 md:block">Pick a skill to read it.</p>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -472,17 +491,26 @@ function InstructionsPanel({
       />
       <details className="rounded-md border border-edge p-3">
         <summary className="cursor-pointer text-sm font-medium">Safety rules (shipped, read only)</summary>
-        <pre className="mt-2 text-xs whitespace-pre-wrap text-slate-400">{data.safety}</pre>
+        {data.safety ? (
+          <Markdown size="sm" className="mt-2 text-slate-300">
+            {data.safety}
+          </Markdown>
+        ) : (
+          <p className="mt-2 text-sm text-rose-400">The shipped safety rules couldn't be read.</p>
+        )}
       </details>
       {data.shared && (
         <details className="rounded-md border border-edge p-3">
           <summary className="cursor-pointer text-sm font-medium">House conventions (shipped, read only)</summary>
-          <pre className="mt-2 text-xs whitespace-pre-wrap text-slate-400">{data.shared}</pre>
+          <Markdown size="sm" className="mt-2 text-slate-300">
+            {data.shared}
+          </Markdown>
         </details>
       )}
       <Layer
         title="Global instructions"
-        hint="For every agent of every user."
+        hint="Optional. Extra rules for Jarvis and every agent of every user, you and anyone you invite, added after the house conventions. Leave it empty unless something should apply to everyone; your own preferences go in Your instructions."
+        placeholder={isAdmin ? "e.g. Never book anything that costs money without asking first." : "None set."}
         value={data.global}
         editable={isAdmin}
         saved={saved === "global"}
@@ -491,7 +519,11 @@ function InstructionsPanel({
       {data.roles.map((r) => (
         <details key={r.role} className="rounded-md border border-edge p-3">
           <summary className="cursor-pointer text-sm font-medium capitalize">{r.role}</summary>
-          <pre className="mt-2 text-xs whitespace-pre-wrap text-slate-400">{r.shipped}</pre>
+          {r.shipped && (
+            <Markdown size="sm" className="mt-2 text-slate-300">
+              {r.shipped}
+            </Markdown>
+          )}
           <div className="mt-3">
             <Layer
               title="Added by admins"
@@ -510,6 +542,7 @@ function InstructionsPanel({
 function Layer({
   title,
   hint,
+  placeholder,
   value,
   editable,
   saved,
@@ -517,6 +550,7 @@ function Layer({
 }: {
   title: string;
   hint?: string;
+  placeholder?: string;
   value: string;
   editable: boolean;
   saved: boolean;
@@ -532,6 +566,7 @@ function Layer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         readOnly={!editable}
+        placeholder={placeholder}
         rows={5}
         className="w-full rounded-md border border-edge bg-panel p-2 text-sm"
       />
