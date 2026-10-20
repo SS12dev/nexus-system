@@ -285,6 +285,8 @@ async def finish(
         files = (
             await db.scalars(select(File).where(File.run_id == run_id).order_by(File.created_at))
         ).all()
+        if status == RunStatus.completed:
+            run.output = await answer_from_files(deps, run.output or "", files)
         message = None
         if run.chat_id is not None:
             chat = await db.get(Chat, run.chat_id)
@@ -332,6 +334,33 @@ async def finish(
         await deps.enqueue("draft_skill", str(run_id), _job_id=f"learn:{run_id}")
 
 
+# A result shorter than this that leaves the answer in a text file it made ("Saved guide.md. It
+# contains...") is replaced in the chat by that file, so the user reads the answer itself.
+POINTER_CHARS = 1500
+INLINE_FILE_CHARS = 20000
+TEXT_FILES = (".md", ".markdown", ".txt")
+
+
+async def answer_from_files(deps, output: str, files: list[File]) -> str:
+    if len(output.strip()) >= POINTER_CHARS or deps.storage is None:
+        return output
+    texts = [f for f in files if Path(f.name).suffix.lower() in TEXT_FILES]
+    if not texts:
+        return output
+    # The newest version of the last text file the run wrote is its main deliverable.
+    f = max(texts, key=lambda x: (x.created_at, x.version))
+    if f.size > INLINE_FILE_CHARS * 4:
+        return output
+    try:
+        text = (await deps.storage.get(f.storage_key)).decode("utf-8", errors="replace").strip()
+    except Exception:
+        log.warning("Couldn't read %s to put its answer in the chat", f.id, exc_info=True)
+        return output
+    if len(text) <= len(output.strip()) or len(text) > INLINE_FILE_CHARS:
+        return output
+    return text
+
+
 def result_text(system: AgentSystem, run: AgentRun, files: list[File]) -> str:
     cost = f"${float(run.cost_usd or 0):.2f}" if run.cost_usd else "under a cent"
     if run.status == RunStatus.completed:
@@ -341,7 +370,7 @@ def result_text(system: AgentSystem, run: AgentRun, files: list[File]) -> str:
     else:
         parts = [f"**{system.name}** stopped: {run.error}"]
     if files:
-        parts.append("Files: " + ", ".join(f"`{f.name}`" for f in files))
+        parts.append("Files, if you want them: " + ", ".join(f"`{f.name}`" for f in files))
     parts.append(f"_Run cost {cost} of a ${float(run.budget_usd):.2f} budget._")
     if run.status == RunStatus.completed and system.lifetime == SystemLifetime.ephemeral:
         parts.append("Want me to keep this team as a template for next time?")

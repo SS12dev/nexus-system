@@ -185,6 +185,39 @@ async def load(sdeps, run_id):
         return run, system
 
 
+async def test_answer_left_in_a_file_is_posted_in_the_chat(sdeps, owner, scripts):
+    guide = "# Buying guide\n\n**Pick: Bambu Lab A1 Mini.**\n\n| Model | Price |\n|---|---|\n" + (
+        "| Example printer | 20,000 |\n" * 20
+    )
+    scripts["solo"] = [
+        {"tool": "save_file", "args": {"name": "guide.md", "content": guide}},
+        "Done. I saved guide.md. It contains a recommendation and a comparison table.",
+    ]
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=["save_file"])])
+    await runner.run_system(sdeps, run_id)
+
+    run, _ = await load(sdeps, run_id)
+    assert run.output == guide.strip()
+    async with sdeps.sessionmaker() as db:
+        msg = await db.get(Message, run.message_id)
+        # The answer itself, with the file still attached for whoever wants it.
+        assert "**Pick: Bambu Lab A1 Mini.**" in msg.content
+        assert "It contains" not in msg.content and "`guide.md`" in msg.content
+        assert await db.scalar(select(Attachment).where(Attachment.message_id == msg.id))
+
+
+async def test_a_full_answer_is_kept_over_its_file(sdeps, owner, scripts):
+    answer = "**Pick: the Honda CB350.** " + "Reasons and a comparison table follow. " * 50
+    scripts["solo"] = [
+        {"tool": "save_file", "args": {"name": "bikes.md", "content": "# Bikes\n" + "row\n" * 600}},
+        answer,
+    ]
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=["save_file"])])
+    await runner.run_system(sdeps, run_id)
+    run, _ = await load(sdeps, run_id)
+    assert run.output == answer
+
+
 def human_texts(messages) -> str:
     return "\n".join(m.content for m in messages if m.type == "human")
 
