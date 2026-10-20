@@ -1,7 +1,6 @@
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Message } from "../lib/types";
 import { FileChip } from "./FileChip";
+import { Markdown } from "./Markdown";
 import { ToolSteps } from "./ToolSteps";
 import { useAssistantName } from "../lib/assistant";
 
@@ -43,8 +42,14 @@ export function MessageView({ message, activity }: { message: Message; activity?
           {activity && !message.steps?.length && <span className="text-sm text-slate-400">{activity}…</span>}
         </div>
       ) : (
-        <div className="prose prose-invert max-w-none prose-pre:bg-panel prose-pre:border prose-pre:border-edge">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        <Markdown>{message.content}</Markdown>
+      )}
+      {/* Files Jarvis made for this reply. */}
+      {!!message.attachments?.length && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {message.attachments.map((f) => (
+            <FileChip key={f.id} file={f} status={f.status} />
+          ))}
         </div>
       )}
       {message.status === "failed" && (

@@ -1,7 +1,6 @@
-import { Bot, Bookmark, FileText, Play, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { ArrowLeft, Bot, Bookmark, FileText, Play, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Markdown } from "../components/Markdown";
 import { Link, useNavigate, useParams } from "react-router";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { RUN_LABEL, RUN_STYLE, RunControls, isLive, money } from "../components/RunControls";
@@ -41,6 +40,9 @@ export function AgentsPage() {
   const [detail, setDetail] = useState<SystemDetail | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [run, setRun] = useState<RunDetail | null>(null);
+  const pane = useRef<HTMLElement>(null);
+  // A newly picked team starts at the top of the reading pane.
+  useEffect(() => pane.current?.scrollTo({ top: 0 }), [systemId]);
   const [request, setRequest] = useState("");
   const [error, setError] = useState("");
 
@@ -106,8 +108,8 @@ export function AgentsPage() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-6">
         <h1 className="mb-1 text-xl font-semibold">Agents</h1>
         <p className="mb-6 text-sm text-slate-400">
           Teams of sub-agents {assistant} builds for bigger jobs: who is on each team, what every run
@@ -116,256 +118,263 @@ export function AgentsPage() {
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
 
         {pending.length > 0 && (
-          <section className="mb-6 space-y-3">
+          <section className="mb-6 max-h-[40vh] space-y-3 overflow-y-auto">
             <h2 className="text-sm font-medium text-rose-300">Waiting for you</h2>
             {pending.map((a) => (
               <ApprovalCard key={a.id} approval={a} systemName={live[a.system_id]?.name} />
             ))}
           </section>
         )}
+      </div>
 
-        <div className="grid gap-6 md:grid-cols-[18rem_1fr]">
-          <aside>
-            <label className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-              <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
-              Show finished one-off teams
-            </label>
-            <ul className="space-y-1">
-              {list.length === 0 && (
-                <li className="text-sm text-slate-500">
-                  No teams yet. Try asking {assistant} for a researched report with a spreadsheet.
+      {/* The list and the team scroll on their own, so a team picked far down the list shows
+          right beside it; on a phone they take turns filling the screen. */}
+      <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 grid-rows-[minmax(0,1fr)] gap-6 px-4 md:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className={`min-h-0 overflow-y-auto pr-1 pb-6 ${systemId ? "hidden md:block" : ""}`}>
+          <label className="mb-2 flex items-center gap-2 text-xs text-slate-400">
+            <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
+            Show finished one-off teams
+          </label>
+          <ul className="space-y-1">
+            {list.length === 0 && (
+              <li className="text-sm text-slate-500">
+                No teams yet. Try asking {assistant} for a researched report with a spreadsheet.
+              </li>
+            )}
+            {list.map((s) => {
+              const r = live[s.id]?.run ?? s.run;
+              return (
+                <li key={s.id}>
+                  <Link
+                    to={`/agents/${s.id}`}
+                    className={`block rounded-md border px-3 py-2 text-sm ${
+                      s.id === systemId ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Bot size={14} className="shrink-0 text-sky-300" />
+                      <span className="truncate font-medium">{s.name}</span>
+                      {s.lifetime === "template" && (
+                        <Bookmark size={12} className="ml-auto shrink-0 text-amber-300" />
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex gap-2 text-xs text-slate-500">
+                      <span>{TOPOLOGY[s.topology]}</span>
+                      {r && <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span>}
+                    </div>
+                  </Link>
                 </li>
-              )}
-              {list.map((s) => {
-                const r = live[s.id]?.run ?? s.run;
-                return (
-                  <li key={s.id}>
-                    <Link
-                      to={`/agents/${s.id}`}
-                      className={`block rounded-md border px-3 py-2 text-sm ${
-                        s.id === systemId ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Bot size={14} className="shrink-0 text-sky-300" />
-                        <span className="truncate font-medium">{s.name}</span>
-                        {s.lifetime === "template" && (
-                          <Bookmark size={12} className="ml-auto shrink-0 text-amber-300" />
-                        )}
-                      </div>
-                      <div className="mt-0.5 flex gap-2 text-xs text-slate-500">
-                        <span>{TOPOLOGY[s.topology]}</span>
-                        {r && <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span>}
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </aside>
+              );
+            })}
+          </ul>
+        </aside>
 
-          {detail ? (
-            <section className="min-w-0 space-y-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-lg font-semibold">{detail.name}</h2>
-                <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
-                  {TOPOLOGY[detail.topology]}
-                </span>
-                <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
-                  {detail.lifetime === "template" ? "Template" : detail.lifetime === "persistent" ? "Saved" : "One-off"}
-                </span>
-                {canEdit && (
-                  <div className="ml-auto flex gap-2">
-                    {detail.lifetime !== "template" && (
-                      <button
-                        onClick={() =>
-                          act(async () => {
-                            const s = await api.keepAsTemplate(detail.id);
-                            upsertSystems([s]);
-                          })
-                        }
-                        className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
-                      >
-                        <Bookmark size={14} /> Keep as template
-                      </button>
-                    )}
+        {detail ? (
+          <section ref={pane} className="min-h-0 min-w-0 space-y-5 overflow-y-auto pb-6">
+            <Link to="/agents" className="flex items-center gap-1 text-sm text-slate-400 hover:text-white md:hidden">
+              <ArrowLeft size={14} /> All teams
+            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-lg font-semibold">{detail.name}</h2>
+              <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
+                {TOPOLOGY[detail.topology]}
+              </span>
+              <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
+                {detail.lifetime === "template" ? "Template" : detail.lifetime === "persistent" ? "Saved" : "One-off"}
+              </span>
+              {canEdit && (
+                <div className="ml-auto flex gap-2">
+                  {detail.lifetime !== "template" && (
                     <button
-                      disabled={isLive(liveRun)}
-                      onClick={() => {
-                        if (!confirm(`Delete ${detail.name} and its run history?`)) return;
+                      onClick={() =>
                         act(async () => {
-                          await api.deleteSystem(detail.id);
-                          navigate("/agents");
-                        });
-                      }}
-                      className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-rose-500/20 disabled:opacity-40"
+                          const s = await api.keepAsTemplate(detail.id);
+                          upsertSystems([s]);
+                        })
+                      }
+                      className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
                     >
-                      <Trash2 size={14} /> Delete
+                      <Bookmark size={14} /> Keep as template
                     </button>
+                  )}
+                  <button
+                    disabled={isLive(liveRun)}
+                    onClick={() => {
+                      if (!confirm(`Delete ${detail.name} and its run history?`)) return;
+                      act(async () => {
+                        await api.deleteSystem(detail.id);
+                        navigate("/agents");
+                      });
+                    }}
+                    className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-rose-500/20 disabled:opacity-40"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-sm text-slate-300">{detail.goal}</p>
+
+            <div className="rounded-lg border border-edge bg-panel p-3">
+              <TeamGraph
+                nodes={detail.nodes}
+                edges={detail.edges}
+                topology={detail.topology}
+                live={liveRun?.agents}
+              />
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-edge">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-panel text-xs text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2">Agent</th>
+                    <th className="px-3 py-2">Model</th>
+                    <th className="px-3 py-2">Tools and skills</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.spec.agents.map((a) => (
+                    <tr key={a.id} className="border-t border-edge align-top">
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{a.name}</div>
+                        <div className="text-xs text-slate-500">{a.role}</div>
+                        <details className="mt-1 text-xs text-slate-400">
+                          <summary className="cursor-pointer">Instructions</summary>
+                          <p className="mt-1 whitespace-pre-wrap">{a.instructions}</p>
+                        </details>
+                      </td>
+                      <td className="px-3 py-2 text-xs">jarvis-{a.tier}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {[...a.tools, ...a.skills].map((t) => (
+                            <span key={t} className="rounded bg-edge px-1.5 py-0.5 text-xs">
+                              {t}
+                            </span>
+                          ))}
+                          {!a.tools.length && !a.skills.length && (
+                            <span className="text-xs text-slate-500">none</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {detail.spec.deliverables.length > 0 && (
+              <p className="text-xs text-slate-400">Delivers: {detail.spec.deliverables.join(", ")}</p>
+            )}
+
+            {canEdit && (
+              <form onSubmit={runAgain} className="flex gap-2">
+                <input
+                  value={request}
+                  onChange={(e) => setRequest(e.target.value)}
+                  placeholder="Run this team on a new request…"
+                  className="min-w-0 flex-1 rounded-md border border-edge bg-panel px-3 py-1.5 text-sm"
+                />
+                <button
+                  disabled={!request.trim() || isLive(liveRun)}
+                  className="flex items-center gap-1 rounded-md bg-sky-600 px-3 py-1.5 text-sm hover:bg-sky-500 disabled:opacity-40"
+                >
+                  <Play size={14} /> Run
+                </button>
+              </form>
+            )}
+
+            <div>
+              <h3 className="mb-2 text-sm font-medium">Runs</h3>
+              <div className="flex flex-wrap gap-2">
+                {detail.runs.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setRunId(r.id)}
+                    className={`rounded-md border px-2.5 py-1 text-xs ${
+                      r.id === runId ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
+                    }`}
+                  >
+                    {formatDate(r.created_at)} ·{" "}
+                    <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span> ·{" "}
+                    {money(r.cost_usd)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {run && liveRun && (
+              <div className="space-y-4 rounded-lg border border-edge bg-panel p-4">
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className={RUN_STYLE[liveRun.status]}>{RUN_LABEL[liveRun.status]}</span>
+                  <span className="text-slate-400">
+                    {money(liveRun.cost_usd)} of {money(liveRun.budget_usd)} · {liveRun.steps} model
+                    calls · {liveRun.input_tokens + liveRun.output_tokens} tokens
+                  </span>
+                  {liveRun.trace_id && (
+                    <span className="text-xs text-slate-500" title="Langfuse trace id">
+                      trace {liveRun.trace_id.slice(0, 8)}
+                    </span>
+                  )}
+                  <div className="ml-auto">
+                    <RunControls run={liveRun} onError={setError} />
+                  </div>
+                </div>
+                <p className="text-sm text-slate-300">
+                  <span className="text-slate-500">Asked: </span>
+                  {run.run.input}
+                </p>
+                {run.approvals.map((a) => (
+                  <ApprovalCard key={a.id} approval={approvals[a.id] ?? a} />
+                ))}
+                {run.files.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {run.files.map((f) => (
+                      <a
+                        key={f.id}
+                        href={api.fileUrl(f.id)}
+                        className="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs hover:bg-edge/60"
+                      >
+                        <FileText size={12} /> {f.name}
+                        {f.version > 1 && ` (v${f.version})`}
+                      </a>
+                    ))}
                   </div>
                 )}
-              </div>
-              <p className="text-sm text-slate-300">{detail.goal}</p>
-
-              <div className="rounded-lg border border-edge bg-panel p-3">
-                <TeamGraph
-                  nodes={detail.nodes}
-                  edges={detail.edges}
-                  topology={detail.topology}
-                  live={liveRun?.agents}
-                />
-              </div>
-
-              <div className="overflow-x-auto rounded-lg border border-edge">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-panel text-xs text-slate-400">
-                    <tr>
-                      <th className="px-3 py-2">Agent</th>
-                      <th className="px-3 py-2">Model</th>
-                      <th className="px-3 py-2">Tools and skills</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.spec.agents.map((a) => (
-                      <tr key={a.id} className="border-t border-edge align-top">
-                        <td className="px-3 py-2">
-                          <div className="font-medium">{a.name}</div>
-                          <div className="text-xs text-slate-500">{a.role}</div>
-                          <details className="mt-1 text-xs text-slate-400">
-                            <summary className="cursor-pointer">Instructions</summary>
-                            <p className="mt-1 whitespace-pre-wrap">{a.instructions}</p>
-                          </details>
-                        </td>
-                        <td className="px-3 py-2 text-xs">jarvis-{a.tier}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap gap-1">
-                            {[...a.tools, ...a.skills].map((t) => (
-                              <span key={t} className="rounded bg-edge px-1.5 py-0.5 text-xs">
-                                {t}
-                              </span>
-                            ))}
-                            {!a.tools.length && !a.skills.length && (
-                              <span className="text-xs text-slate-500">none</span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {detail.spec.deliverables.length > 0 && (
-                <p className="text-xs text-slate-400">Delivers: {detail.spec.deliverables.join(", ")}</p>
-              )}
-
-              {canEdit && (
-                <form onSubmit={runAgain} className="flex gap-2">
-                  <input
-                    value={request}
-                    onChange={(e) => setRequest(e.target.value)}
-                    placeholder="Run this team on a new request…"
-                    className="min-w-0 flex-1 rounded-md border border-edge bg-panel px-3 py-1.5 text-sm"
-                  />
-                  <button
-                    disabled={!request.trim() || isLive(liveRun)}
-                    className="flex items-center gap-1 rounded-md bg-sky-600 px-3 py-1.5 text-sm hover:bg-sky-500 disabled:opacity-40"
-                  >
-                    <Play size={14} /> Run
-                  </button>
-                </form>
-              )}
-
-              <div>
-                <h3 className="mb-2 text-sm font-medium">Runs</h3>
-                <div className="flex flex-wrap gap-2">
-                  {detail.runs.map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => setRunId(r.id)}
-                      className={`rounded-md border px-2.5 py-1 text-xs ${
-                        r.id === runId ? "border-sky-500/60 bg-edge" : "border-edge hover:bg-edge/50"
-                      }`}
-                    >
-                      {formatDate(r.created_at)} ·{" "}
-                      <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span> ·{" "}
-                      {money(r.cost_usd)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {run && liveRun && (
-                <div className="space-y-4 rounded-lg border border-edge bg-panel p-4">
-                  <div className="flex flex-wrap items-center gap-3 text-sm">
-                    <span className={RUN_STYLE[liveRun.status]}>{RUN_LABEL[liveRun.status]}</span>
-                    <span className="text-slate-400">
-                      {money(liveRun.cost_usd)} of {money(liveRun.budget_usd)} · {liveRun.steps} model
-                      calls · {liveRun.input_tokens + liveRun.output_tokens} tokens
-                    </span>
-                    {liveRun.trace_id && (
-                      <span className="text-xs text-slate-500" title="Langfuse trace id">
-                        trace {liveRun.trace_id.slice(0, 8)}
-                      </span>
-                    )}
-                    <div className="ml-auto">
-                      <RunControls run={liveRun} onError={setError} />
-                    </div>
-                  </div>
-                  <p className="text-sm text-slate-300">
-                    <span className="text-slate-500">Asked: </span>
-                    {run.run.input}
-                  </p>
-                  {run.approvals.map((a) => (
-                    <ApprovalCard key={a.id} approval={approvals[a.id] ?? a} />
-                  ))}
-                  {run.files.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {run.files.map((f) => (
-                        <a
-                          key={f.id}
-                          href={api.fileUrl(f.id)}
-                          className="flex items-center gap-1 rounded-md border border-edge px-2 py-1 text-xs hover:bg-edge/60"
-                        >
-                          <FileText size={12} /> {f.name}
-                          {f.version > 1 && ` (v${f.version})`}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {run.run.output && (
-                    <details open className="text-sm">
-                      <summary className="cursor-pointer text-slate-400">Result</summary>
-                      <div className="prose prose-invert prose-sm mt-2 max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{run.run.output}</ReactMarkdown>
-                      </div>
-                    </details>
-                  )}
-                  {run.run.error && <p className="text-sm text-rose-400">{run.run.error}</p>}
-                  <details className="text-sm">
-                    <summary className="cursor-pointer text-slate-400">
-                      Timeline ({run.events.length} events)
-                    </summary>
-                    <ol className="mt-2 space-y-1 text-xs">
-                      {run.events.map((e, i) => (
-                        <li key={i} className="flex gap-2">
-                          <span className="shrink-0 text-slate-500">
-                            {new Date(e.at).toLocaleTimeString()}
-                          </span>
-                          <span className="shrink-0 font-medium text-slate-300">{e.agent}</span>
-                          <span className="min-w-0 truncate text-slate-400">
-                            {(EVENT_TEXT[e.type] ?? (() => e.type))(e.data)}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
+                {run.run.output && (
+                  <details open className="text-sm">
+                    <summary className="cursor-pointer text-slate-400">Result</summary>
+                    <Markdown size="sm" className="mt-2">
+                      {run.run.output}
+                    </Markdown>
                   </details>
-                </div>
-              )}
-            </section>
-          ) : (
-            <section className="hidden text-sm text-slate-500 md:block">Pick a team to see it.</section>
-          )}
-        </div>
+                )}
+                {run.run.error && <p className="text-sm text-rose-400">{run.run.error}</p>}
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-slate-400">
+                    Timeline ({run.events.length} events)
+                  </summary>
+                  <ol className="mt-2 space-y-1 text-xs">
+                    {run.events.map((e, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="shrink-0 text-slate-500">
+                          {new Date(e.at).toLocaleTimeString()}
+                        </span>
+                        <span className="shrink-0 font-medium text-slate-300">{e.agent}</span>
+                        <span className="min-w-0 truncate text-slate-400">
+                          {(EVENT_TEXT[e.type] ?? (() => e.type))(e.data)}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className={`text-sm text-slate-500 ${systemId ? "" : "hidden md:block"}`}>
+            {systemId ? "Loading…" : "Pick a team to see it."}
+          </section>
+        )}
       </div>
     </div>
   );
