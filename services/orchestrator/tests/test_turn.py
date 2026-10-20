@@ -164,6 +164,74 @@ async def test_unknown_message_is_ignored(setup):
     assert model.seen == []
 
 
+async def ask(sessionmaker, chat_id, text: str) -> uuid.UUID:
+    """Add a user message and a streaming reply placeholder; return the placeholder's id."""
+    async with sessionmaker() as db:
+        db.add(
+            Message(
+                chat_id=chat_id, role=MessageRole.user, content=text, status=MessageStatus.complete
+            )
+        )
+        await db.flush()
+        reply = Message(
+            chat_id=chat_id,
+            role=MessageRole.assistant,
+            content="",
+            status=MessageStatus.streaming,
+            model="jarvis-mini",
+            trace_id="t2",
+        )
+        db.add(reply)
+        await db.commit()
+        return reply.id
+
+
+RESEARCH = (
+    "Can you help me prepare research gaps in the latest LLM training and fine-tuning for a "
+    "paper on reasoning?"
+)
+
+
+async def test_router_hands_team_work_to_build_agent_system(setup, settings, sessionmaker):
+    deps, model, factory_calls, (_u, chat_id, _m) = setup
+    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    await run_turn(deps, chat_id, _m)  # "Hi Jarvis" is too short to route
+    assert [c["model"] for c in factory_calls] == ["jarvis-mini"]
+
+    model.seen.clear()
+    model.script = ['{"route": "team", "reason": "literature research"}', "On it."]
+    reply_id = await ask(sessionmaker, chat_id, RESEARCH)
+    await run_turn(deps, chat_id, reply_id)
+    assert factory_calls[-1]["model"] == "jarvis-nano"
+    assert factory_calls[-1]["metadata"]["generation_name"] == "jarvis.route"
+    # The router saw the request; Jarvis's first call was made to call build_agent_system.
+    assert RESEARCH in model.seen[0][-1].content
+    assert {"tool_choice": "build_agent_system"} in model.binds
+    assert "build_agent_system" in model.tools
+
+
+async def test_router_leaves_other_messages_to_jarvis(setup, settings, sessionmaker):
+    deps, model, _calls, (_u, chat_id, _m) = setup
+    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    model.script = ['{"route": "self", "reason": "calendar question"}', "Two meetings."]
+    reply_id = await ask(sessionmaker, chat_id, "What is on my calendar for the rest of this week?")
+    await run_turn(deps, chat_id, reply_id)
+    assert not any("tool_choice" in b for b in model.binds)
+    async with sessionmaker() as db:
+        assert (await db.get(Message, reply_id)).content == "Two meetings."
+
+
+async def test_router_failure_falls_back_to_jarvis(setup, settings, sessionmaker):
+    deps, model, _calls, (_u, chat_id, _m) = setup
+    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    model.script = ["not json at all", "Here you go."]
+    reply_id = await ask(sessionmaker, chat_id, RESEARCH)
+    await run_turn(deps, chat_id, reply_id)
+    assert not any("tool_choice" in b for b in model.binds)
+    async with sessionmaker() as db:
+        assert (await db.get(Message, reply_id)).content == "Here you go."
+
+
 def test_track_step_pairs_calls_with_their_outcome():
     steps: list[dict] = []
     track_step(steps, "tool.call", {"name": "web_search", "call_id": "a", "query": "x" * 500})

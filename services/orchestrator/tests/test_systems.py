@@ -572,3 +572,15 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
         {"system_id": str(system.id), "request": "again"}
     )
     assert "already running" in again
+
+
+def test_keeping_a_team_takes_the_users_own_words():
+    from jarvis_orchestrator.systems.manage import asked_to_keep
+
+    assert asked_to_keep("Research EV prices and keep this team for next month")
+    assert asked_to_keep("save it as a template")
+    assert asked_to_keep("Send me this digest every morning")
+    # Budget talk is not a request to keep the team.
+    assert not asked_to_keep("Email a two-line note about EV prices, keep the budget small")
+    assert not asked_to_keep("keep it cheap")
+    assert not asked_to_keep("Research the best-selling EVs in Europe")

@@ -40,6 +40,7 @@ from jarvis_common.toolinfo import TOOLS, allowed_tools, connected_only
 from jarvis_orchestrator.context import assemble
 from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
+from jarvis_orchestrator.route import wants_team
 from jarvis_orchestrator.sandbox import SandboxClient
 from jarvis_orchestrator.systems.manage import system_tools
 from jarvis_orchestrator.tools import ToolContext, build_tools
@@ -251,6 +252,34 @@ async def systems_context(db, user_id: uuid.UUID, chat_id: uuid.UUID) -> str:
     return "<agent_systems>\n" + "\n".join(lines) + "\n</agent_systems>" if lines else ""
 
 
+async def route_to_team(
+    deps, user: User, chat: Chat, msg: Message, history: list[Message], api_key: str
+) -> bool:
+    """Ask the cheapest model whether the latest message is work for an agent team. Short
+    messages ("hi", "thanks", "yes") never are, so they skip the call."""
+    if not deps.settings.route_model or not history or history[-1].role != MessageRole.user:
+        return False
+    question = history[-1].content.strip()
+    if len(question) < deps.settings.route_min_chars:
+        return False
+    previous = next(
+        (m.content for m in reversed(history[:-1]) if m.role == MessageRole.assistant), ""
+    )
+    model = deps.model_factory(
+        model=deps.settings.route_model,
+        api_key=api_key,
+        metadata={
+            "trace_id": msg.trace_id,
+            "trace_name": "jarvis.turn",
+            "generation_name": "jarvis.route",
+            "session_id": str(chat.id),
+            "trace_user_id": str(user.id),
+            "tags": ["jarvis", "route", deps.settings.env],
+        },
+    )
+    return await wants_team(model, question, previous, msg.trace_id)
+
+
 async def _generate(
     deps, db, chat: Chat, user: User, msg: Message, emit
 ) -> tuple[str, dict, bool, list]:
@@ -319,6 +348,10 @@ async def _generate(
     tools = build_tools(ctx, names)
     if allowed:
         tools += system_tools(ctx, user, allowed, msg.trace_id, asked=question)
+    # When the router says this is work for a team, Jarvis's first move is to build one.
+    force_tool = None
+    if allowed and await route_to_team(deps, user, chat, msg, history, api_key):
+        force_tool = "build_agent_system"
     graph = build_graph(model, tools)
     content = ""
     usage = {"input_tokens": 0, "output_tokens": 0}
@@ -326,6 +359,7 @@ async def _generate(
         {
             "messages": to_langchain(history),
             "system_prompt": system_prompt(user.name, rendered),
+            "force_tool": force_tool,
         },
         {"recursion_limit": RECURSION_LIMIT},
         stream_mode="messages",

@@ -210,12 +210,15 @@ OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 ## Agent systems
 
 For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Jarvis
-calls `build_agent_system`. The architect model (`DESIGN_MODEL`, jarvis-pro) writes an
+calls `build_agent_system`. Before Jarvis answers a message, the cheapest tier (`ROUTE_MODEL`,
+jarvis-nano) decides whether it is work for a team (multi-source research, deliverables, many
+items, sending email); when it is, Jarvis's first move is to build one. The architect model (`DESIGN_MODEL`, jarvis-pro) writes an
 AgentSystemSpec: a small team, a topology, each agent's role, instructions, model tier, tools and
 skills. The spec is validated against what you may use, compiled to a LangGraph graph and run on
 the orchestrator queue; the team's card in the chat shows each agent live, and the result and
-files are posted in the chat when it finishes. One-off teams are archived after their run;
-"keep it" saves one as a template Jarvis reuses for similar asks.
+files are posted in the chat when it finishes. One-off teams are archived after their run, and
+the orb only shows teams with a run in progress; "keep it" saves one as a template Jarvis
+reuses for similar asks (Jarvis only keeps a team up front when you say so).
 
 - **Topologies:** single agent, pipeline, lead and workers (`supervisor_workers`), parallel
   map-reduce, and worker with critic.

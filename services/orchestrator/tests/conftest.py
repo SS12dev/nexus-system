@@ -19,6 +19,8 @@ class ScriptedModel(BaseChatModel):
     seen: list = []
     calls: list = []
     tools: list = []
+    # Options each bind_tools call got, e.g. a forced tool_choice.
+    binds: list = []
 
     @property
     def _llm_type(self) -> str:
@@ -26,6 +28,7 @@ class ScriptedModel(BaseChatModel):
 
     def bind_tools(self, tools, **kwargs):
         self.tools[:] = [t.name for t in tools]
+        self.binds.append(kwargs)
         return self
 
     def _next(self):
@@ -94,7 +97,7 @@ class Enqueued:
 
 @pytest.fixture
 def model() -> ScriptedModel:
-    return ScriptedModel(seen=[], calls=[], tools=[])
+    return ScriptedModel(seen=[], calls=[], tools=[], binds=[])
 
 
 @pytest.fixture

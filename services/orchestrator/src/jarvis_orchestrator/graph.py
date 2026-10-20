@@ -15,20 +15,29 @@ RECURSION_LIMIT = 16
 
 class JarvisState(MessagesState):
     system_prompt: str
+    # A tool Jarvis must call on its first model call of the turn (the router sent the
+    # request to a team); cleared once it has.
+    force_tool: str | None
 
 
 def build_graph(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
-    bound = model.bind_tools(list(tools)) if tools else model
+    tools = list(tools)
+    bound = model.bind_tools(tools) if tools else model
+    names = {t.name for t in tools}
 
     async def respond(state: JarvisState) -> dict:
-        reply = await bound.ainvoke([SystemMessage(state["system_prompt"]), *state["messages"]])
-        return {"messages": [reply]}
+        forced = state.get("force_tool")
+        runnable = (
+            model.bind_tools(tools, tool_choice=forced) if forced and forced in names else bound
+        )
+        reply = await runnable.ainvoke([SystemMessage(state["system_prompt"]), *state["messages"]])
+        return {"messages": [reply], "force_tool": None}
 
     graph = StateGraph(JarvisState)
     graph.add_node("respond", respond)
     graph.add_edge(START, "respond")
     if tools:
-        graph.add_node("tools", ToolNode(list(tools)))
+        graph.add_node("tools", ToolNode(tools))
         graph.add_conditional_edges("respond", tools_condition, {"tools": "tools", END: END})
         graph.add_edge("tools", "respond")
     else:

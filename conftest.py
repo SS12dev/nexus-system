@@ -49,6 +49,8 @@ def settings() -> Settings:
         litellm_base_url="http://litellm.invalid",
         litellm_master_key="sk-test-master",
         library_path=str(Path(__file__).parent / "library"),
+        # Off by default so scripted models aren't asked to route; routing tests turn it on.
+        route_model="",
     )
 
 
