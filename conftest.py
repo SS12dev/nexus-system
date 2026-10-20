@@ -31,7 +31,8 @@ TABLES = (
     "approvals, run_events, agent_runs, agent_systems, skill_usages, skill_versions, skills, "
     "instructions, tool_grants, memory_events, memories, episodes, profiles, attachments, "
     "file_chunks, files, "
-    "embedding_cache, audit_log, messages, chats, budgets, api_keys, sessions, user_roles, users"
+    "embedding_cache, audit_log, messages, chats, budgets, google_grants, api_keys, sessions, "
+    "user_roles, users"
 )
 
 

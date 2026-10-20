@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     oidc_issuer: str = "https://accounts.google.com"
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    # Google services Jarvis asks for at sign-in, besides the user's name and email: any of
+    # gmail, calendar, contacts, tasks, drive. Each is optional on Google's consent screen, so
+    # people can untick them and still sign in. Empty asks for sign-in only. Used only when
+    # the issuer is Google.
+    google_services: str = "gmail,calendar,contacts,tasks"
 
     # Passwordless local sign-in for development: anyone who knows the token can sign in as
     # an invited (or the first) user. Never enable on a public hostname.
@@ -128,6 +133,12 @@ class Settings(BaseSettings):
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_client_id and self.oidc_client_secret)
+
+    @property
+    def google_service_list(self) -> list[str]:
+        if "accounts.google.com" not in self.oidc_issuer:
+            return []
+        return [s.strip().lower() for s in self.google_services.split(",") if s.strip()]
 
     @property
     def dev_login_active(self) -> bool:

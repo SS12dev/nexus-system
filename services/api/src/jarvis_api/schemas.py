@@ -58,6 +58,14 @@ class UserUpdateIn(BaseModel):
     budget_usd: Usd | None = None
 
 
+class GoogleAccessOut(BaseModel):
+    # Sign-in is Google and asks for services.
+    available: bool
+    requested: list[str]
+    granted: list[str]
+    connected_at: datetime | None
+
+
 class AuthConfigOut(BaseModel):
     oidc_enabled: bool
     dev_login_enabled: bool

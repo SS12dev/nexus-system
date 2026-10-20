@@ -2,6 +2,7 @@ import {
   Bot,
   Brain,
   FolderOpen,
+  Link2,
   LogOut,
   Menu,
   MessageSquarePlus,
@@ -132,6 +133,9 @@ export function Shell() {
           </NavLink>
           <NavLink to="/skills" className={navClass}>
             <Sparkles size={16} /> Skills
+          </NavLink>
+          <NavLink to="/connections" className={navClass}>
+            <Link2 size={16} /> Connections
           </NavLink>
           {hasRole(user, "admin") && (
             <NavLink to="/people" className={navClass}>

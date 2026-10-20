@@ -6,6 +6,7 @@ import { useEventSocket } from "./lib/socket";
 import { hasRole } from "./lib/types";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
@@ -53,6 +54,7 @@ export function App() {
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />
         <Route path="skills" element={<SkillsPage />} />
+        <Route path="connections" element={<ConnectionsPage />} />
         {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
