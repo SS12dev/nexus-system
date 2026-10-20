@@ -39,6 +39,7 @@ from jarvis_common.storage import Storage
 from jarvis_common.systems import ACTIVE_RUN, granted_capabilities
 from jarvis_common.toolinfo import TOOLS, allowed_tools, connected_only
 from jarvis_orchestrator.context import assemble
+from jarvis_orchestrator.github import GitHubApp
 from jarvis_orchestrator.graph import RECURSION_LIMIT, build_graph
 from jarvis_orchestrator.prompts import system_prompt
 from jarvis_orchestrator.route import Route, route
@@ -72,6 +73,8 @@ class TurnDeps:
     storage: Storage | None = None
     sandbox: SandboxClient | None = None
     workbench: WorkbenchClient | None = None
+    # The Jarvis GitHub App, when it is set up (GITHUB_* settings).
+    github: GitHubApp | None = None
     web: WebClient | None = None
     # Shared client for Google's APIs (Gmail, Calendar, ...); None opens one per call.
     google_http: httpx.AsyncClient | None = None

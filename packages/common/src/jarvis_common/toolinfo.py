@@ -32,6 +32,8 @@ class ToolInfo:
     jarvis: bool = True
     # The Google service it acts on; offered only to users who granted it.
     service: str | None = None
+    # Only the owner may have it, whatever their grants.
+    owner_only: bool = False
 
 
 TOOLS: list[ToolInfo] = [
@@ -103,6 +105,15 @@ TOOLS: list[ToolInfo] = [
         "write",
         "Commit every change in the project folder to its git history with a message.",
         jarvis=False,
+    ),
+    ToolInfo(
+        "github_transfer",
+        "Move a project to GitHub",
+        "outbound",
+        "Transfer a software project's repo from Jarvis's GitHub organisation to someone's own "
+        "GitHub account; GitHub emails them to accept it. Asks the user first.",
+        jarvis=False,
+        owner_only=True,
     ),
     ToolInfo(
         "send_email",
@@ -236,7 +247,13 @@ def allowed_tools(user: User, granted: set[Capability]) -> set[str]:
     if not user.has_role(RoleName.member):
         return set()
     caps = capabilities(user, granted)
-    return {t.name for t in TOOLS if (need := RISK_CAPABILITY[t.risk]) is None or need in caps}
+    owner = user.role == RoleName.owner
+    return {
+        t.name
+        for t in TOOLS
+        if ((need := RISK_CAPABILITY[t.risk]) is None or need in caps)
+        and (owner or not t.owner_only)
+    }
 
 
 def connected_only(names: set[str], services: set[str] | list[str]) -> set[str]:

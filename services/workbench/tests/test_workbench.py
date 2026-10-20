@@ -204,3 +204,58 @@ async def test_token_is_checked(workbench, monkeypatch):
     resp = await workbench.put("/projects/u1/p1", headers={"Authorization": "Bearer s3cret"})
     assert resp.status_code == 200
     assert (await workbench.get("/healthz")).status_code == 200
+
+
+async def test_identity_sets_who_commits(workbench, project, run):
+    resp = await workbench.put(
+        f"{project}/git/identity",
+        json={"name": "jarvis[bot]", "email": "123+jarvis[bot]@users.noreply.github.com"},
+    )
+    assert resp.status_code == 200
+    await workbench.put(f"{project}/file", json={"path": "a.txt", "content": "x"})
+    await workbench.post(f"{project}/git/commit", json={"message": "By the bot"})
+    # Agents' own git commits get it too.
+    await run("echo y > b.txt && git add b.txt && git commit -qm 'By hand'")
+    log = (await run("git log -2 --format='%an <%ae>'"))["stdout"].splitlines()
+    assert log == ["jarvis[bot] <123+jarvis[bot]@users.noreply.github.com>"] * 2
+    bad = await workbench.put(f"{project}/git/identity", json={"name": "x\nevil", "email": "a@b"})
+    assert bad.status_code == 422
+
+
+async def test_default_identity_without_one(run):
+    await run("echo y > b.txt && git add b.txt && git commit -qm 'x'")
+    assert (await run("git log -1 --format=%an"))["stdout"].strip() == module.GIT_NAME
+
+
+async def test_push_sends_head_to_a_branch(workbench, project, run, monkeypatch):
+    # A bare repository inside the project stands in for GitHub (commands can't leave it).
+    await run("git init -q --bare .home/remote.git")
+    remote = str(module.ROOT / "u1" / "p1" / ".home" / "remote.git")
+    monkeypatch.setattr(module, "PUSH_URL", __import__("re").compile(r"^/.*\.git$"))
+    await workbench.put(f"{project}/file", json={"path": "a.txt", "content": "x"})
+    await workbench.post(f"{project}/git/commit", json={"message": "Add a"})
+    body = {"url": remote, "branch": "jarvis/run-1", "token": "ghs_secret"}
+    resp = await workbench.post(f"{project}/git/push", json=body)
+    assert resp.status_code == 200, resp.text
+    head = (await run("git rev-parse HEAD"))["stdout"].strip()
+    assert resp.json() == {"branch": "jarvis/run-1", "commit": head}
+    pushed = await run("git --git-dir=.home/remote.git rev-parse refs/heads/jarvis/run-1")
+    assert pushed["stdout"].strip() == head
+    # The token is never written into the project's git config.
+    assert "ghs_secret" not in (await run("cat .git/config"))["stdout"]
+
+
+@pytest.mark.parametrize(
+    "url,branch",
+    [
+        ("https://evil.example.com/a/b.git", "main"),
+        ("file:///etc/passwd.git", "main"),
+        ("https://github.com/org/repo.git", "--upload-pack=x"),
+        ("https://github.com/org/repo.git", "a/../b"),
+    ],
+)
+async def test_push_only_goes_to_github(workbench, project, url, branch):
+    resp = await workbench.post(
+        f"{project}/git/push", json={"url": url, "branch": branch, "token": "t"}
+    )
+    assert resp.status_code == 400

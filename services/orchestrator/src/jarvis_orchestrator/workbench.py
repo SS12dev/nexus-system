@@ -110,3 +110,12 @@ class WorkbenchClient:
 
     async def commit(self, user: str, project: str, message: str) -> dict:
         return await self._call("POST", user, project, "/git/commit", json={"message": message})
+
+    async def identity(self, user: str, project: str, name: str, email: str) -> dict:
+        return await self._call(
+            "PUT", user, project, "/git/identity", json={"name": name, "email": email}
+        )
+
+    async def push(self, user: str, project: str, url: str, branch: str, token: str) -> dict:
+        body = {"url": url, "branch": branch, "token": token}
+        return await self._call("POST", user, project, "/git/push", json=body)

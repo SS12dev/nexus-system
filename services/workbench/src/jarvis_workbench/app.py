@@ -21,6 +21,8 @@ group, and (where the kernel has Landlock) it can only see its own project folde
     GET    /projects/{user}/{project}/git/status
     GET    /projects/{user}/{project}/git/diff?ref=
     POST   /projects/{user}/{project}/git/commit      {"message"}
+    PUT    /projects/{user}/{project}/git/identity    {"name", "email"}
+    POST   /projects/{user}/{project}/git/push        {"url", "branch", "token"}
 """
 
 import asyncio
@@ -88,6 +90,10 @@ GITIGNORE = (
 )
 ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 REF = re.compile(r"^[A-Za-z0-9._/~^@{}-]{1,100}$")
+# Where a project may be pushed: a GitHub repository over HTTPS (through the egress proxy).
+PUSH_URL = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\.git$")
+BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+PUSH_TIMEOUT_S = 180
 
 app = FastAPI(title="Jarvis workbench", version="0.1.0")
 slots = asyncio.Semaphore(CONCURRENCY)
@@ -200,6 +206,11 @@ async def _pump(stream: asyncio.StreamReader, sink: _Tail) -> None:
 def command_env(root: Path) -> dict[str, str]:
     home = root / ".home"
     (home / "tmp").mkdir(parents=True, exist_ok=True)
+    # The default commit identity. A project's own git config (set through git/identity, e.g.
+    # the GitHub App's bot) wins over it, which environment variables would not allow.
+    gitconfig = home / ".gitconfig"
+    if not gitconfig.exists():
+        gitconfig.write_text(f"[user]\n\tname = {GIT_NAME}\n\temail = {GIT_EMAIL}\n")
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": str(home),
@@ -211,23 +222,22 @@ def command_env(root: Path) -> dict[str, str]:
         "UV_PYTHON_DOWNLOADS": "never",
         "UV_LINK_MODE": "copy",
         "npm_config_update_notifier": "false",
-        "GIT_AUTHOR_NAME": GIT_NAME,
-        "GIT_AUTHOR_EMAIL": GIT_EMAIL,
-        "GIT_COMMITTER_NAME": GIT_NAME,
-        "GIT_COMMITTER_EMAIL": GIT_EMAIL,
+        "GIT_TERMINAL_PROMPT": "0",
     }
     env.update({k: os.environ[k] for k in PASS_ENV if k in os.environ})
     return env
 
 
-async def execute(root: Path, argv: list[str], limit_s: int) -> dict:
+async def execute(
+    root: Path, argv: list[str], limit_s: int, extra_env: dict[str, str] | None = None
+) -> dict:
     """Run argv in the project folder. When the command ends (or times out) anything it left
     running in its process group is killed too, so nothing outlives the call."""
     started = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=root,
-        env=command_env(root),
+        env={**command_env(root), **(extra_env or {})},
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -259,10 +269,12 @@ async def execute(root: Path, argv: list[str], limit_s: int) -> dict:
     }
 
 
-async def git(root: Path, *args: str) -> dict:
+async def git(
+    root: Path, *args: str, env: dict[str, str] | None = None, limit_s: int = GIT_TIMEOUT_S
+) -> dict:
     # Hooks and fsmonitor would run commands the project chose, outside a command's limits.
     argv = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args]
-    return await execute(root, argv, GIT_TIMEOUT_S)
+    return await execute(root, argv, limit_s, env)
 
 
 async def git_ok(root: Path, *args: str) -> str:
@@ -542,6 +554,62 @@ async def git_commit(user: str, project: str, body: CommitIn):
         sha = (await git_ok(root, "rev-parse", "--short", "HEAD")).strip()
         summary = (await git_ok(root, "show", "--stat", "--format=", "HEAD")).strip()
     return {"committed": True, "commit": sha, "summary": summary.splitlines()[-1]}
+
+
+class IdentityIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100, pattern=r"^[^\n<>]+$")
+    email: str = Field(min_length=3, max_length=200, pattern=r"^[^\s<>]+@[^\s<>]+$")
+
+
+@api.put(P + "/git/identity")
+async def git_identity(user: str, project: str, body: IdentityIn):
+    """Who this project's commits are by from now on, such as the GitHub App's bot."""
+    root = project_dir(user, project)
+    async with git_locks[root]:
+        await git_ok(root, "config", "user.name", body.name)
+        await git_ok(root, "config", "user.email", body.email)
+    return {"name": body.name, "email": body.email}
+
+
+class PushIn(BaseModel):
+    url: str = Field(max_length=300)
+    branch: str
+    # A short-lived token for this one repository; used for this push only, never stored.
+    token: str = Field(min_length=1, max_length=500)
+
+
+@api.post(P + "/git/push")
+async def git_push(user: str, project: str, body: PushIn):
+    """Push the current commit to a branch of a GitHub repository."""
+    root = project_dir(user, project)
+    if not PUSH_URL.match(body.url):
+        raise bad("Projects can only be pushed to a GitHub repository over HTTPS.")
+    if not BRANCH.match(body.branch) or ".." in body.branch:
+        raise bad(f"Bad branch name: {body.branch}")
+    basic = base64.b64encode(f"x-access-token:{body.token}".encode()).decode()
+    # In git's environment, not its arguments or the remote URL, so it never shows in a process
+    # list, git's output or .git/config; Landlock keeps other commands out of /proc/<pid>/environ.
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}",
+    }
+    async with git_locks[root]:
+        sha = (await git_ok(root, "rev-parse", "HEAD")).strip()
+        result = await git(
+            root,
+            "push",
+            "--force",
+            "--porcelain",
+            body.url,
+            f"HEAD:refs/heads/{body.branch}",
+            env=env,
+            limit_s=PUSH_TIMEOUT_S,
+        )
+    if result["exit_code"] != 0:
+        detail = (result["stderr"] or result["stdout"]).replace(body.token, "***").strip()
+        raise bad(f"git push failed: {detail[:500]}", status.HTTP_502_BAD_GATEWAY)
+    return {"branch": body.branch, "commit": sha}
 
 
 @app.get("/healthz")

@@ -145,6 +145,26 @@ class FileOut(FileBrief):
     created_at: datetime
 
 
+class ProjectOut(BaseModel):
+    """A software project in the Library: one card linking to its GitHub repo."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    stack: str | None
+    repo_url: str | None
+    branch: str | None
+    merged: bool
+    transferred_to: str | None
+    last_commit: str | None
+    last_commit_message: str | None
+    last_commit_at: datetime | None
+    live_url: str | None
+    chat_id: uuid.UUID | None
+    updated_at: datetime
+
+
 class FileUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 

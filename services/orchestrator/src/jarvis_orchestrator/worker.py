@@ -20,6 +20,7 @@ from jarvis_common.settings import get_settings
 from jarvis_common.skills import sync_library
 from jarvis_common.storage import S3Storage
 from jarvis_orchestrator import memory
+from jarvis_orchestrator.github import GitHubApp
 from jarvis_orchestrator.llm import chat_model
 from jarvis_orchestrator.sandbox import SandboxClient
 from jarvis_orchestrator.systems import learn, runner
@@ -66,6 +67,7 @@ async def startup(ctx: dict) -> None:
         storage=S3Storage(settings),
         sandbox=SandboxClient(settings),
         workbench=WorkbenchClient(settings),
+        github=GitHubApp(settings) if settings.github_enabled else None,
         web=WebClient(settings),
         google_http=httpx.AsyncClient(timeout=30),
         checkpointer=checkpointer,
@@ -84,6 +86,8 @@ async def shutdown(ctx: dict) -> None:
     await deps.storage.aclose()
     await deps.sandbox.aclose()
     await deps.workbench.aclose()
+    if deps.github is not None:
+        await deps.github.aclose()
     await deps.web.aclose()
     await deps.google_http.aclose()
     await ctx["pool"].close()

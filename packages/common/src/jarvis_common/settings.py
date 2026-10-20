@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     # it may ask for.
     workbench_timeout_s: int = 300
     workbench_max_timeout_s: int = 900
+
+    # GitHub: each software project gets a private repo in this organisation, written by the
+    # Jarvis GitHub App installed on it (docs/github-app.md). The key is the App's private key
+    # (PEM), base64 on one line. Empty turns GitHub off: projects then stay in the workbench.
+    github_apps_org: str = ""
+    github_app_id: str = ""
+    github_app_installation_id: str = ""
+    github_app_private_key_b64: str = ""
+    github_api_url: str = "https://api.github.com"
     # Longest a single run_system or continue_run job may take.
     run_job_timeout_s: int = 1800
 
@@ -154,6 +163,15 @@ class Settings(BaseSettings):
     # Backups (the backup service in compose.yaml). The API only reads its records and queues
     # "back up now"; this is how old the last good backup may be before the Admin page warns.
     backup_stale_hours: int = 36
+
+    @property
+    def github_enabled(self) -> bool:
+        return bool(
+            self.github_apps_org
+            and self.github_app_id
+            and self.github_app_installation_id
+            and self.github_app_private_key_b64
+        )
 
     @property
     def smtp_enabled(self) -> bool:

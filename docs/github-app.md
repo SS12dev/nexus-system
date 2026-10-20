@@ -1,0 +1,92 @@
+# GitHub App setup
+
+Every app a software team builds gets its own private repo in a GitHub organisation you own.
+Jarvis writes to it as a GitHub App called Jarvis, so commits show as `<app-name>[bot]`, its
+tokens last an hour, and it can only touch that organisation. Without this setup, projects
+still build and show in the Library; they just stay in the workbench.
+
+## 1. The organisation
+
+Create a free organisation for Jarvis's projects (Settings → Organizations → New
+organization), for example `servhub-apps`. Keeping them out of your own account means Jarvis
+never has access to your other repos.
+
+## 2. The App
+
+In the organisation: Settings → Developer settings → GitHub Apps → New GitHub App.
+
+| Field | Value |
+| --- | --- |
+| GitHub App name | must be unique on all of GitHub, e.g. `servhub-jarvis`; commits show as `<name>[bot]` |
+| Homepage URL | `https://jarvis.servhub.cc` |
+| Callback URL, Setup URL | leave empty; leave every box under them unticked |
+| Webhook | untick **Active**: Jarvis doesn't listen for events |
+| Where can this GitHub App be installed? | Only on this account |
+
+Repository permissions, and nothing else:
+
+| Permission | Access | Why |
+| --- | --- | --- |
+| Administration | Read and write | repo settings (making `main` the default branch) and moving a repo to your account ("move it to my GitHub") |
+| Repository creation | Read and write | create a repo per project (newer GitHub forms list this separately; on older ones Administration covers it) |
+| Contents | Read and write | push the team's branch and move `main` to it |
+| Metadata | Read-only | required by GitHub for every App |
+
+No organisation or account permissions are needed.
+
+After creating it, note the **App ID** at the top of its page, then under **Private keys**
+choose **Generate a private key**; your browser downloads a `.pem` file.
+
+## 3. Install it
+
+On the App's page: Install App → your organisation → **All repositories** (so the repos Jarvis
+creates are covered). The address you land on ends in `/installations/<number>`: that number
+is the installation id.
+
+## 4. Tell Jarvis
+
+Plain settings go in `.env`:
+
+```sh
+GITHUB_APPS_ORG=servhub-apps
+GITHUB_APP_ID=123456
+GITHUB_APP_INSTALLATION_ID=78901234
+```
+
+The private key is a secret. `scripts/secrets.sh` stores one line per value, so it goes in as
+base64 on one line, straight from the file (it never appears on screen or in your history):
+
+```sh
+base64 -i ~/Downloads/jarvis.*.private-key.pem | tr -d '\n' \
+  | ./scripts/secrets.sh set GITHUB_APP_PRIVATE_KEY_B64
+```
+
+Then delete the downloaded `.pem` (GitHub can make a new one any time) and restart:
+
+```sh
+./scripts/compose.sh --profile tunnel up -d
+```
+
+## What happens on a release
+
+- The repo is named after the app (`2048`); projects of people other than the owner get their
+  name in front (`priya-2048`). A taken name gets `-2`, `-3` and so on.
+- Each run pushes to `jarvis/<run id>`. `main` moves to it only when the reviewer approved and
+  every test passed; otherwise the reply says why it stayed on the branch.
+- A follow-up ("add a high score table") pushes to the same repo.
+- Pushes go from the workbench through its allowlist proxy, with a token limited to that one
+  repo's contents. The broader token that creates repos never leaves the orchestrator.
+
+## Moving a repo to your account
+
+Say "move 2048 to my GitHub, I'm SS12dev". Jarvis starts a small team whose agent asks you on
+an approval card before calling `github_transfer`. GitHub then emails that account to accept
+the transfer. Only the owner can do this. Once moved, Jarvis stops pushing to it; later
+changes stay in the workbench.
+
+## If something goes wrong
+
+The final reply says `Repo: not pushed: …` with GitHub's own message. 401 usually means a wrong
+App ID or key, 404 an installation id that doesn't match the organisation or an App not
+installed on all repositories, and 403 a missing permission from the table above (after
+changing permissions, accept the new ones on the installation page).
