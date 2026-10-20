@@ -78,6 +78,9 @@ async def test_import_zip_starts_as_draft(owner):
     assert resp.status_code == 201, resp.text
     s = resp.json()
     assert s["status"] == "draft" and s["file_contents"] == {"scripts/clean.py": "print('hi')\n"}
+    drafts = (await owner.get("/api/skills", params={"status": "draft"})).json()
+    assert [d["id"] for d in drafts] == [s["id"]]
+    assert (await owner.get("/api/skills", params={"scope": "learned"})).json() == []
     on = (await owner.post(f"/api/skills/{s['id']}/status", json={"status": "active"})).json()
     assert on["status"] == "active"
 

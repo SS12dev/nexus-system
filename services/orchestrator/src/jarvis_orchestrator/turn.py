@@ -261,7 +261,7 @@ async def _generate(
     )
     tools = build_tools(ctx, names)
     if allowed:
-        tools += system_tools(ctx, user, allowed, msg.trace_id)
+        tools += system_tools(ctx, user, allowed, msg.trace_id, asked=question)
     graph = build_graph(model, tools)
     content = ""
     usage = {"input_tokens": 0, "output_tokens": 0}

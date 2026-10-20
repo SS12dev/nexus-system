@@ -64,8 +64,14 @@ async def active_run(db, system_id: uuid.UUID) -> AgentRun | None:
 
 
 def system_tools(
-    ctx: ToolContext, user: User, allowed: set[str], trace_id: str | None = None
+    ctx: ToolContext,
+    user: User,
+    allowed: set[str],
+    trace_id: str | None = None,
+    asked: str = "",
 ) -> list[BaseTool]:
+    """asked: the user's latest message, handed to new teams verbatim so a step the user asked
+    for (sending an email) can't be lost in Jarvis's retelling; the approval card gates it."""
     deps = ctx.deps
     sessionmaker, user_id = deps.sessionmaker, ctx.user_id
 
@@ -145,13 +151,21 @@ def system_tools(
         """Design a team of sub-agents for a big task and start it. Use for multi-step work
         that needs research, several documents or files made (reports, decks, spreadsheets),
         or many items handled in parallel; answer simple things yourself. request: the whole
-        task in the user's words plus everything you know that matters. deliverables: files
-        wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's files to work from
+        task in the user's words plus everything you know that matters; keep every step they
+        asked for, including sending or deleting, since the user approves those in the app.
+        deliverables: files wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's
+        files to work from
         (default: this chat's files). budget_usd: the user's budget in USD; when they ask to
         keep it cheap without a figure, pass 0.25; otherwise leave it out. best_model:
         only when the user asked for the best model. keep: true when the user wants to reuse
         this team (otherwise it is discarded after the run unless they keep it)."""
         await note("build_agent_system")
+        if asked.strip() and asked.strip() not in request:
+            request = (
+                f"{request}\n\nThe user's own words: {asked.strip()[:4000]}\nWhere the text "
+                "above and the user's words differ, do what the user asked. Steps such as "
+                "sending email are allowed: the user approves each one in the app when it happens."
+            )
         async with sessionmaker() as db:
             owner = await db.get(User, user_id)
             ids = await files_for(db, file_ids)

@@ -546,7 +546,8 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
 
     ctx = ToolContext(deps=sdeps, user_id=user.id, chat_id=chat_id, emit=emit)
     allowed = {"web_search", "web_fetch", "run_code", "save_file"}
-    tools = {t.name: t for t in system_tools(ctx, user, allowed, "trace1")}
+    asked = "Research EV sales and email the report to sam@example.com"
+    tools = {t.name: t for t in system_tools(ctx, user, allowed, "trace1", asked=asked)}
     out = await tools["build_agent_system"].ainvoke({"request": "EV report please"})
     assert "Started Market report" in out and "researcher" in out
     async with sdeps.sessionmaker() as db:
@@ -555,6 +556,8 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
     assert system.lifetime == SystemLifetime.ephemeral and system.chat_id == chat_id
     assert run.status == RunStatus.queued and run.trace_id == "trace1"
     assert run.budget_usd == Decimal(str(sdeps.settings.default_run_budget_usd))
+    # The team gets the user's own words, so a step Jarvis left out (the email) isn't lost.
+    assert run.input.startswith("EV report please") and asked in run.input
     assert ("run_system", str(run.id)) in enqueued.jobs
 
     # Keeping it as a template, then listing it.

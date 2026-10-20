@@ -132,6 +132,8 @@ async def list_skills(
     db: DbDep,
     embedder: EmbedderDep,
     q: str | None = Query(default=None, max_length=300),
+    scope: SkillScope | None = None,
+    status_: SkillStatus | None = Query(default=None, alias="status"),
 ):
     if q:
         vec, _ = await embedder.try_embed_one(db, q)
@@ -139,7 +141,12 @@ async def list_skills(
         rows = await db.scalars(select(Skill).where(Skill.id.in_([h.id for h in hits])))
         by_id = {s.id: s for s in rows.all()}
         return [out(by_id[h.id], user) for h in hits if h.id in by_id]
-    rows = await db.scalars(select(Skill).where(listed(user)).order_by(Skill.scope, Skill.name))
+    query = select(Skill).where(listed(user))
+    if scope is not None:
+        query = query.where(Skill.scope == scope)
+    if status_ is not None:
+        query = query.where(Skill.status == status_)
+    rows = await db.scalars(query.order_by(Skill.scope, Skill.name))
     return [out(s, user) for s in rows.all()]
 
 
