@@ -29,7 +29,7 @@ export default defineConfig({
       },
       workbox: {
         // Never serve the API, auth redirects or the socket from the service worker cache.
-        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/ws/],
+        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/ws/, /^\/privacy/],
         // The 3D scene's chunk (three.js) is over the 2 MiB default; precache it for offline use.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
