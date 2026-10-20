@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { Shell } from "./components/Shell";
 import { api, ApiError } from "./lib/api";
 import { useEventSocket } from "./lib/socket";
-import { hasRole } from "./lib/types";
+import { hasRole, isOwner } from "./lib/types";
 import { AdminPage } from "./pages/AdminPage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
@@ -61,7 +61,7 @@ export function App() {
         <Route path="skills" element={<SkillsPage />} />
         <Route path="connections" element={<ConnectionsPage />} />
         {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}
-        {hasRole(user, "admin") && <Route path="admin" element={<AdminPage />} />}
+        {isOwner(user) && <Route path="admin" element={<AdminPage />} />}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

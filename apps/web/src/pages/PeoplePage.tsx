@@ -1,9 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { ROLE_RANK, type Role, type User } from "../lib/types";
 import { useStore } from "../store/chat";
 
 const ROLES: Role[] = ["owner", "admin", "member", "viewer"];
+const ROLE_LABEL: Record<Role, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
+};
 
 export function PeoplePage() {
   const me = useStore((s) => s.user)!;
@@ -46,7 +53,8 @@ export function PeoplePage() {
         <h1 className="mb-1 text-xl font-semibold">People</h1>
         <p className="mb-6 text-sm text-slate-400">
           Invite people by email. They join the first time they sign in with that address. Each
-          person's chats are private to them; budgets cap their model spend per period.
+          person's chats are private to them; budgets cap their model spend per period. Admins can
+          manage people below them here; only owners see the Admin page.
         </p>
 
         <form onSubmit={invite} className="mb-8 flex flex-wrap gap-2">
@@ -58,15 +66,19 @@ export function PeoplePage() {
             onChange={(e) => setEmail(e.target.value)}
             className="min-w-56 flex-1 rounded-md border border-edge bg-panel px-3 py-2"
           />
-          <select
+          <Select
+            large
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
-            className="rounded-md border border-edge bg-panel px-3 py-2"
+            aria-label="Role"
+            className="w-32"
           >
             {grantable.map((r) => (
-              <option key={r}>{r}</option>
+              <option key={r} value={r}>
+                {ROLE_LABEL[r]}
+              </option>
             ))}
-          </select>
+          </Select>
           <input
             inputMode="decimal"
             placeholder="Budget $ (default)"
@@ -91,18 +103,21 @@ export function PeoplePage() {
                   {u.email} · {u.status}
                 </div>
               </div>
-              <select
+              <Select
                 value={u.role}
                 disabled={!manageable(u) || u.id === me.id}
                 onChange={(e) =>
                   run(async () => replace(await api.updateUser(u.id, { role: e.target.value as Role })))
                 }
-                className="rounded-md border border-edge bg-ink px-2 py-1 text-sm disabled:opacity-50"
+                aria-label={`Role for ${u.name || u.email}`}
+                className="w-28 shrink-0"
               >
                 {(manageable(u) ? grantable : [u.role]).map((r) => (
-                  <option key={r}>{r}</option>
+                  <option key={r} value={r}>
+                    {ROLE_LABEL[r]}
+                  </option>
                 ))}
-              </select>
+              </Select>
               {u.role === "member" && manageable(u) && <GrantsField user={u} onError={setError} />}
               <BudgetField
                 user={u}

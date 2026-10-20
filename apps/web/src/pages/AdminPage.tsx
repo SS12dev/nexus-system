@@ -1,8 +1,18 @@
-import { AlertTriangle, CheckCircle2, ExternalLink, RefreshCw, XCircle } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ExternalLink,
+  RefreshCw,
+  Users,
+  X,
+  XCircle,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/format";
-import type { AuditEntry, Backup, OpsStatus, Usage } from "../lib/types";
+import type { AuditEntry, Backup, OpsStatus, Usage, User } from "../lib/types";
 
 type Tab = "status" | "usage" | "audit" | "backups";
 const TABS: { key: Tab; label: string }[] = [
@@ -12,10 +22,18 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "backups", label: "Backups" },
 ];
 
-/** Health, traffic, usage, the audit log, backups and maintenance mode. Admins only. */
+/** Health, traffic, usage, the audit log, backups and maintenance mode. Owners only. */
 export function AdminPage() {
   const [tab, setTab] = useState<Tab>("status");
   const [error, setError] = useState("");
+  const [people, setPeople] = useState<User[]>([]);
+  // Who the per-person figures cover; empty means everyone.
+  const [picked, setPicked] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.users().then(setPeople).catch((e) => setError(e.message));
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-5xl px-4 py-6">
@@ -24,7 +42,7 @@ export function AdminPage() {
           How Jarvis is running, who uses it and what it costs. You see counts, costs and errors
           here, never anyone's chats.
         </p>
-        <div className="mb-4 flex flex-wrap gap-2 text-sm">
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -37,11 +55,16 @@ export function AdminPage() {
               {t.label}
             </button>
           ))}
+          {tab !== "backups" && (
+            <div className="ml-auto">
+              <PeopleFilter people={people} picked={picked} onChange={setPicked} />
+            </div>
+          )}
         </div>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
-        {tab === "status" && <StatusPanel onError={setError} />}
-        {tab === "usage" && <UsagePanel onError={setError} />}
-        {tab === "audit" && <AuditPanel onError={setError} />}
+        {tab === "status" && <StatusPanel onError={setError} userIds={picked} />}
+        {tab === "usage" && <UsagePanel onError={setError} userIds={picked} />}
+        {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
         {tab === "backups" && <BackupsPanel onError={setError} />}
       </div>
     </div>
@@ -49,6 +72,127 @@ export function AdminPage() {
 }
 
 type PanelProps = { onError: (msg: string) => void };
+type FilteredProps = PanelProps & { userIds: string[] };
+
+const personName = (u: Pick<User, "name" | "email">) => u.name || u.email;
+
+/** Pick one person (tap their name) or several (tick the boxes). None picked means everyone. */
+function PeopleFilter({
+  people,
+  picked,
+  onChange,
+}: {
+  people: User[];
+  picked: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !box.current?.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  const chosen = people.filter((p) => picked.includes(p.id));
+  const summary =
+    picked.length === 0
+      ? "Everyone"
+      : picked.length === 1
+        ? (chosen[0] && personName(chosen[0])) || "1 person"
+        : `${picked.length} people`;
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? people.filter((p) => `${p.name ?? ""} ${p.email}`.toLowerCase().includes(q))
+    : people;
+  const toggle = (id: string) =>
+    onChange(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+
+  return (
+    <div ref={box} className="relative">
+      <div className="flex items-center rounded-md border border-edge bg-panel">
+        <button
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          className="flex max-w-56 items-center gap-1.5 px-2 py-1"
+        >
+          <Users size={14} className="shrink-0 text-slate-400" />
+          <span className="truncate">{summary}</span>
+          <ChevronDown size={14} className="shrink-0 text-slate-400" />
+        </button>
+        {picked.length > 0 && (
+          <button
+            onClick={() => onChange([])}
+            className="border-l border-edge px-1.5 py-1 text-slate-400 hover:text-white"
+            aria-label="Show everyone"
+            title="Show everyone"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-edge bg-panel p-2 shadow-xl">
+          {people.length > 6 && (
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find a person"
+              className="mb-2 w-full rounded-md border border-edge bg-ink px-2 py-1"
+            />
+          )}
+          <button
+            onClick={() => {
+              onChange([]);
+              setOpen(false);
+            }}
+            className={`mb-1 w-full rounded-md px-2 py-1.5 text-left hover:bg-edge/60 ${picked.length === 0 ? "text-sky-300" : ""}`}
+          >
+            Everyone
+          </button>
+          <ul role="listbox" aria-multiselectable className="max-h-72 overflow-y-auto">
+            {shown.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 rounded-md px-2 hover:bg-edge/60">
+                <input
+                  type="checkbox"
+                  checked={picked.includes(p.id)}
+                  onChange={() => toggle(p.id)}
+                  aria-label={`Include ${personName(p)}`}
+                />
+                <button
+                  onClick={() => {
+                    onChange([p.id]);
+                    setOpen(false);
+                  }}
+                  className="min-w-0 flex-1 py-1.5 text-left"
+                  title={`Only ${personName(p)}`}
+                >
+                  <div className="truncate">{personName(p)}</div>
+                  {p.name && <div className="truncate text-xs text-slate-500">{p.email}</div>}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 border-t border-edge px-2 pt-2 text-xs text-slate-500">
+            Tap a name to see only them, or tick several.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function usd(n: number): string {
   return `$${n < 10 ? n.toFixed(2) : n.toFixed(0)}`;
@@ -135,7 +279,7 @@ function Bars({
   );
 }
 
-function StatusPanel({ onError }: PanelProps) {
+function StatusPanel({ onError, userIds }: FilteredProps) {
   const [status, setStatus] = useState<OpsStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -143,14 +287,14 @@ function StatusPanel({ onError }: PanelProps) {
   const load = useCallback(() => {
     setLoading(true);
     api
-      .systemStatus()
+      .systemStatus(userIds)
       .then((s) => {
         setStatus(s);
         setMessage((m) => m || s.maintenance || "");
       })
       .catch((e) => onError(e.message))
       .finally(() => setLoading(false));
-  }, [onError]);
+  }, [onError, userIds]);
 
   useEffect(() => {
     load();
@@ -240,7 +384,16 @@ function StatusPanel({ onError }: PanelProps) {
         </p>
       </Section>
 
-      <Section title="Last 24 hours">
+      <Section
+        title="Last 24 hours"
+        action={
+          userIds.length > 0 && (
+            <span className="text-xs text-slate-500">
+              For the people picked. Services and traffic are for all of Jarvis.
+            </span>
+          )
+        }
+      >
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <Tile
             label="Chat turns"
@@ -353,12 +506,12 @@ function StatusPanel({ onError }: PanelProps) {
   );
 }
 
-function UsagePanel({ onError }: PanelProps) {
+function UsagePanel({ onError, userIds }: FilteredProps) {
   const [days, setDays] = useState(7);
   const [usage, setUsage] = useState<Usage | null>(null);
   useEffect(() => {
-    api.usage(days).then(setUsage).catch((e) => onError(e.message));
-  }, [days, onError]);
+    api.usage(days, userIds).then(setUsage).catch((e) => onError(e.message));
+  }, [days, userIds, onError]);
   if (!usage) return <p className="text-sm text-slate-500">Loading…</p>;
   const dayLabel = (d: string) =>
     new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
@@ -450,7 +603,7 @@ function describe(e: AuditEntry): string {
   return [who, details].filter(Boolean).join(" · ");
 }
 
-function AuditPanel({ onError }: PanelProps) {
+function AuditPanel({ onError, userIds }: FilteredProps) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [actions, setActions] = useState<string[]>([]);
   const [action, setAction] = useState("");
@@ -458,19 +611,19 @@ function AuditPanel({ onError }: PanelProps) {
 
   useEffect(() => {
     api
-      .audit({ action: action || undefined })
+      .audit({ action: action || undefined, userIds })
       .then((r) => {
         setEntries(r.entries);
         setActions(r.actions);
         setMore(r.entries.length >= 100);
       })
       .catch((e) => onError(e.message));
-  }, [action, onError]);
+  }, [action, userIds, onError]);
 
   const loadMore = async () => {
     const before = entries[entries.length - 1]?.at;
     try {
-      const r = await api.audit({ action: action || undefined, before });
+      const r = await api.audit({ action: action || undefined, before, userIds });
       setEntries((list) => [...list, ...r.entries]);
       setMore(r.entries.length >= 100);
     } catch (e) {
@@ -482,11 +635,11 @@ function AuditPanel({ onError }: PanelProps) {
   return (
     <div>
       <div className="mb-3 flex flex-wrap gap-2 text-sm">
-        <select
+        <Select
           value={action}
           onChange={(e) => setAction(e.target.value)}
-          className="rounded-md border border-edge bg-panel px-2 py-1"
           aria-label="Filter by action"
+          className="max-w-full"
         >
           <option value="">All events</option>
           {prefixes.map((p) => (
@@ -501,7 +654,7 @@ function AuditPanel({ onError }: PanelProps) {
                 ))}
             </optgroup>
           ))}
-        </select>
+        </Select>
       </div>
       {entries.length === 0 ? (
         <p className="text-sm text-slate-500">Nothing recorded yet.</p>

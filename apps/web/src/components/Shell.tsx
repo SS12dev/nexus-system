@@ -8,22 +8,29 @@ import {
   LogOut,
   Menu,
   MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Sparkles,
   Trash2,
   Users,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { api } from "../lib/api";
-import { hasRole } from "../lib/types";
+import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
 
-const navClass = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-2 rounded-md px-2 py-1.5 ${
-    isActive ? "bg-edge text-white" : "text-slate-300 hover:bg-edge/50"
-  }`;
+const SIDEBAR_KEY = "jarvis.sidebar";
+
+function savedCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+  } catch {
+    return false;
+  }
+}
 
 export function Shell() {
   const user = useStore((s) => s.user)!;
@@ -37,6 +44,8 @@ export function Shell() {
   );
   const upsertApprovals = useStore((s) => s.upsertApprovals);
   const [open, setOpen] = useState(false);
+  // Laptop only: fold the sidebar down to a rail of icons. On phones it is a drawer anyway.
+  const [collapsed, setCollapsed] = useState(savedCollapsed);
   const navigate = useNavigate();
   const { chatId } = useParams();
   const { pathname } = useLocation();
@@ -64,21 +73,62 @@ export function Shell() {
     location.href = "/login";
   };
 
+  const toggleCollapsed = () => {
+    setCollapsed(!collapsed);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, collapsed ? "open" : "collapsed");
+    } catch {
+      /* private mode */
+    }
+  };
+
+  // When folded, labels stay for screen readers but only the icons show.
+  const label = collapsed ? "md:sr-only" : "";
+  const navClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-2 rounded-md px-2 py-1.5 ${collapsed ? "md:justify-center" : ""} ${
+      isActive ? "bg-edge text-white" : "text-slate-300 hover:bg-edge/50"
+    }`;
+  const tip = (text: string) => (collapsed ? text : undefined);
+
   const spend = user.budget.spend_usd;
   return (
     <div className="flex h-full">
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-edge bg-panel transition-transform md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-edge bg-panel transition-[transform,width] md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
-        }`}
+        } ${collapsed ? "md:w-16" : ""}`}
       >
-        <div className="flex items-center gap-3 px-4 py-4">
-          <Orb state={jarvis} />
-          <span className="text-lg font-semibold tracking-wide">Jarvis</span>
+        <div
+          className={`flex items-center gap-3 px-4 py-4 ${collapsed ? "md:flex-col md:gap-3 md:px-0" : ""}`}
+        >
+          <Link
+            to="/"
+            className="flex min-w-0 items-center gap-3 rounded-md"
+            title="Home"
+            aria-label="Jarvis home"
+          >
+            <span className="relative">
+              <Orb state={jarvis} />
+              {collapsed && (
+                <span
+                  className={`absolute -right-0.5 -top-0.5 hidden size-2 rounded-full ring-2 ring-panel md:block ${connected ? "bg-emerald-400" : "bg-slate-600"}`}
+                />
+              )}
+            </span>
+            <span className={`text-lg font-semibold tracking-wide ${label}`}>Jarvis</span>
+          </Link>
           <span
-            className={`ml-auto size-2 rounded-full ${connected ? "bg-emerald-400" : "bg-slate-600"}`}
+            className={`ml-auto size-2 rounded-full ${connected ? "bg-emerald-400" : "bg-slate-600"} ${collapsed ? "md:hidden" : ""}`}
             title={connected ? "Live" : "Reconnecting"}
           />
+          <button
+            onClick={toggleCollapsed}
+            className="hidden text-slate-400 hover:text-white md:block"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
           <button className="md:hidden" onClick={() => setOpen(false)} aria-label="Close menu">
             <X size={18} />
           </button>
@@ -86,11 +136,15 @@ export function Shell() {
         <button
           onClick={() => navigate("/")}
           disabled={!hasRole(user, "member")}
-          className="mx-3 mb-2 flex items-center gap-2 rounded-lg border border-edge px-3 py-2 text-sm hover:bg-edge/60 disabled:opacity-40"
+          title={tip("New chat")}
+          className={`mx-3 mb-2 flex items-center gap-2 rounded-lg border border-edge px-3 py-2 text-sm hover:bg-edge/60 disabled:opacity-40 ${collapsed ? "md:mx-2 md:justify-center md:px-0" : ""}`}
         >
-          <MessageSquarePlus size={16} /> New chat
+          <MessageSquarePlus size={16} className="shrink-0" />
+          <span className={label}>New chat</span>
         </button>
-        <nav className="flex-1 overflow-y-auto px-2">
+        {/* Folded: the chat list goes; the space keeps the links at the bottom. */}
+        {collapsed && <div className="hidden flex-1 md:block" />}
+        <nav className={`flex-1 overflow-y-auto px-2 ${collapsed ? "md:hidden" : ""}`}>
           {chats.map((c) => (
             <div key={c.id} className="group flex items-center">
               <NavLink
@@ -115,49 +169,56 @@ export function Shell() {
             </div>
           ))}
         </nav>
-        <div className="border-t border-edge p-3 text-sm">
-          <NavLink to="/library" className={navClass}>
-            <FolderOpen size={16} /> Library
+        <div className={`border-t border-edge p-3 text-sm ${collapsed ? "md:px-2" : ""}`}>
+          <NavLink to="/library" className={navClass} title={tip("Library")}>
+            <FolderOpen size={16} className="shrink-0" /> <span className={label}>Library</span>
           </NavLink>
-          <NavLink to="/memory" className={navClass}>
-            <Brain size={16} /> Memory
+          <NavLink to="/memory" className={navClass} title={tip("Memory")}>
+            <Brain size={16} className="shrink-0" /> <span className={label}>Memory</span>
           </NavLink>
-          <NavLink to="/agents" className={navClass}>
-            <Bot size={16} /> Agents
+          <NavLink to="/agents" className={(p) => `relative ${navClass(p)}`} title={tip("Agents")}>
+            <Bot size={16} className="shrink-0" /> <span className={label}>Agents</span>
             {waiting > 0 && (
               <span
-                className="ml-auto rounded-full bg-rose-500 px-1.5 text-xs text-white"
+                className={`ml-auto rounded-full bg-rose-500 px-1.5 text-xs text-white ${
+                  collapsed ? "md:absolute md:-right-1 md:-top-1 md:ml-0" : ""
+                }`}
                 title="Steps waiting for your approval"
               >
                 {waiting}
               </span>
             )}
           </NavLink>
-          <NavLink to="/skills" className={navClass}>
-            <Sparkles size={16} /> Skills
+          <NavLink to="/skills" className={navClass} title={tip("Skills")}>
+            <Sparkles size={16} className="shrink-0" /> <span className={label}>Skills</span>
           </NavLink>
-          <NavLink to="/connections" className={navClass}>
-            <Link2 size={16} /> Connections
+          <NavLink to="/connections" className={navClass} title={tip("Connections")}>
+            <Link2 size={16} className="shrink-0" /> <span className={label}>Connections</span>
           </NavLink>
           {hasRole(user, "admin") && (
-            <NavLink to="/people" className={navClass}>
-              <Users size={16} /> People
+            <NavLink to="/people" className={navClass} title={tip("People")}>
+              <Users size={16} className="shrink-0" /> <span className={label}>People</span>
             </NavLink>
           )}
-          {hasRole(user, "admin") && (
-            <NavLink to="/admin" className={navClass}>
-              <Activity size={16} /> Admin
+          {isOwner(user) && (
+            <NavLink to="/admin" className={navClass} title={tip("Admin")}>
+              <Activity size={16} className="shrink-0" /> <span className={label}>Admin</span>
             </NavLink>
           )}
           <div className="mb-2" />
-          <div className="flex items-center gap-2 px-2">
-            <div className="min-w-0 flex-1">
+          <div className={`flex items-center gap-2 px-2 ${collapsed ? "md:justify-center" : ""}`}>
+            <div className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
               <div className="truncate">{user.name || user.email}</div>
               <div className="text-xs text-slate-500">
                 {user.role} · ${spend != null ? spend.toFixed(2) : "–"} of ${user.budget.max_usd}
               </div>
             </div>
-            <button onClick={signOut} className="text-slate-400 hover:text-white" aria-label="Sign out">
+            <button
+              onClick={signOut}
+              className="text-slate-400 hover:text-white"
+              aria-label="Sign out"
+              title={collapsed ? `Sign out ${user.email}` : "Sign out"}
+            >
               <LogOut size={16} />
             </button>
           </div>
@@ -171,8 +232,10 @@ export function Shell() {
           <button onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu size={20} />
           </button>
-          <Orb state={jarvis} size={22} />
-          <span className="font-semibold">Jarvis</span>
+          <Link to="/" className="flex items-center gap-3" aria-label="Jarvis home">
+            <Orb state={jarvis} size={22} />
+            <span className="font-semibold">Jarvis</span>
+          </Link>
         </header>
         {user.notice && (
           <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">

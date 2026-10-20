@@ -72,5 +72,8 @@ def require_role(minimum: RoleName) -> Callable:
 
 MemberUser = Annotated[User, Depends(require_role(RoleName.member))]
 AdminUser = Annotated[User, Depends(require_role(RoleName.admin))]
+# The Admin page (health, usage, audit log, backups, maintenance) is for owners only: admins
+# can manage people, but only the owner sees how Jarvis runs and what everyone costs.
+OwnerUser = Annotated[User, Depends(require_role(RoleName.owner))]
 
 RedisDep = Annotated[Redis, Depends(get_redis)]

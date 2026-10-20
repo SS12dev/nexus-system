@@ -363,6 +363,11 @@ export function hasRole(user: Pick<User, "role">, minimum: Role): boolean {
   return ROLE_RANK[user.role] >= ROLE_RANK[minimum];
 }
 
+/** The Admin page is the owner's alone; admins manage people but don't see it. */
+export function isOwner(user: Pick<User, "role">): boolean {
+  return user.role === "owner";
+}
+
 export interface SessionInfo {
   id: string;
   created_at: string;
