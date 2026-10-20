@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis_api.appsettings import refuse_during_maintenance
 from jarvis_api.deps import (
     CurrentUser,
     DbDep,
@@ -17,6 +18,7 @@ from jarvis_api.deps import (
     RedisDep,
     SettingsDep,
 )
+from jarvis_api.ratelimit import runs_limit
 from jarvis_api.schemas import DecisionIn, RunIn, TemplateIn
 from jarvis_common.events import Event, publish
 from jarvis_common.models import (
@@ -134,7 +136,9 @@ async def get_system(system_id: uuid.UUID, user: CurrentUser, db: DbDep):
     }
 
 
-@router.post("/systems/{system_id}/runs", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/systems/{system_id}/runs", status_code=status.HTTP_202_ACCEPTED, dependencies=[runs_limit]
+)
 async def start_run(
     system_id: uuid.UUID,
     body: RunIn,
@@ -146,6 +150,7 @@ async def start_run(
     redis: RedisDep,
 ):
     s = await own_system(db, user, system_id)
+    await refuse_during_maintenance(db, user)
     live = await db.scalar(
         select(AgentRun.id).where(AgentRun.system_id == s.id, AgentRun.status.in_(ACTIVE_RUN))
     )

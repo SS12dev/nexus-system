@@ -4,3 +4,5 @@
 ORCHESTRATOR_QUEUE = "arq:queue"
 # Parsing and embedding uploads run on the doc-worker.
 DOCS_QUEUE = "arq:docs"
+# arq refreshes this key on each worker's queue while the worker is alive.
+HEALTH_SUFFIX = ":health-check"

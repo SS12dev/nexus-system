@@ -147,6 +147,8 @@ class WorkerSettings:
     ]
     on_startup = startup
     on_shutdown = shutdown
+    # The Admin page reads <queue>:health-check to tell whether a worker is alive.
+    health_check_interval = 30
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 20
     job_timeout = 300

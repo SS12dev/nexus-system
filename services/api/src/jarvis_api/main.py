@@ -9,6 +9,7 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from jarvis_api import ws
+from jarvis_api.middleware import GuardMiddleware
 from jarvis_api.queue import ArqJobQueue, JobQueue
 from jarvis_api.routes import (
     admin,
@@ -18,6 +19,7 @@ from jarvis_api.routes import (
     instructions,
     me,
     memories,
+    ops,
     skills,
     systems,
 )
@@ -77,6 +79,8 @@ def create_app(
         https_only=settings.session_cookie_secure,
         max_age=600,
     )
+    # Outermost: refuses cross-site writes and over-limit callers before anything else runs.
+    app.add_middleware(GuardMiddleware, settings=settings)
 
     app.include_router(auth.router)
     app.include_router(me.router)
@@ -87,6 +91,7 @@ def create_app(
     app.include_router(instructions.router)
     app.include_router(systems.router)
     app.include_router(admin.router)
+    app.include_router(ops.router)
     app.include_router(ws.router)
 
     @app.get("/healthz", tags=["ops"])

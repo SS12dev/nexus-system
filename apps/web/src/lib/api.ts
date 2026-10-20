@@ -1,6 +1,8 @@
 import type {
   AgentSystem,
   Approval,
+  AuditEntry,
+  Backup,
   Chat,
   FileItem,
   GoogleAccess,
@@ -15,11 +17,14 @@ import type {
   Run,
   RunDetail,
   SearchHit,
+  SessionInfo,
   Skill,
   SkillDetail,
   SkillVersion,
+  OpsStatus,
   SystemDetail,
   ToolEntry,
+  Usage,
   User,
   UserStatus,
 } from "./types";
@@ -67,6 +72,9 @@ export const api = {
   me: () => request<User>("/api/me"),
   googleAccess: () => request<GoogleAccess>("/api/me/google"),
   disconnectGoogle: () => request<void>("/api/me/google", { method: "DELETE" }),
+  sessions: () => request<SessionInfo[]>("/api/me/sessions"),
+  signOutSession: (id: string) => request<void>(`/api/me/sessions/${id}`, { method: "DELETE" }),
+  signOutOthers: () => request<void>("/api/me/sessions/sign-out-others", { method: "POST" }),
 
   chats: () => request<Chat[]>("/api/chats"),
   createChat: () => request<Chat>("/api/chats", { method: "POST", body: json({}) }),
@@ -185,6 +193,25 @@ export const api = {
     request<User>("/api/admin/users", {
       method: "POST",
       body: json({ email, role, ...(budget_usd ? { budget_usd } : {}) }),
+    }),
+  signOutUser: (id: string) =>
+    request<void>(`/api/admin/users/${id}/sign-out`, { method: "POST" }),
+  systemStatus: () => request<OpsStatus>("/api/admin/status"),
+  usage: (days = 7) => request<Usage>(`/api/admin/usage?days=${days}`),
+  audit: (params: { action?: string; before?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.action) q.set("action", params.action);
+    if (params.before) q.set("before", params.before);
+    return request<{ entries: AuditEntry[]; actions: string[] }>(
+      `/api/admin/audit${q.size ? `?${q}` : ""}`,
+    );
+  },
+  backups: () => request<Backup[]>("/api/admin/backups"),
+  backupNow: () => request<Backup>("/api/admin/backups", { method: "POST" }),
+  setMaintenance: (enabled: boolean, message?: string) =>
+    request<{ enabled: boolean; message: string | null }>("/api/admin/maintenance", {
+      method: "PUT",
+      body: json({ enabled, message }),
     }),
   updateUser: (id: string, changes: { role?: Role; status?: UserStatus; budget_usd?: string }) =>
     request<User>(`/api/admin/users/${id}`, { method: "PATCH", body: json(changes) }),

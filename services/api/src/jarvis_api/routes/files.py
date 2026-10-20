@@ -21,6 +21,7 @@ from jarvis_api.deps import (
     SettingsDep,
     StorageDep,
 )
+from jarvis_api.ratelimit import uploads_limit
 from jarvis_api.routes.chats import own_chat
 from jarvis_api.schemas import FileBrief, FileOut, FileTextOut, FileUpdateIn, SearchHitOut
 from jarvis_common.library import SUPPORTED_EXTENSIONS, content_type_for, document_text
@@ -48,7 +49,9 @@ def clean_name(name: str | None) -> str:
     return base[:255] or "upload"
 
 
-@router.post("", response_model=FileOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=FileOut, status_code=status.HTTP_201_CREATED, dependencies=[uploads_limit]
+)
 async def upload(
     user: MemberUser,
     db: DbDep,

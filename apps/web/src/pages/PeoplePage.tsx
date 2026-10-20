@@ -109,6 +109,18 @@ export function PeoplePage() {
                 disabled={!manageable(u)}
                 onSave={(v) => run(async () => replace(await api.updateUser(u.id, { budget_usd: v })))}
               />
+              {u.status === "active" && u.id !== me.id && manageable(u) && (
+                <button
+                  onClick={() =>
+                    confirm(`Sign ${u.name || u.email} out on every device?`) &&
+                    run(() => api.signOutUser(u.id))
+                  }
+                  className="rounded-md border border-edge px-2 py-1 text-sm hover:bg-edge/60"
+                  title="Ends their sessions; they can sign in again"
+                >
+                  Sign out
+                </button>
+              )}
               {u.status !== "invited" && u.id !== me.id && manageable(u) && (
                 <button
                   onClick={() =>

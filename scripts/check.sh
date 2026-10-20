@@ -30,6 +30,10 @@ uv sync --frozen
 uv run ruff check .
 uv run ruff format --check .
 
+step "Shell: backup and restore scripts"
+sh -n infra/backup/backup.sh
+bash -n scripts/restore.sh
+
 step "Python: tests"
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55432/jarvis_test \
 TEST_REDIS_URL=redis://127.0.0.1:56379/15 \
@@ -44,8 +48,8 @@ else docker compose --env-file .env.example config --quiet; fi
 
 if $build_images; then
   step "Compose: build images"
-  if [[ -f .env ]]; then docker compose build web api orchestrator doc-worker sandbox
-  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox; fi
+  if [[ -f .env ]]; then docker compose build web api orchestrator doc-worker sandbox backup
+  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox backup; fi
 fi
 
 printf '\n\033[1;32mAll checks passed.\033[0m\n'

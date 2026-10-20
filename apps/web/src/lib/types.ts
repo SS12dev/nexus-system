@@ -18,6 +18,8 @@ export interface User {
   created_at: string;
   last_login_at: string | null;
   budget: Budget;
+  /** Set while an admin has maintenance mode on (only on /api/me). */
+  notice?: string | null;
 }
 
 export interface GoogleAccess {
@@ -330,4 +332,91 @@ export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 
 
 export function hasRole(user: Pick<User, "role">, minimum: Role): boolean {
   return ROLE_RANK[user.role] >= ROLE_RANK[minimum];
+}
+
+export interface SessionInfo {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  ip: string | null;
+  current: boolean;
+}
+
+export interface ServiceHealth {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface Backup {
+  id: string;
+  kind: "scheduled" | "manual";
+  status: "requested" | "running" | "ok" | "failed";
+  name: string | null;
+  size_bytes: number | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface TrafficMinute {
+  minute: string;
+  requests: number;
+  errors: number;
+  limited: number;
+  avg_ms: number | null;
+}
+
+export interface OpsStatus {
+  services: ServiceHealth[];
+  queues: { orchestrator: number | null; documents: number | null };
+  traffic: TrafficMinute[];
+  people: { active: number; invited: number; disabled: number; signed_in_24h: number };
+  last_24h: {
+    turns: number;
+    failed_turns: number;
+    input_tokens: number;
+    output_tokens: number;
+    failed_runs: number;
+    run_cost_usd: number;
+  };
+  runs_live: number;
+  files: { processing: number; failed: number };
+  spend: { period_usd: number; budgets_usd: number; unknown: number };
+  backup: { last_ok: Backup | null; latest: Backup | null; stale: boolean };
+  maintenance: string | null;
+  failures: { kind: "turn" | "run" | "file"; at: string; error: string; user: string }[];
+  links: { langfuse: string };
+}
+
+export interface UsagePerson {
+  user_id: string;
+  email: string;
+  name: string | null;
+  turns: number;
+  failed_turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  last_active: string | null;
+  runs: number;
+  run_cost_usd: number;
+  files: number;
+}
+
+export interface Usage {
+  days: number;
+  people: UsagePerson[];
+  series: { day: string; turns: number; failed_turns: number; tokens: number; run_cost_usd: number }[];
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  action: string;
+  actor: string | null;
+  target: string | null;
+  target_user?: string | null;
+  data: Record<string, unknown>;
 }

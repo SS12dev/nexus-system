@@ -31,6 +31,15 @@ class RecordingQueue:
         self.runs.append((function, run_id))
 
 
+@pytest.fixture(autouse=True)
+async def clean_counters(redis):
+    """Rate-limit windows and caches would otherwise carry over between tests."""
+    yield
+    keys = [k async for k in redis.scan_iter("jarvis:*")]
+    if keys:
+        await redis.delete(*keys)
+
+
 @pytest.fixture
 def queue():
     return RecordingQueue()

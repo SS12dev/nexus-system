@@ -5,7 +5,8 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import delete, select
 
-from jarvis_api.deps import AdminUser, DbDep, GatewayDep, SettingsDep
+from jarvis_api.cache import cached_spend
+from jarvis_api.deps import AdminUser, DbDep, GatewayDep, RedisDep, SettingsDep
 from jarvis_api.schemas import (
     AdminUserOut,
     BudgetOut,
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 async def _admin_view(db, settings: Settings, gateway: LiteLLMAdmin, user: User) -> AdminUserOut:
     budget = await get_budget(db, settings, user)
     key = await active_key(db, user.id)
+    # Not cached: this follows a change, so show LiteLLM's current figure.
     spend = await gateway.spend(key.secret) if key else None
     return AdminUserOut(
         **UserOut.model_validate(user).model_dump(),
@@ -44,12 +46,16 @@ async def _admin_view(db, settings: Settings, gateway: LiteLLMAdmin, user: User)
 
 
 @router.get("/users", response_model=list[AdminUserOut])
-async def list_users(actor: AdminUser, db: DbDep, settings: SettingsDep, gateway: GatewayDep):
+async def list_users(
+    actor: AdminUser, db: DbDep, settings: SettingsDep, gateway: GatewayDep, redis: RedisDep
+):
     users = (await db.scalars(select(User).order_by(User.created_at))).all()
     budgets = [await get_budget(db, settings, u) for u in users]
     await db.commit()
     keys = [await active_key(db, u.id) for u in users]
-    spends = await asyncio.gather(*(gateway.spend(k.secret) if k else _none() for k in keys))
+    spends = await asyncio.gather(
+        *(cached_spend(redis, gateway, k.secret) if k else _none() for k in keys)
+    )
     return [
         AdminUserOut(
             **UserOut.model_validate(u).model_dump(),
@@ -203,3 +209,16 @@ async def set_grants(user_id: uuid.UUID, body: GrantsIn, actor: AdminUser, db: D
     )
     await db.commit()
     return await get_grants(user_id, actor, db)
+
+
+@router.post("/users/{user_id}/sign-out", status_code=status.HTTP_204_NO_CONTENT)
+async def sign_out_user(user_id: uuid.UUID, actor: AdminUser, db: DbDep) -> None:
+    """Sign someone out on every device, e.g. after a lost phone. They can sign in again."""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if user.id != actor.id and not can_manage(actor, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change this user")
+    await revoke_all(db, user)
+    db.add(AuditLog(actor_id=actor.id, action="user.signed_out", target=str(user.id)))
+    await db.commit()

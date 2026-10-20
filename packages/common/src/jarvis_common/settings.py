@@ -122,6 +122,22 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_starttls: bool = True
 
+    # Rate limits, counted in Redis so they hold across API replicas. Per user where signed in,
+    # otherwise per client IP. 0 turns a limit off.
+    rate_limit_enabled: bool = True
+    rate_limit_api_per_minute: int = 600
+    rate_limit_auth_per_minute: int = 20
+    rate_limit_messages_per_minute: int = 20
+    rate_limit_uploads_per_minute: int = 30
+    rate_limit_runs_per_hour: int = 30
+
+    # Shown as links on the Admin page.
+    langfuse_url: str = "http://localhost:3000"
+
+    # Backups (the backup service in compose.yaml). The API only reads its records and queues
+    # "back up now"; this is how old the last good backup may be before the Admin page warns.
+    backup_stale_hours: int = 36
+
     @property
     def smtp_enabled(self) -> bool:
         return bool(self.smtp_host and (self.smtp_from or self.smtp_username))

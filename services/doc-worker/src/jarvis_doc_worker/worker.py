@@ -59,3 +59,5 @@ class WorkerSettings:
     max_jobs = 2
     job_timeout = 900
     max_tries = 2
+    # The Admin page reads <queue>:health-check to tell whether a worker is alive.
+    health_check_interval = 30

@@ -30,7 +30,7 @@ DEV_TOKEN = "test-dev-token"
 TABLES = (
     "approvals, run_events, agent_runs, agent_systems, skill_usages, skill_versions, skills, "
     "instructions, tool_grants, memory_events, memories, episodes, profiles, attachments, "
-    "file_chunks, files, "
+    "file_chunks, files, backups, app_settings, "
     "embedding_cache, audit_log, messages, chats, budgets, google_grants, api_keys, sessions, "
     "user_roles, users"
 )
@@ -121,6 +121,9 @@ class FakeGateway:
         if key not in self.keys:
             return None
         return self.keys[key].get("spend", 0.0)
+
+    async def healthy(self) -> bool:
+        return True
 
     async def aclose(self) -> None:
         pass
