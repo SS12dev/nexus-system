@@ -133,7 +133,7 @@ async def draft_skill(deps, run_id: uuid.UUID) -> Skill | None:
         )
         db.add(skill)
         await db.flush()
-        add_version(db, skill, None, f"Drafted by Jarvis from {system.name}")
+        add_version(db, skill, None, f"Drafted by the assistant from {system.name}")
         message = None
         if run.chat_id and await db.get(Chat, run.chat_id):
             message = Message(

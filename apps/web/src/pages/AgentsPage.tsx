@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { hasRole, type AgentSystem, type RunDetail, type SystemDetail } from "../lib/types";
 import { useStore } from "../store/chat";
+import { useAssistantName } from "../lib/assistant";
 
 const TOPOLOGY: Record<AgentSystem["topology"], string> = {
   single: "Single agent",
@@ -26,6 +27,7 @@ const EVENT_TEXT: Record<string, (d: Record<string, unknown>) => string> = {
 };
 
 export function AgentsPage() {
+  const assistant = useAssistantName();
   const { systemId } = useParams();
   const navigate = useNavigate();
   const user = useStore((s) => s.user)!;
@@ -108,8 +110,8 @@ export function AgentsPage() {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Agents</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Teams of sub-agents Jarvis builds for bigger jobs: who is on each team, what every run
-          did and cost, and the steps waiting for your approval. Ask Jarvis in a chat to build one.
+          Teams of sub-agents {assistant} builds for bigger jobs: who is on each team, what every run
+          did and cost, and the steps waiting for your approval. Ask {assistant} in a chat to build one.
         </p>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
 
@@ -131,7 +133,7 @@ export function AgentsPage() {
             <ul className="space-y-1">
               {list.length === 0 && (
                 <li className="text-sm text-slate-500">
-                  No teams yet. Try asking Jarvis for a researched report with a spreadsheet.
+                  No teams yet. Try asking {assistant} for a researched report with a spreadsheet.
                 </li>
               )}
               {list.map((s) => {

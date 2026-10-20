@@ -96,9 +96,7 @@ async def callback(request: Request, db: DbDep, settings: SettingsDep):
     except OAuthError as exc:
         log.warning("OIDC callback failed: %s", exc)
         if connecting:
-            return RedirectResponse(
-                "/connections?error=google_cancelled", status.HTTP_303_SEE_OTHER
-            )
+            return RedirectResponse("/settings?error=google_cancelled", status.HTTP_303_SEE_OTHER)
         return RedirectResponse("/login?error=oidc_failed", status.HTTP_303_SEE_OTHER)
     info = token.get("userinfo") or {}
     if not info.get("email") or not info.get("email_verified", False):
@@ -141,12 +139,10 @@ async def _finish_connect(
         else user.email == normalize_email(info["email"])
     )
     if not same_account or str(user.id) != user_id:
-        return RedirectResponse(
-            "/connections?error=google_other_account", status.HTTP_303_SEE_OTHER
-        )
+        return RedirectResponse("/settings?error=google_other_account", status.HTTP_303_SEE_OTHER)
     await google.save_from_sign_in(db, settings, user.id, token)
     await db.commit()
-    return RedirectResponse("/connections", status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/settings", status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/dev-login", response_model=UserOut)

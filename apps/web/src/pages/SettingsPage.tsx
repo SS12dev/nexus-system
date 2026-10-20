@@ -1,7 +1,9 @@
 import { CalendarDays, CheckSquare, HardDrive, Mail, Monitor, Users } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
+import { AssistantNameForm } from "../components/AssistantNameForm";
 import { api } from "../lib/api";
+import { useAssistantName } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDate } from "../lib/format";
 import type { GoogleAccess, SessionInfo } from "../lib/types";
 
@@ -19,10 +21,11 @@ const SERVICES: Record<string, { label: string; what: string; icon: ReactNode }>
 
 const ERRORS: Record<string, string> = {
   google_cancelled: "Google access wasn't changed.",
-  google_other_account: "Choose the same Google account you sign in to Jarvis with.",
+  google_other_account: "Choose the same Google account you sign in with.",
 };
 
-export function ConnectionsPage() {
+export function SettingsPage() {
+  const assistant = useAssistantName();
   const [params] = useSearchParams();
   const [access, setAccess] = useState<GoogleAccess | null>(null);
   const [error, setError] = useState(ERRORS[params.get("error") ?? ""] ?? "");
@@ -32,7 +35,7 @@ export function ConnectionsPage() {
   }, []);
 
   const disconnect = async () => {
-    if (!confirm("Stop Jarvis from using your Google account? Agents lose access right away."))
+    if (!confirm(`Stop ${assistant} from using your Google account? Agents lose access right away.`))
       return;
     try {
       await api.disconnectGoogle();
@@ -46,15 +49,22 @@ export function ConnectionsPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-2xl px-4 py-6">
-        <h1 className="mb-1 text-xl font-semibold">Connections</h1>
+        <h1 className="mb-1 text-xl font-semibold">Settings</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Google services you let Jarvis and its agents use. You chose these when you signed in;
-          change them here at any time. Only you can see this.
+          Your assistant's name, the Google services you let {assistant} and its agents use, and
+          the devices you're signed in on. Only you can see this.
         </p>
+        <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
+          <h2 className="mb-1 font-medium">Your assistant</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            What you call it in chats, and later by voice. Other people name their own.
+          </p>
+          <AssistantNameForm />
+        </section>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {access && !access.available && (
           <p className="text-sm text-slate-400">
-            Google services aren't set up on this Jarvis. They need Google sign-in and
+            Google services aren't set up on this server. They need Google sign-in and
             GOOGLE_SERVICES in .env.
           </p>
         )}

@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { ACCEPT } from "../lib/format";
 import { useStore } from "../store/chat";
 import { FileChip } from "./FileChip";
+import { useAssistantName } from "../lib/assistant";
 
 interface Pending {
   key: string;
@@ -24,6 +25,7 @@ export function Composer({
   placeholder?: string;
   chatId?: string;
 }) {
+  const assistant = useAssistantName();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [pending, setPending] = useState<Pending[]>([]);
@@ -140,7 +142,7 @@ export function Composer({
             rows={1}
             disabled={disabled}
             placeholder={
-              placeholder ?? (pending.length ? "Ask about the attached files" : "Message Jarvis")
+              placeholder ?? (pending.length ? "Ask about the attached files" : `Message ${assistant}`)
             }
             className="max-h-48 min-h-[1.5rem] flex-1 resize-none bg-transparent py-1 outline-none [field-sizing:content] placeholder:text-slate-500 disabled:opacity-50"
           />
@@ -149,7 +151,7 @@ export function Composer({
             disabled={disabled || sending || busyFiles || !text.trim()}
             className="rounded-full bg-sky-500 p-2 text-ink disabled:opacity-30"
             aria-label="Send"
-            title={busyFiles ? "Waiting for Jarvis to finish reading your files" : "Send"}
+            title={busyFiles ? `Waiting for ${assistant} to finish reading your files` : "Send"}
           >
             <SendHorizontal size={16} />
           </button>

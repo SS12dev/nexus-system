@@ -65,11 +65,12 @@ def agent_prompt(
     skills: list[Skill],
     tools: list[ToolInfo],
     user_name: str | None,
+    assistant: str,
 ) -> str:
     today = datetime.now(UTC).strftime("%A %d %B %Y")
     parts = [layers.render()] if layers.render() else []
     parts.append(
-        f"<you>\nYou are {agent.name}, the {agent.role} in a team of agents Jarvis built for "
+        f"<you>\nYou are {agent.name}, the {agent.role} in a team of agents {assistant} built for "
         f"{user_name or 'the user'} to do this: {spec.name}.\n{position(spec, agent)}\n</you>"
     )
     parts.append(f"<instructions>\n{agent.instructions}\n</instructions>")

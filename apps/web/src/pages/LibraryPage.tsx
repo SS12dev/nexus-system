@@ -8,8 +8,10 @@ import { api } from "../lib/api";
 import { ACCEPT, formatDate, formatSize } from "../lib/format";
 import { hasRole, type FileItem, type SearchHit } from "../lib/types";
 import { useStore } from "../store/chat";
+import { useAssistantName } from "../lib/assistant";
 
 export function LibraryPage() {
+  const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const live = useStore((s) => s.files);
   const upsertFile = useStore((s) => s.upsertFile);
@@ -64,7 +66,7 @@ export function LibraryPage() {
   };
 
   const remove = (f: FileItem) => {
-    if (!confirm(`Delete ${f.name}? Jarvis will no longer be able to read it.`)) return;
+    if (!confirm(`Delete ${f.name}? ${assistant} will no longer be able to read it.`)) return;
     run(async () => {
       await api.deleteFile(f.id);
       setIds((xs) => xs.filter((x) => x !== f.id));
@@ -112,7 +114,7 @@ export function LibraryPage() {
           />
         </div>
         <p className="mb-5 text-sm text-slate-400">
-          Every file you upload, here or in a chat. Jarvis reads them, so you can ask about them in
+          Every file you upload, here or in a chat. {assistant} reads them, so you can ask about them in
           any chat. Only you can see your files.
         </p>
 
@@ -175,7 +177,7 @@ export function LibraryPage() {
                     {f.status === "failed"
                       ? f.error
                       : f.status === "processing"
-                        ? "Jarvis is reading it…"
+                        ? `${assistant} is reading it…`
                         : `${formatSize(f.size)} · ${formatDate(f.created_at)}`}
                     {f.chat_id && f.status === "ready" && (
                       <>
@@ -250,6 +252,7 @@ function IconButton({
 
 /** The text Jarvis extracted from a file, which is what it reads when answering. */
 function Preview({ file, onClose }: { file: FileItem; onClose: () => void }) {
+  const assistant = useAssistantName();
   const [text, setText] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
 
@@ -274,7 +277,7 @@ function Preview({ file, onClose }: { file: FileItem; onClose: () => void }) {
           <div className="min-w-0 flex-1">
             <div className="truncate font-medium">{file.name}</div>
             <div className="text-xs text-slate-500">
-              What Jarvis read · {file.parser} · {file.chunk_count} sections
+              What {assistant} read · {file.parser} · {file.chunk_count} sections
             </div>
           </div>
           <a href={api.fileUrl(file.id, true)} target="_blank" rel="noreferrer" className="text-sm text-sky-300">

@@ -4,12 +4,12 @@ import {
   Bot,
   Brain,
   FolderOpen,
-  Link2,
   LogOut,
   Menu,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
   Sparkles,
   Trash2,
   Users,
@@ -18,6 +18,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { api } from "../lib/api";
+import { useAssistantName } from "../lib/assistant";
 import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
@@ -34,6 +35,7 @@ function savedCollapsed(): boolean {
 
 export function Shell() {
   const user = useStore((s) => s.user)!;
+  const assistant = useAssistantName();
   const chats = useStore((s) => s.chats);
   const setChats = useStore((s) => s.setChats);
   const removeChat = useStore((s) => s.removeChat);
@@ -105,7 +107,7 @@ export function Shell() {
             to="/"
             className="flex min-w-0 items-center gap-3 rounded-md"
             title="Home"
-            aria-label="Jarvis home"
+            aria-label={`${assistant} home`}
           >
             <span className="relative">
               <Orb state={jarvis} />
@@ -115,7 +117,7 @@ export function Shell() {
                 />
               )}
             </span>
-            <span className={`text-lg font-semibold tracking-wide ${label}`}>Jarvis</span>
+            <span className={`text-lg font-semibold tracking-wide truncate ${label}`}>{assistant}</span>
           </Link>
           <span
             className={`ml-auto size-2 rounded-full ${connected ? "bg-emerald-400" : "bg-slate-600"} ${collapsed ? "md:hidden" : ""}`}
@@ -192,8 +194,8 @@ export function Shell() {
           <NavLink to="/skills" className={navClass} title={tip("Skills")}>
             <Sparkles size={16} className="shrink-0" /> <span className={label}>Skills</span>
           </NavLink>
-          <NavLink to="/connections" className={navClass} title={tip("Connections")}>
-            <Link2 size={16} className="shrink-0" /> <span className={label}>Connections</span>
+          <NavLink to="/settings" className={navClass} title={tip("Settings")}>
+            <Settings size={16} className="shrink-0" /> <span className={label}>Settings</span>
           </NavLink>
           {hasRole(user, "admin") && (
             <NavLink to="/people" className={navClass} title={tip("People")}>
@@ -232,9 +234,9 @@ export function Shell() {
           <button onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu size={20} />
           </button>
-          <Link to="/" className="flex items-center gap-3" aria-label="Jarvis home">
+          <Link to="/" className="flex items-center gap-3" aria-label={`${assistant} home`}>
             <Orb state={jarvis} size={22} />
-            <span className="font-semibold">Jarvis</span>
+            <span className="font-semibold">{assistant}</span>
           </Link>
         </header>
         {user.notice && (

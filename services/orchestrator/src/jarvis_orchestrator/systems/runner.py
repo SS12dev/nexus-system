@@ -126,7 +126,7 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
                 log.warning("No run key for %s: %s", run_id, exc)
                 await db.commit()
                 await finish(
-                    deps, run_id, RunStatus.failed, error="Jarvis couldn't reach the model gateway."
+                    deps, run_id, RunStatus.failed, error="Couldn't reach the model gateway."
                 )
                 return
             run.key_secret = key
@@ -157,7 +157,9 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
                 if s not in visible and (found := await find_skill(db, user.id, s)):
                     granted_skills.append(found)
             infos = [BY_NAME[t] for t in a.tools if t in allowed and t in BY_NAME]
-            prompts[a.id] = agent_prompt(spec, a, layers, granted_skills, infos, user.name)
+            prompts[a.id] = agent_prompt(
+                spec, a, layers, granted_skills, infos, user.name, user.assistant
+            )
         await db.commit()
         chat_id, request, trace_id = run.chat_id, run.input, run.trace_id
         budget = float(run.budget_usd)

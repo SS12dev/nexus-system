@@ -13,6 +13,7 @@ import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/format";
 import type { AuditEntry, Backup, OpsStatus, Usage, User } from "../lib/types";
+import { APP_NAME } from "../lib/assistant";
 
 type Tab = "status" | "usage" | "audit" | "backups";
 const TABS: { key: Tab; label: string }[] = [
@@ -39,7 +40,7 @@ export function AdminPage() {
       <div className="mx-auto max-w-5xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Admin</h1>
         <p className="mb-4 text-sm text-slate-400">
-          How Jarvis is running, who uses it and what it costs. You see counts, costs and errors
+          How {APP_NAME} is running, who uses it and what it costs. You see counts, costs and errors
           here, never anyone's chats.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -389,7 +390,7 @@ function StatusPanel({ onError, userIds }: FilteredProps) {
         action={
           userIds.length > 0 && (
             <span className="text-xs text-slate-500">
-              For the people picked. Services and traffic are for all of Jarvis.
+              For the people picked. Services and traffic are for all of {APP_NAME}.
             </span>
           )
         }
@@ -463,13 +464,13 @@ function StatusPanel({ onError, userIds }: FilteredProps) {
         <div className="rounded-lg border border-edge bg-panel p-4 text-sm">
           <p className="mb-3 text-slate-400">
             While it is on, everyone sees the message and can read their chats, but only admins can
-            start new turns and agent runs. Use it before restarting or upgrading Jarvis.
+            start new turns and agent runs. Use it before restarting or upgrading {APP_NAME}.
           </p>
           <div className="flex flex-wrap gap-2">
             <input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Jarvis is down for maintenance. Back soon."
+              placeholder={`${APP_NAME} is down for maintenance. Back soon.`}
               maxLength={300}
               className="min-w-56 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5"
             />
@@ -716,7 +717,7 @@ function BackupsPanel({ onError }: PanelProps) {
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-panel p-4 text-sm">
         <p className="flex-1 text-slate-400">
-          Every night Jarvis saves its databases and everyone's files to the backups folder on the
+          Every night {APP_NAME} saves its databases and everyone's files to the backups folder on the
           Mac (BACKUP_DIR) and keeps two weeks of them. Restore one with{" "}
           <code className="text-slate-300">scripts/restore.sh</code>.
         </p>
