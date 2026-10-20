@@ -32,7 +32,7 @@ uv run ruff format --check .
 
 step "Shell: backup, restore and secrets scripts"
 sh -n infra/backup/backup.sh
-bash -n scripts/restore.sh scripts/compose.sh scripts/secrets.sh
+bash -n scripts/restore.sh scripts/compose.sh scripts/secrets.sh scripts/check-workbench-net.sh
 
 step "Python: tests"
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55432/jarvis_test \
@@ -48,8 +48,11 @@ else docker compose --env-file .env.example config --quiet; fi
 
 if $build_images; then
   step "Compose: build images"
-  if [[ -f .env ]]; then ./scripts/compose.sh build web api orchestrator doc-worker sandbox backup
-  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox backup; fi
+  if [[ -f .env ]]; then ./scripts/compose.sh build web api orchestrator doc-worker sandbox workbench egress-proxy backup
+  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox workbench egress-proxy backup; fi
+
+  step "Workbench: network isolation"
+  ./scripts/check-workbench-net.sh
 fi
 
 printf '\n\033[1;32mAll checks passed.\033[0m\n'

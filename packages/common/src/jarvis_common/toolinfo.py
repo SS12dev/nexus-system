@@ -5,7 +5,7 @@ Risk levels:
 - read: looks at the user's own data or the public web.
 - write: adds to or changes the user's own data (library, own Gmail drafts and labels, own
   calendar events without guests, tasks).
-- exec: runs code in the sandbox. Needs the exec capability.
+- exec: runs code in the sandbox or the workbench. Needs the exec capability.
 - outbound: acts outside Jarvis, such as sending email. Needs the outbound capability, and
   always asks the user first.
 - destructive: deletes something of the user's. Always asks the user first.
@@ -52,6 +52,57 @@ TOOLS: list[ToolInfo] = [
         "exec",
         "Run Python or shell in the sandbox (no network) with document libraries and skill "
         "scripts; files written to out/ are saved to the library.",
+    ),
+    # The workbench: a dev team's project folder, kept for the whole run (agents only).
+    ToolInfo(
+        "ws_tree",
+        "List project files",
+        "read",
+        "List the files in the project folder, with sizes.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_read",
+        "Read a project file",
+        "read",
+        "Read a text file from the project folder, with line numbers.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_write",
+        "Write a project file",
+        "write",
+        "Create or overwrite a file in the project folder.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_edit",
+        "Edit a project file",
+        "write",
+        "Replace an exact piece of text in a project file.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_run",
+        "Run a command",
+        "exec",
+        "Run a shell command in the project folder: npm, uv, git, Playwright with headless "
+        "Chromium. Internet reaches only npm, PyPI and GitHub.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_diff",
+        "See project changes",
+        "read",
+        "Show what changed in the project since the last commit, or since a branch or commit.",
+        jarvis=False,
+    ),
+    ToolInfo(
+        "ws_commit",
+        "Commit project changes",
+        "write",
+        "Commit every change in the project folder to its git history with a message.",
+        jarvis=False,
     ),
     ToolInfo(
         "send_email",

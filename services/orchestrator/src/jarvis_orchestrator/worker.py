@@ -26,6 +26,7 @@ from jarvis_orchestrator.systems import learn, runner
 from jarvis_orchestrator.turn import TurnDeps
 from jarvis_orchestrator.turn import run_turn as _run_turn
 from jarvis_orchestrator.web import WebClient
+from jarvis_orchestrator.workbench import WorkbenchClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ async def startup(ctx: dict) -> None:
         enqueue=ctx["redis"].enqueue_job,
         storage=S3Storage(settings),
         sandbox=SandboxClient(settings),
+        workbench=WorkbenchClient(settings),
         web=WebClient(settings),
         google_http=httpx.AsyncClient(timeout=30),
         checkpointer=checkpointer,
@@ -81,6 +83,7 @@ async def shutdown(ctx: dict) -> None:
     await deps.redis.aclose()
     await deps.storage.aclose()
     await deps.sandbox.aclose()
+    await deps.workbench.aclose()
     await deps.web.aclose()
     await deps.google_http.aclose()
     await ctx["pool"].close()

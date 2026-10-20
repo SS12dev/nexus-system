@@ -12,6 +12,7 @@ COPY services/api/pyproject.toml services/api/
 COPY services/orchestrator/pyproject.toml services/orchestrator/
 COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
+COPY services/workbench/pyproject.toml services/workbench/
 RUN uv sync --frozen --no-dev --package jarvis-api --no-install-workspace
 
 COPY packages/common packages/common

@@ -46,6 +46,7 @@ from jarvis_orchestrator.sandbox import SandboxClient
 from jarvis_orchestrator.systems.manage import system_tools
 from jarvis_orchestrator.tools import ToolContext, build_tools
 from jarvis_orchestrator.web import WebClient
+from jarvis_orchestrator.workbench import WorkbenchClient
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class TurnDeps:
     enqueue: Enqueue | None = None
     storage: Storage | None = None
     sandbox: SandboxClient | None = None
+    workbench: WorkbenchClient | None = None
     web: WebClient | None = None
     # Shared client for Google's APIs (Gmail, Calendar, ...); None opens one per call.
     google_http: httpx.AsyncClient | None = None

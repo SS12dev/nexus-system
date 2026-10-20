@@ -1,6 +1,6 @@
 # The containers
 
-`docker compose up -d` starts about 16 containers, all in the Compose project `jarvis`, so
+`docker compose up -d` starts about 18 containers, all in the Compose project `jarvis`, so
 Docker Desktop shows them under one group with names like `jarvis-api-1`. This page says what
 each one is for, how they talk to each other, and which ones you can restart or leave out.
 
@@ -15,6 +15,8 @@ each one is for, how they talk to each other, and which ones you can restart or 
 | `migrate` | Applies database migrations, then **exits** | runs once per start | no |
 | `orchestrator` | Worker that runs Jarvis's turns, agent teams and memory jobs | yes | no |
 | `sandbox` | Locked-down box where agents run Python/bash (makes PDFs, Excel...) | for agent code | no |
+| `workbench` | Dev teams' workshop: a persistent git folder per project, with Node, Python and a browser | for dev teams | no |
+| `egress-proxy` | The workbench's only way out: lets through npm, PyPI and GitHub, nothing else | with the workbench | no |
 | `doc-worker` | Worker that parses uploads (PDF, Word, PPT, Excel) and indexes them | for documents | no |
 | `backup` | Nightly backups of databases and files to `./backups` | recommended | no |
 | `postgres` | The main database (with pgvector for search) | yes | 127.0.0.1:5432 |
@@ -43,6 +45,9 @@ flowchart LR
   orch[orchestrator]
   doc[doc-worker]
   sandbox[sandbox]
+  workbench[workbench]
+  egress[egress-proxy]
+  registries[(npm, PyPI, GitHub)]
   litellm[litellm]
   ollama[(Ollama on the Mac)]
   openai[(OpenAI)]
@@ -68,6 +73,8 @@ flowchart LR
   doc --> minio
   orch --> minio
   orch -->|run_code| sandbox
+  orch -->|ws_* tools| workbench
+  workbench -->|allowlist only| egress --> registries
   orch --> litellm
   doc -->|embeddings| litellm
   api -->|budgets, keys| litellm
@@ -129,13 +136,43 @@ brings its database changes with it.
   rebuilds.
 
 It syncs the core skills from [library](../library) into the database when it starts, and it
-is the only container on the `sandbox` network. `ORCHESTRATOR_REPLICAS` (default 1) adds more.
+is the only container on the `sandbox` network and, with `egress-proxy`, the only other one on
+the `workbench` network. `ORCHESTRATOR_REPLICAS` (default 1) adds more.
 
 **sandbox** ([services/sandbox](../services/sandbox)) runs the code agents write with
 `run_code` (Python or bash, with pypdf, ReportLab, python-docx, python-pptx, openpyxl, pandas,
 matplotlib...). It is deliberately boxed in: an internal network with no internet and no route
 to the databases or your LAN, a read-only filesystem with jobs in a 1 GB `/tmp`, all Linux
 capabilities dropped, and caps of 3 GB memory, 2 CPUs and 256 processes.
+
+**workbench** ([services/workbench](../services/workbench)) is where dev teams build
+software. Each project is a git repository at `/workspaces/<user id>/<project id>` on the
+`jarvis_workspaces` volume, so it survives between steps, runs and restarts until it is deleted.
+Agents use it through the `ws_*` tools: list, read, write and edit files, run a command
+(`ws_run`, which needs the exec capability like `run_code`), see the diff and commit. An agent
+run works in a project named after the run. The image has Node 22 with npm, Python 3.13 with
+uv, git, and Chromium with Playwright (`$PLAYWRIGHT_VERSION`) for headless browser tests.
+It is boxed in like the sandbox, with more room for builds:
+- its network is internal, and its only way out is `egress-proxy`;
+- a read-only root, all Linux capabilities dropped, no new privileges, and caps of 4 GB memory,
+  2 CPUs and 1024 processes (threads count, and Chromium and Node use many);
+- each command runs with a clean environment (no tokens), CPU-time and file-size limits and a
+  wall-clock timeout (`WORKBENCH_TIMEOUT_S`, at most `WORKBENCH_MAX_TIMEOUT_S`) that kills its
+  whole process group; anything it leaves running in the background stops when it ends;
+- each command is locked to its own project folder with Landlock, so one project can't read or
+  change another's. `curl` inside the container shows whether that is on:
+  `docker compose exec workbench curl -s localhost:8200/healthz` says `"isolation":
+  "landlock v…"`, or `"container"` on a kernel without Landlock.
+
+**egress-proxy** ([infra/egress-proxy](../infra/egress-proxy)) is a tinyproxy that forwards
+the workbench's requests to `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`,
+`github.com`, `codeload.github.com` and `objects.githubusercontent.com` (the list is in
+[allowlist](../infra/egress-proxy/allowlist)) and answers anything else with 403. It is the
+only container on both the internal `workbench` network and the `egress` network, which has
+internet access. `./scripts/check-workbench-net.sh` (part of `./scripts/check.sh`) proves the
+box holds: it starts a throwaway copy of the workbench next to Postgres and Redis and checks that
+the allowed hosts answer, other sites are refused, and Postgres, Redis, the other Jarvis
+services, the Mac, the LAN and the internet can't be reached directly.
 
 **doc-worker** ([services/doc-worker](../services/doc-worker/README.md)) takes `parse_file`
 jobs from the `arq:docs` queue: it parses uploads (Docling for PDFs and images, MarkItDown for
@@ -188,18 +225,23 @@ container in the stack; give Docker Desktop at least 8 GB. Jarvis works without 
 
 ## Networks and volumes
 
-- **Networks:** `jarvis_default` connects everything; `jarvis_sandbox` is internal (no
-  internet) and connects only `orchestrator` and `sandbox`.
+- **Networks:** `jarvis_default` connects everything else; `jarvis_sandbox` is internal (no
+  internet) and connects only `orchestrator` and `sandbox`; `jarvis_workbench` is internal and
+  connects only `orchestrator`, `workbench` and `egress-proxy`; `jarvis_egress` has internet
+  access and holds only `egress-proxy`.
 - **Volumes** (where data survives restarts): `jarvis_postgres`, `jarvis_redis`,
-  `jarvis_minio`, `jarvis_clickhouse`, `jarvis_clickhouse-logs`, plus the `./backups` folder.
+  `jarvis_minio`, `jarvis_clickhouse`, `jarvis_clickhouse-logs`, `jarvis_workspaces` (dev-team
+  projects; not in the nightly backup, since the code goes to GitHub), plus the `./backups`
+  folder.
   `docker compose down` keeps them; `docker compose down -v` **deletes them all**.
 
 ## Start-up order
 
 Compose waits on health checks, so things come up in this order:
 
-1. `postgres`, `redis`, `minio`, `clickhouse`, `traefik`, `web`
-2. `migrate` (after Postgres is healthy), `litellm`, `sandbox`, `langfuse-web`, `langfuse-worker`
+1. `postgres`, `redis`, `minio`, `clickhouse`, `traefik`, `web`, `egress-proxy`
+2. `migrate` (after Postgres is healthy), `litellm`, `sandbox`, `workbench`, `langfuse-web`,
+   `langfuse-worker`
 3. `api`, `orchestrator`, `doc-worker`, `backup` (after `migrate` exits successfully)
 4. `cloudflared` (with the tunnel profile)
 
@@ -230,8 +272,9 @@ ones that matter most per container:
 
 | Container | Secrets / key settings |
 | --- | --- |
-| api, orchestrator, doc-worker, migrate | `SECRET_KEY`, `TOKEN_ENCRYPTION_KEYS`, `POSTGRES_PASSWORD`, `LITELLM_MASTER_KEY`, `MINIO_ROOT_PASSWORD`, `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`, `SANDBOX_TOKEN`, search and SMTP keys |
+| api, orchestrator, doc-worker, migrate | `SECRET_KEY`, `TOKEN_ENCRYPTION_KEYS`, `POSTGRES_PASSWORD`, `LITELLM_MASTER_KEY`, `MINIO_ROOT_PASSWORD`, `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`, `SANDBOX_TOKEN`, `WORKBENCH_TOKEN`, search and SMTP keys |
 | litellm | `OPENAI_API_KEY`, `LITELLM_MASTER_KEY`, `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` |
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |
+| workbench | `WORKBENCH_TOKEN`, `WORKBENCH_MEMORY_MB`, `WORKBENCH_MAX_TIMEOUT_S` |
 | cloudflared | `CLOUDFLARE_TUNNEL_TOKEN` |

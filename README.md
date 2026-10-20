@@ -255,6 +255,16 @@ your Library as a generated file (saving the same name again makes a new version
 pypdf, pdfplumber, ReportLab, WeasyPrint, python-docx, python-pptx, openpyxl, pandas and
 matplotlib.
 
+### The workbench
+
+Dev teams work in the `workbench` service instead: one persistent git folder per project, kept
+between steps and runs, with Node 22, Python 3.13 and uv, git and headless Chromium for
+Playwright tests. Agents use it through `ws_tree`, `ws_read`, `ws_write`, `ws_edit`, `ws_run`
+(needs the exec capability, like `run_code`), `ws_diff` and `ws_commit`; a run works in a project
+named after itself. Its only way out is the `egress-proxy` allowlist (npm, PyPI, GitHub), each
+command is limited to its own project folder, and it has the sandbox's hardening with more room
+for builds. Details and the network check are in [docs/containers.md](docs/containers.md).
+
 ## Skills and instructions
 
 Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a one-line
@@ -449,8 +459,10 @@ services/api/           FastAPI: auth, chats, files, memories, skills, agents, a
 services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent systems (design,
                         compile, run, approvals), the memory and learned-skill jobs
 services/sandbox/       FastAPI: runs agent code with no network and resource limits
+services/workbench/     FastAPI: dev teams' persistent project folders, commands and git
 services/doc-worker/    arq worker: parses, chunks and embeds uploads
 infra/backup/           the backup service (pg_dump and MinIO, nightly and on request)
+infra/egress-proxy/     the workbench's allowlist proxy (npm, PyPI, GitHub)
 packages/common/        settings, models, events, storage, embeddings, hybrid search, the agent
                         system spec, tool catalogue and skills helpers
 library/                core skills and the shipped instruction layers
