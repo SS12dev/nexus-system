@@ -17,8 +17,9 @@ In the organisation: Settings → Developer settings → GitHub Apps → New Git
 
 | Field | Value |
 | --- | --- |
-| GitHub App name | Jarvis (or anything; it becomes the bot's name) |
+| GitHub App name | must be unique on all of GitHub, e.g. `servhub-jarvis`; commits show as `<name>[bot]` |
 | Homepage URL | `https://jarvis.servhub.cc` |
+| Callback URL, Setup URL | leave empty; leave every box under them unticked |
 | Webhook | untick **Active**: Jarvis doesn't listen for events |
 | Where can this GitHub App be installed? | Only on this account |
 
@@ -26,7 +27,8 @@ Repository permissions, and nothing else:
 
 | Permission | Access | Why |
 | --- | --- | --- |
-| Administration | Read and write | create a repo per project; move one to your account ("move it to my GitHub") |
+| Administration | Read and write | repo settings (making `main` the default branch) and moving a repo to your account ("move it to my GitHub") |
+| Repository creation | Read and write | create a repo per project (newer GitHub forms list this separately; on older ones Administration covers it) |
 | Contents | Read and write | push the team's branch and move `main` to it |
 | Metadata | Read-only | required by GitHub for every App |
 
