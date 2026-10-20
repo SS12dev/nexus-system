@@ -17,6 +17,7 @@ class Storage(Protocol):
     async def get(self, key: str) -> bytes: ...
     def stream(self, key: str) -> AsyncIterator[bytes]: ...
     async def delete(self, key: str) -> None: ...
+    async def ping(self) -> None: ...
     async def aclose(self) -> None: ...
 
 
@@ -72,6 +73,11 @@ class S3Storage:
             if exc.response.get("Error", {}).get("Code") not in ("NoSuchKey", "404"):
                 raise
 
+    async def ping(self) -> None:
+        """Raise if the bucket can't be reached (for the Admin page)."""
+        client = await self._c()
+        await client.head_bucket(Bucket=self.bucket)
+
     async def aclose(self) -> None:
         await self._stack.aclose()
         self._client = None
@@ -96,6 +102,9 @@ class MemoryStorage:
 
     async def delete(self, key: str) -> None:
         self.objects.pop(key, None)
+
+    async def ping(self) -> None:
+        pass
 
     async def aclose(self) -> None:
         pass

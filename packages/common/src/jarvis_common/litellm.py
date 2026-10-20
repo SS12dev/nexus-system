@@ -83,6 +83,13 @@ class LiteLLMAdmin:
     async def set_blocked(self, key: str, blocked: bool) -> None:
         await self._post("/key/block" if blocked else "/key/unblock", {"key": key})
 
+    async def healthy(self) -> bool:
+        try:
+            resp = await self._client.get("/health/liveliness", timeout=5)
+        except httpx.HTTPError:
+            return False
+        return resp.status_code < 400
+
     async def spend(self, key: str) -> float | None:
         try:
             resp = await self._client.get("/key/info", params={"key": key})

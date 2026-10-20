@@ -338,6 +338,8 @@ class AuditLog(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    __table_args__ = (Index("ix_audit_log_created", "created_at"),)
+
 
 def _tsv(column: str = "content"):
     return mapped_column(
@@ -820,4 +822,55 @@ class Approval(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "tool_call_id"),
         Index("ix_approvals_user_status", "user_id", "status"),
+    )
+
+
+# --- Operations --------------------------------------------------------------------------------
+
+
+class BackupStatus(enum.StrEnum):
+    # Asked for on the Admin page; the backup service picks it up within a minute.
+    requested = "requested"
+    running = "running"
+    ok = "ok"
+    failed = "failed"
+
+
+class Backup(Base):
+    """One run of the backup service (infra/backup), which writes these rows itself with psql."""
+
+    __tablename__ = "backups"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # scheduled or manual
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[BackupStatus] = mapped_column(_enum(BackupStatus, "backup_status"))
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Folder name under BACKUP_DIR, e.g. 2026-10-20T2130Z.
+    name: Mapped[str | None] = mapped_column(String(64))
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_backups_created", "created_at"),)
+
+
+class AppSetting(Base):
+    """Switches admins flip at runtime, such as maintenance mode. One JSON value per key."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )

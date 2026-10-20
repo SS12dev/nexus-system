@@ -1,9 +1,9 @@
-import { CalendarDays, CheckSquare, HardDrive, Mail, Users } from "lucide-react";
+import { CalendarDays, CheckSquare, HardDrive, Mail, Monitor, Users } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
-import type { GoogleAccess } from "../lib/types";
+import { describeAgent, formatAgo, formatDate } from "../lib/format";
+import type { GoogleAccess, SessionInfo } from "../lib/types";
 
 const SERVICES: Record<string, { label: string; what: string; icon: ReactNode }> = {
   gmail: { label: "Gmail", what: "Read, label, draft and send mail", icon: <Mail size={16} /> },
@@ -104,7 +104,65 @@ export function ConnectionsPage() {
             </div>
           </section>
         )}
+        <Devices onError={setError} />
       </div>
     </div>
+  );
+}
+
+/** Browsers signed in as you. Sign out one you don't recognise, or all but this one. */
+function Devices({ onError }: { onError: (msg: string) => void }) {
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const load = () => api.sessions().then(setSessions).catch((e) => onError(e.message));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const act = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+  return (
+    <section className="mt-6 rounded-lg border border-edge bg-panel p-4">
+      <h2 className="mb-1 font-medium">Signed-in devices</h2>
+      <p className="mb-3 text-xs text-slate-500">Each stays signed in for 30 days.</p>
+      <ul className="space-y-2">
+        {sessions.map((s) => (
+          <li key={s.id} className="flex items-center gap-3 text-sm">
+            <Monitor size={16} className="text-slate-400" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate">
+                {describeAgent(s.user_agent)}
+                {s.current && <span className="ml-2 text-xs text-emerald-400">this device</span>}
+              </div>
+              <div className="text-xs text-slate-500">
+                Signed in {formatAgo(s.created_at)}
+                {s.ip ? ` from ${s.ip}` : ""}
+              </div>
+            </div>
+            {!s.current && (
+              <button
+                onClick={() => act(() => api.signOutSession(s.id))}
+                className="rounded-md border border-edge px-2 py-1 text-xs hover:bg-edge/60"
+              >
+                Sign out
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {sessions.filter((s) => !s.current).length > 1 && (
+        <button
+          onClick={() => act(() => api.signOutOthers())}
+          className="mt-3 rounded-md border border-edge px-3 py-1.5 text-sm hover:bg-edge/60"
+        >
+          Sign out all other devices
+        </button>
+      )}
+    </section>
   );
 }

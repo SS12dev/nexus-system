@@ -1,4 +1,6 @@
 import {
+  Activity,
+  AlertTriangle,
   Bot,
   Brain,
   FolderOpen,
@@ -142,6 +144,11 @@ export function Shell() {
               <Users size={16} /> People
             </NavLink>
           )}
+          {hasRole(user, "admin") && (
+            <NavLink to="/admin" className={navClass}>
+              <Activity size={16} /> Admin
+            </NavLink>
+          )}
           <div className="mb-2" />
           <div className="flex items-center gap-2 px-2">
             <div className="min-w-0 flex-1">
@@ -167,6 +174,11 @@ export function Shell() {
           <Orb state={jarvis} size={22} />
           <span className="font-semibold">Jarvis</span>
         </header>
+        {user.notice && (
+          <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">
+            <AlertTriangle size={16} className="shrink-0" /> {user.notice}
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

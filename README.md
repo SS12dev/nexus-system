@@ -4,7 +4,7 @@ Jarvis is a supervisor agent you chat with. It answers simple asks itself and, f
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Jarvis: Architecture & Research".
 
-This repository is at **phase 4, the 3D orb**. Phase 1 gave sign-in
+This repository is at **phase 5, production hardening**. Phase 1 gave sign-in
 with invites and roles, private chats per user, Jarvis streaming replies over a WebSocket, every
 model call going through LiteLLM with a per-user budget, and every call traced with its cost in
 Langfuse. Phase 2 adds long-term memory (a profile of you, facts and preferences, summaries of
@@ -13,8 +13,11 @@ the Library page and ask Jarvis about them. Phase 3 lets Jarvis build teams of s
 bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
 shared skills library, per-run budgets, and your approval before anything risky. Phase 4 makes
 the home screen a 3D orb: Jarvis in the middle, its live agent teams growing out of it and
-pulling back in, and your memories and artifacts inside it. All of it runs on one machine with
-Docker Compose.
+pulling back in, and your memories and artifacts inside it. Phase 5 makes it safe to invite
+people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
+nightly backups with a restore script, and an Admin page with service health, traffic, usage,
+the audit log, backups and a maintenance switch. All of it runs on one machine with Docker
+Compose.
 
 ## Quick start
 
@@ -35,6 +38,7 @@ models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without
 | Langfuse (traces, cost) | http://localhost:3000 (`LANGFUSE_PORT`), login from `LANGFUSE_ADMIN_EMAIL` / `LANGFUSE_ADMIN_PASSWORD` |
 | LiteLLM admin API | http://localhost:4000, `LITELLM_MASTER_KEY` |
 | MinIO console | http://localhost:9001 |
+| Admin page (health, usage, audit log, backups) | http://localhost:8080/admin |
 
 The first person to sign in becomes the **owner**. Give Docker Desktop at least 8 GB of memory;
 ClickHouse (for Langfuse) is the heaviest container.
@@ -119,7 +123,7 @@ sign-in, since Google does not accept private IP addresses as callbacks.
   `DEFAULT_BUDGET_USD` (owner: `OWNER_BUDGET_USD`) per 30 days. Admins change budgets on the
   People page; disabling a user signs them out everywhere and blocks their key. When a budget runs
   out, Jarvis says so in the chat instead of failing silently.
-- Admin actions and sign-ups are recorded in `audit_log`.
+- Admin actions, sign-ins and sign-ups are recorded in `audit_log`, shown on the Admin page.
 
 ## Models
 
@@ -279,6 +283,96 @@ Everything is driven by the existing WebSocket events (`jarvis.state`, `system.*
 `agent.status`, `approval.*`, `memory.updated`, `artifact.created`, `file.*`), with a fresh fetch
 on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
 
+## Running it for other people
+
+### Admin page
+
+Admins and owners get **Admin** in the menu:
+
+- **Status:** whether Postgres, Valkey, LiteLLM, MinIO and both workers are up (workers report a
+  heartbeat every 30 seconds), jobs waiting in each queue, the last 24 hours (turns, tokens,
+  agent runs and their cost, failures), model spend this period against the sum of budgets,
+  when the last backup finished, API requests per minute for the last hour with errors and
+  rate-limited calls, and the latest failed turns, runs and file parses with their error.
+  Admins see counts, costs and error messages, never chat content. Per-call traces stay in
+  Langfuse (`LANGFUSE_URL`).
+- **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
+  their chats, but only admins can start turns and agent runs. Turn it on before restarting or
+  upgrading Jarvis.
+- **Usage:** turns, tokens, agent runs and their cost, and files per person and per day, over 7,
+  30 or 90 days.
+- **Audit log:** sign-ins (with IP), invites, role, budget and grant changes, approvals,
+  sign-outs, backups and maintenance, filterable by kind.
+- **Backups:** the list, and **Back up now**.
+
+On the People page an admin can also **sign someone out** on every device. Everyone can see and
+sign out their own signed-in devices on the Connections page.
+
+### Limits and security
+
+| Limit | Default | Setting |
+| --- | --- | --- |
+| API requests per IP | 600 a minute | `RATE_LIMIT_API_PER_MINUTE` |
+| Sign-in attempts per IP | 20 a minute | `RATE_LIMIT_AUTH_PER_MINUTE` |
+| Chat messages per person | 20 a minute | `RATE_LIMIT_MESSAGES_PER_MINUTE` |
+| Uploads per person | 30 a minute | `RATE_LIMIT_UPLOADS_PER_MINUTE` |
+| Agent runs started from the Agents page per person | 30 an hour | `RATE_LIMIT_RUNS_PER_HOUR` |
+
+Counters live in Valkey, so they hold across API replicas; 0 turns a limit off and
+`RATE_LIMIT_ENABLED=false` turns them all off. Over the limit, the API answers 429 with
+`Retry-After` and the app shows the message. Behind the tunnel the caller's IP is Cloudflare's
+`CF-Connecting-IP`. Model spend stays capped by each person's LiteLLM budget as before.
+
+- **Cross-site requests:** the session cookie is `SameSite=Lax` and `HttpOnly`, and the API also
+  refuses any write whose `Origin` is another site (other apps on servhub.cc included). Add an
+  origin to `ALLOWED_ORIGINS` only if you serve the web app from somewhere else.
+- **Headers:** the web app sends a Content Security Policy (scripts only from Jarvis itself, no
+  framing), `nosniff`, a strict referrer policy and, over https, HSTS. API responses are
+  `Cache-Control: no-store`. Uploaded files download as attachments with `CSP: sandbox` (from
+  phase 2).
+- **Exposure:** only Traefik's port (`JARVIS_HTTP_PORT`) listens beyond the Mac's loopback;
+  Postgres, LiteLLM, Langfuse and the MinIO console are bound to 127.0.0.1, and the API docs
+  (`/docs`) aren't routed. Keep `DEV_LOGIN_ENABLED=false` and `SESSION_COOKIE_SECURE=true`
+  on the public hostname.
+- **Cloudflare Access** (optional) can sit in front of `jarvis.servhub.cc` for an extra
+  Google or email check before anyone reaches the sign-in page; it needs no change here.
+
+### Caching and load balancing
+
+- LiteLLM caches identical model calls in Valkey for an hour (exact match only).
+- Spend figures from LiteLLM are cached for a minute, so `/api/me` and the People and Admin
+  pages don't call LiteLLM for every person on every load.
+- Embeddings are cached by text hash in Postgres (phase 2).
+- Web assets are content-hashed and cached for a year; nginx gzips them.
+- Compose runs `API_REPLICAS` (default 2) API containers. Traefik balances requests and the
+  WebSocket across them and stops sending to one whose `/healthz` fails; any replica can serve
+  anyone, since sessions, limits and live events go through Postgres and Valkey.
+  `ORCHESTRATOR_REPLICAS` (default 1) adds workers for more turns and runs at once, each using
+  as much memory again.
+
+### Backups
+
+The `backup` service backs up every night after `BACKUP_HOUR_UTC` (default 21, so 02:30 IST),
+on its first start, whenever none has run for 26 hours (the Mac was asleep), and on **Back up
+now**. Each backup is a folder in `BACKUP_DIR` (default `./backups`, gitignored) named by its
+UTC time, with a `pg_dump` of the jarvis, litellm and langfuse databases, a tarball of the MinIO
+data (uploads and generated files) and `SHA256SUMS`. Backups older than `BACKUP_KEEP_DAYS`
+(14) are deleted, always keeping the newest `BACKUP_KEEP_MIN` (3). The Admin page warns when the
+last good one is older than `BACKUP_STALE_HOURS` (36).
+
+Not included: `.env` (keep your own copy somewhere safe; without the same `SECRET_KEY`, saved
+Google connections can't be decrypted), ClickHouse (Langfuse's trace details) and Valkey (queues
+and caches). To keep a copy off the Mac, point `BACKUP_DIR` at a synced or external folder.
+
+To restore, with the same `.env`:
+
+```sh
+./scripts/restore.sh backups/2026-10-20T210000Z
+```
+
+It checks the checksums, asks you to type `restore`, stops Jarvis, recreates each database from
+its dump, replaces the MinIO data, and starts everything again (the tunnel too, if it was up).
+
 ## Repository layout
 
 ```
@@ -290,6 +384,7 @@ services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent s
                         compile, run, approvals), the memory and learned-skill jobs
 services/sandbox/       FastAPI: runs agent code with no network and resource limits
 services/doc-worker/    arq worker: parses, chunks and embeds uploads
+infra/backup/           the backup service (pg_dump and MinIO, nightly and on request)
 packages/common/        settings, models, events, storage, embeddings, hybrid search, the agent
                         system spec, tool catalogue and skills helpers
 library/                core skills and the shipped instruction layers
@@ -330,5 +425,4 @@ Schema changes: edit `packages/common/src/jarvis_common/models.py`, then
 ## Roadmap
 
 1. Foundation · 2. Memory and documents · 3. Agent systems, tools and the skills library ·
-4. **The 3D orb** (this) · 5. Production hardening (Cloudflare Access, admin console, dashboards,
-backups) · 6. Move to a server, voice
+4. The 3D orb · 5. **Production hardening** (this) · 6. Move to a server, voice

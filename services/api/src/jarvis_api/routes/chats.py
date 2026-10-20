@@ -6,7 +6,9 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis_api.appsettings import refuse_during_maintenance
 from jarvis_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, SettingsDep
+from jarvis_api.ratelimit import messages_limit
 from jarvis_api.schemas import (
     ChatCreateIn,
     ChatOut,
@@ -106,7 +108,10 @@ async def list_messages(chat_id: uuid.UUID, user: CurrentUser, db: DbDep):
 
 
 @router.post(
-    "/{chat_id}/messages", response_model=SendMessageOut, status_code=status.HTTP_202_ACCEPTED
+    "/{chat_id}/messages",
+    response_model=SendMessageOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[messages_limit],
 )
 async def send_message(
     chat_id: uuid.UUID,
@@ -119,6 +124,7 @@ async def send_message(
     """Store the user's message and a placeholder for Jarvis's reply, then queue the turn.
     The reply streams over the WebSocket as message.delta events."""
     chat = await own_chat(db, user, chat_id)
+    await refuse_during_maintenance(db, user)
     busy = await db.scalar(
         select(Message.id).where(
             Message.chat_id == chat_id, Message.status == MessageStatus.streaming

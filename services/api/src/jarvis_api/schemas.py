@@ -40,6 +40,21 @@ class BudgetOut(BaseModel):
 
 class MeOut(UserOut):
     budget: BudgetOut
+    # Set while an admin has maintenance mode on.
+    notice: str | None = None
+
+
+class SessionOut(BaseModel):
+    """A browser signed in as the user, for "signed-in devices"."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    expires_at: datetime
+    user_agent: str | None
+    ip: str | None
+    current: bool = False
 
 
 class AdminUserOut(UserOut):
@@ -255,3 +270,8 @@ class DecisionIn(BaseModel):
 
 class GrantsIn(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
+
+
+class MaintenanceIn(BaseModel):
+    enabled: bool
+    message: str | None = Field(default=None, max_length=300)

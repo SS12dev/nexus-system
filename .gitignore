@@ -9,3 +9,4 @@ apps/web/dist/
 apps/web/dev-dist/
 *.tsbuildinfo
 .DS_Store
+backups/
