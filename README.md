@@ -113,8 +113,12 @@ sign-in, since Google does not accept private IP addresses as callbacks.
 ## People, roles and budgets
 
 - **Roles:** owner > admin > member > viewer, checked on every API route. Viewers can read their
-  own chats but not send messages. Admins manage members and viewers; only owners grant admin or
-  owner, and the last active owner can't be demoted or disabled.
+  own chats but not send messages. Admins manage members and viewers on the People page; only
+  owners grant admin or owner, and the last active owner can't be demoted or disabled.
+- **Who is owner:** the first person ever to sign in becomes owner; everyone after that joins
+  with the role they were invited with (member by default). Only owners see the Admin page and
+  can call its APIs (`/api/admin/status`, `usage`, `audit`, `backups`, `maintenance`), so invite
+  friends as members, or admins if they should help manage people.
 - **Invites:** with `SIGNUP_POLICY=invite_only` (the default), an admin invites an email on the
   People page and that person joins the first time they sign in with it. `open` lets anyone join
   as a member.
@@ -287,14 +291,16 @@ on open and after a reconnect. three.js loads only on the home screen, as its ow
 
 ### Admin page
 
-Admins and owners get **Admin** in the menu:
+Only owners get **Admin** in the menu (admins get **People** but not this page). A person
+filter at the top narrows Status, Usage and the Audit log to one person (tap a name) or several
+(tick them); service health, queues, API traffic and backups always cover all of Jarvis.
 
 - **Status:** whether Postgres, Valkey, LiteLLM, MinIO and both workers are up (workers report a
   heartbeat every 30 seconds), jobs waiting in each queue, the last 24 hours (turns, tokens,
   agent runs and their cost, failures), model spend this period against the sum of budgets,
   when the last backup finished, API requests per minute for the last hour with errors and
   rate-limited calls, and the latest failed turns, runs and file parses with their error.
-  Admins see counts, costs and error messages, never chat content. Per-call traces stay in
+  The owner sees counts, costs and error messages, never chat content. Per-call traces stay in
   Langfuse (`LANGFUSE_URL`).
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or

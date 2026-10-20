@@ -63,6 +63,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const json = (body: unknown) => JSON.stringify(body);
 
+/** Admin stats narrowed to these people: one user_id per person, none for everyone. */
+function forUsers(ids: string[]): URLSearchParams {
+  const q = new URLSearchParams();
+  for (const id of ids) q.append("user_id", id);
+  return q;
+}
+
 export const api = {
   authConfig: () =>
     request<{ oidc_enabled: boolean; dev_login_enabled: boolean }>("/auth/config"),
@@ -196,10 +203,15 @@ export const api = {
     }),
   signOutUser: (id: string) =>
     request<void>(`/api/admin/users/${id}/sign-out`, { method: "POST" }),
-  systemStatus: () => request<OpsStatus>("/api/admin/status"),
-  usage: (days = 7) => request<Usage>(`/api/admin/usage?days=${days}`),
-  audit: (params: { action?: string; before?: string } = {}) => {
-    const q = new URLSearchParams();
+  systemStatus: (userIds: string[] = []) =>
+    request<OpsStatus>(`/api/admin/status${userIds.length ? `?${forUsers(userIds)}` : ""}`),
+  usage: (days = 7, userIds: string[] = []) => {
+    const q = forUsers(userIds);
+    q.set("days", String(days));
+    return request<Usage>(`/api/admin/usage?${q}`);
+  },
+  audit: (params: { action?: string; before?: string; userIds?: string[] } = {}) => {
+    const q = forUsers(params.userIds ?? []);
     if (params.action) q.set("action", params.action);
     if (params.before) q.set("before", params.before);
     return request<{ entries: AuditEntry[]; actions: string[] }>(

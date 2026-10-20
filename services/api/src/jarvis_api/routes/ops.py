@@ -1,5 +1,9 @@
 """The Admin page: health of every service, traffic, usage per person, the audit log, backups
-and maintenance mode. Admins see counts, costs and error messages, never chat content."""
+and maintenance mode. Owners only. They see counts, costs and error messages, never chat
+content.
+
+Status, usage and the audit log take `user_id` (repeatable) to narrow every per-person figure
+to those people. Service health, queues, API traffic and backups are Jarvis-wide and ignore it."""
 
 import asyncio
 import time
@@ -10,12 +14,12 @@ from decimal import Decimal
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel
 from redis.exceptions import RedisError
-from sqlalchemy import Date, cast, func, select, text
+from sqlalchemy import Date, cast, func, or_, select, text
 from sqlalchemy.orm import aliased
 
 from jarvis_api.appsettings import MAINTENANCE, get_setting, maintenance_notice, put_setting
 from jarvis_api.cache import cached_spend
-from jarvis_api.deps import AdminUser, DbDep, GatewayDep, RedisDep, SettingsDep, StorageDep
+from jarvis_api.deps import DbDep, GatewayDep, OwnerUser, RedisDep, SettingsDep, StorageDep
 from jarvis_api.ratelimit import metrics_key
 from jarvis_api.schemas import MaintenanceIn
 from jarvis_common.litellm import PROVIDER
@@ -43,6 +47,13 @@ from jarvis_common.queues import DOCS_QUEUE, HEALTH_SUFFIX, ORCHESTRATOR_QUEUE
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 LIVE_RUNS = (RunStatus.queued, RunStatus.running, RunStatus.awaiting_approval, RunStatus.paused)
+
+UsersFilter = Query(default=[], alias="user_id", max_length=200)
+
+
+def _only(q, column, user_ids: list[uuid.UUID]):
+    """Narrow a query to the chosen people; no choice means everyone."""
+    return q.where(column.in_(user_ids)) if user_ids else q
 
 
 class ServiceOut(BaseModel):
@@ -137,47 +148,74 @@ async def _queues(redis) -> dict:
 
 @router.get("/status")
 async def system_status(
-    actor: AdminUser,
+    actor: OwnerUser,
     db: DbDep,
     redis: RedisDep,
     gateway: GatewayDep,
     storage: StorageDep,
     settings: SettingsDep,
+    user_ids: list[uuid.UUID] = UsersFilter,
 ):
     since = utcnow() - timedelta(hours=24)
     services = await _services(db, redis, gateway, storage)
 
-    people = dict((await db.execute(select(User.status, func.count()).group_by(User.status))).all())
+    people = dict(
+        (
+            await db.execute(
+                _only(select(User.status, func.count()), User.id, user_ids).group_by(User.status)
+            )
+        ).all()
+    )
     signed_in = await db.scalar(
-        select(func.count(func.distinct(Session.user_id))).where(Session.created_at >= since)
+        _only(
+            select(func.count(func.distinct(Session.user_id))).where(Session.created_at >= since),
+            Session.user_id,
+            user_ids,
+        )
     )
     turns = (
         await db.execute(
-            select(
-                func.count(),
-                func.count().filter(Message.status == MessageStatus.failed),
-                func.coalesce(func.sum(Message.input_tokens), 0),
-                func.coalesce(func.sum(Message.output_tokens), 0),
-            ).where(Message.role == MessageRole.assistant, Message.created_at >= since)
+            _only(
+                select(
+                    func.count(),
+                    func.count().filter(Message.status == MessageStatus.failed),
+                    func.coalesce(func.sum(Message.input_tokens), 0),
+                    func.coalesce(func.sum(Message.output_tokens), 0),
+                )
+                .join(Chat, Chat.id == Message.chat_id)
+                .where(Message.role == MessageRole.assistant, Message.created_at >= since),
+                Chat.user_id,
+                user_ids,
+            )
         )
     ).one()
     runs = (
         await db.execute(
-            select(
-                func.count().filter(AgentRun.status.in_(LIVE_RUNS)),
-                func.count().filter(
-                    AgentRun.status == RunStatus.failed, AgentRun.created_at >= since
+            _only(
+                select(
+                    func.count().filter(AgentRun.status.in_(LIVE_RUNS)),
+                    func.count().filter(
+                        AgentRun.status == RunStatus.failed, AgentRun.created_at >= since
+                    ),
+                    func.coalesce(
+                        func.sum(AgentRun.cost_usd).filter(AgentRun.created_at >= since), 0
+                    ),
                 ),
-                func.coalesce(func.sum(AgentRun.cost_usd).filter(AgentRun.created_at >= since), 0),
+                AgentRun.user_id,
+                user_ids,
             )
         )
     ).one()
     files = dict(
         (
             await db.execute(
-                select(File.status, func.count())
-                .where(File.status.in_([FileStatus.processing, FileStatus.failed]))
-                .group_by(File.status)
+                _only(
+                    select(File.status, func.count()).where(
+                        File.status.in_([FileStatus.processing, FileStatus.failed])
+                    ),
+                    File.user_id,
+                    user_ids,
+                ).group_by(File.status)
             )
         ).all()
     )
@@ -185,14 +223,24 @@ async def system_status(
     # Spend this budget period, from LiteLLM (cached for a minute per key).
     keys = (
         await db.scalars(
-            select(ApiKey.secret).where(ApiKey.provider == PROVIDER, ApiKey.revoked_at.is_(None))
+            _only(
+                select(ApiKey.secret).where(
+                    ApiKey.provider == PROVIDER, ApiKey.revoked_at.is_(None)
+                ),
+                ApiKey.user_id,
+                user_ids,
+            )
         )
     ).all()
     spends = await asyncio.gather(*(cached_spend(redis, gateway, k) for k in keys))
     budget_total = await db.scalar(
-        select(func.coalesce(func.sum(Budget.max_usd), 0))
-        .join(User, User.id == Budget.user_id)
-        .where(User.status != UserStatus.disabled)
+        _only(
+            select(func.coalesce(func.sum(Budget.max_usd), 0))
+            .join(User, User.id == Budget.user_id)
+            .where(User.status != UserStatus.disabled),
+            User.id,
+            user_ids,
+        )
     )
 
     last_ok = await db.scalar(
@@ -237,32 +285,44 @@ async def system_status(
             "stale": stale,
         },
         "maintenance": await maintenance_notice(db),
-        "failures": await _recent_failures(db),
+        "failures": await _recent_failures(db, user_ids),
         "links": {"langfuse": settings.langfuse_url},
     }
 
 
-async def _recent_failures(db, limit: int = 15) -> list[dict]:
+async def _recent_failures(db, user_ids: list[uuid.UUID], limit: int = 15) -> list[dict]:
     """The latest failed turns, runs and file parses: who, when and the error, not content."""
     turns = await db.execute(
-        select(Message.created_at, Message.error, User.email)
-        .join(Chat, Chat.id == Message.chat_id)
-        .join(User, User.id == Chat.user_id)
-        .where(Message.status == MessageStatus.failed)
+        _only(
+            select(Message.created_at, Message.error, User.email)
+            .join(Chat, Chat.id == Message.chat_id)
+            .join(User, User.id == Chat.user_id)
+            .where(Message.status == MessageStatus.failed),
+            User.id,
+            user_ids,
+        )
         .order_by(Message.created_at.desc())
         .limit(limit)
     )
     runs = await db.execute(
-        select(AgentRun.created_at, AgentRun.error, User.email)
-        .join(User, User.id == AgentRun.user_id)
-        .where(AgentRun.status == RunStatus.failed)
+        _only(
+            select(AgentRun.created_at, AgentRun.error, User.email)
+            .join(User, User.id == AgentRun.user_id)
+            .where(AgentRun.status == RunStatus.failed),
+            User.id,
+            user_ids,
+        )
         .order_by(AgentRun.created_at.desc())
         .limit(limit)
     )
     files = await db.execute(
-        select(File.created_at, File.error, User.email)
-        .join(User, User.id == File.user_id)
-        .where(File.status == FileStatus.failed)
+        _only(
+            select(File.created_at, File.error, User.email)
+            .join(User, User.id == File.user_id)
+            .where(File.status == FileStatus.failed),
+            User.id,
+            user_ids,
+        )
         .order_by(File.created_at.desc())
         .limit(limit)
     )
@@ -276,7 +336,12 @@ async def _recent_failures(db, limit: int = 15) -> list[dict]:
 
 
 @router.get("/usage")
-async def usage(actor: AdminUser, db: DbDep, days: int = Query(default=7, ge=1, le=90)):
+async def usage(
+    actor: OwnerUser,
+    db: DbDep,
+    days: int = Query(default=7, ge=1, le=90),
+    user_ids: list[uuid.UUID] = UsersFilter,
+):
     """Per person and per day over the last `days` days."""
     since = utcnow() - timedelta(days=days)
     msg_user = (
@@ -310,23 +375,26 @@ async def usage(actor: AdminUser, db: DbDep, days: int = Query(default=7, ge=1, 
         .subquery()
     )
     rows = await db.execute(
-        select(
+        _only(
+            select(
+                User.id,
+                User.email,
+                User.name,
+                func.coalesce(msg_user.c.turns, 0),
+                func.coalesce(msg_user.c.failed, 0),
+                func.coalesce(msg_user.c.input_tokens, 0),
+                func.coalesce(msg_user.c.output_tokens, 0),
+                msg_user.c.last_active,
+                func.coalesce(run_user.c.runs, 0),
+                func.coalesce(run_user.c.run_cost, 0),
+                func.coalesce(file_user.c.files, 0),
+            )
+            .outerjoin(msg_user, msg_user.c.user_id == User.id)
+            .outerjoin(run_user, run_user.c.user_id == User.id)
+            .outerjoin(file_user, file_user.c.user_id == User.id),
             User.id,
-            User.email,
-            User.name,
-            func.coalesce(msg_user.c.turns, 0),
-            func.coalesce(msg_user.c.failed, 0),
-            func.coalesce(msg_user.c.input_tokens, 0),
-            func.coalesce(msg_user.c.output_tokens, 0),
-            msg_user.c.last_active,
-            func.coalesce(run_user.c.runs, 0),
-            func.coalesce(run_user.c.run_cost, 0),
-            func.coalesce(file_user.c.files, 0),
-        )
-        .outerjoin(msg_user, msg_user.c.user_id == User.id)
-        .outerjoin(run_user, run_user.c.user_id == User.id)
-        .outerjoin(file_user, file_user.c.user_id == User.id)
-        .order_by(func.coalesce(msg_user.c.turns, 0).desc(), User.email)
+            user_ids,
+        ).order_by(func.coalesce(msg_user.c.turns, 0).desc(), User.email)
     )
     people = [
         {
@@ -350,14 +418,18 @@ async def usage(actor: AdminUser, db: DbDep, days: int = Query(default=7, ge=1, 
         (d, (n, f, t))
         for d, n, f, t in (
             await db.execute(
-                select(
-                    day,
-                    func.count(),
-                    func.count().filter(Message.status == MessageStatus.failed),
-                    func.coalesce(func.sum(Message.input_tokens + Message.output_tokens), 0),
-                )
-                .where(Message.role == MessageRole.assistant, Message.created_at >= since)
-                .group_by(day)
+                _only(
+                    select(
+                        day,
+                        func.count(),
+                        func.count().filter(Message.status == MessageStatus.failed),
+                        func.coalesce(func.sum(Message.input_tokens + Message.output_tokens), 0),
+                    )
+                    .join(Chat, Chat.id == Message.chat_id)
+                    .where(Message.role == MessageRole.assistant, Message.created_at >= since),
+                    Chat.user_id,
+                    user_ids,
+                ).group_by(day)
             )
         ).all()
     )
@@ -365,9 +437,13 @@ async def usage(actor: AdminUser, db: DbDep, days: int = Query(default=7, ge=1, 
     run_days = dict(
         (
             await db.execute(
-                select(run_day, func.coalesce(func.sum(AgentRun.cost_usd), 0))
-                .where(AgentRun.created_at >= since)
-                .group_by(run_day)
+                _only(
+                    select(run_day, func.coalesce(func.sum(AgentRun.cost_usd), 0)).where(
+                        AgentRun.created_at >= since
+                    ),
+                    AgentRun.user_id,
+                    user_ids,
+                ).group_by(run_day)
             )
         ).all()
     )
@@ -390,14 +466,16 @@ async def usage(actor: AdminUser, db: DbDep, days: int = Query(default=7, ge=1, 
 
 @router.get("/audit")
 async def audit_log(
-    actor: AdminUser,
+    actor: OwnerUser,
     db: DbDep,
     action: str | None = Query(default=None, max_length=64),
     before: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=500),
+    user_ids: list[uuid.UUID] = UsersFilter,
 ):
     """Admin actions, sign-ins, approvals and other recorded events, newest first. `action`
-    matches a prefix, e.g. "user." or "approval."."""
+    matches a prefix, e.g. "user." or "approval.". With `user_id`, only events those people
+    did or that were done to them."""
     Actor = aliased(User)
     q = select(AuditLog, Actor.email).outerjoin(Actor, Actor.id == AuditLog.actor_id)
     if action:
@@ -405,6 +483,13 @@ async def audit_log(
         q = q.where(AuditLog.action.like(escaped + "%", escape="\\"))
     if before:
         q = q.where(AuditLog.created_at < before)
+    if user_ids:
+        q = q.where(
+            or_(
+                AuditLog.actor_id.in_(user_ids),
+                AuditLog.target.in_([str(u) for u in user_ids]),
+            )
+        )
     rows = await db.execute(q.order_by(AuditLog.created_at.desc()).limit(limit))
     out = []
     for entry, email in rows.all():
@@ -454,13 +539,13 @@ def _backup_out(b: Backup) -> dict:
 
 
 @router.get("/backups")
-async def list_backups(actor: AdminUser, db: DbDep, limit: int = Query(default=30, le=200)):
+async def list_backups(actor: OwnerUser, db: DbDep, limit: int = Query(default=30, le=200)):
     rows = await db.scalars(select(Backup).order_by(Backup.created_at.desc()).limit(limit))
     return [_backup_out(b) for b in rows.all()]
 
 
 @router.post("/backups", status_code=status.HTTP_202_ACCEPTED)
-async def request_backup(actor: AdminUser, db: DbDep):
+async def request_backup(actor: OwnerUser, db: DbDep):
     """Ask the backup service for a backup now. It checks for requests every minute."""
     pending = await db.scalar(
         select(Backup).where(Backup.status.in_([BackupStatus.requested, BackupStatus.running]))
@@ -475,13 +560,13 @@ async def request_backup(actor: AdminUser, db: DbDep):
 
 
 @router.get("/maintenance")
-async def get_maintenance(actor: AdminUser, db: DbDep):
+async def get_maintenance(actor: OwnerUser, db: DbDep):
     value = await get_setting(db, MAINTENANCE)
     return {"enabled": bool(value.get("enabled")), "message": value.get("message")}
 
 
 @router.put("/maintenance")
-async def set_maintenance(body: MaintenanceIn, actor: AdminUser, db: DbDep):
+async def set_maintenance(body: MaintenanceIn, actor: OwnerUser, db: DbDep):
     """While on, members and viewers can read but not start chat turns or agent runs; admins
     still can, to test. Runs already going carry on."""
     value = {"enabled": body.enabled, "message": (body.message or "").strip() or None}

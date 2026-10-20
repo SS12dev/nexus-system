@@ -196,3 +196,45 @@ async def test_admin_signs_someone_out(owner, invite, client_for, sessionmaker):
             select(Session).where(Session.revoked_at.is_(None), Session.user_id == member_id)
         )
         assert live is None
+
+
+async def test_admin_page_is_owner_only(owner, invite, client_for):
+    await invite(owner, "a@example.com", role="admin")
+    admin = await client_for("a@example.com")
+    # Admins still manage people...
+    assert (await admin.get("/api/admin/users")).status_code == 200
+    # ...but the Admin page is the owner's alone.
+    for path in ("status", "usage", "audit", "backups", "maintenance"):
+        assert (await admin.get(f"/api/admin/{path}")).status_code == 403, path
+    assert (await admin.post("/api/admin/backups")).status_code == 403
+    assert (await admin.put("/api/admin/maintenance", json={"enabled": True})).status_code == 403
+
+
+async def test_admin_stats_filter_by_person(owner, invite, client_for):
+    a = await invite(owner, "a@example.com")
+    b = await invite(owner, "b@example.com")
+    alice = await client_for("a@example.com")
+    bob = await client_for("b@example.com")
+    for c in (alice, bob):
+        chat = await _chat(c)
+        await c.post(f"/api/chats/{chat}/messages", json={"content": "hello"})
+
+    def q(*users):
+        return "&".join(f"user_id={u['id']}" for u in users)
+
+    everyone = (await owner.get("/api/admin/status")).json()
+    assert everyone["last_24h"]["turns"] == 2 and everyone["people"]["active"] == 3
+    one = (await owner.get(f"/api/admin/status?{q(a)}")).json()
+    assert one["last_24h"]["turns"] == 1 and one["people"]["active"] == 1
+
+    usage = (await owner.get(f"/api/admin/usage?{q(a)}")).json()
+    assert [p["email"] for p in usage["people"]] == ["a@example.com"]
+    assert usage["series"][-1]["turns"] == 1
+    both = (await owner.get(f"/api/admin/usage?{q(a, b)}")).json()
+    assert {p["email"] for p in both["people"]} == {"a@example.com", "b@example.com"}
+    assert both["series"][-1]["turns"] == 2
+
+    audit = (await owner.get(f"/api/admin/audit?{q(b)}")).json()["entries"]
+    assert audit and all(
+        e["actor"] == "b@example.com" or e.get("target_user") == "b@example.com" for e in audit
+    )
