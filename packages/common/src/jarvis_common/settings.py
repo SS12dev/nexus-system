@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     route_model: str = "jarvis-nano"
     route_min_chars: int = 15
     default_run_budget_usd: float = 0.50
+    # Software teams (dev_project) plan, build, test and review in rounds, so they get more.
+    dev_run_budget_usd: float = 2.00
     max_run_budget_usd: float = 5.00
     # Agents working at once in a parallel_map_reduce system, and items it may fan out to.
     max_parallel_agents: int = 4

@@ -265,6 +265,26 @@ named after itself. Its only way out is the `egress-proxy` allowlist (npm, PyPI,
 command is limited to its own project folder, and it has the sandbox's hardening with more room
 for builds. Details and the network check are in [docs/containers.md](docs/containers.md).
 
+### Software teams
+
+Asking Jarvis to build, fix or extend software ("make me a 2048 game") starts its fixed
+software team, `dev_project`, in a workbench project:
+
+| Stage | Agent (tier) | Does |
+| --- | --- | --- |
+| 1. Brief | Researcher (mini) | Looks at similar apps, picks a house stack (static with Vite, Vite + FastAPI, or Vite + Express), writes `BRIEF.md` |
+| 2. Plan | Architect (pro) | Writes `PLAN.md`: features, file layout, acceptance criteria, test plan; posted in the chat |
+| 3. Build | Frontend and backend builders (mini) | Build side by side in their own folders and commit as they go; no backend for a static app |
+| 4. Test | Tester (mini) | Unit tests and a headless Playwright smoke test; writes `TEST_REPORT.md` |
+| 5. Review | Reviewer (pro) | Approves, or sends numbered fixes back to stage 3, at most three rounds |
+| 6. Release | (code) | Commits what is left, marks the project ready; GitHub and deploys come later |
+
+The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
+after the plan until you say go. The reply gives what was built, the stack, the test count and
+the review rounds. A follow-up such as "add a high score table" continues the same project.
+Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($2), still
+capped by `MAX_RUN_BUDGET_USD`. It needs the Run code (exec) permission.
+
 ## Skills and instructions
 
 Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a one-line

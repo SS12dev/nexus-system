@@ -30,11 +30,18 @@ from sqlalchemy import select
 from jarvis_common.events import Event, publish
 from jarvis_common.models import (
     AgentRun,
+    AgentSystem,
     Approval,
     ApprovalStatus,
+    Chat,
+    Message,
+    MessageRole,
+    MessageStatus,
     RunEvent,
     RunStatus,
+    SystemStatus,
     User,
+    utcnow,
 )
 from jarvis_common.spec import TIER_MODEL, AgentSpec, AgentSystemSpec, tier_down, tier_up
 from jarvis_common.systems import approval_payload, money
@@ -86,6 +93,11 @@ class RunContext:
     _parallel: asyncio.Semaphore | None = None
 
     @property
+    def project(self) -> str:
+        """The workbench project this run's ws_* tools work in."""
+        return self.spec.project or str(self.run_id)
+
+    @property
     def parallel(self) -> asyncio.Semaphore:
         if self._parallel is None:
             self._parallel = asyncio.Semaphore(self.deps.settings.max_parallel_agents)
@@ -106,6 +118,45 @@ class RunContext:
                     run_id=self.run_id, user_id=self.user.id, type=type_, agent=agent, data=data
                 )
             )
+            await db.commit()
+
+    async def post(self, content: str) -> None:
+        """Say something in the run's chat before the final result (a dev team's plan)."""
+        if self.chat_id is None:
+            return
+        # turn imports the systems package, so import it here rather than at the top.
+        from jarvis_orchestrator.turn import message_payload
+
+        async with self.deps.sessionmaker() as db:
+            chat = await db.get(Chat, self.chat_id)
+            if chat is None:
+                return
+            msg = Message(
+                chat_id=chat.id,
+                role=MessageRole.assistant,
+                content=content,
+                status=MessageStatus.complete,
+                model=None,
+                trace_id=self.trace_id,
+            )
+            db.add(msg)
+            chat.updated_at = utcnow()
+            await db.commit()
+            payload = {**message_payload(msg), "attachments": []}
+        await publish(
+            self.deps.redis,
+            self.user.id,
+            Event(type="message.completed", chat_id=self.chat_id, data={"message": payload}),
+        )
+
+    async def pause(self) -> None:
+        """Park the run as if the user had pressed pause: the caller then interrupts with kind
+        "pause", and resuming the run (the user saying go) carries on from there."""
+        async with self._lock, self.deps.sessionmaker() as db:
+            run = await db.get(AgentRun, self.run_id)
+            system = await db.get(AgentSystem, run.system_id)
+            run.status = RunStatus.paused
+            system.status = SystemStatus.paused
             await db.commit()
 
     async def emit_tool(self, agent: str, type_: str, **data) -> None:
@@ -221,6 +272,7 @@ class RunContext:
                 agent=agent.id,
                 skills=set(agent.skills),
                 file_ids=list(self.file_ids),
+                project=self.project,
             )
             self.tool_contexts[agent.id] = ctx
         names = [t for t in agent.tools if t in self.allowed and t in BY_NAME]

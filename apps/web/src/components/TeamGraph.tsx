@@ -8,14 +8,29 @@ const STATUS_FILL: Record<string, string> = {
   waiting: "#f43f5e",
   done: "#10b981",
   failed: "#ef4444",
+  skipped: "#1e293b",
 };
 
 const W = 520;
 const NODE_R = 22;
 
-/** Where each agent sits: the lead above its workers for a supervisor, otherwise in a row. */
+/** Where each agent sits: the lead above its workers for a supervisor, a software team's
+ * stages left to right with its two builders stacked, otherwise in a row. */
 function layout(nodes: AgentNode[], topology: Topology) {
   const pos: Record<string, { x: number; y: number }> = {};
+  if (topology === "dev_project") {
+    const stages = [...new Set(nodes.map((n) => n.stage ?? n.id))];
+    stages.forEach((st, col) => {
+      const here = nodes.filter((n) => (n.stage ?? n.id) === st);
+      here.forEach((n, row) => {
+        pos[n.id] = {
+          x: ((col + 1) * W) / (stages.length + 1),
+          y: here.length > 1 ? 50 + row * 90 : 95,
+        };
+      });
+    });
+    return { pos, height: 200 };
+  }
   if (topology === "supervisor_workers" && nodes.length > 1) {
     pos[nodes[0].id] = { x: W / 2, y: 40 };
     const workers = nodes.slice(1);
@@ -45,6 +60,8 @@ export function TeamGraph({
 }) {
   const { pos, height } = layout(nodes, topology);
   const curved = topology === "critic_loop";
+  // A software team's fixes loop back from the reviewer to the builders, under the row.
+  const loops = topology === "dev_project";
   return (
     <svg
       viewBox={`0 0 ${W} ${height}`}
@@ -69,7 +86,7 @@ export function TeamGraph({
         const y1 = a.y + uy * NODE_R;
         const x2 = b.x - ux * (NODE_R + 4);
         const y2 = b.y - uy * (NODE_R + 4);
-        const bend = curved ? (e.kind === "feedback" ? 30 : -30) : 0;
+        const bend = curved ? (e.kind === "feedback" ? 30 : -30) : loops && e.kind === "feedback" ? 50 : 0;
         const mx = (x1 + x2) / 2 - uy * bend;
         const my = (y1 + y2) / 2 + ux * bend;
         return (
@@ -127,6 +144,7 @@ export function TeamGraph({
             </text>
             {!compact && (
               <text x={p.x} y={p.y + NODE_R + 27} textAnchor="middle" className="fill-slate-500 text-[10px]">
+                {n.stage ? `${n.stage} · ` : ""}
                 {live[n.id]?.tier ?? n.tier}
                 {live[n.id]?.tool && ["working", "waiting"].includes(st) ? ` · ${live[n.id]?.tool}` : ""}
               </text>

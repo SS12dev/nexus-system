@@ -84,9 +84,12 @@ def system_tools(
     allowed: set[str],
     trace_id: str | None = None,
     asked: str = "",
+    software: bool = False,
 ) -> list[BaseTool]:
     """asked: the user's latest message, handed to new teams verbatim so a step the user asked
-    for (sending an email) can't be lost in Jarvis's retelling; the approval card gates it."""
+    for (sending an email) can't be lost in Jarvis's retelling; the approval card gates it.
+    software: the router found it is software to build, fix or extend, so a new team is the
+    dev_project team."""
     deps = ctx.deps
     sessionmaker, user_id = deps.sessionmaker, ctx.user_id
 
@@ -147,8 +150,9 @@ def system_tools(
         )
         await enqueue_run(deps, "run_system", run.id)
         spec = AgentSystemSpec.model_validate(system.spec)
+        where = f", workbench project {spec.project}" if spec.project else ""
         return (
-            f"Started {system.name} (system {system.id}, run {run.id}).\n{describe(spec)}\n"
+            f"Started {system.name} (system {system.id}, run {run.id}{where}).\n{describe(spec)}\n"
             f"Estimated ${float(run.estimate_usd or 0):.2f} of a ${float(run.budget_usd):.2f} "
             "budget. The result and files will be posted in this chat when it finishes; risky "
             "steps will ask the user for approval first. The user can watch, pause or stop it "
@@ -165,7 +169,10 @@ def system_tools(
     ) -> str:
         """Design a team of sub-agents for a big task and start it. Use for multi-step work
         that needs research, several documents or files made (reports, decks, spreadsheets),
-        or many items handled in parallel; answer simple things yourself. request: the whole
+        or many items handled in parallel; answer simple things yourself. Software to build,
+        fix or extend (apps, sites, games, tools) gets a dev team that plans, builds, tests and
+        reviews it in a project folder, and a follow-up to an earlier app continues that
+        project. request: the whole
         task in the user's words plus everything you know that matters; keep every step they
         asked for, including sending or deleting, since the user approves those in the app.
         deliverables: files wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's
@@ -204,6 +211,7 @@ def system_tools(
                     best_model=best_model,
                     trace_id=trace_id,
                     chat_id=ctx.chat_id,
+                    software=software,
                 )
             except DesignFailed as exc:
                 return str(exc)
@@ -218,8 +226,12 @@ def system_tools(
             spec.lifetime = "persistent" if keep else "ephemeral"
             if deliverables and not spec.deliverables:
                 spec.deliverables = deliverables[:10]
+            system_id = uuid.uuid4()
+            if spec.topology == "dev_project" and not spec.project:
+                # A new software project is named after the system that starts it.
+                spec.project = str(system_id)
             system = AgentSystem(
-                id=uuid.uuid4(),
+                id=system_id,
                 user_id=user_id,
                 chat_id=ctx.chat_id,
                 name=spec.name,
@@ -305,6 +317,8 @@ def system_tools(
             # The budget is the user's call (or the default), never the architect's.
             spec.budget_usd = None
             spec.lifetime = current.lifetime
+            if spec.topology == "dev_project":
+                spec.project = spec.project or current.project
             system.spec = spec.model_dump()
             system.name, system.goal, system.topology = spec.name, spec.goal, spec.topology
             system.embedding = system.embedding_model = None

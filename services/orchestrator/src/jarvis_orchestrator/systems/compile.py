@@ -31,6 +31,8 @@ class SystemState(TypedDict, total=False):
     items: list[str]
     results: Annotated[list, operator.add]
     final: str
+    # dev_project: the stack, review rounds, test counts, the reviewer's verdict and so on.
+    dev: Annotated[dict, _merge]
 
 
 # --- Terminal tools: calling one ends the agent's turn; the graph reads its arguments. -----
@@ -401,5 +403,11 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             g.add_edge(START, doer.id)
             g.add_edge(doer.id, critic.id)
             g.add_conditional_edges(critic.id, after_review, [doer.id, END])
+
+        case "dev_project":
+            # dev.py builds on this module's helpers, so it is imported here.
+            from jarvis_orchestrator.systems.dev import add_dev_project
+
+            add_dev_project(rc, g, task, request)
 
     return g

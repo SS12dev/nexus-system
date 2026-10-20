@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis_common.devteam import NEEDED_TOOLS
 from jarvis_common.litellm import ensure_user_key
 from jarvis_common.memory import get_profile
 from jarvis_common.models import AgentSystem, SystemLifetime, SystemStatus, User
@@ -52,7 +53,32 @@ async def templates(db: AsyncSession, user_id: uuid.UUID) -> list[AgentSystem]:
     return list(rows.all())
 
 
-def _problems(raw: dict, allowed: set[str], skills: set[str]) -> tuple[AgentSystemSpec | None, str]:
+async def projects(db: AsyncSession, user_id: uuid.UUID) -> list[tuple[str, str, str]]:
+    """The user's software projects, newest first: (project id, name, goal). Runs end with their
+    system archived, so archived ones count too."""
+    rows = await db.scalars(
+        select(AgentSystem)
+        .where(AgentSystem.user_id == user_id, AgentSystem.topology == "dev_project")
+        .order_by(AgentSystem.updated_at.desc())
+        .limit(40)
+    )
+    out: dict[str, tuple[str, str, str]] = {}
+    for s in rows.all():
+        project = (s.spec or {}).get("project")
+        if project and project not in out:
+            out[project] = (project, s.name, s.goal)
+    return list(out.values())[:10]
+
+
+NEEDS_EXEC = (
+    "Building software needs the Run code permission, which this account doesn't have. An "
+    "admin can grant it on the People page."
+)
+
+
+def _problems(
+    raw: dict, allowed: set[str], skills: set[str], software: bool = False
+) -> tuple[AgentSystemSpec | None, str]:
     data = raw.get("spec")
     if not isinstance(data, dict):
         return None, 'Reply with {"spec": {...}} or {"template_id": "..."}.'
@@ -63,6 +89,11 @@ def _problems(raw: dict, allowed: set[str], skills: set[str]) -> tuple[AgentSyst
             f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:10]
         )
         return None, f"The spec is invalid: {errors}"
+    if software and spec.topology != "dev_project":
+        return None, "This request is software to build, fix or extend: use topology dev_project."
+    if spec.topology == "dev_project" and not NEEDED_TOOLS <= allowed:
+        # No retry can fix a missing permission.
+        raise DesignFailed(NEEDS_EXEC)
     problems = check_spec(spec, allowed, skills)
     if problems:
         return None, "The spec can't run for this user: " + "; ".join(problems)
@@ -83,11 +114,18 @@ async def design(
     trace_id: str | None = None,
     chat_id: uuid.UUID | None = None,
     use_templates: bool = True,
+    software: bool = False,
 ) -> Design:
     """Billed to the user's own key, like the rest of their chat turn."""
     settings = deps.settings
     skills = await usable_skills(db, user.id)
-    saved = await templates(db, user.id) if use_templates and current is None else []
+    if software and not NEEDED_TOOLS <= allowed:
+        raise DesignFailed(NEEDS_EXEC)
+    # A software request is never a saved template: it always gets the house team.
+    saved = (
+        await templates(db, user.id) if use_templates and current is None and not software else []
+    )
+    known = await projects(db, user.id)
     profile = await get_profile(db, user.id)
     prompt = design_request(
         request,
@@ -100,6 +138,8 @@ async def design(
         best_model,
         current.model_dump() if current is not None else None,
         role_names(Path(settings.library_path)),
+        known,
+        software,
     )
     api_key = await ensure_user_key(db, settings, deps.gateway, user)
     model = deps.model_factory(
@@ -131,8 +171,11 @@ async def design(
                 return Design(template=template)
             problem = "That template id doesn't exist; design a spec instead."
         else:
-            spec, problem = _problems(raw, allowed, slugs)
+            spec, problem = _problems(raw, allowed, slugs, software)
             if spec is not None:
+                if spec.project and spec.project not in {p for p, _, _ in known}:
+                    # Only the user's own projects can be continued.
+                    spec.project = None
                 if spec.lead.tier == "max" and not best_model:
                     spec.lead.tier = "pro"
                 return Design(spec=spec)

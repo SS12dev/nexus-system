@@ -1,11 +1,14 @@
 import json
+import uuid
 from collections.abc import AsyncIterator
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
 
+from jarvis_common.models import Chat, RoleName, UserStatus
 from jarvis_orchestrator.turn import TurnDeps
 
 
@@ -124,3 +127,109 @@ def deps(settings, sessionmaker, redis, gateway, embedder, model, enqueued):
     )
     d.factory_calls = factory_calls
     return d
+
+
+# --- Agent systems: each agent plays its own script ------------------------------------
+
+
+class AgentModel(BaseChatModel):
+    """Plays a per-agent script: a string is the reply, a dict {"tool", "args"} (or a list of
+    them) is a tool call. Records the messages and tool names it was given."""
+
+    agent: str = ""
+    model_name: str = ""
+    # (scripts, seen), shared with the test; a tuple so pydantic doesn't copy the dicts.
+    box: tuple = ({}, {})
+
+    @property
+    def scripts(self) -> dict:
+        return self.box[0]
+
+    @property
+    def seen(self) -> dict:
+        return self.box[1]
+
+    @property
+    def _llm_type(self) -> str:
+        return "agent-scripted"
+
+    def bind_tools(self, tools, **kwargs):
+        self.seen.setdefault(f"{self.agent}:tools", []).append([t.name for t in tools])
+        return self
+
+    def bind(self, **kwargs):
+        return self
+
+    def _generate(self, *a, **k):
+        raise NotImplementedError
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kw) -> ChatResult:
+        self.seen.setdefault(self.agent, []).append(messages)
+        self.seen.setdefault("models", []).append((self.agent, self.model_name))
+        queue = self.scripts.setdefault(self.agent, [])
+        step = queue.pop(0) if queue else f"{self.agent} done"
+        if isinstance(step, Exception):
+            raise step
+        usage = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        if isinstance(step, dict | list):
+            calls = [step] if isinstance(step, dict) else step
+            msg = AIMessage(
+                "",
+                tool_calls=[
+                    {"name": c["tool"], "args": c.get("args", {}), "id": uuid.uuid4().hex}
+                    for c in calls
+                ],
+                usage_metadata=usage,
+            )
+        else:
+            msg = AIMessage(step, usage_metadata=usage)
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+@pytest.fixture
+def scripts() -> dict:
+    return {}
+
+
+@pytest.fixture
+def seen() -> dict:
+    return {}
+
+
+@pytest.fixture
+def sdeps(settings, sessionmaker, redis, gateway, embedder, enqueued, storage, scripts, seen):
+    def factory(*, model, api_key, metadata):
+        name = metadata.get("generation_name", "")
+        agent = name.removeprefix("agent.") if name.startswith("agent.") else name
+        seen.setdefault("keys", []).append(api_key)
+        return AgentModel(agent=agent, model_name=model, box=(scripts, seen))
+
+    return TurnDeps(
+        settings=settings,
+        sessionmaker=sessionmaker,
+        redis=redis,
+        gateway=gateway,
+        model_factory=factory,
+        embedder=embedder,
+        enqueue=enqueued,
+        storage=storage,
+        checkpointer=InMemorySaver(),
+    )
+
+
+@pytest.fixture
+async def owner(sessionmaker):
+    from jarvis_api.users import create_user
+
+    async with sessionmaker() as db:
+        user = await create_user(
+            db,
+            email="shivam@example.com",
+            role=RoleName.owner,
+            status=UserStatus.active,
+            name="Shivam",
+        )
+        chat = Chat(user_id=user.id, title="t")
+        db.add(chat)
+        await db.commit()
+        return user, chat.id

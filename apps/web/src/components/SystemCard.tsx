@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { feedFromEvents } from "../lib/feed";
-import { AGENT_LABEL, stepDetail, toolLabel } from "../lib/tools";
+import { AGENT_LABEL, currentStage, stepDetail, toolLabel } from "../lib/tools";
 import type { AgentSystem, FeedItem } from "../lib/types";
 import { NODE_COLOR } from "../orb/model";
 import { useStore } from "../store/chat";
@@ -40,6 +40,7 @@ export function SystemCard({ system }: { system: AgentSystem }) {
   }, [expanded, run?.id, seeded]);
 
   const shown = all ? feed : feed.slice(-FEED_SHOWN);
+  const stage = live ? currentStage(system.nodes, run?.agents) : "";
   return (
     <div className="rounded-xl border border-edge bg-panel">
       <button
@@ -50,6 +51,7 @@ export function SystemCard({ system }: { system: AgentSystem }) {
         {expanded ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
         <Bot size={16} className="shrink-0 text-sky-300" />
         <span className="truncate font-medium">{system.name}</span>
+        {stage && <span className="shrink-0 text-xs text-slate-500">{stage}</span>}
         {run && (
           <span className={`ml-auto shrink-0 text-xs ${RUN_STYLE[run.status]}`}>
             {RUN_LABEL[run.status]}
@@ -70,6 +72,7 @@ export function SystemCard({ system }: { system: AgentSystem }) {
                   <span className="size-2 shrink-0 rounded-full" style={{ background: NODE_COLOR[st] ?? NODE_COLOR.idle }} />
                   <span className="shrink-0 text-slate-200">{n.name}</span>
                   <span className="shrink-0 text-xs text-slate-500">
+                    {n.stage ? `${n.stage} · ` : ""}
                     {n.role} · {a?.tier ?? n.tier}
                   </span>
                   <span className="ml-auto truncate text-xs text-slate-400" title={a?.item}>
