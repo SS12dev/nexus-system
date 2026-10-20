@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from jarvis_common.models import Skill
 from jarvis_common.skills import Layers, catalogue
 from jarvis_common.spec import AgentSpec, AgentSystemSpec
-from jarvis_common.toolinfo import ToolInfo
+from jarvis_common.toolinfo import ToolInfo, needs_approval
 
 
 def position(spec: AgentSystemSpec, agent: AgentSpec) -> str:
@@ -81,6 +81,15 @@ def agent_prompt(
         )
     if tools:
         listing = "\n".join(f"- {t.name}: {t.description}" for t in tools)
+        gated = [t.name for t in tools if needs_approval(t.name, set(spec.approval.required_for))]
+        if gated:
+            listing += (
+                f"\n\nCalling {', '.join(gated)} pauses the run and asks the user to approve, "
+                "edit or reject that exact call in the app; that is the approval step. When your "
+                "task includes it, call it with the final arguments: don't wait for approval, "
+                "ask for it in your reply, or skip it. If the user rejects it, you are told so; "
+                "then don't retry it and say so in your result."
+            )
         parts.append(f"<tools>\n{listing}\n</tools>")
     parts.append(
         "<working>\n"

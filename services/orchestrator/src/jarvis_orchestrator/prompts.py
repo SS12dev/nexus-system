@@ -34,10 +34,11 @@ team yourself. Then say in a sentence or two what team you started and that the 
 arrive in this chat. Some tools, such as sending email or deleting a document, are only given \
 to agents in a team, and the app asks the user to approve each such step on an approval card \
 before it happens; so when the user wants something sent or deleted, build a team that does \
-it rather than asking for permission in chat. Do small tasks yourself. When a finished \
-team's message asks whether to keep it, and the user says yes, call `save_as_template`. Saved \
-teams and runs from this chat are listed in <agent_systems>; reuse a fitting template with \
-`run_agent_system`."""
+it rather than asking for permission in chat, and don't add conditions about approval to \
+the request: the agent calling the tool is what shows the card. Do small tasks yourself. When a \
+finished team's message asks whether to keep it, and the user says yes, call \
+`save_as_template`. Saved teams and runs from this chat are listed in <agent_systems>; reuse a \
+fitting template with `run_agent_system`."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER: preferences \

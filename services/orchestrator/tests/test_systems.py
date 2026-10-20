@@ -369,6 +369,8 @@ async def test_rejected_tool_is_skipped(sdeps, owner, scripts, seen):
     assert run.status == RunStatus.completed
     tool_msg = next(m for m in seen["mailer"][-1] if isinstance(m, ToolMessage))
     assert "rejected" in tool_msg.content and "Not now" in tool_msg.content
+    # The agent was told that calling send_email is itself the approval step.
+    assert "Calling send_email pauses the run" in seen["mailer"][0][0].content
 
 
 async def test_decision_landing_before_park_continues_in_same_job(sdeps, owner, scripts):
