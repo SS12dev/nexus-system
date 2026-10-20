@@ -19,6 +19,7 @@ sed \
   -e "s|^LANGFUSE_ADMIN_PASSWORD=.*|LANGFUSE_ADMIN_PASSWORD=$(rand 12)|" \
   -e "s|^DEV_LOGIN_TOKEN=.*|DEV_LOGIN_TOKEN=$(rand 12)|" \
   -e "s|^SANDBOX_TOKEN=.*|SANDBOX_TOKEN=$(rand)|" \
+  -e "s|^WORKBENCH_TOKEN=.*|WORKBENCH_TOKEN=$(rand)|" \
   -e "s|^TOKEN_ENCRYPTION_KEYS=.*|TOKEN_ENCRYPTION_KEYS=$(rand 32)|" \
   .env.example > .env
 chmod 600 .env

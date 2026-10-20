@@ -9,6 +9,13 @@ export const TOOL_LABEL: Record<string, string> = {
   web_search: "Searching the web",
   web_fetch: "Reading a web page",
   run_code: "Running code",
+  ws_tree: "Looking through the project",
+  ws_read: "Reading a project file",
+  ws_write: "Writing a project file",
+  ws_edit: "Editing a project file",
+  ws_run: "Running a command",
+  ws_diff: "Checking the changes",
+  ws_commit: "Committing the changes",
   save_file: "Saving a file",
   send_email: "Sending an email",
   gmail_search: "Searching your email",
@@ -42,7 +49,9 @@ export function toolLabel(name: string): string {
 }
 
 /** Argument keys worth showing next to a step, best first. */
-const DETAIL_KEYS = ["query", "file", "url", "skill", "name", "path", "subject", "to", "title", "item"];
+const DETAIL_KEYS = [
+  "query", "file", "url", "skill", "name", "path", "command", "message", "subject", "to", "title", "item",
+];
 
 /** The one argument that says what a step was about, such as the search query. */
 export function stepDetail(args: Record<string, unknown> | undefined): string {

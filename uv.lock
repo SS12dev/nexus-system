@@ -18,6 +18,7 @@ members = [
     "jarvis-orchestrator",
     "jarvis-sandbox",
     "jarvis-system",
+    "jarvis-workbench",
 ]
 
 [[package]]
@@ -1644,6 +1645,7 @@ dev = [
     { name = "jarvis-doc-worker" },
     { name = "jarvis-orchestrator" },
     { name = "jarvis-sandbox" },
+    { name = "jarvis-workbench" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1660,9 +1662,25 @@ dev = [
     { name = "jarvis-doc-worker", editable = "services/doc-worker" },
     { name = "jarvis-orchestrator", editable = "services/orchestrator" },
     { name = "jarvis-sandbox", editable = "services/sandbox" },
+    { name = "jarvis-workbench", editable = "services/workbench" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "ruff", specifier = ">=0.8" },
+]
+
+[[package]]
+name = "jarvis-workbench"
+version = "0.1.0"
+source = { editable = "services/workbench" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 
 [[package]]

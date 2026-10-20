@@ -39,6 +39,7 @@ from jarvis_orchestrator.artifacts import save_generated
 from jarvis_orchestrator.google_tools import build_google_tools
 from jarvis_orchestrator.sandbox import SandboxError
 from jarvis_orchestrator.web import WebError
+from jarvis_orchestrator.workbench import WorkbenchError
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ TOOL_OUTPUT_CHARS = 8000
 # Inputs sent to the sandbox per call.
 MAX_INPUT_FILES = 10
 SAVE_FILE_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".html", ".xml", ".yaml", ".yml"}
+# Lines ws_read returns per call unless asked for fewer, and characters per line.
+WS_READ_LINES = 400
+WS_LINE_CHARS = 2000
 
 Emit = Callable[..., Awaitable[None]]
 ToolFn = Callable[..., Awaitable[str]]
@@ -74,6 +78,14 @@ class ToolContext:
     file_ids: list[uuid.UUID] = field(default_factory=list)
     # Generated files, in order, so the caller can report them.
     saved: list[File] = field(default_factory=list)
+    # The workbench project the ws_* tools work in; an agent run uses its own id by default.
+    project: str | None = None
+
+    @property
+    def workbench_project(self) -> str | None:
+        if self.project:
+            return self.project
+        return str(self.run_id) if self.run_id else None
 
 
 def _clip(text: str, limit: int = TOOL_OUTPUT_CHARS) -> str:
@@ -395,6 +407,132 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             parts.append("too large or too many, not saved: " + ", ".join(result.skipped_files))
         return "\n\n".join(parts)
 
+    # --- Workbench -------------------------------------------------------------------------
+
+    async def workbench(tool: str, call: Callable[..., Awaitable[str]], **data) -> str:
+        """Note the call, then run it against this run's project, scoped to its user."""
+        await note(tool, **data)
+        project = ctx.workbench_project
+        if deps.workbench is None:
+            return "The workbench isn't available."
+        if project is None:
+            return "The workbench is only for agent teams working on a project."
+        try:
+            return await call(deps.workbench, str(user_id), project)
+        except WorkbenchError as exc:
+            return str(exc)
+
+    async def ws_tree(path: str = "", depth: int = 3) -> str:
+        """List the files in the project folder (or one of its folders) with their sizes, up to
+        depth levels down. Generated folders such as node_modules and .venv are listed but not
+        opened."""
+
+        async def call(wb, user, project):
+            data = await wb.tree(user, project, path, max(1, min(depth, 10)))
+            if not data["entries"]:
+                return "The project folder is empty."
+            lines = [
+                e["path"] + (f" ({e['size']} bytes)" if e.get("size") is not None else "")
+                for e in data["entries"]
+            ]
+            if data["truncated"]:
+                lines.append("… more files not listed; look inside a folder with path.")
+            return "\n".join(lines)
+
+        return await workbench("ws_tree", call, path=path or ".")
+
+    async def ws_read(path: str, offset: int = 1, limit: int = WS_READ_LINES) -> str:
+        """Read a text file in the project, with line numbers. offset is the first line to show
+        and limit how many; page through long files with them."""
+
+        async def call(wb, user, project):
+            data = await wb.read(user, project, path)
+            if data["encoding"] != "text":
+                return f"{path} is a binary file ({data['size']} bytes)."
+            lines = data["content"].splitlines()
+            start = max(offset, 1)
+            shown = lines[start - 1 : start - 1 + max(1, min(limit, WS_READ_LINES))]
+            if not shown:
+                return f"{path} has {len(lines)} lines; nothing at line {start}."
+            body = "\n".join(
+                f"{n:>5}  {line[:WS_LINE_CHARS]}" for n, line in enumerate(shown, start)
+            )
+            end = start + len(shown) - 1
+            more = (
+                f"\n[Lines {start}-{end} of {len(lines)}. Call again with offset={end + 1} "
+                "for more.]"
+                if end < len(lines) or data["truncated"]
+                else ""
+            )
+            return f"{body}{more}"
+
+        return await workbench("ws_read", call, path=path)
+
+    async def ws_write(path: str, content: str) -> str:
+        """Create or overwrite a text file in the project with this content; folders are made
+        as needed. To change part of an existing file, use ws_edit."""
+
+        async def call(wb, user, project):
+            data = await wb.write(user, project, path, content)
+            return f"{'Created' if data['created'] else 'Wrote'} {path} ({data['size']} bytes)."
+
+        return await workbench("ws_write", call, path=path)
+
+    async def ws_edit(path: str, old: str, new: str, replace_all: bool = False) -> str:
+        """Replace an exact piece of text in a project file with new text. old must match the
+        file exactly (copy it from ws_read, without the line numbers) and only once, unless
+        replace_all is true."""
+
+        async def call(wb, user, project):
+            data = await wb.edit(user, project, path, old, new, replace_all)
+            n = data["replaced"]
+            return f"Edited {path} ({n} replacement{'s' if n != 1 else ''})."
+
+        return await workbench("ws_edit", call, path=path)
+
+    async def ws_run(command: str, timeout_s: int = 0) -> str:
+        """Run a bash command in the project folder, e.g. npm install, npm test, uv run pytest
+        or npx playwright test. Node 22 with npm, Python 3.13 with uv, git and headless Chromium
+        (use @playwright/test at the version in $PLAYWRIGHT_VERSION) are installed. The internet
+        reaches only npm, PyPI and GitHub. Anything left running in the background stops when
+        the command ends, so start a server and test against it in the same command. timeout_s
+        (default 300, at most 900) is how long it may take."""
+
+        async def call(wb, user, project):
+            result = await wb.run(user, project, command, timeout_s or None)
+            parts = [f"exit code: {'timeout' if result.timed_out else result.exit_code}"]
+            if result.stdout.strip():
+                parts.append(f"stdout:\n{_clip(result.stdout, 6000)}")
+            if result.stderr.strip():
+                parts.append(f"stderr:\n{_clip(result.stderr, 4000)}")
+            return "\n\n".join(parts)
+
+        return await workbench("ws_run", call, command=command)
+
+    async def ws_diff(ref: str = "") -> str:
+        """Show what changed in the project, new files included: since the last commit, or
+        since ref (a branch or commit, e.g. main or HEAD~3)."""
+
+        async def call(wb, user, project):
+            data = await wb.diff(user, project, ref or "HEAD")
+            if not data["diff"].strip():
+                return f"No changes since {data['ref']}."
+            return f"{data['stat']}\n\n{_clip(data['diff'], 12000)}"
+
+        return await workbench("ws_diff", call, ref=ref or "HEAD")
+
+    async def ws_commit(message: str) -> str:
+        """Commit every change in the project to its git history. message says what changed
+        and why, in a short first line."""
+
+        async def call(wb, user, project):
+            data = await wb.commit(user, project, message)
+            if not data["committed"]:
+                return data["summary"]
+            return f"Committed {data['commit']}: {data['summary']}"
+
+        return await workbench("ws_commit", call, message=message)
+
     # --- Outbound --------------------------------------------------------------------------
 
     async def send_email(
@@ -498,6 +636,13 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "web_search": web_search,
         "web_fetch": web_fetch,
         "run_code": run_code,
+        "ws_tree": ws_tree,
+        "ws_read": ws_read,
+        "ws_write": ws_write,
+        "ws_edit": ws_edit,
+        "ws_run": ws_run,
+        "ws_diff": ws_diff,
+        "ws_commit": ws_commit,
         "send_email": send_email,
         **build_google_tools(ctx, note),
     }

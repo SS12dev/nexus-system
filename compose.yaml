@@ -40,6 +40,10 @@ x-jarvis-env: &jarvis-env
   MAX_TIER_ROLES: ${MAX_TIER_ROLES:-owner,admin}
   SANDBOX_URL: http://sandbox:8100
   SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+  WORKBENCH_URL: http://workbench:8200
+  WORKBENCH_TOKEN: ${WORKBENCH_TOKEN:-}
+  WORKBENCH_TIMEOUT_S: ${WORKBENCH_TIMEOUT_S:-300}
+  WORKBENCH_MAX_TIMEOUT_S: ${WORKBENCH_MAX_TIMEOUT_S:-900}
   WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
   TAVILY_API_KEY: ${TAVILY_API_KEY:-}
   BRAVE_API_KEY: ${BRAVE_API_KEY:-}
@@ -156,8 +160,8 @@ services:
   orchestrator:
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
     environment: *jarvis-env
-    # The only service that can reach the sandbox.
-    networks: [default, sandbox]
+    # The only service that can reach the sandbox and the workbench.
+    networks: [default, sandbox, workbench]
     # More workers take more turns and runs at once (each also uses more memory).
     deploy:
       replicas: ${ORCHESTRATOR_REPLICAS:-1}
@@ -165,6 +169,7 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
       sandbox: { condition: service_healthy }
+      workbench: { condition: service_healthy }
     restart: unless-stopped
 
   # Runs agent code. Its network is internal, so jobs can't reach the internet, Jarvis's
@@ -186,6 +191,59 @@ services:
     pids_limit: 256
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Where dev teams build software: a persistent git folder per project on the workspaces
+  # volume, with Node, Python, git and headless Chromium. Its network is internal, so the only
+  # way out is egress-proxy, which allows npm, PyPI and GitHub and nothing else: no Jarvis
+  # databases, no LAN, no other sites. Each command is locked to its own project folder.
+  workbench:
+    build: { context: ., dockerfile: services/workbench/Dockerfile }
+    environment:
+      WORKBENCH_TOKEN: ${WORKBENCH_TOKEN:-}
+      WORKBENCH_MEMORY_MB: ${WORKBENCH_MEMORY_MB:-3072}
+      WORKBENCH_MAX_TIMEOUT_S: ${WORKBENCH_MAX_TIMEOUT_S:-900}
+      WORKBENCH_CONCURRENCY: "4"
+    networks: [workbench]
+    volumes:
+      - workspaces:/workspaces
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    # Chromium keeps its pages in shared memory.
+    shm_size: 1g
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # More than the sandbox: npm installs, builds and a browser run at once. Every thread
+    # counts towards pids_limit, and Chromium and Node use many.
+    mem_limit: 4g
+    cpus: 2
+    pids_limit: 1024
+    depends_on:
+      egress-proxy: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The workbench's allowlist proxy (infra/egress-proxy/allowlist). It is the only container on
+  # both the internal workbench network and the egress network, which has internet access.
+  egress-proxy:
+    build: infra/egress-proxy
+    networks: [workbench, egress]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8888"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -362,6 +420,10 @@ networks:
   default:
   sandbox:
     internal: true
+  workbench:
+    internal: true
+  # Only egress-proxy joins this one: its way out to the allowlisted hosts.
+  egress:
 
 volumes:
   postgres:
@@ -369,3 +431,5 @@ volumes:
   minio:
   clickhouse:
   clickhouse-logs:
+  # Dev-team projects in the workbench, one folder per user and project.
+  workspaces:

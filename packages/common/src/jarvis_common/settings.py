@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     sandbox_url: str = "http://sandbox:8100"
     sandbox_token: str = ""
     sandbox_timeout_s: int = 120
+    # Workbench for dev teams: a persistent git folder per project with Node, Python, git and
+    # headless Chromium; internet only to npm, PyPI and GitHub.
+    workbench_url: str = "http://workbench:8200"
+    workbench_token: str = ""
+    # Wall-clock time for one ws_run command unless the agent asks for longer, and the most
+    # it may ask for.
+    workbench_timeout_s: int = 300
+    workbench_max_timeout_s: int = 900
     # Longest a single run_system or continue_run job may take.
     run_job_timeout_s: int = 1800
 
