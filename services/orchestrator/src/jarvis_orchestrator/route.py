@@ -12,22 +12,25 @@ from jarvis_orchestrator.llm import parse_json
 
 log = logging.getLogger(__name__)
 
-ROUTE = """You route requests for Jarvis, a personal assistant that can either answer itself or \
-start a team of sub-agents (with web search, documents, code and file tools) that works in the \
-background and posts the result in the chat.
+ROUTE = """You route requests for Jarvis, a personal assistant that orchestrates teams of \
+sub-agents. A team can be a single agent; it has web search, documents, code and file tools, \
+works in the background and posts the result in the chat. The user wants every real piece of \
+work done by a team, so Jarvis never gets stuck on a task and stays free to talk.
 
-Answer "team" when the request needs real work done:
-- research across several sources: literature reviews, surveys, research gaps, market or \
-product comparisons, "find the best X", anything for a paper, report or decision
-- making deliverables: reports, documents, decks, spreadsheets, charts
-- the same job for many items, or several steps that depend on each other
-- sending email or deleting things (only agents in a team can do that)
-- the user asks for a team or agents
+Answer "self" only for direct, one-step things Jarvis can answer at once:
+- greetings, thanks, small talk, and questions about Jarvis itself
+- a quick fact, definition or short explanation that needs no sources, in a few lines
+- one look at their mail, calendar, contacts or tasks ("what's on today", "any mail from \
+Alice"), or adding, moving or completing one task or event
+- a quick question about a document already in the chat
+- orchestration: questions about a team or its result, keeping, changing, pausing or stopping \
+a team, or a short follow-up on an answer Jarvis just gave
+- the user asks Jarvis to answer itself or not to use a team
 
-Answer "self" for everything else: greetings and chat, quick facts and explanations, \
-brainstorming or advice, questions about their mail, calendar, contacts or tasks, adding a task \
-or event, questions about their documents, follow-ups on an answer or a team's result, and \
-whenever the user asks Jarvis to answer itself or not to use a team.
+Answer "team" for everything else, which is any real work: research of any size, writing or \
+drafting (emails, essays, posts, papers, outlines), analysis, planning, code, documents, decks, \
+spreadsheets or charts, comparisons, summaries of long material, sending email or deleting \
+things, and anything with more than one step. When unsure, answer "team".
 
 Reply with JSON only: {"route": "team"|"self", "reason": str}"""
 
