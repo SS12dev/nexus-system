@@ -1,6 +1,7 @@
 #!/bin/sh
 # Jarvis backups. Each backup is a folder under $BACKUP_OUT named by its UTC time, holding a
-# pg_dump of every database, a tarball of the MinIO data and SHA256SUMS. Progress is recorded in
+# pg_dump of every database, a tarball of the MinIO data, the encrypted secrets file (if there is
+# one) and SHA256SUMS. Progress is recorded in
 # the jarvis database's backups table, which the Admin page reads.
 #
 #   jarvis-backup loop   check every minute: a "back up now" from the Admin page, or the daily one
@@ -13,10 +14,12 @@
 #   BACKUP_KEEP_DAYS           delete backups older than this (default 14) ...
 #   BACKUP_KEEP_MIN            ... but always keep this many (default 3)
 #   BACKUP_OUT / MINIO_DATA    where backups go, and the MinIO volume (mounted read-only)
+#   SECRETS_FILE               the encrypted secrets file, copied in when present
 set -u
 
 OUT=${BACKUP_OUT:-/backups}
 MINIO_DATA=${MINIO_DATA:-/minio}
+SECRETS_FILE=${SECRETS_FILE:-/secrets/jarvis.sops.env}
 DATABASES=${BACKUP_DATABASES:-jarvis litellm langfuse}
 HOUR=${BACKUP_HOUR_UTC:-21}
 KEEP_DAYS=${BACKUP_KEEP_DAYS:-14}
@@ -47,6 +50,10 @@ backup() {
     done
     if [ -d "$MINIO_DATA" ]; then
       tar -C "$MINIO_DATA" -czf minio.tar.gz . || exit 1
+    fi
+    # Encrypted with your age key, so it is safe here; restoring on a new machine needs it.
+    if [ -f "$SECRETS_FILE" ]; then
+      cp "$SECRETS_FILE" jarvis.sops.env || exit 1
     fi
     sha256sum $(ls | grep -v -e '^backup.log$' -e '^SHA256SUMS$') > SHA256SUMS || exit 1
   ) > "$dir/backup.log" 2>&1; then

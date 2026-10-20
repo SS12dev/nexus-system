@@ -29,6 +29,9 @@ ollama pull bge-m3             # then keep Ollama running (the menu bar app, or 
 docker compose up -d --build
 ```
 
+Before others use it, encrypt the secrets with `./scripts/secrets.sh init` and start Jarvis with
+`./scripts/compose.sh` from then on (see [Secrets](#secrets)).
+
 The first build takes a while: the doc-worker image includes Docling with CPU PyTorch and its
 models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without OCR.
 
@@ -350,6 +353,46 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
   `ORCHESTRATOR_REPLICAS` (default 1) adds workers for more turns and runs at once, each using
   as much memory again.
 
+### Secrets
+
+`.env` starts out holding everything: plain settings and about twenty secrets (the OpenAI key,
+the Google client secret, the tunnel token, database passwords). For production the secrets move
+into `secrets/jarvis.sops.env`, encrypted with [SOPS](https://getsops.io) and an
+[age](https://age-encryption.org) key, and `.env` keeps only settings:
+
+```sh
+brew install sops age
+./scripts/secrets.sh init       # makes ~/.config/jarvis/age.key, moves the secrets, adds
+                                # TOKEN_ENCRYPTION_KEYS; checks the file decrypts first
+cat ~/.config/jarvis/age.key    # save this in your password manager
+./scripts/compose.sh up -d      # docker compose with the secrets loaded, same arguments
+```
+
+Afterwards:
+
+- `./scripts/compose.sh` replaces `docker compose` everywhere (it is plain `docker compose` when
+  there is no encrypted file). Plain `docker compose up` stops with "... missing, use
+  ./scripts/compose.sh", so nothing starts half-configured.
+- `./scripts/secrets.sh set TAVILY_API_KEY` adds or changes one secret (typed hidden, or piped
+  in), `edit` opens them all in `$EDITOR`, `list` shows the names. Apply with
+  `./scripts/compose.sh up -d`.
+- The decrypted values exist only in the environment of the command that starts the
+  containers. Docker keeps them in each container's settings, so they survive restarts without
+  the key; they are not written to disk in the repo.
+- Saved Google tokens are encrypted with `TOKEN_ENCRYPTION_KEYS`, not `SECRET_KEY`, so either
+  can be changed without signing everyone out of Google. To rotate the token key, put a new
+  one first (`new,old`); each grant is re-encrypted the next time it is used, and the old key
+  can be dropped later. Grants still under `SECRET_KEY` move over the same way.
+- Every backup includes the encrypted file. It is useless without the age key, so keep the key
+  somewhere other than the Mac.
+
+On a new machine: clone the repo, put the age key at `~/.config/jarvis/age.key`, copy
+`jarvis.sops.env` from a backup into `secrets/`, recreate `.env` from `.env.example` (settings
+only), then restore the backup.
+
+When Jarvis moves to a server, the same file can also be opened by a cloud key (SOPS supports
+GCP KMS, AWS KMS and others as extra recipients), so the server needs no copy of the age key.
+
 ### Backups
 
 The `backup` service backs up every night after `BACKUP_HOUR_UTC` (default 21, so 02:30 IST),
@@ -360,11 +403,13 @@ data (uploads and generated files) and `SHA256SUMS`. Backups older than `BACKUP_
 (14) are deleted, always keeping the newest `BACKUP_KEEP_MIN` (3). The Admin page warns when the
 last good one is older than `BACKUP_STALE_HOURS` (36).
 
-Not included: `.env` (keep your own copy somewhere safe; without the same `SECRET_KEY`, saved
-Google connections can't be decrypted), ClickHouse (Langfuse's trace details) and Valkey (queues
-and caches). To keep a copy off the Mac, point `BACKUP_DIR` at a synced or external folder.
+Each backup also holds the encrypted secrets file once you've run `./scripts/secrets.sh init`.
+Not included: `.env` and your age key (keep the key in your password manager; without it, or
+the old `.env` before encrypting, saved Google connections can't be decrypted), ClickHouse
+(Langfuse's trace details) and Valkey (queues and caches). To keep a copy off the Mac, point
+`BACKUP_DIR` at a synced or external folder.
 
-To restore, with the same `.env`:
+To restore, with the same secrets:
 
 ```sh
 ./scripts/restore.sh backups/2026-10-20T210000Z
@@ -389,6 +434,7 @@ packages/common/        settings, models, events, storage, embeddings, hybrid se
                         system spec, tool catalogue and skills helpers
 library/                core skills and the shipped instruction layers
 infra/                  LiteLLM config, Postgres init, Cloudflare Tunnel notes
+secrets/                the encrypted secrets file (gitignored; README: Secrets)
 compose.yaml            the whole stack
 ```
 

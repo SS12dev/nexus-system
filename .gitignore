@@ -10,3 +10,7 @@ apps/web/dev-dist/
 *.tsbuildinfo
 .DS_Store
 backups/
+# Encrypted secrets stay on this machine (and in backups); the age key never goes in the repo.
+secrets/*
+!secrets/README.md
+.sops.yaml

@@ -30,9 +30,9 @@ uv sync --frozen
 uv run ruff check .
 uv run ruff format --check .
 
-step "Shell: backup and restore scripts"
+step "Shell: backup, restore and secrets scripts"
 sh -n infra/backup/backup.sh
-bash -n scripts/restore.sh
+bash -n scripts/restore.sh scripts/compose.sh scripts/secrets.sh
 
 step "Python: tests"
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55432/jarvis_test \
@@ -43,12 +43,12 @@ step "Web: typecheck, tests, build"
 (cd apps/web && npm ci --no-audit --no-fund && npm run typecheck && npm test && npm run build)
 
 step "Compose: config"
-if [[ -f .env ]]; then docker compose config --quiet
+if [[ -f .env ]]; then ./scripts/compose.sh config --quiet
 else docker compose --env-file .env.example config --quiet; fi
 
 if $build_images; then
   step "Compose: build images"
-  if [[ -f .env ]]; then docker compose build web api orchestrator doc-worker sandbox backup
+  if [[ -f .env ]]; then ./scripts/compose.sh build web api orchestrator doc-worker sandbox backup
   else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox backup; fi
 fi
 

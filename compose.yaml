@@ -1,5 +1,6 @@
 # Jarvis on one machine. `cp .env.example .env` (or run scripts/init-env.sh), then
-# `docker compose up -d --build` and open http://localhost:8080.
+# `docker compose up -d --build` and open http://localhost:8080. Once the secrets are encrypted
+# (scripts/secrets.sh init), use ./scripts/compose.sh in place of docker compose.
 name: jarvis
 
 x-jarvis-env: &jarvis-env
@@ -13,7 +14,8 @@ x-jarvis-env: &jarvis-env
   JARVIS_CHAT_MODEL: ${JARVIS_CHAT_MODEL:-jarvis-mini}
   DEFAULT_BUDGET_USD: ${DEFAULT_BUDGET_USD:-5}
   OWNER_BUDGET_USD: ${OWNER_BUDGET_USD:-50}
-  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY missing, use ./scripts/compose.sh or set it in .env}
+  TOKEN_ENCRYPTION_KEYS: ${TOKEN_ENCRYPTION_KEYS:-}
   SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
   SIGNUP_POLICY: ${SIGNUP_POLICY:-invite_only}
   OIDC_ISSUER: ${OIDC_ISSUER:-https://accounts.google.com}
@@ -57,13 +59,13 @@ x-jarvis-env: &jarvis-env
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://jarvis:${POSTGRES_PASSWORD}@postgres:5432/langfuse
-  SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
-  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY in .env}
+  SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT missing, use ./scripts/compose.sh or set it in .env}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY missing, use ./scripts/compose.sh or set it in .env}
   TELEMETRY_ENABLED: "false"
   CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
   CLICKHOUSE_URL: http://clickhouse:8123
   CLICKHOUSE_USER: clickhouse
-  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
   CLICKHOUSE_CLUSTER_ENABLED: "false"
   REDIS_CONNECTION_STRING: redis://redis:6379/1
   LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
@@ -215,6 +217,8 @@ services:
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups
       - minio:/minio:ro
+      # The encrypted secrets file, copied into each backup (README: Secrets).
+      - ./secrets:/secrets:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
     restart: unless-stopped
@@ -224,7 +228,7 @@ services:
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: jarvis
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
       POSTGRES_DB: jarvis
     volumes:
       - postgres:/var/lib/postgresql/data
@@ -258,7 +262,7 @@ services:
     command: -c 'mkdir -p /data/jarvis /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-jarvis}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
     volumes:
       - minio:/data
     ports:
@@ -276,7 +280,7 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY missing, use ./scripts/compose.sh or set it in .env}
       DATABASE_URL: postgresql://jarvis:${POSTGRES_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
@@ -336,7 +340,7 @@ services:
     environment:
       <<: *langfuse-env
       NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:${LANGFUSE_PORT:-3000}}
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET in .env}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET missing, use ./scripts/compose.sh or set it in .env}
       # Creates the org, project, API keys and an admin login on first start.
       LANGFUSE_INIT_ORG_ID: jarvis
       LANGFUSE_INIT_ORG_NAME: Jarvis
@@ -346,7 +350,7 @@ services:
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@jarvis.local}
       LANGFUSE_INIT_USER_NAME: Jarvis admin
-      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:?set LANGFUSE_ADMIN_PASSWORD in .env}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:?LANGFUSE_ADMIN_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
       AUTH_DISABLE_SIGNUP: "true"
     ports:
       - "127.0.0.1:${LANGFUSE_PORT:-3000}:3000"

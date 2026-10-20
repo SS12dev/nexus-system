@@ -13,7 +13,7 @@ import uuid
 from datetime import timedelta
 
 import httpx
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis_common.models import GoogleGrant, utcnow
@@ -58,31 +58,55 @@ def services_in(scopes: str) -> list[str]:
     return [name for name, scope in SERVICE_SCOPES.items() if scope in granted]
 
 
-def _fernet(settings: Settings) -> Fernet:
-    digest = hashlib.sha256(b"jarvis-google-tokens:" + settings.secret_key.encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
+def _fernets(settings: Settings) -> list[Fernet]:
+    """Tokens are encrypted under the first TOKEN_ENCRYPTION_KEYS entry and decrypt under any of
+    them, or under SECRET_KEY, which encrypted them before that setting existed."""
+    secrets = [k.strip() for k in settings.token_encryption_keys.split(",") if k.strip()]
+    digests = (
+        hashlib.sha256(b"jarvis-google-tokens:" + s.encode()).digest()
+        for s in [*secrets, settings.secret_key]
+    )
+    return [Fernet(base64.urlsafe_b64encode(d)) for d in digests]
 
 
 def encrypt(settings: Settings, value: str) -> str:
-    return _fernet(settings).encrypt(value.encode()).decode()
+    return _fernets(settings)[0].encrypt(value.encode()).decode()
 
 
 def decrypt(settings: Settings, value: str) -> str | None:
-    """None when the value was encrypted under another SECRET_KEY."""
+    """None when the value was encrypted under a key that is no longer configured."""
     try:
-        return _fernet(settings).decrypt(value.encode()).decode()
+        return MultiFernet(_fernets(settings)).decrypt(value.encode()).decode()
     except InvalidToken:
         return None
 
 
+def _under_current_key(settings: Settings, value: str) -> bool:
+    try:
+        _fernets(settings)[0].decrypt(value.encode())
+        return True
+    except InvalidToken:
+        return False
+
+
 async def get_grant(db: AsyncSession, settings: Settings, user_id: uuid.UUID) -> GoogleGrant | None:
-    """The user's grant, or None. A grant that no longer decrypts (SECRET_KEY changed) is
+    """The user's grant, or None. A grant that no longer decrypts (its key was removed) is
     dropped, so the next sign-in asks again."""
     grant = await db.get(GoogleGrant, user_id)
-    if grant is not None and decrypt(settings, grant.refresh_token) is None:
+    if grant is None:
+        return None
+    refresh = decrypt(settings, grant.refresh_token)
+    if refresh is None:
         await db.delete(grant)
         await db.flush()
         return None
+    if not _under_current_key(settings, grant.refresh_token):
+        # Encrypted under an older key: re-encrypt under the current one, so the old key can be
+        # removed once every grant has been used.
+        grant.refresh_token = encrypt(settings, refresh)
+        access = decrypt(settings, grant.access_token) if grant.access_token else None
+        grant.access_token = encrypt(settings, access) if access else None
+        await db.flush()
     return grant
 
 
