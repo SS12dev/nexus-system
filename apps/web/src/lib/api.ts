@@ -1,4 +1,5 @@
 import type {
+  AppItem,
   AgentSystem,
   Approval,
   AuditEntry,
@@ -100,6 +101,12 @@ export const api = {
 
   files: () => request<FileItem[]>("/api/files"),
   projects: () => request<Project[]>("/api/projects"),
+  apps: () => request<AppItem[]>("/api/apps"),
+  appAction: (id: string, action: "stop" | "restart" | "redeploy") =>
+    request<AppItem>(`/api/apps/${id}/${action}`, { method: "POST" }),
+  setAppInternet: (id: string, internet: boolean) =>
+    request<AppItem>(`/api/apps/${id}`, { method: "PATCH", body: json({ internet }) }),
+  deleteApp: (id: string) => request<void>(`/api/apps/${id}`, { method: "DELETE" }),
   uploadFile: (file: File, chatId?: string) => {
     const form = new FormData();
     form.append("file", file);

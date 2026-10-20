@@ -50,6 +50,22 @@ export interface FileBrief {
   version?: number;
 }
 
+/** A running app a software team built, on the Apps page. */
+export interface AppItem {
+  id: string;
+  name: string;
+  slug: string | null;
+  owner_id: string;
+  owner: string;
+  state: string | null;
+  live_url: string | null;
+  repo_url: string | null;
+  stack: string | null;
+  deployed_at: string | null;
+  deploy_error: string | null;
+  internet: boolean;
+}
+
 /** A software project a dev team built: one Library card linking to its GitHub repo. */
 export interface Project {
   id: string;

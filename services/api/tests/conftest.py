@@ -12,6 +12,7 @@ class RecordingQueue:
         self.parses: list[uuid.UUID] = []
         self.profiles: list[uuid.UUID] = []
         self.runs: list[tuple[str, uuid.UUID]] = []
+        self.deploys: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
@@ -29,6 +30,9 @@ class RecordingQueue:
 
     async def enqueue_run(self, function, run_id):
         self.runs.append((function, run_id))
+
+    async def enqueue_deploy(self, project_id):
+        self.deploys.append(project_id)
 
 
 @pytest.fixture(autouse=True)

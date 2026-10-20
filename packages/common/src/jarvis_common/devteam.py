@@ -88,9 +88,10 @@ def dev_agents() -> list[dict]:
             "instructions": (
                 "Build the front end PLAN.md describes, in your folder only, with Vite and "
                 "TypeScript (npm create vite@latest, then npm install). Make npm run build pass "
-                "before you stop. Commit with ws_commit after each piece that works. When you "
-                "are given review fixes, make exactly those. Reply with what you built and how "
-                "to run it."
+                "and write its output to dist/ before you stop; it is deployed from there. Call "
+                "the back end on the same host under /api (fetch('/api/...')). Commit with "
+                "ws_commit after each piece that works. When you are given review fixes, make "
+                "exactly those. Reply with what you built and how to run it."
             ),
         },
         {
@@ -102,8 +103,10 @@ def dev_agents() -> list[dict]:
             "max_steps": MAX_STEPS,
             "instructions": (
                 "Build the back end PLAN.md describes, in your folder only: FastAPI with uv "
-                "(uv init, uv add fastapi uvicorn) for web_fastapi, Express for node. Give it a "
-                "/health endpoint and the API the front end needs, and check it starts. Commit "
+                "(uv init, uv add fastapi uvicorn; app = FastAPI() in main.py, listening on 8000) "
+                "for web_fastapi, Express for node (npm start runs it on process.env.PORT). Put "
+                "every route under /api, with /api/health answering 200, and check it starts. "
+                "Keep its dependencies installed (.venv or node_modules): deploys use them. Commit "
                 "with ws_commit after each piece that works. When you are given review fixes, "
                 "make exactly those. Reply with what you built and how to run it."
             ),

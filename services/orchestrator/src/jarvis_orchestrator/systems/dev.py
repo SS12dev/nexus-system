@@ -9,11 +9,14 @@ paused run and carries on when they say go. Builders work side by side in their 
 (no backend for a static app); the tester runs unit and Playwright tests; the reviewer approves
 or sends numbered fixes back to the builders. Release is plain code: it commits what is left,
 marks the project ready, saves it to the Library, pushes it to GitHub when the App is set up
-(release.py) and writes the answer for the chat. Deploys plug in through RELEASE_STEPS.
+(release.py). Then deploy runs it as an app (deploy.py) when the reviewer approved and the
+tests passed; a deploy that fails its health check goes back to the builders once, with the
+error and logs, before the user hears about it. Other steps plug in through RELEASE_STEPS.
 """
 
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
@@ -23,6 +26,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from jarvis_common.devteam import FOLDERS, STACKS
+from jarvis_orchestrator.deploy import deploy_project
 from jarvis_orchestrator.github import GitHubError
 from jarvis_orchestrator.systems import release as releasing
 from jarvis_orchestrator.systems.compile import SystemState, run_agent, terminal
@@ -38,6 +42,8 @@ PLAN_FIRST = re.compile(
     re.I,
 )
 PLAN_CHARS = 6000
+# Times a failed deploy goes back to the builders before the user is told.
+DEPLOY_RETRIES = 1
 SUMMARY_CHARS = 600
 
 
@@ -89,6 +95,14 @@ def repo_line(release: dict) -> str:
     return f"{url} (on branch {release.get('branch')}, not merged: {release.get('merge_note')})"
 
 
+def live_line(release: dict) -> str:
+    if release.get("live_url"):
+        return release["live_url"]
+    if release.get("live_note"):
+        return release["live_note"]
+    return "added here once deploys are switched on"
+
+
 def answer(name: str, dev: dict) -> str:
     """The final chat reply: the answer first, then the facts."""
     tests = dev.get("tests") or {}
@@ -113,7 +127,7 @@ def answer(name: str, dev: dict) -> str:
         f"- Tests: {result}",
         f"- Review: {review}",
         f"- Repo: {repo_line(release)}",
-        f"- Live link: {release.get('live_url') or 'added here once deploys are switched on'}",
+        f"- Live link: {live_line(release)}",
     ]
     if not dev.get("approved") and dev.get("fixes"):
         lines.append(f"\nStill to fix:\n{dev['fixes'].strip()[:1500]}")
@@ -322,7 +336,8 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             approved=bool(dev.get("approved")),
         )
         facts: dict = {"project": project, "commit": commit}
-        await releasing.save_project(rc, dev)
+        row = await releasing.save_project(rc, dev)
+        facts["project_id"] = str(row.id)
         if rc.deps.github is not None:
             try:
                 facts.update(await releasing.publish(rc, dev))
@@ -334,8 +349,45 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 facts.update(await step(rc, dev) or {})
             except Exception:
                 log.exception("Release step %s failed for run %s", step.__name__, rc.run_id)
+        return {"dev": {"release": facts}}
+
+    async def deploy(state: SystemState) -> dict:
+        dev = dict(state.get("dev") or {})
+        facts = dict(dev.get("release") or {})
+        if rc.deps.deployer is None:
+            pass  # Deploys are off here; the answer says the link comes later.
+        elif not dev.get("approved"):
+            facts["live_note"] = "not deployed, as the reviewer hasn't approved it"
+        elif not releasing.passed(dev):
+            facts["live_note"] = "not deployed, as not every test passed"
+        else:
+            result = await deploy_project(
+                rc.deps, uuid.UUID(facts["project_id"]), run_id=rc.run_id, chat_id=rc.chat_id
+            )
+            if result.ok:
+                facts["live_url"] = result.url
+            elif dev.get("deploy_retries", 0) < DEPLOY_RETRIES and result.logs:
+                # Back to the builders with what went wrong; the user hears only the outcome.
+                fixes = (
+                    f"The deploy failed: {result.error}\nFix the app so it builds and starts "
+                    f"with the house template for the {dev.get('stack')} stack.\n"
+                    f"Logs:\n{result.logs[-3000:]}"
+                )
+                return {
+                    "dev": {
+                        "deploy_retries": dev.get("deploy_retries", 0) + 1,
+                        "approved": False,
+                        "fixes": fixes,
+                        "redeploy": True,
+                    }
+                }
+            else:
+                facts["live_note"] = f"not deployed: {result.error}"
         dev["release"] = facts
-        return {"dev": {"release": facts}, "final": answer(spec.name, dev)}
+        return {"dev": {"release": facts, "redeploy": False}, "final": answer(spec.name, dev)}
+
+    def after_deploy(state: SystemState) -> str:
+        return "build" if (state.get("dev") or {}).get("redeploy") else END
 
     for name, fn in [
         ("brief", brief),
@@ -347,6 +399,7 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         ("test", test),
         ("review", review),
         ("release", release),
+        ("deploy", deploy),
     ]:
         g.add_node(name, fn)
     g.add_edge(START, "brief")
@@ -359,4 +412,5 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
     g.add_edge("backend", "test")
     g.add_edge("test", "review")
     g.add_conditional_edges("review", after_review, ["build", "release"])
-    g.add_edge("release", END)
+    g.add_edge("release", "deploy")
+    g.add_conditional_edges("deploy", after_deploy, ["build", END])

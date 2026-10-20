@@ -13,6 +13,7 @@ from jarvis_api.middleware import GuardMiddleware
 from jarvis_api.queue import ArqJobQueue, JobQueue
 from jarvis_api.routes import (
     admin,
+    apps,
     auth,
     chats,
     files,
@@ -25,6 +26,7 @@ from jarvis_api.routes import (
     systems,
 )
 from jarvis_common.db import make_engine, make_sessionmaker
+from jarvis_common.deployer import DeployerClient
 from jarvis_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.settings import Settings, get_settings
@@ -51,6 +53,7 @@ def create_app(
         app.state.storage = storage or S3Storage(settings)
         inner = embedder or LiteLLMEmbedder(settings)
         app.state.embedder = CachedEmbedder(inner, settings.embedding_batch_size)
+        app.state.deployer = DeployerClient(settings)
         pool = None
         if queue is None:
             pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
@@ -64,6 +67,7 @@ def create_app(
         await app.state.storage.aclose()
         await app.state.gateway.aclose()
         await app.state.redis.aclose()
+        await app.state.deployer.aclose()
         await engine.dispose()
 
     app = FastAPI(title="Jarvis API", version="0.1.0", lifespan=lifespan)
@@ -88,6 +92,7 @@ def create_app(
     app.include_router(chats.router)
     app.include_router(files.router)
     app.include_router(projects.router)
+    app.include_router(apps.router)
     app.include_router(memories.router)
     app.include_router(skills.router)
     app.include_router(instructions.router)

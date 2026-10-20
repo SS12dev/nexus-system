@@ -20,6 +20,7 @@ COPY services/orchestrator/pyproject.toml services/orchestrator/
 COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
+COPY services/deployer/pyproject.toml services/deployer/
 RUN uv sync --frozen --no-dev --package jarvis-sandbox --no-install-workspace
 
 COPY services/sandbox services/sandbox

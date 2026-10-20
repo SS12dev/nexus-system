@@ -11,6 +11,7 @@ class JobQueue(Protocol):
     async def enqueue_parse(self, file_id: uuid.UUID) -> None: ...
     async def enqueue_profile_rebuild(self, user_id: uuid.UUID) -> None: ...
     async def enqueue_run(self, function: str, run_id: uuid.UUID) -> None: ...
+    async def enqueue_deploy(self, project_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -39,3 +40,7 @@ class ArqJobQueue:
     async def enqueue_run(self, function: str, run_id: uuid.UUID) -> None:
         """run_system or continue_run. One job per run at a time (see the orchestrator)."""
         await self.pool.enqueue_job(function, str(run_id), _job_id=f"run:{run_id}")
+
+    async def enqueue_deploy(self, project_id: uuid.UUID) -> None:
+        """A redeploy from the Apps page; one at a time per project."""
+        await self.pool.enqueue_job("deploy_app", str(project_id), _job_id=f"deploy:{project_id}")

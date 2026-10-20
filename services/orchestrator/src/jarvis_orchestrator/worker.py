@@ -14,12 +14,13 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
 from jarvis_common.db import make_engine, make_sessionmaker
+from jarvis_common.deployer import DeployerClient
 from jarvis_common.embeddings import CachedEmbedder, LiteLLMEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.settings import get_settings
 from jarvis_common.skills import sync_library
 from jarvis_common.storage import S3Storage
-from jarvis_orchestrator import memory
+from jarvis_orchestrator import deploy, memory
 from jarvis_orchestrator.github import GitHubApp
 from jarvis_orchestrator.llm import chat_model
 from jarvis_orchestrator.sandbox import SandboxClient
@@ -68,6 +69,7 @@ async def startup(ctx: dict) -> None:
         sandbox=SandboxClient(settings),
         workbench=WorkbenchClient(settings),
         github=GitHubApp(settings) if settings.github_enabled else None,
+        deployer=DeployerClient(settings),
         web=WebClient(settings),
         google_http=httpx.AsyncClient(timeout=30),
         checkpointer=checkpointer,
@@ -88,6 +90,7 @@ async def shutdown(ctx: dict) -> None:
     await deps.workbench.aclose()
     if deps.github is not None:
         await deps.github.aclose()
+    await deps.deployer.aclose()
     await deps.web.aclose()
     await deps.google_http.aclose()
     await ctx["pool"].close()
@@ -118,6 +121,11 @@ async def draft_skill(ctx: dict, run_id: str) -> None:
     await learn.draft_skill(ctx["deps"], uuid.UUID(run_id))
 
 
+async def deploy_app(ctx: dict, project_id: str) -> None:
+    """Redeploy from the Apps page."""
+    await deploy.deploy_project(ctx["deps"], uuid.UUID(project_id))
+
+
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -141,6 +149,7 @@ class WorkerSettings:
         # run:<id> job id only blocks a second job while one is queued or running.
         func(run_system, timeout=settings.run_job_timeout_s, keep_result=0),
         func(continue_run, timeout=settings.run_job_timeout_s, keep_result=0),
+        func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
     ]
     cron_jobs = [
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),

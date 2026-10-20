@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  AppWindow,
   Bot,
   Brain,
   FolderOpen,
@@ -175,6 +176,9 @@ export function Shell() {
         <div className={`border-t border-edge p-3 text-sm ${collapsed ? "md:px-2" : ""}`}>
           <NavLink to="/library" className={navClass} title={tip("Library")}>
             <FolderOpen size={16} className="shrink-0" /> <span className={label}>Library</span>
+          </NavLink>
+          <NavLink to="/apps" className={navClass} title={tip("Apps")}>
+            <AppWindow size={16} className="shrink-0" /> <span className={label}>Apps</span>
           </NavLink>
           <NavLink to="/memory" className={navClass} title={tip("Memory")}>
             <Brain size={16} className="shrink-0" /> <span className={label}>Memory</span>

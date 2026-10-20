@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis_api.queue import JobQueue
 from jarvis_api.sessions import user_for_token
+from jarvis_common.deployer import DeployerClient
 from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.models import RoleName, User
@@ -43,12 +44,17 @@ def get_gateway(request: Request) -> LiteLLMAdmin:
     return request.app.state.gateway
 
 
+def get_deployer(request: Request) -> DeployerClient:
+    return request.app.state.deployer
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 StorageDep = Annotated[Storage, Depends(get_storage)]
 EmbedderDep = Annotated[CachedEmbedder, Depends(get_embedder)]
 GatewayDep = Annotated[LiteLLMAdmin, Depends(get_gateway)]
+DeployerDep = Annotated[DeployerClient, Depends(get_deployer)]
 
 
 async def current_user(request: Request, db: DbDep, settings: SettingsDep) -> User:

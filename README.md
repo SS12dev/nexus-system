@@ -277,7 +277,7 @@ software team, `dev_project`, in a workbench project:
 | 3. Build | Frontend and backend builders (mini) | Build side by side in their own folders and commit as they go; no backend for a static app |
 | 4. Test | Tester (mini) | Unit tests and a headless Playwright smoke test; writes `TEST_REPORT.md` |
 | 5. Review | Reviewer (pro) | Approves, or sends numbered fixes back to stage 3, at most three rounds |
-| 6. Release | (code) | Commits what is left, saves the project to the Library and pushes it to its own private GitHub repo; deploys come later |
+| 6. Release | (code) | Commits what is left, saves the project to the Library, pushes it to its own private GitHub repo and, once approved and green, runs it as an app |
 
 The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
 after the plan until you say go. The reply gives what was built, the stack, the test count and
@@ -290,6 +290,11 @@ files. With the Jarvis GitHub App set up ([docs/github-app.md](docs/github-app.m
 private repo in `GITHUB_APPS_ORG`: the run's work goes to a `jarvis/<run id>` branch, and `main`
 moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
 transfers a repo to your own account, after you approve it on a card (owner only).
+
+When the reviewer approved and every test passed, the `deployer` runs the app as a container and
+the reply gives its link, `http://<name>.apps.localhost:8080` (open it in Chrome or Firefox on
+this Mac), with a screenshot. The **Apps** page lists them with stop, restart, redeploy and delete;
+members can run three at once. How apps are built and boxed in: [docs/containers.md](docs/containers.md).
 
 ## Skills and instructions
 
@@ -486,6 +491,7 @@ services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent s
                         compile, run, approvals), the memory and learned-skill jobs
 services/sandbox/       FastAPI: runs agent code with no network and resource limits
 services/workbench/     FastAPI: dev teams' persistent project folders, commands and git
+services/deployer/      FastAPI: builds and runs finished projects as apps, and the Docker gate
 services/doc-worker/    arq worker: parses, chunks and embeds uploads
 infra/backup/           the backup service (pg_dump and MinIO, nightly and on request)
 infra/egress-proxy/     the workbench's allowlist proxy (npm, PyPI, GitHub)

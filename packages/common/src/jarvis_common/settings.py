@@ -132,8 +132,17 @@ class Settings(BaseSettings):
     github_app_installation_id: str = ""
     github_app_private_key_b64: str = ""
     github_api_url: str = "https://api.github.com"
+
+    # Deployer: builds software projects into containers on the apps network.
+    deployer_url: str = "http://deployer:8300"
+    deployer_token: str = ""
+    # A deploy builds, starts, health-checks and screenshots; this is how long it may take.
+    deploy_timeout_s: int = 1500
+    # Apps a member may have running at once; the owner has no limit.
+    member_app_limit: int = 3
     # Longest a single run_system or continue_run job may take.
-    run_job_timeout_s: int = 1800
+    # Software teams plan, build, test, review and deploy, which can take most of it.
+    run_job_timeout_s: int = 3600
 
     # Web search: tavily or brave when a key is set, otherwise DuckDuckGo (free, no key).
     web_search_provider: Literal["auto", "tavily", "brave", "duckduckgo"] = "auto"

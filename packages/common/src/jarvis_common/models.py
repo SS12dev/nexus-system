@@ -821,8 +821,15 @@ class Project(Base):
     last_commit: Mapped[str | None] = mapped_column(String(64))
     last_commit_message: Mapped[str | None] = mapped_column(Text)
     last_commit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Filled by deploys (a later release step).
+    # The running app (the deployer): its name in URLs and containers, where it answers, and
+    # how its last deploy went. app_state: building, running, stopped or failed.
+    app_slug: Mapped[str | None] = mapped_column(String(64))
+    app_state: Mapped[str | None] = mapped_column(String(24))
     live_url: Mapped[str | None] = mapped_column(String(300))
+    deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deploy_error: Mapped[str | None] = mapped_column(Text)
+    # Apps have no internet unless their project opts in.
+    internet: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

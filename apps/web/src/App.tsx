@@ -11,6 +11,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { HomePage } from "./pages/HomePage";
 import { JarvisLayout } from "./pages/JarvisLayout";
+import { AppsPage } from "./pages/AppsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
@@ -64,6 +65,7 @@ export function App() {
           <Route path="c/:chatId" element={<ChatPage />} />
         </Route>
         <Route path="library" element={<LibraryPage />} />
+        <Route path="apps" element={<AppsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />
