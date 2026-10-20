@@ -55,17 +55,33 @@ and runs from this chat are listed in <agent_systems>; reuse a fitting template 
 `run_agent_system`."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
-Read the latest exchange and list durable facts worth remembering about the USER: preferences \
-(format, tone, tools, style), facts about them (role, projects, people, location, \
-constraints), goals, and standing instructions for the assistant.
+Read the latest exchange and list durable facts worth remembering about the USER as a person: \
+preferences (format, tone, tools, style), facts about them (role, work, projects, people, \
+location, constraints, things they own), long-term goals, and standing instructions for the \
+assistant.
+
+The test for each item: would it still be true and useful a month from now, in a chat about \
+something else? If not, leave it out. Most messages are requests for a task; the task itself \
+is never a memory, only what the request reveals about the person.
+
+Examples (message -> what to save):
+- "Help me choose a 3D printer, I want to get into 3D printing as a hobby" -> "Is getting into \
+3D printing as a hobby" (fact). NOT "Wants help choosing a 3D printer".
+- "Which bike should I buy under 4 lakh for daily running?" -> nothing, or a stated fact such \
+as "Commutes daily by motorbike" only if they said so. NOT "Wants help choosing a bike".
+- "Research the best way to set up a home server, I'm in India" -> "Lives in India" (fact). \
+NOT "Wants research on home servers".
+- "OK, build the 2048 game" -> nothing. NOT "Agreed to build the 2048 MVP".
+- "Keep answers short and use tables" -> "Prefers short answers with tables" (preference).
+- "I'm writing a paper on LLM reasoning this semester" -> "Is writing a paper on LLM \
+reasoning" (goal).
 
 Rules:
 - Only what the user said or clearly confirmed. Nothing about the assistant, nothing guessed.
-- Skip one-off requests, small talk and facts only relevant to this task. A task the user \
-asked for (research something, build a team, draft or send an email, add an event) is not a \
-goal, and a go-ahead or approval given for one task is not a standing instruction.
-- One short, self-contained sentence each, in the third person ("Prefers tables for \
-comparisons", "Works on a multi-agent system called Jarvis").
+- Never save a request, a question they asked, a task, or a go-ahead or approval for one \
+("Wants help with...", "Asked for...", "Agreed to...", "Approved..."). A goal is something \
+the user is working towards over weeks or months, not what they asked for in this chat.
+- One short, self-contained sentence each, in the third person.
 - confidence: 0.9 when stated outright, 0.6 when implied.
 - If the user asks the assistant to forget something, put a short description of it in \
 "forget".
@@ -95,8 +111,11 @@ PROFILE = """Write the assistant's profile of its user from the memories below: 
 impression that is put at the top of every conversation. Use these Markdown sections, leaving \
 out any with nothing to say: **About**, **Preferences**, **How to answer**, **Current goals**. \
 Short bullets, at most 250 words in total. Pinned memories must appear. When memories \
-conflict, prefer pinned, then higher confidence, then newer. Do not invent anything. Reply \
-with the profile only."""
+conflict, prefer pinned, then higher confidence, then newer. **How to answer** comes only from \
+preferences and instructions about how they like answers; **Current goals** only from \
+long-term goals. A single task or question they once asked about (choosing a product, one \
+research request) belongs in neither and is left out. Do not invent anything. Reply with the \
+profile only."""
 
 
 def system_prompt(name: str | None, assistant: str, context: str = "") -> str:
