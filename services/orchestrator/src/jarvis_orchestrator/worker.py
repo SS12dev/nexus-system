@@ -167,6 +167,9 @@ class WorkerSettings:
     health_check_interval = 30
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 20
+    # arq looks for new jobs every 0.5 s by default, which a chat turn waits on; checking
+    # Redis every 50 ms costs next to nothing.
+    poll_delay = 0.05
     job_timeout = 300
     # A turn streams to the user as it runs, so a retry would duplicate output.
     max_tries = 1
