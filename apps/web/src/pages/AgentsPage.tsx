@@ -41,8 +41,10 @@ export function AgentsPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [run, setRun] = useState<RunDetail | null>(null);
   const pane = useRef<HTMLElement>(null);
-  // A newly picked team starts at the top of the reading pane.
-  useEffect(() => pane.current?.scrollTo({ top: 0 }), [systemId]);
+  // A newly picked team starts at the top of the reading pane (braces: see SkillsPage).
+  useEffect(() => {
+    pane.current?.scrollTo({ top: 0 });
+  }, [systemId]);
   const [request, setRequest] = useState("");
   const [error, setError] = useState("");
 
