@@ -17,6 +17,8 @@ import {
   upsertApprovals,
   upsertFile,
   upsertSystems,
+  syncFiles,
+  syncLiveSystems,
   type ChatState,
 } from "./reducers";
 
@@ -33,7 +35,10 @@ interface Store extends ChatState {
   addMessages: (chatId: string, messages: Message[]) => void;
   handleEvent: (event: ServerEvent) => void;
   upsertFile: (file: FileItem) => void;
+  /** Take a fresh file list as the truth, keeping uploads still being processed. */
+  syncFiles: (files: FileItem[]) => void;
   upsertSystems: (systems: AgentSystem[]) => void;
+  syncLiveSystems: (systems: AgentSystem[]) => void;
   upsertApprovals: (approvals: Approval[]) => void;
 }
 
@@ -56,6 +61,8 @@ export const useStore = create<Store>((set) => ({
   addMessages: (chatId, messages) => set((s) => addMessages(s, chatId, messages)),
   handleEvent: (event) => set((s) => applyEvent(s, event)),
   upsertFile: (file) => set((s) => ({ files: upsertFile(s.files, file) })),
+  syncFiles: (files) => set((s) => ({ files: syncFiles(s.files, files) })),
   upsertSystems: (systems) => set((s) => upsertSystems(s, systems)),
+  syncLiveSystems: (systems) => set((s) => syncLiveSystems(s, systems)),
   upsertApprovals: (approvals) => set((s) => upsertApprovals(s, approvals)),
 }));

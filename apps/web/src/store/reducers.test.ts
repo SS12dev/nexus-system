@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../lib/types";
-import { addMessages, applyEvent, initialState, mergeFetched } from "./reducers";
+import type { AgentSystem, FileItem, Message } from "../lib/types";
+import {
+  addMessages,
+  applyEvent,
+  initialState,
+  mergeFetched,
+  syncFiles,
+  syncLiveSystems,
+  upsertSystems,
+} from "./reducers";
 
 const msg = (over: Partial<Message> = {}): Message => ({
   id: "m1",
@@ -182,5 +190,30 @@ describe("agent systems", () => {
       data: { message: msg({ status: "complete", attachments: [file] }) },
     });
     expect(s.messages.c1[0].attachments).toEqual([file]);
+  });
+});
+
+describe("orb data", () => {
+  const system = (id: string, status: AgentSystem["status"] = "idle") =>
+    ({ id, status, nodes: [], edges: [] }) as unknown as AgentSystem;
+  const file = (id: string, status: FileItem["status"] = "ready") =>
+    ({ id, name: id, status, origin: "generated" }) as FileItem;
+
+  it("drops live systems a fresh list no longer has, keeping archived ones for chat cards", () => {
+    let s = upsertSystems(initialState, [system("a"), system("b"), system("old", "archived")]);
+    s = syncLiveSystems(s, [system("a")]);
+    expect(Object.keys(s.systems).sort()).toEqual(["a", "old"]);
+  });
+
+  it("adds artifacts as they are made and removes deleted files", () => {
+    let s = applyEvent(initialState, { type: "artifact.created", data: { file: file("f1") } });
+    expect(s.files.f1).toBeDefined();
+    s = applyEvent(s, { type: "file.deleted", data: { id: "f1" } });
+    expect(s.files.f1).toBeUndefined();
+  });
+
+  it("syncs files but keeps uploads still being processed", () => {
+    const current = { up: file("up", "processing"), gone: file("gone") };
+    expect(Object.keys(syncFiles(current, [file("new")])).sort()).toEqual(["new", "up"]);
   });
 });

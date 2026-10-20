@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { isLive } from "../components/RunControls";
 import { SystemCard } from "../components/SystemCard";
@@ -7,6 +7,7 @@ import { Composer } from "../components/Composer";
 import { MessageView } from "../components/MessageView";
 import { Orb } from "../components/Orb";
 import { api } from "../lib/api";
+import { useSend } from "../lib/useSend";
 import { hasRole, type Message } from "../lib/types";
 import { useStore } from "../store/chat";
 
@@ -22,9 +23,8 @@ export function ChatPage() {
   const activity = useStore((s) => s.activity);
   const allSystems = useStore((s) => s.systems);
   const allApprovals = useStore((s) => s.approvals);
-  const { setMessages, mergeFetched, addMessages, upsertChat, upsertSystems, upsertApprovals } =
-    useStore.getState();
-  const [error, setError] = useState("");
+  const { mergeFetched, upsertSystems, upsertApprovals } = useStore.getState();
+  const { send, error, setError } = useSend(chatId);
   const bottom = useRef<HTMLDivElement>(null);
 
   // Load (or reload after a reconnect, in case events were missed) the open chat.
@@ -38,7 +38,7 @@ export function ChatPage() {
     // Teams started from this chat, and steps waiting for approval.
     api.systems({ chat_id: chatId }).then(upsertSystems).catch(() => {});
     api.approvals(chatId).then(upsertApprovals).catch(() => {});
-  }, [chatId, connected, navigate, mergeFetched, upsertSystems, upsertApprovals]);
+  }, [chatId, connected, navigate, mergeFetched, upsertSystems, upsertApprovals, setError]);
 
   const systems = useMemo(
     () =>
@@ -56,27 +56,6 @@ export function ChatPage() {
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, liveSystems.length, approvals.length]);
-
-  const send = async (content: string, fileIds: string[]): Promise<boolean> => {
-    setError("");
-    try {
-      let id = chatId;
-      if (!id) {
-        const chat = await api.createChat();
-        upsertChat(chat);
-        setMessages(chat.id, []);
-        id = chat.id;
-        navigate(`/c/${id}`);
-      }
-      const res = await api.send(id, content, fileIds);
-      upsertChat(res.chat);
-      addMessages(id, [res.user_message, res.assistant_message]);
-      return true;
-    } catch (e) {
-      setError((e as Error).message);
-      return false;
-    }
-  };
 
   const canChat = hasRole(user, "member");
   const busy = messages.some((m) => m.status === "streaming");

@@ -1,7 +1,7 @@
 import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
@@ -25,6 +25,8 @@ export function MemoryPage() {
   const [kind, setKind] = useState<MemoryKind>("preference");
   const [error, setError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
+  // Tapping a memory in the orb opens it here.
+  const focus = useSearchParams()[0].get("focus");
 
   const load = useCallback(async (q?: string) => {
     const [p, list] = await Promise.all([api.profile(), api.memories(q)]);
@@ -196,6 +198,7 @@ export function MemoryPage() {
             <MemoryRow
               key={m.id}
               memory={m}
+              focused={m.id === focus}
               canEdit={canEdit}
               onChange={(changes) => run(async () => replace(await api.updateMemory(m.id, changes)))}
               onDelete={() => remove(m)}
@@ -215,11 +218,13 @@ export function MemoryPage() {
 
 function MemoryRow({
   memory: m,
+  focused,
   canEdit,
   onChange,
   onDelete,
 }: {
   memory: Memory;
+  focused: boolean;
   canEdit: boolean;
   onChange: (changes: { content?: string; kind?: MemoryKind; pinned?: boolean }) => void;
   onDelete: () => void;
@@ -228,7 +233,12 @@ function MemoryRow({
   const [draft, setDraft] = useState(m.content);
   const [events, setEvents] = useState<MemoryEvent[] | null>(null);
 
+  const row = useRef<HTMLDivElement>(null);
+
   useEffect(() => setDraft(m.content), [m.content]);
+  useEffect(() => {
+    if (focused) row.current?.scrollIntoView({ block: "center" });
+  }, [focused]);
 
   const save = () => {
     setEditing(false);
@@ -236,7 +246,10 @@ function MemoryRow({
   };
 
   return (
-    <div className="rounded-lg border border-edge bg-panel px-4 py-3">
+    <div
+      ref={row}
+      className={`rounded-lg border bg-panel px-4 py-3 ${focused ? "border-sky-400 ring-1 ring-sky-400/50" : "border-edge"}`}
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           {editing ? (

@@ -7,6 +7,7 @@ import { hasRole } from "./lib/types";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
+import { HomePage } from "./pages/HomePage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
@@ -47,7 +48,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<ChatPage />} />
+        <Route index element={<HomePage />} />
         <Route path="c/:chatId" element={<ChatPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="memory" element={<MemoryPage />} />
