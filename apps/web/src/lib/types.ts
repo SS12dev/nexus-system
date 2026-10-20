@@ -50,6 +50,23 @@ export interface FileBrief {
   version?: number;
 }
 
+/** A software project a dev team built: one Library card linking to its GitHub repo. */
+export interface Project {
+  id: string;
+  name: string;
+  stack: string | null;
+  repo_url: string | null;
+  branch: string | null;
+  merged: boolean;
+  transferred_to: string | null;
+  last_commit: string | null;
+  last_commit_message: string | null;
+  last_commit_at: string | null;
+  live_url: string | null;
+  chat_id: string | null;
+  updated_at: string;
+}
+
 export interface FileItem extends FileBrief {
   error: string | null;
   parser: string | null;

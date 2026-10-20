@@ -277,13 +277,19 @@ software team, `dev_project`, in a workbench project:
 | 3. Build | Frontend and backend builders (mini) | Build side by side in their own folders and commit as they go; no backend for a static app |
 | 4. Test | Tester (mini) | Unit tests and a headless Playwright smoke test; writes `TEST_REPORT.md` |
 | 5. Review | Reviewer (pro) | Approves, or sends numbered fixes back to stage 3, at most three rounds |
-| 6. Release | (code) | Commits what is left, marks the project ready; GitHub and deploys come later |
+| 6. Release | (code) | Commits what is left, saves the project to the Library and pushes it to its own private GitHub repo; deploys come later |
 
 The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
 after the plan until you say go. The reply gives what was built, the stack, the test count and
 the review rounds. A follow-up such as "add a high score table" continues the same project.
 Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($2), still
 capped by `MAX_RUN_BUDGET_USD`. It needs the Run code (exec) permission.
+
+Projects show in the Library as one card each (stack, latest commit, repo link), never as loose
+files. With the Jarvis GitHub App set up ([docs/github-app.md](docs/github-app.md)), each gets a
+private repo in `GITHUB_APPS_ORG`: the run's work goes to a `jarvis/<run id>` branch, and `main`
+moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
+transfers a repo to your own account, after you approve it on a card (owner only).
 
 ## Skills and instructions
 

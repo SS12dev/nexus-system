@@ -789,6 +789,49 @@ class AgentRun(Base):
     )
 
 
+class Project(Base):
+    """A software project a dev team built: its workbench folder, and its GitHub repo once it
+    has been pushed. The Library shows it as one card, never as loose files."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The workbench project id (the spec's project): a follow-up run works in the same one.
+    workbench_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(200))
+    stack: Mapped[str | None] = mapped_column(String(32))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    # The system and run that last worked on it.
+    system_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_systems.id", ondelete="SET NULL")
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    # GitHub: owner/name, set once the repo exists. After "move it to my GitHub" the owner is
+    # the user's account and Jarvis no longer pushes to it.
+    repo_owner: Mapped[str | None] = mapped_column(String(100))
+    repo_name: Mapped[str | None] = mapped_column(String(100))
+    repo_url: Mapped[str | None] = mapped_column(String(300))
+    # The branch of the last push and whether it was merged to main.
+    branch: Mapped[str | None] = mapped_column(String(200))
+    merged: Mapped[bool] = mapped_column(Boolean, default=False)
+    transferred_to: Mapped[str | None] = mapped_column(String(100))
+    last_commit: Mapped[str | None] = mapped_column(String(64))
+    last_commit_message: Mapped[str | None] = mapped_column(Text)
+    last_commit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Filled by deploys (a later release step).
+    live_url: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "workbench_id"),
+        Index("ix_projects_user", "user_id", "updated_at"),
+    )
+
+
 class RunEvent(Base):
     """What happened in a run, for the Agents page timeline."""
 

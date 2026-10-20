@@ -148,7 +148,8 @@ capabilities dropped, and caps of 3 GB memory, 2 CPUs and 256 processes.
 **workbench** ([services/workbench](../services/workbench)) is where dev teams build
 software. Each project is a git repository at `/workspaces/<user id>/<project id>` on the
 `jarvis_workspaces` volume, so it survives between steps, runs and restarts until it is deleted.
-Agents use it through the `ws_*` tools: list, read, write and edit files, run a command
+A finished project is pushed from here to its GitHub repo through `egress-proxy`
+([GitHub App setup](github-app.md)). Agents use it through the `ws_*` tools: list, read, write and edit files, run a command
 (`ws_run`, which needs the exec capability like `run_code`), see the diff and commit. An agent
 run works in a project named after the run. The image has Node 22 with npm, Python 3.13 with
 uv, git, and Chromium with Playwright (`$PLAYWRIGHT_VERSION`) for headless browser tests.
@@ -277,4 +278,5 @@ ones that matter most per container:
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |
 | workbench | `WORKBENCH_TOKEN`, `WORKBENCH_MEMORY_MB`, `WORKBENCH_MAX_TIMEOUT_S` |
+| orchestrator (GitHub) | `GITHUB_APPS_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` ([setup](github-app.md)) |
 | cloudflared | `CLOUDFLARE_TUNNEL_TOKEN` |

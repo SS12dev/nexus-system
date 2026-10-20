@@ -3,9 +3,10 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import { Link } from "react-router";
 import { FileIcon, StatusIcon } from "../components/FileChip";
 import { FilePreview } from "../components/FilePreview";
+import { ProjectCard } from "../components/ProjectCard";
 import { api } from "../lib/api";
 import { ACCEPT, formatDate, formatSize } from "../lib/format";
-import { hasRole, type FileItem, type SearchHit } from "../lib/types";
+import { hasRole, type FileItem, type Project, type SearchHit } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
 
@@ -15,6 +16,7 @@ export function LibraryPage() {
   const live = useStore((s) => s.files);
   const upsertFile = useStore((s) => s.upsertFile);
   const [ids, setIds] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [preview, setPreview] = useState<FileItem | null>(null);
@@ -31,6 +33,10 @@ export function LibraryPage() {
         setIds(list.map((f) => f.id));
       })
       .catch((e) => setError(e.message));
+    api
+      .projects()
+      .then(setProjects)
+      .catch(() => {});
   }, [upsertFile]);
 
   const files = useMemo(() => ids.map((id) => live[id]).filter(Boolean), [ids, live]);
@@ -116,6 +122,20 @@ export function LibraryPage() {
           Every file you upload, here or in a chat. {assistant} reads them, so you can ask about them in
           any chat. Only you can see your files.
         </p>
+
+        {projects.length > 0 && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-medium text-slate-300">Projects</h2>
+            <p className="mb-3 text-xs text-slate-500">
+              Software {assistant}'s teams built. The code lives in each project's GitHub repo, not here.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {projects.map((p) => (
+                <ProjectCard key={p.id} project={p} />
+              ))}
+            </div>
+          </section>
+        )}
 
         <form onSubmit={search} className="mb-5 flex gap-2">
           <div className="flex flex-1 items-center gap-2 rounded-md border border-edge bg-panel px-3">

@@ -20,6 +20,7 @@ from jarvis_api.routes import (
     me,
     memories,
     ops,
+    projects,
     skills,
     systems,
 )
@@ -86,6 +87,7 @@ def create_app(
     app.include_router(me.router)
     app.include_router(chats.router)
     app.include_router(files.router)
+    app.include_router(projects.router)
     app.include_router(memories.router)
     app.include_router(skills.router)
     app.include_router(instructions.router)

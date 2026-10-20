@@ -7,6 +7,7 @@ import asyncio
 import contextvars
 import functools
 import logging
+import re
 import smtplib
 import time
 import uuid
@@ -29,6 +30,7 @@ from jarvis_common.models import (
     FileStatus,
     Memory,
     MemoryKind,
+    Project,
     Skill,
     SkillUsage,
     utcnow,
@@ -36,6 +38,7 @@ from jarvis_common.models import (
 from jarvis_common.search import hybrid_search
 from jarvis_common.skills import find_skill
 from jarvis_orchestrator.artifacts import save_generated
+from jarvis_orchestrator.github import GitHubError
 from jarvis_orchestrator.google_tools import build_google_tools
 from jarvis_orchestrator.sandbox import SandboxError
 from jarvis_orchestrator.web import WebError
@@ -47,6 +50,7 @@ READ_CHARS = 12000
 TOOL_OUTPUT_CHARS = 8000
 # Inputs sent to the sandbox per call.
 MAX_INPUT_FILES = 10
+GITHUB_USER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 SAVE_FILE_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".html", ".xml", ".yaml", ".yml"}
 # Lines ws_read returns per call unless asked for fewer, and characters per line.
 WS_READ_LINES = 400
@@ -576,6 +580,42 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             return f"Sending failed: {exc.__class__.__name__}: {str(exc)[:200]}"
         return f"Sent to {', '.join(to)}."
 
+    async def github_transfer(project: str, github_user: str) -> str:
+        """Move one of the user's software projects (by name or repo name) from Jarvis's
+        GitHub organisation to a GitHub account, e.g. the user's own. GitHub emails that
+        account to accept the transfer. The user approves every transfer first."""
+        await note("github_transfer", project=project, to=github_user)
+        if deps.github is None:
+            return "GitHub isn't set up on this server (docs/github-app.md)."
+        if not GITHUB_USER.match(github_user.strip()):
+            return f"{github_user} isn't a GitHub username."
+        wanted = project.strip().lower()
+        async with sessionmaker() as db:
+            rows = await db.scalars(
+                select(Project)
+                .where(Project.user_id == user_id, Project.repo_name.is_not(None))
+                .order_by(Project.updated_at.desc())
+            )
+            found = [
+                p for p in rows.all() if wanted in (p.name.lower(), (p.repo_name or "").lower())
+            ]
+            if not found:
+                return f"No project called {project} has a GitHub repo yet."
+            p = found[0]
+            if p.transferred_to:
+                return f"{p.name} was already moved to {p.transferred_to}."
+            try:
+                repo = await deps.github.transfer(p.repo_name, github_user.strip())
+            except GitHubError as exc:
+                return f"The transfer didn't happen: {exc}"
+            p.transferred_to, p.repo_owner, p.repo_url = repo.owner, repo.owner, repo.url
+            p.updated_at = utcnow()
+            await db.commit()
+        return (
+            f"Asked GitHub to move {p.name} to {repo.owner}. GitHub emails {repo.owner} to "
+            f"accept it; once accepted it is at {repo.url}. Jarvis no longer pushes to it."
+        )
+
     # --- Skills ----------------------------------------------------------------------------
 
     async def skills_load(name: str) -> str:
@@ -644,6 +684,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "ws_diff": ws_diff,
         "ws_commit": ws_commit,
         "send_email": send_email,
+        "github_transfer": github_transfer,
         **build_google_tools(ctx, note),
     }
     chosen = [impls[n] for n in impls if n in set(names)]

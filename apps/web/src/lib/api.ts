@@ -12,7 +12,9 @@ import type {
   MemoryEvent,
   MemoryKind,
   Message,
+  OpsStatus,
   Profile,
+  Project,
   Role,
   Run,
   RunDetail,
@@ -21,7 +23,6 @@ import type {
   Skill,
   SkillDetail,
   SkillVersion,
-  OpsStatus,
   SystemDetail,
   ToolEntry,
   Usage,
@@ -98,6 +99,7 @@ export const api = {
     ),
 
   files: () => request<FileItem[]>("/api/files"),
+  projects: () => request<Project[]>("/api/projects"),
   uploadFile: (file: File, chatId?: string) => {
     const form = new FormData();
     form.append("file", file);

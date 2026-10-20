@@ -164,6 +164,9 @@ agents whose task they cover.
 - If the request asks for something to be emailed or a document deleted, give the agent that \
 does it send_email or delete_document; the user approves each such step on an approval card \
 in the app, so don't leave it out or plan to ask in chat.
+- If the user asks to move a software project to their own GitHub, a single agent with \
+github_transfer does it (it asks the user first); the request must name their GitHub \
+username.
 - approval.required_for: add tools that should pause for the user beyond the ones that \
 always do (send_email, delete_document always ask).
 - deliverables: files the user asked for, e.g. ["report.docx"]. When they asked a question \

@@ -8,8 +8,8 @@ posted in the chat. If the user asked to see the plan first, the run parks after
 paused run and carries on when they say go. Builders work side by side in their own folders
 (no backend for a static app); the tester runs unit and Playwright tests; the reviewer approves
 or sends numbered fixes back to the builders. Release is plain code: it commits what is left,
-marks the project ready and writes the answer for the chat. GitHub (PR 3) and deploys (PR 4)
-plug in through RELEASE_STEPS.
+marks the project ready, saves it to the Library, pushes it to GitHub when the App is set up
+(release.py) and writes the answer for the chat. Deploys plug in through RELEASE_STEPS.
 """
 
 import logging
@@ -23,6 +23,8 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from jarvis_common.devteam import FOLDERS, STACKS
+from jarvis_orchestrator.github import GitHubError
+from jarvis_orchestrator.systems import release as releasing
 from jarvis_orchestrator.systems.compile import SystemState, run_agent, terminal
 from jarvis_orchestrator.systems.runtime import RunContext, build_agent, final_text
 from jarvis_orchestrator.workbench import WorkbenchError
@@ -74,6 +76,19 @@ def _args(state: dict) -> dict:
     return (state.get("done") or {}).get("args") or {}
 
 
+def repo_line(release: dict) -> str:
+    url = release.get("repo_url")
+    if release.get("repo_error"):
+        return f"not pushed: {release['repo_error']}"
+    if not url:
+        return "added here once GitHub is connected"
+    if release.get("repo_note"):
+        return f"{url} ({release['repo_note']})"
+    if release.get("merged"):
+        return f"{url} (on main)"
+    return f"{url} (on branch {release.get('branch')}, not merged: {release.get('merge_note')})"
+
+
 def answer(name: str, dev: dict) -> str:
     """The final chat reply: the answer first, then the facts."""
     tests = dev.get("tests") or {}
@@ -97,7 +112,7 @@ def answer(name: str, dev: dict) -> str:
         f"- Stack: {STACKS.get(dev.get('stack', ''), 'not chosen')}",
         f"- Tests: {result}",
         f"- Review: {review}",
-        f"- Repo: {release.get('repo_url') or 'added here once GitHub is connected'}",
+        f"- Repo: {repo_line(release)}",
         f"- Live link: {release.get('live_url') or 'added here once deploys are switched on'}",
     ]
     if not dev.get("approved") and dev.get("fixes"):
@@ -145,6 +160,7 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
     async def brief(state: SystemState) -> dict:
         if wb is None:
             raise WorkbenchError("The workbench isn't available.")
+        await releasing.set_identity(rc)
         # Where the run started, so the reviewer sees only this run's changes.
         head = await wb.run(user, project, "git rev-parse --short HEAD")
         st = await run_agent(
@@ -306,6 +322,13 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             approved=bool(dev.get("approved")),
         )
         facts: dict = {"project": project, "commit": commit}
+        await releasing.save_project(rc, dev)
+        if rc.deps.github is not None:
+            try:
+                facts.update(await releasing.publish(rc, dev))
+            except (GitHubError, WorkbenchError) as exc:
+                log.warning("Couldn't publish run %s to GitHub: %s", rc.run_id, exc)
+                facts["repo_error"] = str(exc)
         for step in RELEASE_STEPS:
             try:
                 facts.update(await step(rc, dev) or {})
