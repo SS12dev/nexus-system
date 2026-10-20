@@ -40,6 +40,9 @@ models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without
 | MinIO console | http://localhost:9001 |
 | Admin page (health, usage, audit log, backups) | http://localhost:8080/admin |
 
+What each of the containers Compose starts is for, and how they connect, is in
+[docs/containers.md](docs/containers.md).
+
 The first person to sign in becomes the **owner**. Give Docker Desktop at least 8 GB of memory;
 ClickHouse (for Langfuse) is the heaviest container.
 
@@ -389,6 +392,7 @@ packages/common/        settings, models, events, storage, embeddings, hybrid se
                         system spec, tool catalogue and skills helpers
 library/                core skills and the shipped instruction layers
 infra/                  LiteLLM config, Postgres init, Cloudflare Tunnel notes
+docs/containers.md      what every Docker container does and how they fit together
 compose.yaml            the whole stack
 ```
 
