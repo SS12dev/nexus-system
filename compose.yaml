@@ -82,6 +82,9 @@ services:
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=jarvis_default
       - --entrypoints.web.address=:80
+      # cloudflared (and Docker Desktop's port forwarding) connect from private addresses; trust
+      # their X-Forwarded-Proto so the API builds https:// callback URLs behind the tunnel.
+      - --entrypoints.web.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32
       - --ping=true
       - --accesslog=true
     ports:
@@ -93,7 +96,7 @@ services:
     restart: unless-stopped
 
   cloudflared:
-    image: cloudflare/cloudflared:2025.9.1
+    image: cloudflare/cloudflared:2026.10.0
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
     environment:
