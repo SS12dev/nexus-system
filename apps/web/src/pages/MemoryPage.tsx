@@ -1,6 +1,7 @@
-import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Brain, ChevronDown, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
+import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
@@ -14,6 +15,25 @@ const KIND_STYLE: Record<MemoryKind, string> = {
   fact: "bg-slate-500/20 text-slate-300",
   goal: "bg-emerald-500/15 text-emerald-300",
   instruction: "bg-amber-500/15 text-amber-300",
+};
+/** What each kind of memory is for, shown on the chips and in the add form. */
+const KIND_INFO: Record<MemoryKind, { label: string; help: string }> = {
+  preference: {
+    label: "Preference",
+    help: "How you like things: tone, formats, tools, brands.",
+  },
+  fact: {
+    label: "Fact",
+    help: "Something true about you: your work, people, places, setup.",
+  },
+  goal: {
+    label: "Goal",
+    help: "Something you're working towards over weeks or months.",
+  },
+  instruction: {
+    label: "Instruction",
+    help: "A standing rule to always or never do something.",
+  },
 };
 
 export function MemoryPage() {
@@ -82,8 +102,7 @@ export function MemoryPage() {
   };
 
   const forgetAll = () => {
-    if (!confirm("Delete every memory, past-chat summary and your profile? This can't be undone."))
-      return;
+    if (!confirm("Delete every memory, past-chat summary and your profile? This can't be undone.")) return;
     run(async () => {
       await api.forgetEverything();
       await load();
@@ -94,10 +113,11 @@ export function MemoryPage() {
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Memory</h1>
-        <p className="mb-6 text-sm text-slate-400">
-          What {assistant} has learned about you from your chats, and the profile it builds from it.
-          Edit, pin or delete anything; deleting is permanent. Only you can see this.
+        <p className="mb-3 text-sm text-slate-400">
+          What {assistant} has learned about you from your chats, and the profile it builds from it. Edit, pin
+          or delete anything; deleting is permanent. Only you can see this.
         </p>
+        <HowItWorks assistant={assistant} />
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
 
         {profile && (
@@ -125,6 +145,12 @@ export function MemoryPage() {
                 </button>
               )}
             </div>
+            <p className="mb-3 text-xs text-slate-500">
+              A short summary {assistant} writes from your memories and reads at the start of every chat; the
+              teams it builds get it too. It has up to four parts: <b>About</b> (who you are),{" "}
+              <b>Preferences</b>, <b>How to answer</b> (style and format) and <b>Current goals</b>. Pinned
+              memories always make it in.
+            </p>
             {profile.content ? (
               <Markdown size="sm">{profile.content}</Markdown>
             ) : (
@@ -133,22 +159,30 @@ export function MemoryPage() {
               </p>
             )}
             {canEdit && (
-              <label className="mt-4 flex items-center gap-2 border-t border-edge pt-3 text-sm text-slate-300">
+              <label className="mt-4 flex items-start gap-3 border-t border-edge pt-3 text-sm">
                 <input
                   type="checkbox"
+                  className="mt-1"
                   checked={profile.memory_enabled}
-                  onChange={(e) =>
-                    run(async () => setProfile(await api.setMemoryEnabled(e.target.checked)))
-                  }
+                  onChange={(e) => run(async () => setProfile(await api.setMemoryEnabled(e.target.checked)))}
                 />
-                Learn from my chats and use what {assistant} remembers
+                <span>
+                  <span className="text-slate-200">
+                    Learn from my chats and use what {assistant} remembers
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {profile.memory_enabled
+                      ? `On: after each chat ${assistant} saves anything lasting you said, and uses this profile, your memories and summaries of past chats when it answers.`
+                      : `Off: ${assistant} learns nothing new and answers without your profile, memories or past chats. Nothing here is deleted; turn it back on any time.`}
+                  </span>
+                </span>
               </label>
             )}
           </section>
         )}
 
         {canEdit && (
-          <form onSubmit={add} className="mb-4 flex flex-wrap gap-2">
+          <form onSubmit={add} className="mb-4 flex flex-wrap items-start gap-2">
             <input
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -159,13 +193,22 @@ export function MemoryPage() {
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value as MemoryKind)}
+              aria-label="Type of memory"
               className="rounded-md border border-edge bg-panel px-3 py-2"
             >
               {KINDS.map((k) => (
-                <option key={k}>{k}</option>
+                <option key={k} value={k}>
+                  {KIND_INFO[k].label}
+                </option>
               ))}
             </select>
             <button className="rounded-md bg-sky-500 px-4 py-2 font-medium text-ink">Add</button>
+            <p className="w-full text-xs text-slate-500">
+              <span className={`mr-1.5 rounded px-1.5 py-0.5 ${KIND_STYLE[kind]}`}>
+                {KIND_INFO[kind].label}
+              </span>
+              {KIND_INFO[kind].help}
+            </p>
           </form>
         )}
 
@@ -279,23 +322,30 @@ function MemoryRow({
           )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {canEdit ? (
-              <select
-                value={m.kind}
-                onChange={(e) => onChange({ kind: e.target.value as MemoryKind })}
-                className={`rounded px-1.5 py-0.5 ${KIND_STYLE[m.kind]} bg-transparent`}
-              >
-                {KINDS.map((k) => (
-                  <option key={k} className="bg-panel text-slate-100">
-                    {k}
-                  </option>
-                ))}
-              </select>
+              <span className={`relative inline-flex items-center rounded ${KIND_STYLE[m.kind]}`}>
+                <select
+                  value={m.kind}
+                  onChange={(e) => onChange({ kind: e.target.value as MemoryKind })}
+                  aria-label="Type of memory"
+                  title={`${KIND_INFO[m.kind].help} Click to change the type.`}
+                  className="cursor-pointer appearance-none bg-transparent py-0.5 pr-5 pl-1.5"
+                >
+                  {KINDS.map((k) => (
+                    <option key={k} value={k} className="bg-panel text-slate-100">
+                      {KIND_INFO[k].label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={11} className="pointer-events-none absolute right-1" />
+              </span>
             ) : (
-              <span className={`rounded px-1.5 py-0.5 ${KIND_STYLE[m.kind]}`}>{m.kind}</span>
+              <span className={`rounded px-1.5 py-0.5 ${KIND_STYLE[m.kind]}`} title={KIND_INFO[m.kind].help}>
+                {KIND_INFO[m.kind].label}
+              </span>
             )}
             <span
               className="inline-flex items-center gap-1"
-              title={`Confidence ${Math.round(m.confidence * 100)}%`}
+              title={`How sure it is: ${Math.round(m.confidence * 100)}%. Fades if nothing confirms it for 60 days; dropped below 20%. Pinned memories never fade.`}
             >
               <span className="h-1 w-12 overflow-hidden rounded bg-edge">
                 <span
@@ -331,7 +381,12 @@ function MemoryRow({
         <div className="flex items-center text-slate-400">
           <button
             onClick={() =>
-              events ? setEvents(null) : api.memoryEvents(m.id).then(setEvents).catch(() => {})
+              events
+                ? setEvents(null)
+                : api
+                    .memoryEvents(m.id)
+                    .then(setEvents)
+                    .catch(() => {})
             }
             className="p-1.5 hover:text-white"
             aria-label="History"
@@ -345,11 +400,20 @@ function MemoryRow({
                 onClick={() => onChange({ pinned: !m.pinned })}
                 className={`p-1.5 hover:text-white ${m.pinned ? "text-sky-300" : ""}`}
                 aria-label={m.pinned ? "Unpin" : "Pin"}
-                title={m.pinned ? "Pinned: always in your profile. Click to unpin." : "Pin"}
+                title={
+                  m.pinned
+                    ? "Pinned: always in your profile, never changed or faded. Click to unpin."
+                    : "Pin: keep it in your profile and stop it changing or fading"
+                }
               >
                 {m.pinned ? <Pin size={15} /> : <PinOff size={15} />}
               </button>
-              <button onClick={onDelete} className="p-1.5 hover:text-rose-400" aria-label="Delete" title="Delete">
+              <button
+                onClick={onDelete}
+                className="p-1.5 hover:text-rose-400"
+                aria-label="Delete"
+                title="Delete"
+              >
                 <Trash2 size={15} />
               </button>
             </>
@@ -357,5 +421,51 @@ function MemoryRow({
         </div>
       </div>
     </div>
+  );
+}
+
+/** A short guide to what this page holds and how it changes answers. */
+function HowItWorks({ assistant }: { assistant: string }) {
+  return (
+    <Guide title="How memory works">
+      <div>
+        <GuideHeading>What gets saved</GuideHeading>
+        <p>
+          After each chat {assistant} keeps anything lasting you said about yourself. One-off requests and
+          small talk are skipped. You can also add memories yourself below. Each has a type:
+        </p>
+        <ul className="mt-2 space-y-1">
+          {KINDS.map((k) => (
+            <li key={k}>
+              <span className={`mr-1.5 rounded px-1.5 py-0.5 text-xs ${KIND_STYLE[k]}`}>
+                {KIND_INFO[k].label}
+              </span>
+              {KIND_INFO[k].help}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <GuideHeading>How it's used</GuideHeading>
+        <ul className="list-disc space-y-1 pl-4">
+          <li>Your profile goes into every chat and every team {assistant} builds.</li>
+          <li>
+            The memories closest to your question, and summaries of related past chats, are looked up for each
+            reply.
+          </li>
+          <li>
+            <b>Pin</b> a memory to keep it in your profile and stop {assistant} rewording, merging or fading
+            it.
+          </li>
+          <li>
+            Unpinned memories fade if nothing confirms them for 60 days; near duplicates are merged overnight.
+          </li>
+          <li>
+            The clock icon shows a memory's history. <b>Forget everything</b> at the bottom wipes memories,
+            past-chat summaries and the profile.
+          </li>
+        </ul>
+      </div>
+    </Guide>
   );
 }

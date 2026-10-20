@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+import { codeLanguage, notebookCells, parseCsv, prettyJson, previewKind } from "./preview";
+
+describe("file previews", () => {
+  it("picks a view from the file name", () => {
+    expect(previewKind("game.py")).toBe("code");
+    expect(codeLanguage("game.py")).toBe("python");
+    expect(previewKind("report.pdf")).toBe("pdf");
+    expect(previewKind("Notes.MD")).toBe("markdown");
+    expect(previewKind("data.json")).toBe("json");
+    expect(previewKind("plan.docx")).toBe("docx");
+    expect(previewKind("deck.pptx")).toBe("extracted");
+    expect(previewKind("server.log")).toBe("text");
+  });
+
+  it("parses quoted CSV fields", () => {
+    expect(parseCsv('a,b\n"x, y","say ""hi"""\r\n1,2')).toEqual([
+      ["a", "b"],
+      ["x, y", 'say "hi"'],
+      ["1", "2"],
+    ]);
+  });
+
+  it("pretty-prints JSON and leaves broken JSON alone", () => {
+    expect(prettyJson('{"a":1}')).toBe('{\n  "a": 1\n}');
+    expect(prettyJson("{oops")).toBe("{oops");
+  });
+
+  it("reads notebook cells and text outputs", () => {
+    const nb = JSON.stringify({
+      cells: [
+        { cell_type: "markdown", source: ["# Title"] },
+        { cell_type: "code", source: "print(1)", outputs: [{ text: ["1\n"] }] },
+      ],
+    });
+    expect(notebookCells(nb)).toEqual([
+      { kind: "markdown", source: "# Title", outputs: [] },
+      { kind: "code", source: "print(1)", outputs: ["1\n"] },
+    ]);
+  });
+});
