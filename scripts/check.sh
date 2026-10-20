@@ -48,8 +48,8 @@ else docker compose --env-file .env.example config --quiet; fi
 
 if $build_images; then
   step "Compose: build images"
-  if [[ -f .env ]]; then ./scripts/compose.sh build web api orchestrator doc-worker sandbox workbench egress-proxy backup
-  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox workbench egress-proxy backup; fi
+  if [[ -f .env ]]; then ./scripts/compose.sh build web api orchestrator doc-worker sandbox workbench egress-proxy deployer docker-gate backup
+  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox workbench egress-proxy deployer docker-gate backup; fi
 
   step "Workbench: network isolation"
   ./scripts/check-workbench-net.sh

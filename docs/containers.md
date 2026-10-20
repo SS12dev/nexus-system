@@ -1,6 +1,6 @@
 # The containers
 
-`docker compose up -d` starts about 18 containers, all in the Compose project `jarvis`, so
+`docker compose up -d` starts about 20 containers, all in the Compose project `jarvis`, so
 Docker Desktop shows them under one group with names like `jarvis-api-1`. This page says what
 each one is for, how they talk to each other, and which ones you can restart or leave out.
 
@@ -17,6 +17,9 @@ each one is for, how they talk to each other, and which ones you can restart or 
 | `sandbox` | Locked-down box where agents run Python/bash (makes PDFs, Excel...) | for agent code | no |
 | `workbench` | Dev teams' workshop: a persistent git folder per project, with Node, Python and a browser | for dev teams | no |
 | `egress-proxy` | The workbench's only way out: lets through npm, PyPI and GitHub, nothing else | with the workbench | no |
+| `deployer` | Builds finished software projects into containers and runs them as apps | for running apps | no |
+| `docker-gate` | The deployer's only door to Docker: a short allowlist of API calls | with the deployer | no |
+| `jarvis-app-*` | The apps teams built (made by the deployer, not Compose) | | `<name>.apps.localhost:8080` |
 | `doc-worker` | Worker that parses uploads (PDF, Word, PPT, Excel) and indexes them | for documents | no |
 | `backup` | Nightly backups of databases and files to `./backups` | recommended | no |
 | `postgres` | The main database (with pgvector for search) | yes | 127.0.0.1:5432 |
@@ -75,6 +78,13 @@ flowchart LR
   orch -->|run_code| sandbox
   orch -->|ws_* tools| workbench
   workbench -->|allowlist only| egress --> registries
+  deployer[deployer]
+  gate[docker-gate]
+  apps[(jarvis-app-* containers)]
+  orch -->|deploy| deployer
+  api -->|stop, restart, delete| deployer
+  deployer -->|allowlisted calls| gate
+  traefik -->|<name>.apps.localhost| apps
   orch --> litellm
   doc -->|embeddings| litellm
   api -->|budgets, keys| litellm
@@ -175,6 +185,38 @@ box holds: it starts a throwaway copy of the workbench next to Postgres and Redi
 the allowed hosts answer, other sites are refused, and Postgres, Redis, the other Jarvis
 services, the Mac, the LAN and the internet can't be reached directly.
 
+**deployer** ([services/deployer](../services/deployer)) runs the apps software teams build. At
+the end of a run whose reviewer approved and whose tests passed (or on **Redeploy** on the Apps
+page) it builds the project from its workbench folder, mounted read-only, using a house
+template ([templates](../services/deployer/src/jarvis_deployer/templates)): a static site on
+unprivileged nginx, FastAPI on Python slim, or Express on Node. Agents never write their own
+Dockerfiles, and builds have **no network**: they use the `node_modules` or `.venv` the team
+installed in the workbench. Each app runs as `jarvis-app-<name>-web` (and `-api` for a back end)
+on the `apps` network, replacing the previous version in place: non-root, read-only, 512 MB and
+half a CPU, no host folders, restarting unless stopped, and labelled `jarvis.app` and
+`jarvis.owner`. Traefik routes `<name>.apps.localhost` to it, and `/api` on that host to the back
+end. *.localhost reaches your Mac by itself in Chrome and Firefox, so
+`http://2048.apps.localhost:8080` works with no DNS setup; PR 5 moves apps to `servhub.cc` names.
+After a start it checks the app answers through Traefik and takes a screenshot with the
+workbench image's Playwright; a failed check goes back to the team's builders once, with the
+logs, before the reply.
+
+**docker-gate** (same image) is the only container with the Docker socket, and only the deployer
+can reach it. Generic socket proxies allow or deny by URL prefix, so allowing containers would
+also allow `exec` and file writes into any container; this gate checks every call
+([gate.py](../services/deployer/src/jarvis_deployer/gate.py)): offline builds of `jarvis-app-*`
+images only; new containers named `jarvis-app-*`, non-root, on the apps network, with memory
+and CPU caps and no privileges, host mounts, devices, ports or added capabilities; starting,
+stopping, logs and deleting only for containers labelled as Jarvis apps (so not Postgres or any
+other Jarvis container); and nothing else: no exec, archive, attach, volumes, swarm or system
+calls.
+
+**Apps page** (`/apps`): every app with its owner, state, link, repo and last deploy, and Stop,
+Restart, Redeploy and Delete (which removes the containers and image, keeping the project and
+repo). The owner sees everyone's apps and can give one internet access (from its next deploy);
+members see only their own and can have `MEMBER_APP_LIMIT` (3) running at once. The API enforces
+both.
+
 **doc-worker** ([services/doc-worker](../services/doc-worker/README.md)) takes `parse_file`
 jobs from the `arq:docs` queue: it parses uploads (Docling for PDFs and images, MarkItDown for
 Office files), splits them into chunks, embeds them and stores them for search. Every ten
@@ -229,7 +271,11 @@ container in the stack; give Docker Desktop at least 8 GB. Jarvis works without 
 - **Networks:** `jarvis_default` connects everything else; `jarvis_sandbox` is internal (no
   internet) and connects only `orchestrator` and `sandbox`; `jarvis_workbench` is internal and
   connects only `orchestrator`, `workbench` and `egress-proxy`; `jarvis_egress` has internet
-  access and holds only `egress-proxy`.
+  access and holds only `egress-proxy`; `jarvis_deployer` (internal) connects the orchestrator,
+  the API, Traefik and the deployer; `jarvis_docker-gate` (internal) only the deployer and the gate;
+  `jarvis_apps` (internal: no internet, no Jarvis services, no LAN) holds the apps and Traefik;
+  `jarvis_apps_egress` is where apps that were given internet access also sit. Apps on
+  `jarvis_apps` can reach each other and Traefik's front door, nothing else.
 - **Volumes** (where data survives restarts): `jarvis_postgres`, `jarvis_redis`,
   `jarvis_minio`, `jarvis_clickhouse`, `jarvis_clickhouse-logs`, `jarvis_workspaces` (dev-team
   projects; not in the nightly backup, since the code goes to GitHub), plus the `./backups`
@@ -240,9 +286,9 @@ container in the stack; give Docker Desktop at least 8 GB. Jarvis works without 
 
 Compose waits on health checks, so things come up in this order:
 
-1. `postgres`, `redis`, `minio`, `clickhouse`, `traefik`, `web`, `egress-proxy`
-2. `migrate` (after Postgres is healthy), `litellm`, `sandbox`, `workbench`, `langfuse-web`,
-   `langfuse-worker`
+1. `postgres`, `redis`, `minio`, `clickhouse`, `traefik`, `web`, `egress-proxy`, `docker-gate`
+2. `migrate` (after Postgres is healthy), `litellm`, `sandbox`, `workbench`, `deployer`,
+   `langfuse-web`, `langfuse-worker`
 3. `api`, `orchestrator`, `doc-worker`, `backup` (after `migrate` exits successfully)
 4. `cloudflared` (with the tunnel profile)
 
@@ -278,5 +324,6 @@ ones that matter most per container:
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |
 | workbench | `WORKBENCH_TOKEN`, `WORKBENCH_MEMORY_MB`, `WORKBENCH_MAX_TIMEOUT_S` |
+| deployer, api, orchestrator | `DEPLOYER_TOKEN`, `APPS_DOMAIN`, `APPS_URL`, `MEMBER_APP_LIMIT` |
 | orchestrator (GitHub) | `GITHUB_APPS_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` ([setup](github-app.md)) |
 | cloudflared | `CLOUDFLARE_TUNNEL_TOKEN` |

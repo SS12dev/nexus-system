@@ -14,6 +14,7 @@ resolution-markers = [
 members = [
     "jarvis-api",
     "jarvis-common",
+    "jarvis-deployer",
     "jarvis-doc-worker",
     "jarvis-orchestrator",
     "jarvis-sandbox",
@@ -1541,6 +1542,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "jarvis-deployer"
+version = "0.1.0"
+source = { editable = "services/deployer" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[[package]]
 name = "jarvis-doc-worker"
 version = "0.1.0"
 source = { editable = "services/doc-worker" }
@@ -1642,6 +1660,7 @@ dev = [
     { name = "httpx" },
     { name = "jarvis-api" },
     { name = "jarvis-common" },
+    { name = "jarvis-deployer" },
     { name = "jarvis-doc-worker" },
     { name = "jarvis-orchestrator" },
     { name = "jarvis-sandbox" },
@@ -1659,6 +1678,7 @@ dev = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "jarvis-api", editable = "services/api" },
     { name = "jarvis-common", editable = "packages/common" },
+    { name = "jarvis-deployer", editable = "services/deployer" },
     { name = "jarvis-doc-worker", editable = "services/doc-worker" },
     { name = "jarvis-orchestrator", editable = "services/orchestrator" },
     { name = "jarvis-sandbox", editable = "services/sandbox" },

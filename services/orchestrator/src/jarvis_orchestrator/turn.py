@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jarvis_common.deployer import DeployerClient
 from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.events import Event, publish
 from jarvis_common.google import get_grant, services_in
@@ -75,6 +76,8 @@ class TurnDeps:
     workbench: WorkbenchClient | None = None
     # The Jarvis GitHub App, when it is set up (GITHUB_* settings).
     github: GitHubApp | None = None
+    # Runs finished software projects as apps.
+    deployer: DeployerClient | None = None
     web: WebClient | None = None
     # Shared client for Google's APIs (Gmail, Calendar, ...); None opens one per call.
     google_http: httpx.AsyncClient | None = None

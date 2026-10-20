@@ -15,6 +15,7 @@ members = [
     "services/doc-worker",
     "services/sandbox",
     "services/workbench",
+    "services/deployer",
 ]
 
 [dependency-groups]
@@ -30,6 +31,7 @@ dev = [
     "jarvis-doc-worker",
     "jarvis-sandbox",
     "jarvis-workbench",
+    "jarvis-deployer",
 ]
 
 [tool.uv.sources]
@@ -39,6 +41,7 @@ jarvis-orchestrator = { workspace = true }
 jarvis-doc-worker = { workspace = true }
 jarvis-sandbox = { workspace = true }
 jarvis-workbench = { workspace = true }
+jarvis-deployer = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -59,6 +62,7 @@ testpaths = [
     "services/doc-worker/tests",
     "services/sandbox/tests",
     "services/workbench/tests",
+    "services/deployer/tests",
 ]
 addopts = "--import-mode=importlib"
 
@@ -70,4 +74,5 @@ known-first-party = [
     "jarvis_doc_worker",
     "jarvis_sandbox",
     "jarvis_workbench",
+    "jarvis_deployer",
 ]

@@ -49,6 +49,9 @@ x-jarvis-env: &jarvis-env
   GITHUB_APP_ID: ${GITHUB_APP_ID:-}
   GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
   GITHUB_APP_PRIVATE_KEY_B64: ${GITHUB_APP_PRIVATE_KEY_B64:-}
+  DEPLOYER_URL: http://deployer:8300
+  DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
+  MEMBER_APP_LIMIT: ${MEMBER_APP_LIMIT:-3}
   WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
   TAVILY_API_KEY: ${TAVILY_API_KEY:-}
   BRAVE_API_KEY: ${BRAVE_API_KEY:-}
@@ -110,6 +113,8 @@ services:
       - --accesslog=true
     ports:
       - "${JARVIS_HTTP_PORT:-8080}:80"
+    # apps: to route to the apps users build; deployer: so the deployer can check them.
+    networks: [default, apps, apps_egress, deployer]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
@@ -145,6 +150,8 @@ services:
   api:
     build: { context: ., dockerfile: services/api/Dockerfile }
     environment: *jarvis-env
+    # deployer: the Apps page stops, restarts and deletes apps.
+    networks: [default, deployer]
     # Traefik spreads requests over the replicas and drops one that fails /healthz. Any replica
     # can serve any user: sessions, rate limits and live events all go through Postgres and Redis.
     deploy:
@@ -166,7 +173,7 @@ services:
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
     environment: *jarvis-env
     # The only service that can reach the sandbox and the workbench.
-    networks: [default, sandbox, workbench]
+    networks: [default, sandbox, workbench, deployer]
     # More workers take more turns and runs at once (each also uses more memory).
     deploy:
       replicas: ${ORCHESTRATOR_REPLICAS:-1}
@@ -249,6 +256,72 @@ services:
     pids_limit: 64
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "8888"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Builds a software project from its workbench folder into containers on the apps network,
+  # from house templates and with no network during the build, then checks it answers through
+  # Traefik and takes a screenshot. Only the orchestrator and the API can reach it.
+  deployer:
+    build: { context: ., dockerfile: services/deployer/Dockerfile }
+    environment:
+      DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
+      DOCKER_URL: http://docker-gate:2375
+      APPS_NETWORK: jarvis_apps
+      APPS_EGRESS_NETWORK: jarvis_apps_egress
+      APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
+      APPS_URL: ${APPS_URL:-http://{host}:${JARVIS_HTTP_PORT:-8080}}
+      TRAEFIK_URL: http://traefik
+      SCREENSHOT_IMAGE: jarvis-workbench:latest
+      APP_MEMORY_MB: "512"
+      APP_CPUS: "0.5"
+    networks: [deployer, docker-gate]
+    volumes:
+      - workspaces:/workspaces:ro
+    read_only: true
+    tmpfs:
+      # Build contexts are spooled here on their way to Docker.
+      - /tmp:size=2g,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 256
+    depends_on:
+      docker-gate: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The deployer's only door to Docker and the only container with the Docker socket. It allows
+  # a short list of calls (offline builds; creating, starting, stopping and deleting jarvis-app
+  # containers with fixed limits) and refuses exec, volumes, swarm and everything else
+  # (services/deployer/src/jarvis_deployer/gate.py). Root inside, to open the socket, but with no
+  # capabilities and only the deployer able to reach it.
+  docker-gate:
+    build: { context: ., dockerfile: services/deployer/Dockerfile }
+    command: ["uvicorn", "jarvis_deployer.gate:app", "--host", "0.0.0.0", "--port", "2375"]
+    user: "0"
+    environment:
+      APPS_NETWORK: jarvis_apps
+      APPS_EGRESS_NETWORK: jarvis_apps_egress
+      SCREENSHOT_IMAGE: jarvis-workbench:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [docker-gate]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2375/_ping')"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -427,6 +500,16 @@ networks:
     internal: true
   workbench:
     internal: true
+  # The orchestrator and API to the deployer, and the deployer to Traefik for health checks.
+  deployer:
+    internal: true
+  docker-gate:
+    internal: true
+  # The apps users build, and Traefik. Internal: no internet, no Jarvis services, no LAN.
+  apps:
+    internal: true
+  # Apps that opt in to the internet join this one too.
+  apps_egress:
   # Only egress-proxy joins this one: its way out to the allowlisted hosts.
   egress:
 
