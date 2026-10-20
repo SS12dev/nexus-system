@@ -259,15 +259,22 @@ Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a on
 description, plus `scripts/` and `references/`. Agents see only the names and descriptions; they
 load a skill's instructions with `skills_load` when a task needs it and read its files with
 `skills_read_file`, so prompts stay small. Core skills ship in [library/core](library/core) and
-are synced into the database when the orchestrator starts: PDF (Markdown to PDF, merge, split,
-watermark, forms), Word, PowerPoint, Excel, charts and web research, each tested in the sandbox.
+are synced into the database when the orchestrator starts. 27 skills sit on seven shelves:
+documents (PDF, Word, PowerPoint, Excel, charts, images, conversions), research (web research,
+literature reviews, reading papers, research gaps, paper writing, citations, fact-checking),
+writing (reports, summaries, email, meeting notes), data (analysis, statistics, ML experiments,
+LLM evaluation), productivity (inbox triage, scheduling, comparing options), agents (prompt
+writing) and engineering (code review). Every script is tested in the sandbox; see
+[library/README.md](library/README.md).
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version
 history, rollback, enable/disable and import (a `SKILL.md` or a `.zip`). Imported skills, and
 skills Jarvis drafts after a long successful run, stay off until reviewed; skills whose runs
-keep failing are flagged. Its Instructions tab holds the layers every agent gets, in order: the
-shipped safety rules ([library/instructions](library/instructions)), global and per-role
-instructions (admins), then your own house style.
+keep failing are flagged; it filters by shelf, and admins can share one of their own skills
+(say, one Jarvis learned) with everyone. Its Instructions tab holds the layers every agent gets,
+in order: the shipped safety rules and house conventions
+([library/instructions](library/instructions)), global and per-role instructions (admins), then
+your own house style. Jarvis's own chat follows the conventions, global instructions and yours.
 
 ## The orb
 

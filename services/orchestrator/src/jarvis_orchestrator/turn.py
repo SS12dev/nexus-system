@@ -32,8 +32,9 @@ from jarvis_common.models import (
     UserStatus,
     utcnow,
 )
+from jarvis_common.search import hybrid_search
 from jarvis_common.settings import Settings
-from jarvis_common.skills import catalogue, instruction_layers, usable_skills
+from jarvis_common.skills import catalogue, instruction_layers, shelf_index, usable_skills
 from jarvis_common.storage import Storage
 from jarvis_common.systems import ACTIVE_RUN, granted_capabilities
 from jarvis_common.toolinfo import TOOLS, allowed_tools, connected_only
@@ -49,6 +50,11 @@ from jarvis_orchestrator.web import WebClient
 log = logging.getLogger(__name__)
 
 ModelFactory = Callable[..., BaseChatModel]
+# Up to this many skills, Jarvis's prompt lists them all; beyond it, only the ones that match the
+# message in full, plus every skill's name by shelf, so a big library doesn't cost every turn.
+CATALOGUE_LIMIT = 12
+RELEVANT_SKILLS = 6
+
 # Puts a job on the orchestrator queue: enqueue(function_name, *args, **arq_options).
 Enqueue = Callable[..., Awaitable[object]]
 
@@ -69,6 +75,34 @@ class TurnDeps:
     google_http: httpx.AsyncClient | None = None
     # Where agent-system runs keep their LangGraph checkpoints (Postgres in production).
     checkpointer: BaseCheckpointSaver | None = None
+
+
+async def skills_context(
+    db: AsyncSession, embedder: CachedEmbedder, user_id: uuid.UUID, question: str
+) -> str:
+    skills = await usable_skills(db, user_id)
+    if not skills:
+        return ""
+    head = (
+        "<skills>\nSkills in the shared library (load one with skills_load before a task it covers)"
+    )
+    if len(skills) <= CATALOGUE_LIMIT:
+        return f"{head}:\n{catalogue(skills)}\n</skills>"
+    by_id = {s.id: s for s in skills}
+    picked = []
+    if question.strip():
+        vec, _ = await embedder.try_embed_one(db, question[:4000])
+        hits = await hybrid_search(db, "skills", user_id, question[:4000], vec, RELEVANT_SKILLS)
+        picked = [by_id[h.id] for h in hits if h.id in by_id]
+    lines = [f"{head}."]
+    if picked:
+        lines += ["Likely relevant to this message:", catalogue(picked)]
+    lines += [
+        "The whole library by shelf (skills_search describes any of them):",
+        shelf_index(skills),
+        "</skills>",
+    ]
+    return "\n".join(lines)
 
 
 class TurnFailed(Exception):
@@ -324,14 +358,12 @@ async def _generate(
     names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
     extra = []
     layers = await instruction_layers(db, Path(deps.settings.library_path), user, None)
+    if layers.global_extra:
+        extra.append(f"<shared_instructions>\n{layers.global_extra}\n</shared_instructions>")
     if layers.user:
         extra.append(f"<user_instructions>\n{layers.user}\n</user_instructions>")
-    skills = await usable_skills(db, user.id)
-    if skills:
-        extra.append(
-            "<skills>\nSkills in the shared library (load one with skills_load before a task "
-            f"it covers):\n{catalogue(skills)}\n</skills>"
-        )
+    if skills_block := await skills_context(db, deps.embedder, user.id, question):
+        extra.append(skills_block)
     if allowed:
         extra.append(await systems_context(db, user.id, chat.id))
     rendered = "\n\n".join(x for x in [context.render(), *extra] if x)

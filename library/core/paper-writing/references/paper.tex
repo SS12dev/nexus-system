@@ -1,0 +1,64 @@
+% Generic skeleton. Swap in the venue's style file (e.g. \usepackage{neurips_2026}) on Overleaf.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[numbers]{natbib}
+\usepackage{xcolor}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\title{\todo{Title: method or finding + task}}
+\author{\todo{Authors (remove for double-blind review)}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\todo{Problem. Gap. What we do. Key result with numbers. Implication.}
+\end{abstract}
+
+\section{Introduction}
+\todo{Context; failure of current methods \citep{key}; our idea; contributions.}
+\begin{itemize}
+  \item \todo{Contribution 1 (Section~\ref{sec:method})}
+  \item \todo{Contribution 2 (Section~\ref{sec:experiments})}
+\end{itemize}
+
+\section{Related Work}
+\todo{Grouped by theme; end each paragraph with how we differ.}
+
+\section{Method}\label{sec:method}
+\todo{Setup and notation, then the method.}
+
+\section{Experiments}\label{sec:experiments}
+\begin{table}[t]
+  \centering
+  \caption{\todo{Main results. Mean $\pm$ std over 3 seeds.}}
+  \begin{tabular}{lcc}
+    \toprule
+    Method & Benchmark A & Benchmark B \\
+    \midrule
+    Baseline \citep{key} & 0.0 $\pm$ 0.0 & 0.0 $\pm$ 0.0 \\
+    Ours & \textbf{0.0} $\pm$ 0.0 & \textbf{0.0} $\pm$ 0.0 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Limitations}
+\todo{Scope, assumptions, costs.}
+
+\section{Conclusion}
+\todo{3--5 sentences.}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Implementation Details}
+\todo{Hyper-parameters, prompts, compute.}
+\end{document}

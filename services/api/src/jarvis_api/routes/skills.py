@@ -12,7 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jarvis_api.deps import CurrentUser, DbDep, EmbedderDep, MemberUser, RedisDep
+from jarvis_api.deps import AdminUser, CurrentUser, DbDep, EmbedderDep, MemberUser, RedisDep
 from jarvis_api.schemas import SkillCreateIn, SkillRollbackIn, SkillStatusIn, SkillUpdateIn
 from jarvis_common.events import Event, publish
 from jarvis_common.models import (
@@ -239,6 +239,31 @@ async def set_status(
     await db.commit()
     await announce(redis, user, s)
     return out(s, user)
+
+
+@router.post("/{skill_id}/share")
+async def share_skill(skill_id: uuid.UUID, user: AdminUser, db: DbDep, redis: RedisDep):
+    """Move one of your own skills (written, imported or learned) into the shared library, on
+    for everyone. It keeps its version history and usage; from then on admins edit it."""
+    s = await get_skill(db, user, skill_id)
+    if s.owner_id != user.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only your own skills can be shared")
+    try:
+        parse_skill(s.content, s.files or {})
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    await _unique(db, user, SkillScope.domain, s.name)
+    old = s.slug
+    s.scope = SkillScope.domain
+    s.owner_id = None
+    s.slug = skill_slug(SkillScope.domain, s.name)
+    s.status = SkillStatus.active
+    s.version += 1
+    add_version(db, s, user.id, f"Shared with everyone (was {old})")
+    db.add(AuditLog(actor_id=user.id, action="skill.share", target=s.slug, data={"from": old}))
+    await db.commit()
+    await announce(redis, user, s)
+    return out(s, user, full=True)
 
 
 @router.get("/{skill_id}/versions")

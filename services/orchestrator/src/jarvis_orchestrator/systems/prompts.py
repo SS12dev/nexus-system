@@ -128,13 +128,15 @@ when it matters.
 - max: only for the lead, and only when the user asked for the best model.
 
 ## Rules
-- Agent ids: short lowercase words (researcher, writer). role: one of researcher, writer, \
-analyst, reviewer, planner, coder, assistant.
+- Agent ids: short lowercase words (researcher, writer). role: one of ROLES; it picks the \
+standing instructions the agent gets.
 - instructions: specific to this task: what to produce, sources to prefer, the format, and \
 when to stop. Don't restate generic rules; agents already get safety rules and their role.
 - tools: give each agent only the tools it needs, chosen from AVAILABLE TOOLS. An agent that \
 makes PDF, Word, PowerPoint, Excel or chart files needs run_code and the matching core skill.
-- skills: grant matching skills from AVAILABLE SKILLS by id (e.g. core/pdf).
+- skills: grant matching skills from AVAILABLE SKILLS by id (e.g. core/pdf): file skills for \
+agents that make files, and method skills (e.g. core/literature-review, core/fact-check) for \
+agents whose task they cover.
 - If the request asks for something to be emailed or a document deleted, give the agent that \
 does it send_email or delete_document; the user approves each such step on an approval card \
 in the app, so don't leave it out or plan to ask in chat.
@@ -151,6 +153,9 @@ str, "name": str, "role": str, "instructions": str, "tier": str, "tools": [str],
 "deliverables": [str]}} or {"template_id": str}."""
 
 
+DEFAULT_ROLES = ("researcher", "writer", "analyst", "reviewer", "planner", "coder")
+
+
 def design_request(
     request: str,
     deliverables: list[str],
@@ -161,6 +166,7 @@ def design_request(
     profile: str,
     best_model: bool,
     current: dict | None = None,
+    roles: list[str] | None = None,
 ) -> str:
     parts = [f"REQUEST:\n{request}"]
     if deliverables:
@@ -175,6 +181,7 @@ def design_request(
         "AVAILABLE TOOLS:\n" + "\n".join(f"- {t.name} [{t.risk}]: {t.description}" for t in tools)
     )
     parts.append("AVAILABLE SKILLS:\n" + (catalogue(skills) or "(none)"))
+    parts.append("ROLES: " + ", ".join(sorted({*(roles or DEFAULT_ROLES), "assistant"})))
     if templates:
         parts.append(
             "SAVED TEMPLATES:\n" + "\n".join(f"- {i}: {n}: {g[:300]}" for i, n, g in templates)

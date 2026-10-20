@@ -1,6 +1,8 @@
 ---
 name: pdf
 description: Create PDFs from Markdown or HTML (reports, letters, invoices), and merge, split, rotate, watermark, fill forms in, or extract text and tables from existing PDFs. Use whenever a task produces or changes a .pdf file.
+metadata:
+  category: documents
 ---
 
 # PDF

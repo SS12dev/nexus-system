@@ -102,3 +102,40 @@ async def test_instruction_layers(owner, client_for, invite):
     member = await client_for("m2@example.com")
     assert (await member.put("/api/instructions/global", json={"content": "x"})).status_code == 403
     assert (await member.get("/api/instructions")).json()["user"] == ""
+
+
+async def test_library_shelves_and_shared_conventions(owner, sessionmaker, settings):
+    await sync(sessionmaker, settings)
+    skills = (await owner.get("/api/skills")).json()
+    shelf = {s["slug"]: s["category"] for s in skills}
+    assert shelf["core/pdf"] == "documents"
+    assert shelf["core/literature-review"] == "research"
+    assert shelf["core/llm-evaluation"] == "data"
+    data = (await owner.get("/api/instructions")).json()
+    assert "Sources" in data["shared"]
+    assert {"scientist", "fact_checker"} <= {r["role"] for r in data["roles"]}
+
+
+async def test_share_moves_a_skill_into_the_shared_library(owner, client_for, invite):
+    s = (await owner.post("/api/skills", json={"content": SKILL})).json()
+    await invite(owner, "member@example.com")
+    member = await client_for("member@example.com")
+    assert "personal/meeting-notes" not in {
+        x["slug"] for x in (await member.get("/api/skills")).json()
+    }
+
+    # Members can't publish to everyone, even their own skills.
+    theirs = (await member.post("/api/skills", json={"content": SKILL})).json()
+    assert (await member.post(f"/api/skills/{theirs['id']}/share")).status_code == 403
+
+    shared = await owner.post(f"/api/skills/{s['id']}/share")
+    assert shared.status_code == 200, shared.text
+    body = shared.json()
+    assert body["slug"] == "domain/meeting-notes" and body["owner_id"] is None
+    assert body["status"] == "active" and body["version"] == 2
+    listed = {x["slug"] for x in (await member.get("/api/skills")).json()}
+    assert "domain/meeting-notes" in listed
+    versions = (await owner.get(f"/api/skills/{s['id']}/versions")).json()
+    assert "Shared with everyone" in versions[0]["note"]
+    # Already shared: not one of the owner's own skills any more.
+    assert (await owner.post(f"/api/skills/{s['id']}/share")).status_code == 409
