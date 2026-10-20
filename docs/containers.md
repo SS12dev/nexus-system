@@ -146,7 +146,8 @@ GB, because of Docling and PyTorch); `DOCLING=false` in `.env` builds a small on
 **backup** ([infra/backup](../infra/backup)) checks every minute for a **Back up now** from the
 Admin page and runs the daily backup after `BACKUP_HOUR_UTC` (02:30 IST by default). Each backup
 in `./backups` holds a `pg_dump` of the `jarvis`, `litellm` and `langfuse` databases, a tarball
-of the MinIO files and checksums; 14 days are kept. Restore with `scripts/restore.sh`.
+of the MinIO files, the encrypted secrets file (once there is one) and checksums; 14 days are
+kept. Restore with `scripts/restore.sh`.
 
 ### Data
 
@@ -204,6 +205,9 @@ Compose waits on health checks, so things come up in this order:
 
 ## Everyday commands
 
+Once the secrets are encrypted (`./scripts/secrets.sh init`, README: Secrets), use
+`./scripts/compose.sh` wherever these say `docker compose`; it takes the same arguments.
+
 ```sh
 docker compose ps                         # what's running, health, ports
 docker compose logs -f api orchestrator   # follow logs of a few services
@@ -220,12 +224,13 @@ maintenance mode on the Admin page before restarting `postgres`, `redis` or `lit
 
 ## Where each container gets its settings
 
-All settings come from `.env` through [compose.yaml](../compose.yaml). The ones that matter
-most per container:
+All settings come from `.env` through [compose.yaml](../compose.yaml); once encrypted, the
+secrets below come from `secrets/jarvis.sops.env` instead, loaded by `./scripts/compose.sh`. The
+ones that matter most per container:
 
 | Container | Secrets / key settings |
 | --- | --- |
-| api, orchestrator, doc-worker, migrate | `SECRET_KEY`, `POSTGRES_PASSWORD`, `LITELLM_MASTER_KEY`, `MINIO_ROOT_PASSWORD`, `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`, `SANDBOX_TOKEN`, search and SMTP keys |
+| api, orchestrator, doc-worker, migrate | `SECRET_KEY`, `TOKEN_ENCRYPTION_KEYS`, `POSTGRES_PASSWORD`, `LITELLM_MASTER_KEY`, `MINIO_ROOT_PASSWORD`, `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`, `SANDBOX_TOKEN`, search and SMTP keys |
 | litellm | `OPENAI_API_KEY`, `LITELLM_MASTER_KEY`, `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` |
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
 
     # Auth
     secret_key: str = Field(default="change-me", min_length=8)
+    # Encrypts stored Google tokens: comma-separated, the first encrypts and any decrypts, so a
+    # new key goes first and the old one is dropped later. Empty uses SECRET_KEY, as before.
+    token_encryption_keys: str = ""
     session_cookie_name: str = "jarvis_session"
     session_ttl_days: int = 30
     # Force the Secure flag on cookies; otherwise it follows the request scheme.

@@ -4,8 +4,9 @@
 #   ./scripts/restore.sh backups/2026-10-20T213000Z
 #
 # Replaces every database in the backup and the MinIO files with the backup's copies. Jarvis is
-# stopped while it runs. The .env must be the one the backup was made with: SECRET_KEY decrypts
-# the saved Google tokens, and the Postgres and MinIO passwords must match.
+# stopped while it runs. The secrets must be the ones the backup was made with: the token keys
+# decrypt the saved Google tokens, and the Postgres and MinIO passwords must match. Each backup
+# holds a copy of the encrypted secrets file; put it back in secrets/ first (README: Secrets).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,8 +24,9 @@ if [[ "$(cd "$(dirname "$src")" && pwd)" != "$(cd "$backup_dir" && pwd)" ]]; the
   exit 1
 fi
 
+dc() { ./scripts/compose.sh "$@"; }
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
-run() { docker compose run --rm --no-deps -T "$@"; }
+run() { dc run --rm --no-deps -T "$@"; }
 
 step "Checking $name"
 run backup sh -c "cd /backups/$name && sha256sum -c SHA256SUMS"
@@ -33,10 +35,10 @@ read -r -p "This replaces all of Jarvis's data with the backup from $name. Type 
 [[ "$ok" == "restore" ]] || { echo "Stopped."; exit 1; }
 
 step "Stopping Jarvis"
-tunnel=$(docker compose --profile tunnel ps -q cloudflared 2>/dev/null || true)
-docker compose --profile tunnel stop web api orchestrator doc-worker backup litellm langfuse-web langfuse-worker \
+tunnel=$(dc --profile tunnel ps -q cloudflared 2>/dev/null || true)
+dc --profile tunnel stop web api orchestrator doc-worker backup litellm langfuse-web langfuse-worker \
   cloudflared minio 2>/dev/null || true
-docker compose up -d postgres
+dc up -d postgres
 
 step "Restoring databases"
 for dump in "$src"/*.dump; do
@@ -58,5 +60,5 @@ if [[ -f "$src/minio.tar.gz" ]]; then
 fi
 
 step "Starting Jarvis"
-if [[ -n "$tunnel" ]]; then docker compose --profile tunnel up -d; else docker compose up -d; fi
+if [[ -n "$tunnel" ]]; then dc --profile tunnel up -d; else dc up -d; fi
 echo "Restored $name."

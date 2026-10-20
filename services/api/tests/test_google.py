@@ -207,3 +207,23 @@ async def test_grant_under_old_secret_key_is_dropped(client_for, google_app, ses
 async def test_google_access_without_oidc(owner):
     access = (await owner.get("/api/me/google")).json()
     assert access["available"] is False and access["granted"] == []
+
+
+async def test_new_token_key_re_encrypts_old_grants(client_for, google_app, sessionmaker):
+    await sign_in(client_for, google_app.fake, token(GMAIL))
+    keyed = google_app.settings.model_copy(update={"token_encryption_keys": "new-key,old-key"})
+    async with sessionmaker() as db:
+        user = (await db.scalars(select(User))).one()
+        grant = await google.get_grant(db, keyed, user.id)
+        assert google.decrypt(keyed, grant.refresh_token) == "refresh-1"
+        await db.commit()
+    # Now under new-key alone: SECRET_KEY is no longer needed, and a removed key drops it.
+    only_new = google_app.settings.model_copy(
+        update={"token_encryption_keys": "new-key", "secret_key": "another-secret-key"}
+    )
+    async with sessionmaker() as db:
+        grant = await google.get_grant(db, only_new, user.id)
+        assert google.decrypt(only_new, grant.access_token) == "access-1"
+    gone = only_new.model_copy(update={"token_encryption_keys": "newer-key"})
+    async with sessionmaker() as db:
+        assert await google.get_grant(db, gone, user.id) is None
