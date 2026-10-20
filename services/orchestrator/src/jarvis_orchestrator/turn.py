@@ -86,8 +86,54 @@ def message_payload(msg: Message) -> dict:
         "output_tokens": msg.output_tokens,
         "trace_id": msg.trace_id,
         "error": msg.error,
+        "steps": msg.steps,
         "created_at": msg.created_at.isoformat(),
     }
+
+
+MAX_STEPS = 60
+ARG_CHARS = 200
+
+
+def track_step(steps: list[dict], type_: str, data: dict) -> None:
+    """Keep the tools Jarvis used in a turn, in order, so the reply can show them after a
+    reload. tool.call opens a step and tool.done closes the step with the same call id."""
+    if type_ not in ("tool.call", "tool.done"):
+        return
+    call_id = data.get("call_id")
+    step = next((s for s in steps if call_id and s["id"] == call_id), None)
+    if type_ == "tool.call":
+        if step is not None or len(steps) >= MAX_STEPS:
+            return
+        args = {
+            k: v[:ARG_CHARS] if isinstance(v, str) else v
+            for k, v in data.items()
+            if k not in ("name", "call_id") and isinstance(v, str | int | float | bool)
+        }
+        steps.append(
+            {
+                "id": call_id or uuid.uuid4().hex[:12],
+                "name": data.get("name"),
+                "args": args,
+                "status": "running",
+            }
+        )
+        return
+    if step is None:
+        if len(steps) >= MAX_STEPS:
+            return
+        step = {"id": call_id, "name": data.get("name"), "args": {}}
+        steps.append(step)
+    step.update(
+        status="done" if data.get("ok", True) else "failed",
+        ms=data.get("ms"),
+        summary=data.get("summary") or "",
+    )
+
+
+def finished(steps: list[dict]) -> list[dict]:
+    """Steps as stored once the turn is over: any still open never reported back."""
+    return [s if s.get("status") != "running" else {**s, "status": "failed"} for s in steps]
 
 
 def to_langchain(messages: list[Message]) -> list[BaseMessage]:
@@ -122,7 +168,10 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         user = await db.get(User, chat.user_id)
         user_id = user.id
 
+        steps: list[dict] = []
+
         async def emit(type_: str, **data) -> None:
+            track_step(steps, type_, data)
             await publish(deps.redis, user_id, Event(type=type_, chat_id=chat_id, data=data))
 
         try:
@@ -135,6 +184,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
             msg = await db.get(Message, assistant_message_id)
             msg.status = MessageStatus.failed
             msg.error = str(exc) if isinstance(exc, TurnFailed) else friendly_error(exc)
+            msg.steps = finished(steps) or None
             await db.commit()
             await emit("message.failed", message=message_payload(msg))
             await emit("jarvis.state", state="idle")
@@ -144,6 +194,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         msg.status = MessageStatus.complete
         msg.input_tokens = usage.get("input_tokens")
         msg.output_tokens = usage.get("output_tokens")
+        msg.steps = finished(steps) or None
         chat.updated_at = utcnow()
         # Files Jarvis made in this turn (save_file, run_code) are attached to its reply.
         for f in saved:

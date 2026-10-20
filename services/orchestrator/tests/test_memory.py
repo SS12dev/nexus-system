@@ -264,6 +264,14 @@ async def test_tool_calls_read_documents_and_count_every_call(
         done = await db.get(Message, reply.id)
     assert done.content == "The Q3 target is 5 million."
     assert (done.input_tokens, done.output_tokens) == (5 + 5 + 12, 2 + 2 + 4)
+    # The reply keeps the tools it used, in order, each closed with its outcome.
+    assert [(s["name"], s["status"]) for s in done.steps] == [
+        ("search_documents", "done"),
+        ("read_document", "done"),
+    ]
+    assert done.steps[0]["args"] == {"query": "Q3 target"}
+    assert done.steps[1]["summary"] == "# board-deck.pptx"
+    assert all(isinstance(s["ms"], int) and s["id"] for s in done.steps)
 
 
 async def test_tools_cannot_read_other_users_documents(deps, model, chat, sessionmaker):

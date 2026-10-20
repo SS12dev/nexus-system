@@ -60,3 +60,15 @@ body {
   border: 1px solid rgb(28 37 64);
   user-select: none;
 }
+
+/* What Jarvis is doing, under the orb, and the tool a busy agent is using, under the agent. */
+.orb-label-activity {
+  max-width: 16rem;
+  font-size: 12px;
+  color: rgb(224 242 254);
+  border-color: rgb(56 189 248 / 0.5);
+}
+.orb-label-tool {
+  font-size: 10px;
+  color: rgb(254 243 199);
+}

@@ -1,0 +1,73 @@
+/** How tools read in the UI: what Jarvis or an agent is doing while one runs. */
+export const TOOL_LABEL: Record<string, string> = {
+  search_documents: "Searching your documents",
+  read_document: "Reading a document",
+  list_documents: "Looking through your library",
+  delete_document: "Deleting a document",
+  search_memory: "Remembering",
+  remember: "Saving to memory",
+  web_search: "Searching the web",
+  web_fetch: "Reading a web page",
+  run_code: "Running code",
+  save_file: "Saving a file",
+  send_email: "Sending an email",
+  gmail_search: "Searching your email",
+  gmail_read: "Reading an email",
+  gmail_draft: "Drafting an email",
+  gmail_update_labels: "Tidying your inbox",
+  gmail_send: "Sending an email",
+  calendar_list_events: "Checking your calendar",
+  calendar_create_event: "Adding to your calendar",
+  calendar_update_event: "Updating your calendar",
+  calendar_invite: "Sending an invitation",
+  calendar_delete_event: "Removing a calendar event",
+  contacts_search: "Looking up a contact",
+  tasks_list: "Checking your tasks",
+  tasks_add: "Adding a task",
+  tasks_complete: "Ticking off a task",
+  skills_load: "Loading a skill",
+  skills_read_file: "Reading a skill",
+  skills_search: "Looking for a skill",
+  build_agent_system: "Designing a team of agents",
+  update_agent_system: "Redesigning the team",
+  run_agent_system: "Starting the team",
+  list_agent_systems: "Checking your teams",
+  save_as_template: "Saving the team as a template",
+  delete_agent_system: "Removing a team",
+  control_agent_run: "Steering a team",
+};
+
+export function toolLabel(name: string): string {
+  return TOOL_LABEL[name] ?? name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+/** Argument keys worth showing next to a step, best first. */
+const DETAIL_KEYS = ["query", "file", "url", "skill", "name", "path", "subject", "to", "title", "item"];
+
+/** The one argument that says what a step was about, such as the search query. */
+export function stepDetail(args: Record<string, unknown> | undefined): string {
+  if (!args) return "";
+  for (const k of DETAIL_KEYS) {
+    const v = args[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+export function duration(ms: number | null | undefined): string {
+  if (ms == null) return "";
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+
+/** What an agent in a team is doing, by its live status. */
+export const AGENT_LABEL: Record<string, string> = {
+  idle: "Idle",
+  queued: "Starting",
+  running: "Working",
+  thinking: "Thinking",
+  working: "Using a tool",
+  waiting: "Waiting for your approval",
+  paused: "Paused",
+  done: "Done",
+  failed: "Failed",
+};

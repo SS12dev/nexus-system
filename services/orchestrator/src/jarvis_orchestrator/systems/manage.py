@@ -5,7 +5,7 @@ queue (runner.py); these tools return straight away so Jarvis can tell the user 
 import logging
 import uuid
 
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from sqlalchemy import select
 
 from jarvis_common.events import Event, publish
@@ -29,7 +29,7 @@ from jarvis_common.systems import (
     system_payload,
 )
 from jarvis_orchestrator.systems.design import DesignFailed, describe, design
-from jarvis_orchestrator.tools import ToolContext
+from jarvis_orchestrator.tools import CALL_ID, ToolContext, as_tools
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def system_tools(
     sessionmaker, user_id = deps.sessionmaker, ctx.user_id
 
     async def note(tool: str, /, **data) -> None:
-        await ctx.emit("tool.call", name=tool, **data)
+        await ctx.emit("tool.call", name=tool, call_id=CALL_ID.get(), **data)
 
     async def owned(db, system_id: str) -> AgentSystem | None:
         sid = _uuid(system_id)
@@ -392,4 +392,4 @@ def system_tools(
         delete_agent_system,
         control_agent_run,
     ]
-    return [StructuredTool.from_function(coroutine=fn) for fn in fns]
+    return as_tools(ctx, fns)

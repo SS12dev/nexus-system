@@ -14,6 +14,7 @@ EventType = Literal[
     "message.failed",
     "chat.updated",
     "tool.call",
+    "tool.done",
     "file.updated",
     "file.deleted",
     "memory.updated",

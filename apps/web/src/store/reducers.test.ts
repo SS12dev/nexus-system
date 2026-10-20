@@ -6,6 +6,7 @@ import {
   initialState,
   mergeFetched,
   syncFiles,
+  seedRunFeed,
   syncLiveSystems,
   upsertSystems,
 } from "./reducers";
@@ -172,13 +173,43 @@ describe("agent systems", () => {
     expect(s.systems.s1).toBeUndefined();
   });
 
-  it("keeps agent tool calls out of Jarvis's own activity", () => {
-    const s = applyEvent(initialState, {
+  it("keeps agent tool calls out of Jarvis's own activity and logs them on the run", () => {
+    let s = applyEvent(initialState, { type: "system.created", chat_id: "c1", data: { system } });
+    s = applyEvent(s, {
+      type: "agent.status",
+      chat_id: "c1",
+      data: { system_id: "s1", run_id: "r1", agent: "writer", status: "running" },
+    });
+    s = applyEvent(s, {
       type: "tool.call",
       chat_id: "c1",
-      data: { name: "web_search", run_id: "r1", agent: "writer" },
+      data: { name: "web_search", call_id: "t1", run_id: "r1", agent: "writer", query: "evals" },
     });
     expect(s.activity).toBeNull();
+    s = applyEvent(s, {
+      type: "tool.done",
+      chat_id: "c1",
+      data: { name: "web_search", call_id: "t1", ok: true, ms: 800, summary: "5 results", run_id: "r1", agent: "writer" },
+    });
+    expect(s.runFeed.r1.map((f) => [f.kind, f.name, f.status])).toEqual([
+      ["agent", "running", "running"],
+      ["tool", "web_search", "done"],
+    ]);
+    expect(s.runFeed.r1[1]).toMatchObject({ agent: "writer", args: { query: "evals" }, ms: 800, summary: "5 results" });
+    // Thinking and tool-use statuses are live status, not feed lines.
+    s = applyEvent(s, {
+      type: "agent.status",
+      chat_id: "c1",
+      data: { system_id: "s1", run_id: "r1", agent: "writer", status: "thinking" },
+    });
+    expect(s.runFeed.r1).toHaveLength(2);
+    // The stored timeline fills in what happened before the live events, without repeats.
+    const old = { id: "t0", kind: "tool" as const, agent: "writer", name: "web_fetch", status: "running" as const, at: "2000-01-01T00:00:00Z" };
+    const seeded = seedRunFeed(s, "r1", [old, { ...s.runFeed.r1[1], at: old.at }]);
+    expect(seeded.runFeed.r1.map((f) => f.id)).toEqual(["t0", ...s.runFeed.r1.map((f) => f.id)]);
+    // The writer has called a tool since, so the stored call is over.
+    expect(seeded.runFeed.r1[0].status).toBe("done");
+    expect(seedRunFeed(s, "r1", [])).toBe(s);
   });
 
   it("uses attachments carried by a completed message", () => {
@@ -215,5 +246,27 @@ describe("orb data", () => {
   it("syncs files but keeps uploads still being processed", () => {
     const current = { up: file("up", "processing"), gone: file("gone") };
     expect(Object.keys(syncFiles(current, [file("new")])).sort()).toEqual(["new", "up"]);
+  });
+
+  it("shows the tools Jarvis uses on the reply it is writing, and keeps them when it completes", () => {
+    let s = addMessages(initialState, "c1", [msg({ id: "u1", role: "user", status: "complete" }), msg()]);
+    s = applyEvent(s, {
+      type: "tool.call",
+      chat_id: "c1",
+      data: { name: "search_documents", call_id: "a", query: "Q3 target" },
+    });
+    expect(s.activity).toBe("Searching your documents");
+    expect(s.messages.c1[1].steps).toEqual([
+      { id: "a", name: "search_documents", args: { query: "Q3 target" }, status: "running" },
+    ]);
+    s = applyEvent(s, {
+      type: "tool.done",
+      chat_id: "c1",
+      data: { name: "search_documents", call_id: "a", ok: false, ms: 12, summary: "boom" },
+    });
+    expect(s.messages.c1[1].steps?.[0]).toMatchObject({ status: "failed", ms: 12, args: { query: "Q3 target" } });
+    // An older server that sends no steps keeps the ones already shown.
+    s = applyEvent(s, { type: "message.completed", chat_id: "c1", data: { message: msg({ status: "complete" }) } });
+    expect(s.messages.c1[1].steps).toHaveLength(1);
   });
 });

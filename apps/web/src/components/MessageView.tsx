@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "../lib/types";
 import { FileChip } from "./FileChip";
+import { ToolSteps } from "./ToolSteps";
 
 export function MessageView({ message, activity }: { message: Message; activity?: string | null }) {
   if (message.role === "user") {
@@ -20,9 +21,11 @@ export function MessageView({ message, activity }: { message: Message; activity?
       </div>
     );
   }
-  const waiting = message.status === "streaming" && !message.content;
+  const streaming = message.status === "streaming";
+  const waiting = streaming && !message.content;
   return (
     <div className="max-w-full">
+      {!!message.steps?.length && <ToolSteps steps={message.steps} live={streaming} />}
       {waiting ? (
         <div className="flex items-center gap-3 py-3" aria-label="Jarvis is thinking">
           <div className="flex gap-1">
@@ -34,7 +37,8 @@ export function MessageView({ message, activity }: { message: Message; activity?
               />
             ))}
           </div>
-          {activity && <span className="text-sm text-slate-400">{activity}…</span>}
+          {/* With steps listed above, the current one already shows there. */}
+          {activity && !message.steps?.length && <span className="text-sm text-slate-400">{activity}…</span>}
         </div>
       ) : (
         <div className="prose prose-invert max-w-none prose-pre:bg-panel prose-pre:border prose-pre:border-edge">

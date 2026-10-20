@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
 import { ApprovalCard } from "../components/ApprovalCard";
-import { isLive } from "../components/RunControls";
 import { SystemCard } from "../components/SystemCard";
 import { useNavigate, useParams } from "react-router";
 import { Composer } from "../components/Composer";
 import { MessageView } from "../components/MessageView";
-import { Orb } from "../components/Orb";
 import { api } from "../lib/api";
 import { useSend } from "../lib/useSend";
-import { hasRole, type Message } from "../lib/types";
+import { hasRole, type AgentSystem, type Message } from "../lib/types";
 import { useStore } from "../store/chat";
 
 const EMPTY: Message[] = [];
@@ -19,7 +17,6 @@ export function ChatPage() {
   const user = useStore((s) => s.user)!;
   const messages = useStore((s) => (chatId ? (s.messages[chatId] ?? EMPTY) : EMPTY));
   const connected = useStore((s) => s.connected);
-  const jarvis = useStore((s) => s.jarvis);
   const activity = useStore((s) => s.activity);
   const allSystems = useStore((s) => s.systems);
   const allApprovals = useStore((s) => s.approvals);
@@ -51,11 +48,18 @@ export function ChatPage() {
     () => Object.values(allApprovals).filter((a) => a.chat_id === chatId && a.status === "pending"),
     [allApprovals, chatId],
   );
-  const liveSystems = systems.filter((s) => isLive(s.run));
+  // Teams appear in the conversation where they started, right after the reply that started them.
+  const timeline = useMemo(() => {
+    const items: ({ at: string; message: Message } | { at: string; system: AgentSystem })[] = [
+      ...messages.map((m) => ({ at: m.created_at, message: m })),
+      ...systems.map((s) => ({ at: s.run!.created_at, system: s })),
+    ];
+    return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  }, [messages, systems]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, liveSystems.length, approvals.length]);
+  }, [messages, systems.length, approvals.length]);
 
   const canChat = hasRole(user, "member");
   const busy = messages.some((m) => m.status === "streaming");
@@ -65,9 +69,6 @@ export function ChatPage() {
         {messages.length === 0 ? (
           <div className="grid h-full place-items-center px-6 text-center">
             <div>
-              <div className="mb-5 flex justify-center">
-                <Orb state={jarvis} size={120} />
-              </div>
               <p className="text-lg text-slate-300">
                 Hi{user.name ? ` ${user.name.split(" ")[0]}` : ""}, what can I do for you?
               </p>
@@ -79,13 +80,14 @@ export function ChatPage() {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
-            {messages.map((m) => (
-              <MessageView key={m.id} message={m} activity={activity} />
-            ))}
-            {liveSystems.map((s) => (
-              <SystemCard key={s.id} system={s} />
-            ))}
+          <div className="mx-auto max-w-3xl space-y-5 px-4 py-5">
+            {timeline.map((item) =>
+              "message" in item ? (
+                <MessageView key={item.message.id} message={item.message} activity={activity} />
+              ) : (
+                <SystemCard key={item.system.id} system={item.system} />
+              ),
+            )}
             {approvals.map((a) => (
               <ApprovalCard key={a.id} approval={a} systemName={allSystems[a.system_id]?.name} />
             ))}

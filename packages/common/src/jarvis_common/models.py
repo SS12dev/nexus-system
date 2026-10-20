@@ -323,6 +323,8 @@ class Message(Base):
     # Langfuse trace id for the turn that produced this message.
     trace_id: Mapped[str | None] = mapped_column(String(64))
     error: Mapped[str | None] = mapped_column(Text)
+    # Tools Jarvis used for an assistant reply: id, name, args, status, ms, summary.
+    steps: Mapped[list | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_messages_chat_created", "chat_id", "created_at"),)

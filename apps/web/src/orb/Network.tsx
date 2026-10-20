@@ -10,6 +10,7 @@ import {
   Mesh,
   Vector3,
 } from "three";
+import { toolLabel } from "../lib/tools";
 import { hash, isActive, NODE_COLOR, ORB_R, type OrbCluster, type OrbNode } from "./model";
 
 interface Entry {
@@ -213,6 +214,13 @@ function AgentNode({
         {label && (
           <Html center position={[0, size + 0.22, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
             <div className="orb-label">{label}</div>
+          </Html>
+        )}
+        {node.tool && ["working", "waiting"].includes(node.status) && !leaving && (
+          <Html center position={[0, -size - 0.16, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+            <div className="orb-label orb-label-tool" style={{ borderColor: color }}>
+              {toolLabel(node.tool)}
+            </div>
           </Html>
         )}
       </group>
