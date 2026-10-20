@@ -59,8 +59,11 @@ export function SkillsPage() {
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const detail = useRef<HTMLElement>(null);
-  // Each new skill or draft starts at the top of the reading pane.
-  useEffect(() => detail.current?.scrollTo({ top: 0 }), [selected?.id, draft == null]);
+  // Each new skill or draft starts at the top of the reading pane. Braces matter: newer
+  // Chrome returns a promise from scrollTo, and React would call it as the cleanup.
+  useEffect(() => {
+    detail.current?.scrollTo({ top: 0 });
+  }, [selected?.id, draft == null]);
 
   const act = async (fn: () => Promise<void>) => {
     setError("");
