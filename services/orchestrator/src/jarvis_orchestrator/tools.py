@@ -33,6 +33,7 @@ from jarvis_common.models import (
 from jarvis_common.search import hybrid_search
 from jarvis_common.skills import find_skill
 from jarvis_orchestrator.artifacts import save_generated
+from jarvis_orchestrator.google_tools import build_google_tools
 from jarvis_orchestrator.sandbox import SandboxError
 from jarvis_orchestrator.web import WebError
 
@@ -450,6 +451,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "web_fetch": web_fetch,
         "run_code": run_code,
         "send_email": send_email,
+        **build_google_tools(ctx, note),
     }
     chosen = [impls[n] for n in impls if n in set(names)]
     chosen += [skills_load, skills_read_file, skills_search]

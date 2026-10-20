@@ -12,6 +12,8 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0",
     "psycopg[binary,pool]>=3.2",
     "pypdf>=5.1",
+    # zoneinfo data for calendar time zones (the slim image has no system tzdata).
+    "tzdata>=2024.1",
 ]
 
 [tool.uv.sources]
