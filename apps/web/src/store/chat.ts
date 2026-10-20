@@ -3,6 +3,7 @@ import type {
   AgentSystem,
   Approval,
   Chat,
+  FeedItem,
   FileItem,
   Message,
   ServerEvent,
@@ -13,6 +14,7 @@ import {
   applyEvent,
   initialState,
   mergeFetched,
+  seedRunFeed,
   upsertChat,
   upsertApprovals,
   upsertFile,
@@ -40,6 +42,7 @@ interface Store extends ChatState {
   upsertSystems: (systems: AgentSystem[]) => void;
   syncLiveSystems: (systems: AgentSystem[]) => void;
   upsertApprovals: (approvals: Approval[]) => void;
+  seedRunFeed: (runId: string, items: FeedItem[]) => void;
 }
 
 export const useStore = create<Store>((set) => ({
@@ -65,4 +68,5 @@ export const useStore = create<Store>((set) => ({
   upsertSystems: (systems) => set((s) => upsertSystems(s, systems)),
   syncLiveSystems: (systems) => set((s) => syncLiveSystems(s, systems)),
   upsertApprovals: (approvals) => set((s) => upsertApprovals(s, approvals)),
+  seedRunFeed: (runId, items) => set((s) => seedRunFeed(s, runId, items)),
 }));

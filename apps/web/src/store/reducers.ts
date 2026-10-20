@@ -1,11 +1,14 @@
+import { toolLabel } from "../lib/tools";
 import type {
   AgentSystem,
   Approval,
   Chat,
+  FeedItem,
   FileItem,
   JarvisState,
   Message,
   ServerEvent,
+  ToolStep,
 } from "../lib/types";
 
 export interface ChatState {
@@ -26,6 +29,8 @@ export interface ChatState {
   agentsVersion: number;
   /** Bumped when a skill changes (Jarvis drafted one, or someone edited one). */
   skillsVersion: number;
+  /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
+  runFeed: Record<string, FeedItem[]>;
 }
 
 export const initialState: ChatState = {
@@ -39,39 +44,68 @@ export const initialState: ChatState = {
   approvals: {},
   agentsVersion: 0,
   skillsVersion: 0,
+  runFeed: {},
 };
 
-const ACTIVITY: Record<string, string> = {
-  search_documents: "Searching your documents",
-  read_document: "Reading a document",
-  list_documents: "Looking through your library",
-  search_memory: "Remembering",
-  remember: "Saving to memory",
-  web_search: "Searching the web",
-  web_fetch: "Reading a web page",
-  run_code: "Running code",
-  save_file: "Saving a file",
-  gmail_search: "Searching your email",
-  gmail_read: "Reading an email",
-  gmail_draft: "Drafting an email",
-  gmail_update_labels: "Tidying your inbox",
-  gmail_send: "Sending an email",
-  calendar_list_events: "Checking your calendar",
-  calendar_create_event: "Adding to your calendar",
-  calendar_update_event: "Updating your calendar",
-  calendar_invite: "Sending an invitation",
-  calendar_delete_event: "Removing a calendar event",
-  contacts_search: "Looking up a contact",
-  tasks_list: "Checking your tasks",
-  tasks_add: "Adding a task",
-  tasks_complete: "Ticking off a task",
-  skills_load: "Loading a skill",
-  skills_read_file: "Reading a skill",
-  skills_search: "Looking for a skill",
-  build_agent_system: "Designing a team of agents",
-  update_agent_system: "Redesigning the team",
-  run_agent_system: "Starting the team",
-};
+/** Most feed lines kept per run; older ones drop off the top. */
+export const FEED_MAX = 60;
+const META_KEYS = new Set(["name", "call_id", "agent", "run_id", "system_id"]);
+
+function argsOf(data: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(data).filter(([k]) => !META_KEYS.has(k)));
+}
+
+/** Add a step, or merge into the one with the same id. */
+export function upsertStep<T extends ToolStep>(list: T[], step: T): T[] {
+  const i = list.findIndex((s) => s.id === step.id);
+  if (i === -1) return [...list, step];
+  const next = list.slice();
+  next[i] = { ...next[i], ...step, args: { ...next[i].args, ...step.args } };
+  return next;
+}
+
+/** Add a step to the reply Jarvis is writing in a chat. */
+function stepOnReply(state: ChatState, chatId: string | null, step: ToolStep): ChatState {
+  const list = chatId ? state.messages[chatId] : undefined;
+  if (!chatId || !list) return state;
+  let i = -1;
+  for (let j = list.length - 1; j >= 0; j--)
+    if (list[j].role === "assistant" && list[j].status === "streaming") {
+      i = j;
+      break;
+    }
+  if (i === -1) return state;
+  const next = list.slice();
+  next[i] = { ...list[i], steps: upsertStep(list[i].steps ?? [], step) };
+  return { ...state, messages: { ...state.messages, [chatId]: next } };
+}
+
+function feedOn(state: ChatState, runId: string, item: FeedItem): ChatState {
+  let list = state.runFeed[runId] ?? [];
+  // A new call from an agent means its last stored call (whose end wasn't recorded) is over.
+  if (item.kind === "tool" && item.agent)
+    list = list.map((f) =>
+      f.stored && f.status === "running" && f.agent === item.agent ? { ...f, status: "done" as const } : f,
+    );
+  list = upsertStep(list, item);
+  return { ...state, runFeed: { ...state.runFeed, [runId]: list.slice(-FEED_MAX) } };
+}
+
+/** Fill in a run's feed from its stored timeline, for a card opened after the events went by.
+ * Lines that live events already brought stay; stored ones from before them go first. */
+export function seedRunFeed(state: ChatState, runId: string, items: FeedItem[]): ChatState {
+  const live = state.runFeed[runId] ?? [];
+  const ids = new Set(live.map((f) => f.id));
+  const first = live[0]?.at;
+  // An agent's stored call counts as finished once a later live one from that agent arrived.
+  const busy = new Set(live.filter((f) => f.kind === "tool").map((f) => f.agent));
+  const earlier = items
+    .filter((f) => !ids.has(f.id) && (!first || f.at < first))
+    .map((f) => (f.kind === "tool" && f.status === "running" && busy.has(f.agent) ? { ...f, status: "done" as const } : f));
+  if (!earlier.length) return state;
+  return { ...state, runFeed: { ...state.runFeed, [runId]: [...earlier, ...live].slice(-FEED_MAX) } };
+}
+
 
 export function upsertSystems(state: ChatState, systems: AgentSystem[]): ChatState {
   const next = { ...state.systems };
@@ -132,9 +166,12 @@ export function mergeFetched(state: ChatState, chatId: string, fetched: Message[
   const local = new Map((state.messages[chatId] ?? []).map((m) => [m.id, m]));
   const merged = fetched.map((m) => {
     const mine = local.get(m.id);
-    return m.status === "streaming" && mine && mine.content.length > m.content.length
-      ? { ...m, content: mine.content }
-      : m;
+    if (m.status !== "streaming" || !mine) return m;
+    return {
+      ...m,
+      content: mine.content.length > m.content.length ? mine.content : m.content,
+      steps: mine.steps ?? m.steps,
+    };
   });
   const fetchedIds = new Set(fetched.map((m) => m.id));
   // Keep messages added locally after the fetch started.
@@ -151,10 +188,25 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         jarvis: event.data.state,
         activity: event.data.state === "idle" ? null : state.activity,
       };
-    case "tool.call":
+    case "tool.call": {
+      const { name, call_id, agent, run_id } = event.data;
+      const id = call_id ?? `${name}-${Date.now()}`;
+      const step: ToolStep = { id, name, args: argsOf(event.data), status: "running" };
       // Tools that agents in a run call show on the run's card, not as Jarvis's activity.
-      if (event.data.run_id) return state;
-      return { ...state, activity: ACTIVITY[event.data.name] ?? "Working" };
+      if (run_id)
+        return feedOn(state, run_id, { ...step, kind: "tool", agent: agent ?? null, at: new Date().toISOString() });
+      return stepOnReply({ ...state, activity: toolLabel(name) }, event.chat_id, step);
+    }
+    case "tool.done": {
+      const { name, call_id, ok, ms, summary, agent, run_id } = event.data;
+      const step: ToolStep = { id: call_id, name, status: ok ? "done" : "failed", ms, summary };
+      if (run_id) {
+        const known = state.runFeed[run_id]?.some((f) => f.id === call_id);
+        const item = known ? step : { ...step, kind: "tool", agent: agent ?? null, at: new Date().toISOString() };
+        return feedOn(state, run_id, item as FeedItem);
+      }
+      return stepOnReply(state, event.chat_id, step);
+    }
     case "system.created":
     case "system.updated":
       return { ...upsertSystems(state, [event.data.system]), agentsVersion: state.agentsVersion + 1 };
@@ -175,7 +227,19 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       if (!sys?.run || sys.run.id !== run_id) return state;
       const agents = { ...sys.run.agents, [agent]: { ...sys.run.agents[agent], ...live } };
       const run = { ...sys.run, agents };
-      return { ...state, systems: { ...state.systems, [sys.id]: { ...sys, run } } };
+      const next = { ...state, systems: { ...state.systems, [sys.id]: { ...sys, run } } };
+      // Starting, finishing and failing are worth a line in the feed; the rest is live status.
+      if (!["running", "done", "failed"].includes(live.status)) return next;
+      const at = new Date().toISOString();
+      return feedOn(next, run_id, {
+        id: `${agent}:${live.status}:${at}`,
+        kind: "agent",
+        agent,
+        name: live.status,
+        args: live.item ? { item: live.item } : {},
+        status: live.status === "running" ? "running" : live.status === "failed" ? "failed" : "done",
+        at,
+      });
     }
     case "approval.requested":
     case "approval.resolved":
@@ -224,6 +288,7 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       const message = {
         ...event.data.message,
         attachments: event.data.message.attachments ?? prev?.attachments ?? [],
+        steps: event.data.message.steps ?? prev?.steps ?? null,
       };
       return addMessages(next, event.chat_id, [message]);
     }

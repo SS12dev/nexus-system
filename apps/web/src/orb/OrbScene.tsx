@@ -1,4 +1,4 @@
-import { OrbitControls, Stars } from "@react-three/drei";
+import { Html, OrbitControls, Stars } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useRef } from "react";
@@ -28,6 +28,7 @@ export function selectionId(s: Selection | null): string | null {
 /** The whole 3D home scene. Lazy-loaded, so three.js only downloads on the orb page. */
 export default function OrbScene({
   jarvis,
+  activity = null,
   clusters,
   memories,
   artifacts,
@@ -36,6 +37,8 @@ export default function OrbScene({
   onSelect,
 }: {
   jarvis: JarvisState;
+  /** What Jarvis is doing right now, shown under the orb while it works. */
+  activity?: string | null;
   clusters: OrbCluster[];
   memories: MemoryPoint[];
   artifacts: Crystal[];
@@ -61,6 +64,11 @@ export default function OrbScene({
       <Stars radius={60} depth={40} count={perf.stars} factor={3} fade speed={still ? 0 : 0.4} />
 
       <CoreOrb state={jarvis} still={still} />
+      {activity && (
+        <Html center position={[0, -1.3, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+          <div className="orb-label orb-label-activity">{activity}</div>
+        </Html>
+      )}
       <MemoryCloud
         points={memories}
         still={still}

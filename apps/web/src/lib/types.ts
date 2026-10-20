@@ -108,6 +108,26 @@ export interface Message {
   error: string | null;
   created_at: string;
   attachments?: FileBrief[];
+  /** Tools Jarvis used for this reply, in order. */
+  steps?: ToolStep[] | null;
+}
+
+export interface ToolStep {
+  id: string;
+  name: string;
+  args?: Record<string, unknown>;
+  status: "running" | "done" | "failed";
+  ms?: number | null;
+  summary?: string;
+}
+
+/** One line of a team run's live activity: an agent starting or finishing, or a tool call. */
+export interface FeedItem extends ToolStep {
+  kind: "tool" | "agent";
+  agent: string | null;
+  at: string;
+  /** Read from the stored timeline, which records calls but not their end. */
+  stored?: boolean;
 }
 
 // --- Skills -----------------------------------------------------------------------------
@@ -313,7 +333,16 @@ export type ServerEvent =
   | { type: "message.completed"; chat_id: string; data: { message: Message } }
   | { type: "message.failed"; chat_id: string; data: { message: Message } }
   | { type: "chat.updated"; chat_id: string; data: { chat: Chat } }
-  | { type: "tool.call"; chat_id: string | null; data: { name: string; query?: string; agent?: string; run_id?: string } }
+  | {
+      type: "tool.call";
+      chat_id: string | null;
+      data: { name: string; call_id?: string | null; agent?: string; run_id?: string; [arg: string]: unknown };
+    }
+  | {
+      type: "tool.done";
+      chat_id: string | null;
+      data: { name: string; call_id: string; ok: boolean; ms: number; summary: string; agent?: string; run_id?: string };
+    }
   | { type: "file.updated"; chat_id?: null; data: { file: FileItem } }
   | { type: "memory.updated"; chat_id?: null; data: { op: string; memory: Memory | { id: string } } }
   | { type: "profile.updated"; chat_id?: null; data: { content: string } }
