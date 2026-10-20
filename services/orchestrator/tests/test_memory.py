@@ -119,6 +119,32 @@ async def test_new_preference_is_added_with_its_source(deps, model, chat, sessio
     assert enqueued.jobs == [("rebuild_profile", str(user_id))]
 
 
+async def test_task_requests_are_not_saved_as_memories(deps, model, chat, sessionmaker):
+    user_id, chat_id, reply_id = chat
+    model.script = [
+        js(
+            memories=[
+                {"content": "Wants help choosing a 3D printer", "kind": "goal"},
+                {"content": "Wants research on setting up a home server", "kind": "goal"},
+                {"content": "Agreed to build the 2048 MVP", "kind": "instruction"},
+                {"content": "Asked for a bike under 4 lakh", "kind": "goal"},
+                {"content": "Lives in India", "kind": "fact", "confidence": 0.9},
+            ],
+            forget=[],
+        )
+    ]
+    await memory.extract_memories(deps, chat_id, reply_id)
+    assert [m.content for m in await memories(sessionmaker, user_id)] == ["Lives in India"]
+
+
+def test_request_filter_keeps_real_preferences():
+    assert memory.is_request("Wants help choosing a bike")
+    assert memory.is_request("The user asked for a 2048 game")
+    assert not memory.is_request("Wants concise answers with tables")
+    assert not memory.is_request("Wants to publish a paper on LLM reasoning this year")
+    assert not memory.is_request("Prefers British spelling")
+
+
 async def test_repeated_preference_reinforces_instead_of_duplicating(
     deps, model, chat, sessionmaker, embedder
 ):

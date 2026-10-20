@@ -10,6 +10,7 @@
 """
 
 import logging
+import re
 import uuid
 from datetime import timedelta
 
@@ -149,10 +150,26 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
         await apply_candidates(deps, db, user, chat, latest_user, candidates, forget)
 
 
+# Task requests the extractor still sometimes saves ("Wants help choosing a bike", "Agreed to
+# build the 2048 MVP"). They describe one chat, not the user, so they are dropped.
+REQUEST = re.compile(
+    r"^(the user )?(asked|asks|requested|requests|agreed|approved|is asking|is looking for help|"
+    r"needs help|wants (help|research|advice|assistance|a recommendation|recommendations|"
+    r"suggestions|to know|a team|an agent|jarvis|the assistant)|would like (help|to know))\b",
+    re.I,
+)
+
+
+def is_request(content: str) -> bool:
+    return bool(REQUEST.match(content.strip()))
+
+
 def _candidates(raw) -> list[dict]:
     out = []
     for item in raw or []:
         if not isinstance(item, dict) or not str(item.get("content", "")).strip():
+            continue
+        if is_request(str(item["content"])):
             continue
         kind = item.get("kind")
         try:
