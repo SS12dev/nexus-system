@@ -3,10 +3,17 @@ import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from jarvis_api.deps import AdminUser, DbDep, GatewayDep, SettingsDep
-from jarvis_api.schemas import AdminUserOut, BudgetOut, InviteIn, UserOut, UserUpdateIn
+from jarvis_api.schemas import (
+    AdminUserOut,
+    BudgetOut,
+    GrantsIn,
+    InviteIn,
+    UserOut,
+    UserUpdateIn,
+)
 from jarvis_api.sessions import revoke_all
 from jarvis_api.users import (
     can_assign,
@@ -17,8 +24,10 @@ from jarvis_api.users import (
     set_role,
 )
 from jarvis_common.litellm import GatewayError, LiteLLMAdmin, active_key, get_budget
-from jarvis_common.models import AuditLog, RoleName, User, UserStatus
+from jarvis_common.models import AuditLog, Capability, RoleName, ToolGrant, User, UserStatus
 from jarvis_common.settings import Settings
+from jarvis_common.systems import granted_capabilities
+from jarvis_common.toolinfo import capabilities
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -156,3 +165,41 @@ async def _gateway_call(coro) -> None:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, "Couldn't update the model gateway"
         ) from exc
+
+
+@router.get("/users/{user_id}/grants")
+async def get_grants(user_id: uuid.UUID, actor: AdminUser, db: DbDep):
+    """Capabilities beyond a member's defaults: exec (run code in the sandbox) and outbound
+    (send email and other actions outside Jarvis, always with approval). Admins have both."""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    granted = await granted_capabilities(db, user.id)
+    return {
+        "granted": sorted(c.value for c in granted),
+        "effective": sorted(c.value for c in capabilities(user, granted)),
+    }
+
+
+@router.put("/users/{user_id}/grants")
+async def set_grants(user_id: uuid.UUID, body: GrantsIn, actor: AdminUser, db: DbDep):
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    try:
+        wanted = {Capability(c) for c in body.capabilities}
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown capability") from exc
+    await db.execute(delete(ToolGrant).where(ToolGrant.user_id == user.id))
+    for c in sorted(wanted):
+        db.add(ToolGrant(user_id=user.id, capability=c))
+    db.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="user.grants",
+            target=str(user.id),
+            data={"capabilities": sorted(c.value for c in wanted)},
+        )
+    )
+    await db.commit()
+    return await get_grants(user_id, actor, db)

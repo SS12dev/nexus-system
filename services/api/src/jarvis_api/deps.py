@@ -72,3 +72,5 @@ def require_role(minimum: RoleName) -> Callable:
 
 MemberUser = Annotated[User, Depends(require_role(RoleName.member))]
 AdminUser = Annotated[User, Depends(require_role(RoleName.admin))]
+
+RedisDep = Annotated[Redis, Depends(get_redis)]

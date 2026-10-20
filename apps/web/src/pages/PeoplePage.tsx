@@ -103,6 +103,7 @@ export function PeoplePage() {
                   <option key={r}>{r}</option>
                 ))}
               </select>
+              {u.role === "member" && manageable(u) && <GrantsField user={u} onError={setError} />}
               <BudgetField
                 user={u}
                 disabled={!manageable(u)}
@@ -157,5 +158,37 @@ function BudgetField({
       />
       <span className="text-xs">/ {user.budget.duration}</span>
     </label>
+  );
+}
+
+const CAPABILITIES = [
+  { key: "exec", label: "Run code", hint: "Agents may run code in the sandbox" },
+  { key: "outbound", label: "Send", hint: "Agents may send email (each send asks first)" },
+];
+
+/** What a member's agents may do beyond reading and writing their own library. */
+function GrantsField({ user, onError }: { user: User; onError: (msg: string) => void }) {
+  const [granted, setGranted] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.grants(user.id).then((g) => setGranted(g.granted)).catch(() => setGranted([]));
+  }, [user.id]);
+  if (granted == null) return null;
+  const toggle = async (key: string) => {
+    const next = granted.includes(key) ? granted.filter((k) => k !== key) : [...granted, key];
+    try {
+      setGranted((await api.setGrants(user.id, next)).granted);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+  return (
+    <div className="flex gap-3 text-xs text-slate-400">
+      {CAPABILITIES.map((c) => (
+        <label key={c.key} className="flex items-center gap-1" title={c.hint}>
+          <input type="checkbox" checked={granted.includes(c.key)} onChange={() => toggle(c.key)} />
+          {c.label}
+        </label>
+      ))}
+    </div>
   );
 }

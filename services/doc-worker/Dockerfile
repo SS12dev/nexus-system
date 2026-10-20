@@ -15,6 +15,7 @@ COPY packages/common/pyproject.toml packages/common/
 COPY services/api/pyproject.toml services/api/
 COPY services/orchestrator/pyproject.toml services/orchestrator/
 COPY services/doc-worker/pyproject.toml services/doc-worker/
+COPY services/sandbox/pyproject.toml services/sandbox/
 RUN uv sync --frozen --no-dev --package jarvis-doc-worker --no-install-workspace
 
 # Docling gives layout-aware PDF tables and OCR for scans and images. It needs PyTorch, taken

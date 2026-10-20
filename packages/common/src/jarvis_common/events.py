@@ -18,6 +18,16 @@ EventType = Literal[
     "file.deleted",
     "memory.updated",
     "profile.updated",
+    # Agent systems. system.* carry the nodes and edges the UI draws.
+    "system.created",
+    "system.updated",
+    "system.deleted",
+    "run.updated",
+    "agent.status",
+    "approval.requested",
+    "approval.resolved",
+    "artifact.created",
+    "skill.updated",
 ]
 
 JarvisState = Literal["idle", "thinking", "speaking"]

@@ -1,4 +1,12 @@
-import type { Chat, FileItem, JarvisState, Message, ServerEvent } from "../lib/types";
+import type {
+  AgentSystem,
+  Approval,
+  Chat,
+  FileItem,
+  JarvisState,
+  Message,
+  ServerEvent,
+} from "../lib/types";
 
 export interface ChatState {
   chats: Chat[];
@@ -10,6 +18,14 @@ export interface ChatState {
   files: Record<string, FileItem>;
   /** Bumped whenever Jarvis changes a memory or the profile, so open pages can refresh. */
   memoryVersion: number;
+  /** Agent systems seen this session, with their latest run, kept live by events. */
+  systems: Record<string, AgentSystem>;
+  /** Approval requests seen this session, pending or decided. */
+  approvals: Record<string, Approval>;
+  /** Bumped on any agent-system change, so the Agents page can refresh its details. */
+  agentsVersion: number;
+  /** Bumped when a skill changes (Jarvis drafted one, or someone edited one). */
+  skillsVersion: number;
 }
 
 export const initialState: ChatState = {
@@ -19,6 +35,10 @@ export const initialState: ChatState = {
   activity: null,
   files: {},
   memoryVersion: 0,
+  systems: {},
+  approvals: {},
+  agentsVersion: 0,
+  skillsVersion: 0,
 };
 
 const ACTIVITY: Record<string, string> = {
@@ -27,7 +47,29 @@ const ACTIVITY: Record<string, string> = {
   list_documents: "Looking through your library",
   search_memory: "Remembering",
   remember: "Saving to memory",
+  web_search: "Searching the web",
+  web_fetch: "Reading a web page",
+  run_code: "Running code",
+  save_file: "Saving a file",
+  skills_load: "Loading a skill",
+  skills_read_file: "Reading a skill",
+  skills_search: "Looking for a skill",
+  build_agent_system: "Designing a team of agents",
+  update_agent_system: "Redesigning the team",
+  run_agent_system: "Starting the team",
 };
+
+export function upsertSystems(state: ChatState, systems: AgentSystem[]): ChatState {
+  const next = { ...state.systems };
+  for (const s of systems) next[s.id] = { ...next[s.id], ...s, run: s.run ?? next[s.id]?.run };
+  return { ...state, systems: next };
+}
+
+export function upsertApprovals(state: ChatState, approvals: Approval[]): ChatState {
+  const next = { ...state.approvals };
+  for (const a of approvals) next[a.id] = a;
+  return { ...state, approvals: next };
+}
 
 function upsertMessage(list: Message[] = [], message: Message): Message[] {
   const i = list.findIndex((m) => m.id === message.id);
@@ -78,7 +120,39 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         activity: event.data.state === "idle" ? null : state.activity,
       };
     case "tool.call":
+      // Tools that agents in a run call show on the run's card, not as Jarvis's activity.
+      if (event.data.run_id) return state;
       return { ...state, activity: ACTIVITY[event.data.name] ?? "Working" };
+    case "system.created":
+    case "system.updated":
+      return { ...upsertSystems(state, [event.data.system]), agentsVersion: state.agentsVersion + 1 };
+    case "system.deleted": {
+      const { [event.data.system.id]: _gone, ...systems } = state.systems;
+      return { ...state, systems, agentsVersion: state.agentsVersion + 1 };
+    }
+    case "run.updated": {
+      const run = event.data.run;
+      const sys = state.systems[run.system_id];
+      const bumped = { ...state, agentsVersion: state.agentsVersion + 1 };
+      if (!sys) return bumped;
+      return { ...bumped, systems: { ...state.systems, [sys.id]: { ...sys, run } } };
+    }
+    case "agent.status": {
+      const { system_id, run_id, agent, ...live } = event.data;
+      const sys = state.systems[system_id];
+      if (!sys?.run || sys.run.id !== run_id) return state;
+      const agents = { ...sys.run.agents, [agent]: { ...sys.run.agents[agent], ...live } };
+      const run = { ...sys.run, agents };
+      return { ...state, systems: { ...state.systems, [sys.id]: { ...sys, run } } };
+    }
+    case "approval.requested":
+    case "approval.resolved":
+      return {
+        ...upsertApprovals(state, [event.data.approval]),
+        agentsVersion: state.agentsVersion + 1,
+      };
+    case "skill.updated":
+      return { ...state, skillsVersion: state.skillsVersion + 1 };
     case "file.updated": {
       const file = event.data.file;
       // Attachment chips in loaded chats follow the file's status too.
@@ -107,9 +181,12 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     case "message.failed": {
       const next = { ...state, activity: null };
       if (!state.messages[event.chat_id]) return next;
-      // Completion events carry no attachments; keep the ones already shown.
+      // Replies with files Jarvis or a team made carry them; otherwise keep the ones shown.
       const prev = state.messages[event.chat_id].find((m) => m.id === event.data.message.id);
-      const message = { ...event.data.message, attachments: prev?.attachments ?? [] };
+      const message = {
+        ...event.data.message,
+        attachments: event.data.message.attachments ?? prev?.attachments ?? [],
+      };
       return addMessages(next, event.chat_id, [message]);
     }
     case "memory.updated":

@@ -1,13 +1,24 @@
 import type {
+  AgentSystem,
+  Approval,
   Chat,
   FileItem,
+  Grants,
+  Instructions,
   Memory,
   MemoryEvent,
   MemoryKind,
   Message,
   Profile,
   Role,
+  Run,
+  RunDetail,
   SearchHit,
+  Skill,
+  SkillDetail,
+  SkillVersion,
+  SystemDetail,
+  ToolEntry,
   User,
   UserStatus,
 } from "./types";
@@ -99,7 +110,74 @@ export const api = {
     request<Profile>("/api/memories/profile", { method: "PATCH", body: json({ memory_enabled }) }),
   rebuildProfile: () => request<void>("/api/memories/profile/rebuild", { method: "POST" }),
 
+  skills: (q?: string) =>
+    request<Skill[]>(`/api/skills${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  skill: (id: string) => request<SkillDetail>(`/api/skills/${id}`),
+  createSkill: (content: string, scope: "personal" | "domain" = "personal") =>
+    request<SkillDetail>("/api/skills", { method: "POST", body: json({ content, scope }) }),
+  importSkill: (file: File, scope: "personal" | "domain" = "personal") => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("scope", scope);
+    return request<SkillDetail>("/api/skills/import", { method: "POST", body: form });
+  },
+  editSkill: (id: string, content: string, files?: Record<string, string>, note?: string) =>
+    request<SkillDetail>(`/api/skills/${id}`, {
+      method: "PUT",
+      body: json({ content, ...(files ? { files } : {}), ...(note ? { note } : {}) }),
+    }),
+  setSkillStatus: (id: string, status: "active" | "disabled") =>
+    request<Skill>(`/api/skills/${id}/status`, { method: "POST", body: json({ status }) }),
+  skillVersions: (id: string) => request<SkillVersion[]>(`/api/skills/${id}/versions`),
+  rollbackSkill: (id: string, version: number) =>
+    request<SkillDetail>(`/api/skills/${id}/rollback`, {
+      method: "POST",
+      body: json({ version }),
+    }),
+  deleteSkill: (id: string) => request<void>(`/api/skills/${id}`, { method: "DELETE" }),
+
+  instructions: () => request<Instructions>("/api/instructions"),
+  setInstructions: (layer: "user" | "global" | `roles/${string}`, content: string) =>
+    request<void>(`/api/instructions/${layer}`, { method: "PUT", body: json({ content }) }),
+
+  tools: () => request<ToolEntry[]>("/api/tools"),
+  systems: (params: { chat_id?: string; archived?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (params.chat_id) q.set("chat_id", params.chat_id);
+    if (params.archived) q.set("archived", "true");
+    return request<AgentSystem[]>(`/api/systems${q.size ? `?${q}` : ""}`);
+  },
+  system: (id: string) => request<SystemDetail>(`/api/systems/${id}`),
+  runSystem: (id: string, body: { request: string; chat_id?: string; budget_usd?: number }) =>
+    request<AgentSystem>(`/api/systems/${id}/runs`, { method: "POST", body: json(body) }),
+  keepAsTemplate: (id: string, name?: string) =>
+    request<AgentSystem>(`/api/systems/${id}/template`, {
+      method: "POST",
+      body: json(name ? { name } : {}),
+    }),
+  deleteSystem: (id: string) => request<void>(`/api/systems/${id}`, { method: "DELETE" }),
+  run: (id: string) => request<RunDetail>(`/api/runs/${id}`),
+  controlRun: (id: string, action: "pause" | "resume" | "cancel") =>
+    request<Run>(`/api/runs/${id}/${action}`, { method: "POST" }),
+  approvals: (chatId?: string) =>
+    request<Approval[]>(`/api/approvals${chatId ? `?chat_id=${chatId}` : ""}`),
+  decide: (
+    id: string,
+    decision: "approve" | "reject",
+    extra: { args?: Record<string, unknown>; note?: string } = {},
+  ) =>
+    request<Approval>(`/api/approvals/${id}`, {
+      method: "POST",
+      body: json({ decision, ...extra }),
+    }),
+
   users: () => request<User[]>("/api/admin/users"),
+  grants: (userId: string) => request<Grants>(`/api/admin/users/${userId}/grants`),
+  setGrants: (userId: string, capabilities: string[]) =>
+    request<Grants>(`/api/admin/users/${userId}/grants`, {
+      method: "PUT",
+      body: json({ capabilities }),
+    }),
   invite: (email: string, role: Role, budget_usd?: string) =>
     request<User>("/api/admin/users", {
       method: "POST",

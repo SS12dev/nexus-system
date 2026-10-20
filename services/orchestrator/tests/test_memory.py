@@ -33,24 +33,32 @@ async def chat(sessionmaker):
 
     async with sessionmaker() as db:
         user = await create_user(
-            db, email="shivam@example.com", role=RoleName.owner, status=UserStatus.active,
+            db,
+            email="shivam@example.com",
+            role=RoleName.owner,
+            status=UserStatus.active,
             name="Shivam",
-        )  # fmt: skip
+        )
         c = Chat(user_id=user.id, title="Planning")
         db.add(c)
         await db.flush()
         now = utcnow()
         db.add(
             Message(
-                chat_id=c.id, role=MessageRole.user, status=MessageStatus.complete,
+                chat_id=c.id,
+                role=MessageRole.user,
+                status=MessageStatus.complete,
                 content="Compare LangGraph and CrewAI. I always prefer tables for comparisons.",
                 created_at=now,
             )
-        )  # fmt: skip
+        )
         reply = Message(
-            chat_id=c.id, role=MessageRole.assistant, status=MessageStatus.complete,
-            content="| | LangGraph | CrewAI |", created_at=now + timedelta(seconds=1),
-        )  # fmt: skip
+            chat_id=c.id,
+            role=MessageRole.assistant,
+            status=MessageStatus.complete,
+            content="| | LangGraph | CrewAI |",
+            created_at=now + timedelta(seconds=1),
+        )
         db.add(reply)
         await db.commit()
         return user.id, c.id, reply.id
@@ -60,9 +68,13 @@ async def add_memory(sessionmaker, embedder, user_id, content, **kw) -> uuid.UUI
     async with sessionmaker() as db:
         vec, model = await embedder.embed_one(db, content)
         m = Memory(
-            user_id=user_id, kind=MemoryKind.preference, content=content, embedding=vec,
-            embedding_model=model, **kw,
-        )  # fmt: skip
+            user_id=user_id,
+            kind=MemoryKind.preference,
+            content=content,
+            embedding=vec,
+            embedding_model=model,
+            **kw,
+        )
         db.add(m)
         await db.commit()
         return m.id
@@ -81,9 +93,17 @@ async def memories(sessionmaker, user_id) -> list[Memory]:
 async def test_new_preference_is_added_with_its_source(deps, model, chat, sessionmaker, enqueued):
     user_id, chat_id, reply_id = chat
     model.script = [
-        js(memories=[{"content": "Prefers tables for comparisons", "kind": "preference",
-                      "confidence": 0.9}], forget=[])
-    ]  # fmt: skip
+        js(
+            memories=[
+                {
+                    "content": "Prefers tables for comparisons",
+                    "kind": "preference",
+                    "confidence": 0.9,
+                }
+            ],
+            forget=[],
+        )
+    ]
     await memory.extract_memories(deps, chat_id, reply_id)
 
     (m,) = await memories(sessionmaker, user_id)
@@ -164,17 +184,29 @@ async def test_turn_uses_memories_and_documents_then_queues_learning(
     await add_memory(sessionmaker, embedder, user_id, "Prefers tables for comparisons")
     async with sessionmaker() as db:
         f = File(
-            user_id=user_id, chat_id=chat_id, name="sales.xlsx", content_type="x", size=1,
-            sha256="s", storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=40,
-        )  # fmt: skip
+            user_id=user_id,
+            chat_id=chat_id,
+            name="sales.xlsx",
+            content_type="x",
+            size=1,
+            sha256="s",
+            storage_key="k",
+            status=FileStatus.ready,
+            chunk_count=1,
+            char_count=40,
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=user_id, idx=0, content="| North | 1200 |"))
         (await get_profile(db, user_id)).content = "**About**\n- Builds Jarvis"
         reply = Message(
-            chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
-            content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+            chat_id=chat_id,
+            role=MessageRole.assistant,
+            status=MessageStatus.streaming,
+            content="",
+            model="jarvis-mini",
+            created_at=utcnow() + timedelta(seconds=5),
+        )
         db.add(reply)
         await db.commit()
 
@@ -194,16 +226,27 @@ async def test_tool_calls_read_documents_and_count_every_call(
     user_id, chat_id, _ = chat
     async with sessionmaker() as db:
         f = File(
-            user_id=user_id, name="board-deck.pptx", content_type="x", size=1, sha256="s",
-            storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=30,
-        )  # fmt: skip
+            user_id=user_id,
+            name="board-deck.pptx",
+            content_type="x",
+            size=1,
+            sha256="s",
+            storage_key="k",
+            status=FileStatus.ready,
+            chunk_count=1,
+            char_count=30,
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=user_id, idx=0, content="Q3 target is 5 million"))
         reply = Message(
-            chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
-            content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+            chat_id=chat_id,
+            role=MessageRole.assistant,
+            status=MessageStatus.streaming,
+            content="",
+            model="jarvis-mini",
+            created_at=utcnow() + timedelta(seconds=5),
+        )
         db.add(reply)
         await db.commit()
     model.script = [
@@ -232,16 +275,27 @@ async def test_tools_cannot_read_other_users_documents(deps, model, chat, sessio
             db, email="o@example.com", role=RoleName.member, status=UserStatus.active
         )
         f = File(
-            user_id=other.id, name="theirs.txt", content_type="x", size=1, sha256="s",
-            storage_key="k", status=FileStatus.ready, chunk_count=1, char_count=10,
-        )  # fmt: skip
+            user_id=other.id,
+            name="theirs.txt",
+            content_type="x",
+            size=1,
+            sha256="s",
+            storage_key="k",
+            status=FileStatus.ready,
+            chunk_count=1,
+            char_count=10,
+        )
         db.add(f)
         await db.flush()
         db.add(FileChunk(file_id=f.id, user_id=other.id, idx=0, content="their secret plan"))
         reply = Message(
-            chat_id=chat_id, role=MessageRole.assistant, status=MessageStatus.streaming,
-            content="", model="jarvis-mini", created_at=utcnow() + timedelta(seconds=5),
-        )  # fmt: skip
+            chat_id=chat_id,
+            role=MessageRole.assistant,
+            status=MessageStatus.streaming,
+            content="",
+            model="jarvis-mini",
+            created_at=utcnow() + timedelta(seconds=5),
+        )
         db.add(reply)
         await db.commit()
     model.script = [
@@ -293,9 +347,14 @@ async def test_nightly_decays_stale_memories_and_merges_duplicates(
     await add_memory(sessionmaker, embedder, user_id, "Uses a MacBook", confidence=0.9)
     dup = await add_memory(sessionmaker, embedder, user_id, "uses a macbook", confidence=0.5)
     keep_pinned = await add_memory(
-        sessionmaker, embedder, user_id, "Vegetarian", confidence=0.1, pinned=True,
+        sessionmaker,
+        embedder,
+        user_id,
+        "Vegetarian",
+        confidence=0.1,
+        pinned=True,
         reinforced_at=old,
-    )  # fmt: skip
+    )
     model.script = ["**About**\n- Uses a MacBook"]
 
     await memory.nightly(deps)

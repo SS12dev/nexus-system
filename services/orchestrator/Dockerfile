@@ -11,10 +11,13 @@ COPY packages/common/pyproject.toml packages/common/
 COPY services/api/pyproject.toml services/api/
 COPY services/orchestrator/pyproject.toml services/orchestrator/
 COPY services/doc-worker/pyproject.toml services/doc-worker/
+COPY services/sandbox/pyproject.toml services/sandbox/
 RUN uv sync --frozen --no-dev --package jarvis-orchestrator --no-install-workspace
 
 COPY packages/common packages/common
 COPY services/orchestrator services/orchestrator
+# Core skills (synced into the database at startup) and instruction layers.
+COPY library library
 RUN uv sync --frozen --no-dev --package jarvis-orchestrator
 
 RUN useradd --system --uid 10001 jarvis

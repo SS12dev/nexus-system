@@ -28,7 +28,9 @@ TEST_DATABASE_URL = os.environ.get(
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 DEV_TOKEN = "test-dev-token"
 TABLES = (
-    "memory_events, memories, episodes, profiles, attachments, file_chunks, files, "
+    "approvals, run_events, agent_runs, agent_systems, skill_usages, skill_versions, skills, "
+    "instructions, tool_grants, memory_events, memories, episodes, profiles, attachments, "
+    "file_chunks, files, "
     "embedding_cache, audit_log, messages, chats, budgets, api_keys, sessions, user_roles, users"
 )
 
@@ -45,6 +47,7 @@ def settings() -> Settings:
         dev_login_token=DEV_TOKEN,
         litellm_base_url="http://litellm.invalid",
         litellm_master_key="sk-test-master",
+        library_path=str(Path(__file__).parent / "library"),
     )
 
 
@@ -103,8 +106,20 @@ class FakeGateway:
         self.keys[key]["blocked"] = blocked
         self.calls.append(("set_blocked", key, blocked))
 
+    async def generate_run_key(self, user, run_id, max_usd, models) -> str:
+        key = f"sk-run-{uuid.uuid4().hex[:12]}"
+        self.keys[key] = {"user_id": str(user.id), "max_usd": max_usd, "run_id": str(run_id)}
+        self.calls.append(("generate_run", str(run_id), max_usd))
+        return key
+
+    async def delete_key(self, key: str) -> None:
+        self.keys.pop(key, None)
+        self.calls.append(("delete", key))
+
     async def spend(self, key: str) -> float | None:
-        return 0.0 if key in self.keys else None
+        if key not in self.keys:
+            return None
+        return self.keys[key].get("spend", 0.0)
 
     async def aclose(self) -> None:
         pass

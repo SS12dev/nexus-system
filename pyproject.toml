@@ -8,7 +8,13 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/common", "services/api", "services/orchestrator", "services/doc-worker"]
+members = [
+    "packages/common",
+    "services/api",
+    "services/orchestrator",
+    "services/doc-worker",
+    "services/sandbox",
+]
 
 [dependency-groups]
 dev = [
@@ -21,6 +27,7 @@ dev = [
     "jarvis-api",
     "jarvis-orchestrator",
     "jarvis-doc-worker",
+    "jarvis-sandbox",
 ]
 
 [tool.uv.sources]
@@ -28,6 +35,7 @@ jarvis-common = { workspace = true }
 jarvis-api = { workspace = true }
 jarvis-orchestrator = { workspace = true }
 jarvis-doc-worker = { workspace = true }
+jarvis-sandbox = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -42,8 +50,19 @@ ignore = ["B008"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-testpaths = ["services/api/tests", "services/orchestrator/tests", "services/doc-worker/tests"]
+testpaths = [
+    "services/api/tests",
+    "services/orchestrator/tests",
+    "services/doc-worker/tests",
+    "services/sandbox/tests",
+]
 addopts = "--import-mode=importlib"
 
 [tool.ruff.lint.isort]
-known-first-party = ["jarvis_common", "jarvis_api", "jarvis_orchestrator", "jarvis_doc_worker"]
+known-first-party = [
+    "jarvis_common",
+    "jarvis_api",
+    "jarvis_orchestrator",
+    "jarvis_doc_worker",
+    "jarvis_sandbox",
+]

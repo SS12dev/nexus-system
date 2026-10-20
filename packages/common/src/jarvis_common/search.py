@@ -1,5 +1,6 @@
-"""Hybrid search over a user's memories, past chats and document chunks: vector similarity and
-Postgres full-text search, fused by reciprocal rank. Every query is scoped to one user."""
+"""Hybrid search over a user's memories, past chats, document chunks, agent systems and skills:
+vector similarity and Postgres full-text search, fused by reciprocal rank. Every query is
+scoped to one user (for skills: the shared ones plus the user's own, active only)."""
 
 import uuid
 from dataclasses import dataclass
@@ -8,8 +9,8 @@ from typing import Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-Table = Literal["memories", "file_chunks", "episodes"]
-TABLES: tuple[str, ...] = ("memories", "file_chunks", "episodes")
+Table = Literal["memories", "file_chunks", "episodes", "agent_systems", "skills"]
+TABLES: tuple[str, ...] = ("memories", "file_chunks", "episodes", "agent_systems", "skills")
 # Standard RRF constant: damps the weight of the very top ranks.
 RRF_K = 60
 CANDIDATES = 40
@@ -37,10 +38,14 @@ async def hybrid_search(
     *,
     file_ids: list[uuid.UUID] | None = None,
     exclude_chat_id: uuid.UUID | None = None,
+    lifetime: str | None = None,
 ) -> list[Hit]:
     if table not in TABLES:
         raise ValueError(table)
-    where = ["t.user_id = :user_id"]
+    if table == "skills":
+        where = ["(t.owner_id is null or t.owner_id = :user_id)", "t.status = 'active'"]
+    else:
+        where = ["t.user_id = :user_id"]
     params: dict = {"user_id": user_id, "q": query, "n": CANDIDATES, "k": k}
     if file_ids is not None:
         where.append("t.file_id = any(:file_ids)")
@@ -48,6 +53,9 @@ async def hybrid_search(
     if exclude_chat_id is not None:
         where.append("t.chat_id <> :exclude_chat_id")
         params["exclude_chat_id"] = exclude_chat_id
+    if lifetime is not None:
+        where.append("t.lifetime = :lifetime")
+        params["lifetime"] = lifetime
     cond = " and ".join(where)
 
     parts = []

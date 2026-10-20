@@ -18,6 +18,7 @@ sed \
   -e "s|^LANGFUSE_SECRET_KEY=.*|LANGFUSE_SECRET_KEY=sk-lf-$(rand)|" \
   -e "s|^LANGFUSE_ADMIN_PASSWORD=.*|LANGFUSE_ADMIN_PASSWORD=$(rand 12)|" \
   -e "s|^DEV_LOGIN_TOKEN=.*|DEV_LOGIN_TOKEN=$(rand 12)|" \
+  -e "s|^SANDBOX_TOKEN=.*|SANDBOX_TOKEN=$(rand)|" \
   .env.example > .env
 chmod 600 .env
 echo "Wrote .env. Add OPENAI_API_KEY (and Google OIDC credentials), then: docker compose up -d --build"

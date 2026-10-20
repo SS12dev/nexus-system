@@ -44,8 +44,8 @@ else docker compose --env-file .env.example config --quiet; fi
 
 if $build_images; then
   step "Compose: build images"
-  if [[ -f .env ]]; then docker compose build web api orchestrator doc-worker
-  else docker compose --env-file .env.example build web api orchestrator doc-worker; fi
+  if [[ -f .env ]]; then docker compose build web api orchestrator doc-worker sandbox
+  else docker compose --env-file .env.example build web api orchestrator doc-worker sandbox; fi
 fi
 
 printf '\n\033[1;32mAll checks passed.\033[0m\n'

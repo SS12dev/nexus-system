@@ -101,7 +101,7 @@ async def list_messages(chat_id: uuid.UUID, user: CurrentUser, db: DbDep):
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
     messages = rows.all()
-    files = await attachments_for(db, [m.id for m in messages if m.role == MessageRole.user])
+    files = await attachments_for(db, [m.id for m in messages])
     return [message_out(m, files.get(m.id)) for m in messages]
 
 

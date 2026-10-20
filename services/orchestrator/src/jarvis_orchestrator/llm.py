@@ -1,3 +1,6 @@
+import json
+import re
+
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
@@ -18,3 +21,19 @@ def chat_model(settings: Settings, *, model: str, api_key: str, metadata: dict) 
         timeout=120,
         extra_body={"metadata": metadata},
     )
+
+
+def parse_json(raw: str) -> dict:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, re.S)
+        if not match:
+            return {}
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return {}
+    return data if isinstance(data, dict) else {}
