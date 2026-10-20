@@ -21,6 +21,7 @@ import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
 import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Orb } from "./Orb";
 
 const SIDEBAR_KEY = "jarvis.sidebar";
@@ -244,7 +245,9 @@ export function Shell() {
             <AlertTriangle size={16} className="shrink-0" /> {user.notice}
           </div>
         )}
-        <Outlet />
+        <ErrorBoundary resetKey={pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );
