@@ -14,6 +14,9 @@ const base: Project = {
   last_commit_message: "Add the score",
   last_commit_at: "2026-10-21T10:00:00Z",
   live_url: null,
+  app_state: null,
+  public: false,
+  screenshot_file_id: null,
   chat_id: "c1",
   updated_at: "2026-10-21T10:00:00Z",
 };

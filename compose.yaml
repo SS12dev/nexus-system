@@ -52,6 +52,10 @@ x-jarvis-env: &jarvis-env
   DEPLOYER_URL: http://deployer:8300
   DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
   MEMBER_APP_LIMIT: ${MEMBER_APP_LIMIT:-3}
+  APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
+  JARVIS_URL: ${JARVIS_URL:-https://${JARVIS_HOST:-jarvis.servhub.cc}}
+  RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
+  APP_COOKIE_HOURS: ${APP_COOKIE_HOURS:-12}
   WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
   TAVILY_API_KEY: ${TAVILY_API_KEY:-}
   BRAVE_API_KEY: ${BRAVE_API_KEY:-}
@@ -135,7 +139,9 @@ services:
     build: apps/web
     labels:
       - traefik.enable=true
-      - traefik.http.routers.web.rule=PathPrefix(`/`)
+      # Jarvis answers on its own host and on any host outside the apps domain (localhost, the
+      # Mac's address), never on <name>.APPS_DOMAIN: an app's name that isn't running is a 404.
+      - traefik.http.routers.web.rule=PathPrefix(`/`) && (Host(`${JARVIS_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.web.priority=1
       - traefik.http.services.web.loadbalancer.server.port=80
     restart: unless-stopped
@@ -158,11 +164,14 @@ services:
       replicas: ${API_REPLICAS:-2}
     labels:
       - traefik.enable=true
-      - traefik.http.routers.api.rule=PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)
+      - traefik.http.routers.api.rule=(PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)) && (Host(`${JARVIS_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.api.priority=100
       - traefik.http.services.api.loadbalancer.server.port=8000
       - traefik.http.services.api.loadbalancer.healthcheck.path=/healthz
       - traefik.http.services.api.loadbalancer.healthcheck.interval=10s
+      # Private apps: Traefik asks the API before each request (routes/app_access.py). The
+      # deployer puts this middleware on an app's routes unless the app is public.
+      - traefik.http.middlewares.app-auth.forwardauth.address=http://api:8000/auth/app/check
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -272,7 +281,10 @@ services:
       APPS_NETWORK: jarvis_apps
       APPS_EGRESS_NETWORK: jarvis_apps_egress
       APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
-      APPS_URL: ${APPS_URL:-http://{host}:${JARVIS_HTTP_PORT:-8080}}
+      # Empty: https://<name>.APPS_DOMAIN, or http://<name>.apps.localhost:<port> locally.
+      APPS_URL: ${APPS_URL:-}
+      JARVIS_HTTP_PORT: ${JARVIS_HTTP_PORT:-8080}
+      RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
       TRAEFIK_URL: http://traefik
       SCREENSHOT_IMAGE: jarvis-workbench:latest
       APP_MEMORY_MB: "512"

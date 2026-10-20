@@ -10,30 +10,13 @@ import uuid
 
 from sqlalchemy import func, select
 
+from jarvis_common.apps import app_name, deploy_args
 from jarvis_common.deployer import DeployerError, DeployResult
+from jarvis_common.hostnames import NoFreeName
 from jarvis_common.models import Project, RoleName, User, utcnow
 from jarvis_orchestrator.artifacts import save_generated
-from jarvis_orchestrator.systems.release import base_repo_name
 
 log = logging.getLogger(__name__)
-
-SLUG_TRIES = 20
-
-
-async def _slug(db, row: Project, user: User) -> str:
-    """The app's name in its URL: its repo's name if it has one, else one made the same way;
-    -2, -3... when another project has it."""
-    if row.app_slug:
-        return row.app_slug
-    base = (row.repo_name or base_repo_name(user, row.name))[:36].strip("-") or "app"
-    for n in range(1, SLUG_TRIES + 1):
-        slug = base if n == 1 else f"{base}-{n}"
-        taken = await db.scalar(
-            select(Project.id).where(Project.app_slug == slug, Project.id != row.id)
-        )
-        if taken is None:
-            return slug
-    return f"{base[:27]}-{uuid.uuid4().hex[:8]}"
 
 
 async def deploy_project(
@@ -59,19 +42,15 @@ async def deploy_project(
                 row.deploy_error = error
                 await db.commit()
                 return DeployResult(ok=False, url=row.live_url or "", error=error)
-        row.app_slug = await _slug(db, row, user)
+        try:
+            row.app_slug = await app_name(db, deps.settings, row, user)
+        except NoFreeName as exc:
+            return DeployResult(ok=False, url="", error=str(exc))
         row.app_state = "building"
         await db.commit()
-        slug, internet = row.app_slug, row.internet
-        args = {
-            "app_id": str(row.id),
-            "owner": str(user.id),
-            "user": str(user.id),
-            "project": row.workbench_id,
-            "stack": row.stack,
-        }
+        slug, args = row.app_slug, deploy_args(row, user)
     try:
-        result = await deps.deployer.deploy(slug, internet=internet, **args)
+        result = await deps.deployer.deploy(slug, **args)
     except DeployerError as exc:
         result = DeployResult(ok=False, url="", error=str(exc))
     if not result.ok:
@@ -90,7 +69,7 @@ async def deploy_project(
         await db.commit()
     if result.ok and result.screenshot and deps.storage is not None:
         try:
-            await save_generated(
+            shot = await save_generated(
                 deps,
                 row.user_id,
                 f"{slug}-screenshot.png",
@@ -100,4 +79,9 @@ async def deploy_project(
             )
         except (binascii.Error, ValueError):
             log.warning("Bad screenshot for %s", slug)
+        else:
+            async with deps.sessionmaker() as db:
+                row = await db.get(Project, project_id)
+                row.screenshot_file_id = shot.id
+                await db.commit()
     return result

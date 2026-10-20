@@ -107,6 +107,13 @@ TOOLS: list[ToolInfo] = [
         jarvis=False,
     ),
     ToolInfo(
+        "app_visibility",
+        "Share an app",
+        "write",
+        "Make one of the user's running apps public (anyone with the link) or private (only "
+        "them, after signing in to Jarvis).",
+    ),
+    ToolInfo(
         "github_transfer",
         "Move a project to GitHub",
         "outbound",

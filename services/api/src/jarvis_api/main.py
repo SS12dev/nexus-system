@@ -13,6 +13,7 @@ from jarvis_api.middleware import GuardMiddleware
 from jarvis_api.queue import ArqJobQueue, JobQueue
 from jarvis_api.routes import (
     admin,
+    app_access,
     apps,
     auth,
     chats,
@@ -93,6 +94,7 @@ def create_app(
     app.include_router(files.router)
     app.include_router(projects.router)
     app.include_router(apps.router)
+    app.include_router(app_access.router)
     app.include_router(memories.router)
     app.include_router(skills.router)
     app.include_router(instructions.router)

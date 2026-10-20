@@ -50,10 +50,20 @@ class DeployerClient:
 
     async def deploy(
         self, slug: str, *, app_id: str, owner: str, user: str, project: str,
-        stack: str | None = None, internet: bool = False,
+        stack: str | None = None, internet: bool = False, private: bool = True,
+        build: bool = True,
     ) -> DeployResult:  # fmt: skip
-        body = {"app_id": app_id, "owner": owner, "user": user, "project": project,
-                "stack": stack, "internet": internet}  # fmt: skip
+        """build=False starts the app again from its current images (a change of visibility)."""
+        body = {
+            "app_id": app_id,
+            "owner": owner,
+            "user": user,
+            "project": project,
+            "stack": stack,
+            "internet": internet,
+            "private": private,
+            "build": build,
+        }
         return DeployResult(**await self._call("POST", f"/apps/{slug}/deploy", json=body))
 
     async def apps(self) -> list[dict]:

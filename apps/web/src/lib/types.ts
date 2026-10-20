@@ -64,6 +64,8 @@ export interface AppItem {
   deployed_at: string | null;
   deploy_error: string | null;
   internet: boolean;
+  public: boolean;
+  screenshot_file_id: string | null;
 }
 
 /** A software project a dev team built: one Library card linking to its GitHub repo. */
@@ -79,6 +81,9 @@ export interface Project {
   last_commit_message: string | null;
   last_commit_at: string | null;
   live_url: string | null;
+  app_state: string | null;
+  public: boolean;
+  screenshot_file_id: string | null;
   chat_id: string | null;
   updated_at: string;
 }

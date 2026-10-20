@@ -21,6 +21,7 @@ class FakeDocker:
         self.calls: list[tuple[str, str, dict]] = []
         self.builds: list[dict] = []
         self.containers: dict[str, dict] = {}
+        self.created: dict[str, dict] = {}
         self.images: dict[str, str] = {}
         self.networks: dict[str, list[str]] = defaultdict(list)
         self.build_error: str | None = None
@@ -58,6 +59,7 @@ class FakeDocker:
         if path == "/containers/create":
             spec = json.loads(body)
             self.containers[params["name"]] = {**spec, "state": "created"}
+            self.created[params["name"]] = spec
             return httpx.Response(201, json={"Id": params["name"]})
         if path.startswith("/networks/"):
             self.networks[path.split("/")[2]].append(json.loads(body)["Container"])

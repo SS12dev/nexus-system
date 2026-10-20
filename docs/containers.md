@@ -19,7 +19,7 @@ each one is for, how they talk to each other, and which ones you can restart or 
 | `egress-proxy` | The workbench's only way out: lets through npm, PyPI and GitHub, nothing else | with the workbench | no |
 | `deployer` | Builds finished software projects into containers and runs them as apps | for running apps | no |
 | `docker-gate` | The deployer's only door to Docker: a short allowlist of API calls | with the deployer | no |
-| `jarvis-app-*` | The apps teams built (made by the deployer, not Compose) | | `<name>.apps.localhost:8080` |
+| `jarvis-app-*` | The apps teams built (made by the deployer, not Compose) | | `<name>.<APPS_DOMAIN>` |
 | `doc-worker` | Worker that parses uploads (PDF, Word, PPT, Excel) and indexes them | for documents | no |
 | `backup` | Nightly backups of databases and files to `./backups` | recommended | no |
 | `postgres` | The main database (with pgvector for search) | yes | 127.0.0.1:5432 |
@@ -84,7 +84,7 @@ flowchart LR
   orch -->|deploy| deployer
   api -->|stop, restart, delete| deployer
   deployer -->|allowlisted calls| gate
-  traefik -->|<name>.apps.localhost| apps
+  traefik -->|<name>.APPS_DOMAIN| apps
   orch --> litellm
   doc -->|embeddings| litellm
   api -->|budgets, keys| litellm
@@ -194,9 +194,10 @@ Dockerfiles, and builds have **no network**: they use the `node_modules` or `.ve
 installed in the workbench. Each app runs as `jarvis-app-<name>-web` (and `-api` for a back end)
 on the `apps` network, replacing the previous version in place: non-root, read-only, 512 MB and
 half a CPU, no host folders, restarting unless stopped, and labelled `jarvis.app` and
-`jarvis.owner`. Traefik routes `<name>.apps.localhost` to it, and `/api` on that host to the back
-end. *.localhost reaches your Mac by itself in Chrome and Firefox, so
-`http://2048.apps.localhost:8080` works with no DNS setup; PR 5 moves apps to `servhub.cc` names.
+`jarvis.owner`. Traefik routes `<name>.<APPS_DOMAIN>` to it (`2048.servhub.cc`), and `/api` on
+that host to the back end; private apps go through the `app-auth` sign-in check first
+([app-urls.md](app-urls.md)). Without a domain, `APPS_DOMAIN=apps.localhost` gives
+`http://2048.apps.localhost:8080`, which reaches your Mac by itself in Chrome and Firefox.
 After a start it checks the app answers through Traefik and takes a screenshot with the
 workbench image's Playwright; a failed check goes back to the team's builders once, with the
 logs, before the reply.
@@ -212,8 +213,8 @@ other Jarvis container); and nothing else: no exec, archive, attach, volumes, sw
 calls.
 
 **Apps page** (`/apps`): every app with its owner, state, link, repo and last deploy, and Stop,
-Restart, Redeploy and Delete (which removes the containers and image, keeping the project and
-repo). The owner sees everyone's apps and can give one internet access (from its next deploy);
+Restart, Redeploy, Make public or private, and Delete (which removes the containers and image
+and frees the name, keeping the project and repo). The owner sees everyone's apps and can give one internet access (from its next deploy);
 members see only their own and can have `MEMBER_APP_LIMIT` (3) running at once. The API enforces
 both.
 
@@ -324,6 +325,6 @@ ones that matter most per container:
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |
 | workbench | `WORKBENCH_TOKEN`, `WORKBENCH_MEMORY_MB`, `WORKBENCH_MAX_TIMEOUT_S` |
-| deployer, api, orchestrator | `DEPLOYER_TOKEN`, `APPS_DOMAIN`, `APPS_URL`, `MEMBER_APP_LIMIT` |
+| deployer, api, orchestrator | `DEPLOYER_TOKEN`, `APPS_DOMAIN`, `APPS_URL`, `JARVIS_URL`, `RESERVED_HOSTNAMES`, `APP_COOKIE_HOURS`, `MEMBER_APP_LIMIT` |
 | orchestrator (GitHub) | `GITHUB_APPS_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` ([setup](github-app.md)) |
 | cloudflared | `CLOUDFLARE_TUNNEL_TOKEN` |

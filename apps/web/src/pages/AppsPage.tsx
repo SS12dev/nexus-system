@@ -1,8 +1,8 @@
-import { ExternalLink, FolderGit2, Globe, Play, RefreshCw, RotateCw, Square, Trash2 } from "lucide-react";
+import { ExternalLink, FolderGit2, Globe, Lock, Play, RefreshCw, RotateCw, Square, Trash2, Unlock } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { STACK_LABEL } from "../components/ProjectCard";
 import { api } from "../lib/api";
-import { appActions, appState } from "../lib/apps";
+import { appActions, appAudience, appState } from "../lib/apps";
 import { formatDateTime } from "../lib/format";
 import { isOwner, type AppItem } from "../lib/types";
 import { useAssistantName } from "../lib/assistant";
@@ -74,6 +74,13 @@ export function AppsPage() {
               const off = busy === a.id;
               return (
                 <li key={a.id} className="rounded-xl border border-edge bg-panel p-3">
+                  {a.screenshot_file_id && (
+                    <img
+                      src={api.fileUrl(a.screenshot_file_id, true)}
+                      alt={`${a.name}, as last deployed`}
+                      className="mb-3 aspect-[16/10] w-full rounded-lg border border-edge object-cover object-top sm:float-right sm:mb-0 sm:ml-3 sm:w-48"
+                    />
+                  )}
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="truncate font-medium">{a.name}</span>
                     <span className={`text-xs ${st.style}`}>{st.label}</span>
@@ -92,6 +99,9 @@ export function AppsPage() {
                       </a>
                     )}
                     {a.deployed_at && <span>Deployed {formatDateTime(a.deployed_at)}</span>}
+                    <span className="flex items-center gap-1">
+                      {a.public ? <Unlock size={12} /> : <Lock size={12} />} {appAudience(a)}
+                    </span>
                     {owner && (
                       <label className="flex items-center gap-1" title="Applies from the next deploy">
                         <input
@@ -122,6 +132,16 @@ export function AppsPage() {
                     {can.redeploy && (
                       <button disabled={off} onClick={() => act(a, () => api.appAction(a.id, "redeploy"))} className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1 hover:bg-edge/60 disabled:opacity-50">
                         <RefreshCw size={13} /> Redeploy
+                      </button>
+                    )}
+                    {a.slug && a.state !== "building" && (
+                      <button
+                        disabled={off}
+                        onClick={() => act(a, () => api.setAppPublic(a.id, !a.public))}
+                        className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1 hover:bg-edge/60 disabled:opacity-50"
+                      >
+                        {a.public ? <Lock size={13} /> : <Unlock size={13} />}
+                        {a.public ? "Make private" : "Make public"}
                       </button>
                     )}
                     <button disabled={off} onClick={() => remove(a)} className="ml-auto flex items-center gap-1.5 rounded-md border border-edge px-3 py-1 text-rose-300 hover:bg-edge/60 disabled:opacity-50">

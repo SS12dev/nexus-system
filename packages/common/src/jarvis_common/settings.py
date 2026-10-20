@@ -140,6 +140,19 @@ class Settings(BaseSettings):
     deploy_timeout_s: int = 1500
     # Apps a member may have running at once; the owner has no limit.
     member_app_limit: int = 3
+    # Apps answer at <name>.<apps_domain>; jarvis_url is where people sign in to open a private
+    # one. reserved_hostnames: names apps may never take (comma separated), on top of jarvis,
+    # www, mail, api, admin and traefik, e.g. the names your other servers use.
+    apps_domain: str = "apps.localhost"
+    jarvis_url: str = "https://jarvis.servhub.cc"
+    reserved_hostnames: str = ""
+    # How long one sign-in to a private app lasts on that app's host.
+    app_cookie_hours: int = 12
+
+    @property
+    def reserved_hostname_set(self) -> set[str]:
+        return {h.strip().lower() for h in self.reserved_hostnames.split(",") if h.strip()}
+
     # Longest a single run_system or continue_run job may take.
     # Software teams plan, build, test, review and deploy, which can take most of it.
     run_job_timeout_s: int = 3600

@@ -161,6 +161,9 @@ class ProjectOut(BaseModel):
     last_commit_message: str | None
     last_commit_at: datetime | None
     live_url: str | None
+    app_state: str | None
+    public: bool
+    screenshot_file_id: uuid.UUID | None
     chat_id: uuid.UUID | None
     updated_at: datetime
 
