@@ -1,11 +1,11 @@
 import { AlertTriangle, ArrowLeft, History, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { InstructionsPanel } from "../components/InstructionsPanel";
 import { Markdown } from "../components/Markdown";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import {
   hasRole,
-  type Instructions,
   type Skill,
   type SkillDetail,
   type SkillScope,
@@ -121,23 +121,30 @@ export function SkillsPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-6">
-        <h1 className="mb-1 text-xl font-semibold">Skills</h1>
-        <p className="mb-4 text-sm text-slate-400">
-          Tested instructions and scripts {assistant} and its agents load when a task needs them, such
-          as making a PDF or a spreadsheet, so they don't work it out from scratch each time.
-          Skills {assistant} drafts from its own runs, and ones you import, stay off until reviewed.
-        </p>
-        <div className="mb-4 flex gap-2 text-sm">
+        <h1 className="mb-3 text-xl font-semibold">Skills and instructions</h1>
+        <div className="mb-4 flex gap-1 border-b border-edge text-sm" role="tablist">
           {(["skills", "instructions"] as const).map((t) => (
             <button
               key={t}
+              role="tab"
+              aria-selected={tab === t}
               onClick={() => setTab(t)}
-              className={`rounded-md px-3 py-1 ${tab === t ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
+              className={`-mb-px border-b-2 px-3 py-2 ${
+                tab === t ? "border-sky-400 text-white" : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
             >
               {t === "skills" ? "Skills" : "Instructions"}
             </button>
           ))}
         </div>
+        {tab === "skills" && (
+          <p className="mb-4 max-w-3xl text-sm text-slate-400">
+            Skills are tested how-to guides, often with scripts, that {assistant} and its agents
+            load only when a task needs one, such as making a PDF or a spreadsheet, so they don't
+            work it out from scratch each time. Skills {assistant} drafts from its own runs, and
+            ones you import, stay off until you review them.
+          </p>
+        )}
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
       </div>
 
@@ -447,143 +454,6 @@ export function SkillsPage() {
             )}
           </section>
         </div>
-      )}
-    </div>
-  );
-}
-
-function InstructionsPanel({
-  isAdmin,
-  canWrite,
-  onError,
-}: {
-  isAdmin: boolean;
-  canWrite: boolean;
-  onError: (msg: string) => void;
-}) {
-  const assistant = useAssistantName();
-  const [data, setData] = useState<Instructions | null>(null);
-  const [saved, setSaved] = useState("");
-
-  useEffect(() => {
-    api.instructions().then(setData).catch((e) => onError(e.message));
-  }, [onError]);
-
-  if (!data) return null;
-  const save = async (layer: Parameters<typeof api.setInstructions>[0], content: string) => {
-    try {
-      await api.setInstructions(layer, content);
-      setSaved(layer);
-      setTimeout(() => setSaved(""), 2000);
-    } catch (e) {
-      onError((e as Error).message);
-    }
-  };
-
-  return (
-    <div className="max-w-3xl space-y-6">
-      <p className="text-sm text-slate-400">
-        Every agent gets these in order: the safety rules, the house conventions and global
-        instructions, then its role's, then yours. {assistant} itself follows the conventions, global
-        instructions and yours. Later layers add detail but can't override the safety rules.
-      </p>
-      <Layer
-        title="Your instructions"
-        hint="House style for everything agents make for you, e.g. British English, short reports with a summary first."
-        value={data.user}
-        editable={canWrite}
-        saved={saved === "user"}
-        onSave={(v) => save("user", v)}
-      />
-      <details className="rounded-md border border-edge p-3">
-        <summary className="cursor-pointer text-sm font-medium">Safety rules (shipped, read only)</summary>
-        {data.safety ? (
-          <Markdown size="sm" className="mt-2 text-slate-300">
-            {data.safety}
-          </Markdown>
-        ) : (
-          <p className="mt-2 text-sm text-rose-400">The shipped safety rules couldn't be read.</p>
-        )}
-      </details>
-      {data.shared && (
-        <details className="rounded-md border border-edge p-3">
-          <summary className="cursor-pointer text-sm font-medium">House conventions (shipped, read only)</summary>
-          <Markdown size="sm" className="mt-2 text-slate-300">
-            {data.shared}
-          </Markdown>
-        </details>
-      )}
-      <Layer
-        title="Global instructions"
-        hint={`Optional. Extra rules for ${assistant} and every agent of every user, you and anyone you invite, added after the house conventions. Leave it empty unless something should apply to everyone; your own preferences go in Your instructions.`}
-        placeholder={isAdmin ? "e.g. Never book anything that costs money without asking first." : "None set."}
-        value={data.global}
-        editable={isAdmin}
-        saved={saved === "global"}
-        onSave={(v) => save("global", v)}
-      />
-      {data.roles.map((r) => (
-        <details key={r.role} className="rounded-md border border-edge p-3">
-          <summary className="cursor-pointer text-sm font-medium capitalize">{r.role}</summary>
-          {r.shipped && (
-            <Markdown size="sm" className="mt-2 text-slate-300">
-              {r.shipped}
-            </Markdown>
-          )}
-          <div className="mt-3">
-            <Layer
-              title="Added by admins"
-              value={r.extra}
-              editable={isAdmin}
-              saved={saved === `roles/${r.role}`}
-              onSave={(v) => save(`roles/${r.role}`, v)}
-            />
-          </div>
-        </details>
-      ))}
-    </div>
-  );
-}
-
-function Layer({
-  title,
-  hint,
-  placeholder,
-  value,
-  editable,
-  saved,
-  onSave,
-}: {
-  title: string;
-  hint?: string;
-  placeholder?: string;
-  value: string;
-  editable: boolean;
-  saved: boolean;
-  onSave: (v: string) => void;
-}) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  return (
-    <div>
-      <h3 className="text-sm font-medium">{title}</h3>
-      {hint && <p className="mb-1 text-xs text-slate-500">{hint}</p>}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        readOnly={!editable}
-        placeholder={placeholder}
-        rows={5}
-        className="w-full rounded-md border border-edge bg-panel p-2 text-sm"
-      />
-      {editable && (
-        <button
-          onClick={() => onSave(text)}
-          disabled={text === value && !saved}
-          className="mt-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60 disabled:opacity-40"
-        >
-          {saved ? "Saved" : "Save"}
-        </button>
       )}
     </div>
   );

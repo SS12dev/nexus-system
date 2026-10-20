@@ -72,3 +72,25 @@ body {
   font-size: 10px;
   color: rgb(254 243 199);
 }
+
+/* Syntax colours for code in the file preview (highlight.js classes), tuned for the dark theme. */
+.hljs { color: rgb(226 232 240); background: transparent; }
+.hljs-comment, .hljs-quote { color: rgb(100 116 139); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-meta .hljs-keyword { color: rgb(192 132 252); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute .hljs-string { color: rgb(134 239 172); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: rgb(253 186 116); }
+.hljs-title, .hljs-title.function_, .hljs-section { color: rgb(125 211 252); }
+.hljs-title.class_, .hljs-type { color: rgb(252 211 77); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-property { color: rgb(103 232 249); }
+.hljs-name, .hljs-tag, .hljs-selector-class, .hljs-selector-id { color: rgb(244 114 182); }
+.hljs-meta, .hljs-params { color: rgb(203 213 225); }
+.hljs-deletion { color: rgb(251 113 133); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* Word documents from docx-preview: pages on a grey desk, scaled down on phones. */
+.docx-host .docx-wrapper { background: transparent; padding: 16px; }
+.docx-host .docx-wrapper > section.docx { box-shadow: 0 1px 6px rgb(0 0 0 / 0.25); margin-bottom: 16px; }
+@media (max-width: 640px) {
+  .docx-host .docx-wrapper > section.docx { zoom: 0.5; }
+}

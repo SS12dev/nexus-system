@@ -1,5 +1,6 @@
 import { ArrowLeft, Bot, Bookmark, FileText, Play, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
 import { Link, useNavigate, useParams } from "react-router";
 import { ApprovalCard } from "../components/ApprovalCard";
@@ -17,6 +18,40 @@ const TOPOLOGY: Record<AgentSystem["topology"], string> = {
   supervisor_workers: "Lead and workers",
   parallel_map_reduce: "Parallel map-reduce",
   critic_loop: "Worker and critic",
+};
+
+/** How each shape of team works, in the words of the design prompt (systems/prompts.py). */
+const TOPOLOGY_HELP: Record<AgentSystem["topology"], string> = {
+  single: "One agent does the whole job with the tools it was given.",
+  pipeline:
+    "Agents work in order, each building on the previous one's output (e.g. researcher, then writer).",
+  supervisor_workers:
+    "A lead agent hands tasks to the others one at a time and decides what's next from each result.",
+  parallel_map_reduce:
+    "One agent splits the job into items, copies of a worker do them in parallel, and a third combines the results.",
+  critic_loop: "A worker drafts and a critic reviews, sending it back until it passes.",
+};
+
+const LIFETIME: Record<AgentSystem["lifetime"], { label: string; help: string }> = {
+  ephemeral: {
+    label: "One-off",
+    help: "Built for one request. It's archived when the run finishes and drops off the orb.",
+  },
+  persistent: {
+    label: "Saved",
+    help: "Kept because you asked, so it can run again on a new request.",
+  },
+  template: {
+    label: "Template",
+    help: "Kept and reused automatically when a new request fits, instead of designing a new team.",
+  },
+};
+
+const TIER_HELP: Record<string, string> = {
+  nano: "Cheapest and fastest: sorting, extracting, short summaries.",
+  mini: "The default: tool use, research, writing, making files.",
+  pro: "About 5x mini: planning, leading a team, reviewing, hard reasoning.",
+  max: "The strongest and dearest; only when you ask for the best model.",
 };
 
 const EVENT_TEXT: Record<string, (d: Record<string, unknown>) => string> = {
@@ -87,13 +122,13 @@ export function AgentsPage() {
       setRun(null);
       return;
     }
-    api.run(runId).then(setRun).catch(() => setRun(null));
+    api
+      .run(runId)
+      .then(setRun)
+      .catch(() => setRun(null));
   }, [runId, version]);
 
-  const pending = useMemo(
-    () => Object.values(approvals).filter((a) => a.status === "pending"),
-    [approvals],
-  );
+  const pending = useMemo(() => Object.values(approvals).filter((a) => a.status === "pending"), [approvals]);
   // The store has the live run state (agent statuses stream in between page reloads).
   const current = systemId ? live[systemId] : undefined;
   const liveRun = current?.run && current.run.id === runId ? current.run : run?.run;
@@ -114,9 +149,41 @@ export function AgentsPage() {
       <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-6">
         <h1 className="mb-1 text-xl font-semibold">Agents</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Teams of sub-agents {assistant} builds for bigger jobs: who is on each team, what every run
-          did and cost, and the steps waiting for your approval. Ask {assistant} in a chat to build one.
+          Teams of sub-agents {assistant} builds for bigger jobs: who is on each team, what every run did and
+          cost, and the steps waiting for your approval. Ask {assistant} in a chat to build one.
         </p>
+        <Guide title="How teams work">
+          <div>
+            <GuideHeading>Building a team</GuideHeading>
+            <p>
+              Anything bigger than a quick lookup goes to a team. {assistant} picks the smallest team that
+              fits: how many agents, how they hand work on (the team's shape), each agent's role, model, tools
+              and skills, and a task brief for each. You can open an agent's brief in the table on a team.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {(Object.keys(TOPOLOGY) as AgentSystem["topology"][]).map((t) => (
+                <li key={t}>
+                  <b className="text-slate-300">{TOPOLOGY[t]}:</b> {TOPOLOGY_HELP[t]}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <GuideHeading>Keeping or clearing teams</GuideHeading>
+            <ul className="space-y-1">
+              {(Object.keys(LIFETIME) as AgentSystem["lifetime"][]).map((l) => (
+                <li key={l}>
+                  <b className="text-slate-300">{LIFETIME[l].label}:</b> {LIFETIME[l].help}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2">
+              Teams are one-off unless you say keep, save or reuse. <b>Keep as template</b> turns any team
+              into a template. <b>Delete</b> removes a team and its run history; files it made stay in your
+              Library. Every run has a spending limit and stops when it reaches it.
+            </p>
+          </div>
+        </Guide>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
 
         {pending.length > 0 && (
@@ -157,11 +224,15 @@ export function AgentsPage() {
                       <Bot size={14} className="shrink-0 text-sky-300" />
                       <span className="truncate font-medium">{s.name}</span>
                       {s.lifetime === "template" && (
-                        <Bookmark size={12} className="ml-auto shrink-0 text-amber-300" />
+                        <Bookmark
+                          size={12}
+                          className="ml-auto shrink-0 text-amber-300"
+                          aria-label="Template"
+                        />
                       )}
                     </div>
                     <div className="mt-0.5 flex gap-2 text-xs text-slate-500">
-                      <span>{TOPOLOGY[s.topology]}</span>
+                      <span title={TOPOLOGY_HELP[s.topology]}>{TOPOLOGY[s.topology]}</span>
                       {r && <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span>}
                     </div>
                   </Link>
@@ -173,16 +244,25 @@ export function AgentsPage() {
 
         {detail ? (
           <section ref={pane} className="min-h-0 min-w-0 space-y-5 overflow-y-auto pb-6">
-            <Link to="/agents" className="flex items-center gap-1 text-sm text-slate-400 hover:text-white md:hidden">
+            <Link
+              to="/agents"
+              className="flex items-center gap-1 text-sm text-slate-400 hover:text-white md:hidden"
+            >
               <ArrowLeft size={14} /> All teams
             </Link>
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-lg font-semibold">{detail.name}</h2>
-              <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
+              <span
+                className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300"
+                title={TOPOLOGY_HELP[detail.topology]}
+              >
                 {TOPOLOGY[detail.topology]}
               </span>
-              <span className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300">
-                {detail.lifetime === "template" ? "Template" : detail.lifetime === "persistent" ? "Saved" : "One-off"}
+              <span
+                className="rounded bg-edge px-2 py-0.5 text-xs text-slate-300"
+                title={LIFETIME[detail.lifetime].help}
+              >
+                {LIFETIME[detail.lifetime].label}
               </span>
               {canEdit && (
                 <div className="ml-auto flex gap-2">
@@ -194,6 +274,7 @@ export function AgentsPage() {
                           upsertSystems([s]);
                         })
                       }
+                      title="Keep this team and reuse it automatically when a new request fits"
                       className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60"
                     >
                       <Bookmark size={14} /> Keep as template
@@ -216,6 +297,10 @@ export function AgentsPage() {
               )}
             </div>
             <p className="text-sm text-slate-300">{detail.goal}</p>
+            <p className="-mt-3 text-xs text-slate-500">
+              {TOPOLOGY[detail.topology]}: {TOPOLOGY_HELP[detail.topology]} {LIFETIME[detail.lifetime].label}:{" "}
+              {LIFETIME[detail.lifetime].help}
+            </p>
 
             <div className="rounded-lg border border-edge bg-panel p-3">
               <TeamGraph
@@ -230,9 +315,21 @@ export function AgentsPage() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-panel text-xs text-slate-400">
                   <tr>
-                    <th className="px-3 py-2">Agent</th>
-                    <th className="px-3 py-2">Model</th>
-                    <th className="px-3 py-2">Tools and skills</th>
+                    <th
+                      className="px-3 py-2"
+                      title="Name and role. The role picks the agent's job description (Skills, Instructions, Agent roles)."
+                    >
+                      Agent and role
+                    </th>
+                    <th className="px-3 py-2" title="The model tier: higher tiers are smarter and cost more.">
+                      Model
+                    </th>
+                    <th
+                      className="px-3 py-2"
+                      title="Tools it can call and skills (how-to guides) it can read."
+                    >
+                      Tools and skills
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -242,11 +339,14 @@ export function AgentsPage() {
                         <div className="font-medium">{a.name}</div>
                         <div className="text-xs text-slate-500">{a.role}</div>
                         <details className="mt-1 text-xs text-slate-400">
-                          <summary className="cursor-pointer">Instructions</summary>
+                          <summary className="cursor-pointer">Task brief from {assistant}</summary>
                           <p className="mt-1 whitespace-pre-wrap">{a.instructions}</p>
                         </details>
                       </td>
-                      <td className="px-3 py-2 text-xs">jarvis-{a.tier}</td>
+                      <td className="px-3 py-2 text-xs" title={TIER_HELP[a.tier]}>
+                        {a.tier}
+                        <div className="mt-0.5 text-slate-500">{TIER_HELP[a.tier]?.split(":")[0]}</div>
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
                           {[...a.tools, ...a.skills].map((t) => (
@@ -286,7 +386,11 @@ export function AgentsPage() {
             )}
 
             <div>
-              <h3 className="mb-2 text-sm font-medium">Runs</h3>
+              <h3 className="text-sm font-medium">Runs</h3>
+              <p className="mb-2 text-xs text-slate-500">
+                Each run is one request to this team. Pick one to see what it was asked, its result, files,
+                cost and every step.
+              </p>
               <div className="flex flex-wrap gap-2">
                 {detail.runs.map((r) => (
                   <button
@@ -297,8 +401,7 @@ export function AgentsPage() {
                     }`}
                   >
                     {formatDate(r.created_at)} ·{" "}
-                    <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span> ·{" "}
-                    {money(r.cost_usd)}
+                    <span className={RUN_STYLE[r.status]}>{RUN_LABEL[r.status]}</span> · {money(r.cost_usd)}
                   </button>
                 ))}
               </div>
@@ -309,8 +412,8 @@ export function AgentsPage() {
                 <div className="flex flex-wrap items-center gap-3 text-sm">
                   <span className={RUN_STYLE[liveRun.status]}>{RUN_LABEL[liveRun.status]}</span>
                   <span className="text-slate-400">
-                    {money(liveRun.cost_usd)} of {money(liveRun.budget_usd)} · {liveRun.steps} model
-                    calls · {liveRun.input_tokens + liveRun.output_tokens} tokens
+                    {money(liveRun.cost_usd)} of {money(liveRun.budget_usd)} · {liveRun.steps} model calls ·{" "}
+                    {liveRun.input_tokens + liveRun.output_tokens} tokens
                   </span>
                   {liveRun.trace_id && (
                     <span className="text-xs text-slate-500" title="Langfuse trace id">
@@ -358,9 +461,7 @@ export function AgentsPage() {
                   <ol className="mt-2 space-y-1 text-xs">
                     {run.events.map((e, i) => (
                       <li key={i} className="flex gap-2">
-                        <span className="shrink-0 text-slate-500">
-                          {new Date(e.at).toLocaleTimeString()}
-                        </span>
+                        <span className="shrink-0 text-slate-500">{new Date(e.at).toLocaleTimeString()}</span>
                         <span className="shrink-0 font-medium text-slate-300">{e.agent}</span>
                         <span className="min-w-0 truncate text-slate-400">
                           {(EVENT_TEXT[e.type] ?? (() => e.type))(e.data)}
