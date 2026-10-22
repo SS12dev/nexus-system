@@ -18,18 +18,20 @@ from pathlib import PurePath
 from typing import Literal
 
 from langchain_core.tools import BaseTool, StructuredTool
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from jarvis_common.apps import set_visibility
 from jarvis_common.deployer import DeployerError
 from jarvis_common.events import Event, publish
 from jarvis_common.library import document_text
+from jarvis_common.links import LinkError
 from jarvis_common.memory import mark_profile_stale, memory_payload, record
 from jarvis_common.models import (
     Episode,
     File,
     FileChunk,
     FileStatus,
+    Link,
     Memory,
     MemoryKind,
     Project,
@@ -44,6 +46,7 @@ from jarvis_common.skills import find_skill
 from jarvis_orchestrator.artifacts import save_generated
 from jarvis_orchestrator.github import GitHubError
 from jarvis_orchestrator.google_tools import build_google_tools
+from jarvis_orchestrator.links import keep_link
 from jarvis_orchestrator.sandbox import SandboxError
 from jarvis_orchestrator.web import WebError
 from jarvis_orchestrator.workbench import WorkbenchError
@@ -86,6 +89,8 @@ class ToolContext:
     file_ids: list[uuid.UUID] = field(default_factory=list)
     # Generated files, in order, so the caller can report them.
     saved: list[File] = field(default_factory=list)
+    # Links saved to the library, in order, shown on the reply like files.
+    links: list[Link] = field(default_factory=list)
     # The workbench project the ws_* tools work in; an agent run uses its own id by default.
     project: str | None = None
 
@@ -105,6 +110,11 @@ def _uuid(value: str) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except ValueError:
         return None
+
+
+def link_line(link: Link) -> str:
+    about = f": {link.note}" if link.note else ""
+    return f"- {link.title} ({link.kind}, {link.url}, id {link.id}){about}"
 
 
 def summarize(result: object) -> str:
@@ -155,17 +165,38 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     async def note(tool: str, /, **data) -> None:
         await ctx.emit("tool.call", name=tool, call_id=CALL_ID.get(), **data)
 
+    # save_link has an argument called note.
+    note_call = note
+
     # --- Library ---------------------------------------------------------------------------
+
+    async def matching_links(db, query: str) -> str:
+        """Links whose title, note or address has every word of the query in it."""
+        words = [w for w in query.split() if len(w) > 2][:6]
+        if not words:
+            return ""
+        q = select(Link).where(Link.user_id == user_id)
+        for w in words:
+            pattern = f"%{w.replace('%', '').replace('_', '')}%"
+            q = q.where(
+                or_(Link.title.ilike(pattern), Link.note.ilike(pattern), Link.url.ilike(pattern))
+            )
+        rows = (await db.scalars(q.order_by(Link.updated_at.desc()).limit(5))).all()
+        if not rows:
+            return ""
+        return "Links in the library:\n" + "\n".join(link_line(x) for x in rows)
 
     async def search_documents(query: str, limit: int = 6) -> str:
         """Search the text of every document the user has uploaded or that was generated for
-        them. Returns the best matching excerpts with their document name and id."""
+        them, and their saved links. Returns the best matching excerpts with their document name
+        and id."""
         await note("search_documents", query=query)
         async with sessionmaker() as db:
             vec, _ = await embedder.try_embed_one(db, query)
             hits = await hybrid_search(db, "file_chunks", user_id, query, vec, min(limit, 12))
+            links = await matching_links(db, query)
             if not hits:
-                return "No matching documents."
+                return links or "No matching documents."
             rows = await db.execute(
                 select(FileChunk, File)
                 .join(File, File.id == FileChunk.file_id)
@@ -178,6 +209,8 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 c, f = by_id[h.id]
                 where = f" / {c.heading}" if c.heading else ""
                 out.append(f"[{f.name}{where}] (id {f.id})\n{c.content}")
+        if links:
+            out.append(links)
         return "\n\n---\n\n".join(out)
 
     async def read_document(file_id: str, offset: int = 0) -> str:
@@ -214,7 +247,8 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         return f"# {f.name}\n\n{text}{more}"
 
     async def list_documents() -> str:
-        """List the user's 40 most recent documents with their ids."""
+        """List the user's 40 most recent documents with their ids, and their 20 most recent
+        links (GitHub repos, Google Docs, apps, pages)."""
         await note("list_documents")
         async with sessionmaker() as db:
             rows = await db.scalars(
@@ -224,18 +258,31 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 .limit(40)
             )
             files = rows.all()
-        if not files:
-            return "The user has no documents."
-        return "\n".join(
+            links = (
+                await db.scalars(
+                    select(Link)
+                    .where(Link.user_id == user_id)
+                    .order_by(Link.updated_at.desc())
+                    .limit(20)
+                )
+            ).all()
+        if not files and not links:
+            return "The user has no documents or links."
+        out = [
             f"- {f.name}{f' (v{f.version})' if f.version > 1 else ''} (id {f.id}, {f.status}, "
             f"{'generated' if f.origin == 'generated' else 'uploaded'} {f.created_at:%d %b %Y})"
             for f in files
-        )
+        ] or ["The user has no documents."]
+        if links:
+            out += ["", "Links:", *(link_line(x) for x in links)]
+        return "\n".join(out)
 
-    async def save_file(name: str, content: str) -> str:
+    async def save_file(name: str, content: str, new_version: bool = True) -> str:
         """Save text as a file in the user's library, e.g. notes.md, data.csv or report.html.
-        Saving again under the same name makes a new version. For PDF, Word, PowerPoint or
-        Excel files use run_code with the matching skill instead."""
+        Saving again under the same name makes a new version of that file; pass
+        new_version=False when it is a different piece of work that happens to share the name
+        (another project's README.md, say), so it is kept as a file of its own. For PDF, Word,
+        PowerPoint or Excel files use run_code with the matching skill instead."""
         await note("save_file", file=name)
         if PurePath(name).suffix.lower() not in SAVE_FILE_EXTENSIONS:
             return (
@@ -243,10 +290,44 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 "Use run_code for other formats."
             )
         f = await save_generated(
-            deps, user_id, name, content.encode("utf-8"), chat_id=ctx.chat_id, run_id=ctx.run_id
+            deps,
+            user_id,
+            name,
+            content.encode("utf-8"),
+            chat_id=ctx.chat_id,
+            run_id=ctx.run_id,
+            new_version=new_version,
         )
         ctx.saved.append(f)
         return f"Saved {f.name} (id {f.id}{f', version {f.version}' if f.version > 1 else ''})."
+
+    async def save_link(url: str, title: str = "", note: str = "") -> str:
+        """Add a link to the user's library: a pointer to something that lives elsewhere, such
+        as a GitHub repo, file or pull request, a Google Doc or Sheet, a running app or a web
+        page that is a key source. The library keeps the address and a preview, and the link
+        is shown on your reply. Saving the same address again updates its title and note. Give
+        a short title and, in note, one sentence on what it is and why it matters. Save what
+        the user will want to find again, not every search result."""
+        await note_call("save_link", url=url)
+        try:
+            link = await keep_link(
+                deps,
+                user_id,
+                url,
+                title=title or None,
+                note=note or None,
+                source="team" if ctx.run_id else "jarvis",
+                chat_id=ctx.chat_id,
+                run_id=ctx.run_id,
+            )
+        except LinkError as exc:
+            return f"Not saved: {exc}"
+        if all(x.id != link.id for x in ctx.links):
+            ctx.links.append(link)
+        trouble = (link.preview or {}).get("error")
+        return f"Saved the link {link.title} (id {link.id}, {link.kind})." + (
+            f" No preview: {trouble}" if trouble else ""
+        )
 
     async def delete_document(file_id: str) -> str:
         """Delete a document from the user's library for good."""
@@ -703,6 +784,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "read_document": read_document,
         "list_documents": list_documents,
         "save_file": save_file,
+        "save_link": save_link,
         "delete_document": delete_document,
         "search_memory": search_memory,
         "remember": remember,

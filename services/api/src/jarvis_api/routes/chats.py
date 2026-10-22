@@ -14,6 +14,7 @@ from jarvis_api.schemas import (
     ChatOut,
     ChatUpdateIn,
     FileBrief,
+    LinkOut,
     MessageOut,
     SendMessageIn,
     SendMessageOut,
@@ -22,7 +23,9 @@ from jarvis_common.models import (
     Attachment,
     Chat,
     File,
+    Link,
     Message,
+    MessageLink,
     MessageRole,
     MessageStatus,
     User,
@@ -59,9 +62,27 @@ async def attachments_for(
     return out
 
 
-def message_out(msg: Message, files: list[File] | None = None) -> MessageOut:
+async def links_for(db: AsyncSession, message_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Link]]:
+    if not message_ids:
+        return {}
+    rows = await db.execute(
+        select(MessageLink.message_id, Link)
+        .join(Link, Link.id == MessageLink.link_id)
+        .where(MessageLink.message_id.in_(message_ids))
+        .order_by(Link.created_at)
+    )
+    out: dict[uuid.UUID, list[Link]] = {}
+    for message_id, link in rows.all():
+        out.setdefault(message_id, []).append(link)
+    return out
+
+
+def message_out(
+    msg: Message, files: list[File] | None = None, links: list[Link] | None = None
+) -> MessageOut:
     out = MessageOut.model_validate(msg)
     out.attachments = [FileBrief.model_validate(f) for f in files or []]
+    out.links = [LinkOut.model_validate(x) for x in links or []]
     return out
 
 
@@ -103,8 +124,10 @@ async def list_messages(chat_id: uuid.UUID, user: CurrentUser, db: DbDep):
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
     messages = rows.all()
-    files = await attachments_for(db, [m.id for m in messages])
-    return [message_out(m, files.get(m.id)) for m in messages]
+    ids = [m.id for m in messages]
+    files = await attachments_for(db, ids)
+    links = await links_for(db, ids)
+    return [message_out(m, files.get(m.id), links.get(m.id)) for m in messages]
 
 
 @router.post(

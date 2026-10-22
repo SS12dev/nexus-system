@@ -98,11 +98,18 @@ class GitHubApp:
         return token
 
     async def _request(
-        self, method: str, path: str, *, auth: str = "token", ok: tuple = (), **kw
+        self,
+        method: str,
+        path: str,
+        *,
+        auth: str = "token",
+        ok: tuple = (),
+        accept: str = "application/vnd.github+json",
+        **kw,
     ) -> httpx.Response:
         """ok: error statuses the caller handles itself (such as 404 for a missing repo)."""
         headers = {
-            "Accept": "application/vnd.github+json",
+            "Accept": accept,
             "X-GitHub-Api-Version": "2022-11-28",
         }
         if auth == "jwt":
@@ -178,6 +185,16 @@ class GitHubApp:
         if merged.status_code == 409:
             raise GitHubError(f"{branch} conflicts with main, so it wasn't merged.")
         return "merged into main"
+
+    async def read(self, path: str, raw: bool = False) -> httpx.Response | None:
+        """A GET for a link's preview (jarvis_common.links.github_preview), as the App, so it
+        can see the organisation's private repos. None when GitHub refuses or is unreachable."""
+        accept = "application/vnd.github.raw+json" if raw else "application/vnd.github+json"
+        try:
+            resp = await self._request("GET", path, ok=(403, 404, 409, 422), accept=accept)
+        except GitHubError:
+            return None
+        return resp if resp.status_code == 200 else None
 
     async def transfer(self, name: str, new_owner: str) -> Repo:
         """Hand a repo to someone's own GitHub account. GitHub emails them to accept it."""

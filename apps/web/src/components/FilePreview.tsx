@@ -263,7 +263,7 @@ function DocxView({ blob }: { blob: Blob }) {
 }
 
 /** Code with syntax colours and line numbers; plain until highlight.js has loaded. */
-function Code({ text, language }: { text: string; language: string }) {
+export function Code({ text, language }: { text: string; language: string }) {
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;

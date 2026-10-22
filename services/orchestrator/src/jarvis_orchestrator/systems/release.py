@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from jarvis_common.models import Project, RoleName, User, utcnow
 from jarvis_orchestrator.github import GitHubError
+from jarvis_orchestrator.links import keep_release_link
 from jarvis_orchestrator.systems.runtime import RunContext
 from jarvis_orchestrator.workbench import WorkbenchError
 
@@ -138,6 +139,18 @@ async def publish(rc: RunContext, dev: dict) -> dict:
         row.branch, row.merged = branch, merged
         row.updated_at = utcnow()
         await db.commit()
+    # The code lives on GitHub; the library keeps a link to it, shown on the team's answer.
+    await keep_release_link(
+        rc.deps,
+        rc.user.id,
+        repo.url,
+        title=rc.spec.name,
+        note=f"The code of {rc.spec.name}, on GitHub.",
+        kind="github_repo",
+        chat_id=rc.chat_id,
+        run_id=rc.run_id,
+        project_id=row.id,
+    )
     return {"repo_url": repo.url, "branch": branch, "merged": merged, "merge_note": note}
 
 

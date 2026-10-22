@@ -168,6 +168,38 @@ class ProjectOut(BaseModel):
     updated_at: datetime
 
 
+class LinkOut(BaseModel):
+    """A link in the library: a pointer to a GitHub repo, a Google Doc, an app or a page."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    url: str
+    kind: str
+    title: str
+    note: str | None
+    source: str
+    chat_id: uuid.UUID | None
+    run_id: uuid.UUID | None
+    project_id: uuid.UUID | None
+    preview: dict | None
+    preview_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LinkIn(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+    title: str | None = Field(default=None, max_length=300)
+    note: str | None = Field(default=None, max_length=2000)
+    chat_id: uuid.UUID | None = None
+
+
+class LinkUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class FileUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
@@ -201,6 +233,8 @@ class MessageOut(BaseModel):
     steps: list[dict] | None = None
     created_at: datetime
     attachments: list[FileBrief] = []
+    # Links Jarvis or a team saved while writing it (a repo, an app, a Google Doc).
+    links: list[LinkOut] = []
 
 
 class SendMessageIn(BaseModel):
