@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDate } from "../lib/format";
 import type { GoogleAccess, SessionInfo } from "../lib/types";
+import { confirmAction } from "../components/Feedback";
 
 const SERVICES: Record<string, { label: string; what: string; icon: ReactNode }> = {
   gmail: { label: "Gmail", what: "Read, label, draft and send mail", icon: <Mail size={16} /> },
@@ -35,8 +36,13 @@ export function SettingsPage() {
   }, []);
 
   const disconnect = async () => {
-    if (!confirm(`Stop ${assistant} from using your Google account? Agents lose access right away.`))
-      return;
+    const ok = await confirmAction({
+      title: "Disconnect Google?",
+      body: `${assistant} and its agents lose access to your Google services right away. You can connect again later.`,
+      confirmLabel: "Disconnect",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.disconnectGoogle();
       setAccess(await api.googleAccess());

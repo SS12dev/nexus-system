@@ -7,8 +7,15 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, SettingsDep
-from nexus_api.schemas import AuthConfigOut, DevLoginIn, UserOut
+from nexus_api import access
+from nexus_api.deps import CurrentUser, DbDep, QueueDep, RedisDep, SettingsDep
+from nexus_api.schemas import (
+    AccessRequestIn,
+    AccessStateOut,
+    AuthConfigOut,
+    DevLoginIn,
+    UserOut,
+)
 from nexus_api.sessions import revoke_token, set_session_cookie, start_session, user_for_token
 from nexus_api.users import SignInRefused, normalize_email, resolve_sign_in
 from nexus_common import google
@@ -52,21 +59,26 @@ def _google_params(settings: Settings, *, consent: bool) -> dict:
 @router.get("/config", response_model=AuthConfigOut)
 async def auth_config(settings: SettingsDep) -> AuthConfigOut:
     return AuthConfigOut(
-        oidc_enabled=settings.oidc_enabled, dev_login_enabled=settings.dev_login_active
+        oidc_enabled=settings.oidc_enabled,
+        dev_login_enabled=settings.dev_login_active,
+        access_requests=settings.access_requests_open,
     )
 
 
 @router.get("/login")
-async def login(request: Request, settings: SettingsDep):
+async def login(request: Request, settings: SettingsDep, account: str | None = None):
+    """Start sign-in. account=choose shows the provider's account picker even when the browser
+    is signed in to one account, for someone who was refused with the wrong one."""
     if not settings.oidc_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OIDC sign-in is not configured")
     # Built from the request so the same deployment works on localhost and the public hostname;
     # register every such callback URL with the identity provider.
     redirect_uri = str(request.url_for("auth_callback"))
     request.session.pop("google_connect", None)
-    return await request.app.state.oauth.oidc.authorize_redirect(
-        request, redirect_uri, **_google_params(settings, consent=False)
-    )
+    extra = _google_params(settings, consent=False)
+    if account == "choose":
+        extra["prompt"] = "select_account"
+    return await request.app.state.oauth.oidc.authorize_redirect(request, redirect_uri, **extra)
 
 
 @router.get("/google/connect")
@@ -114,7 +126,12 @@ async def callback(request: Request, db: DbDep, settings: SettingsDep):
         )
     except SignInRefused as exc:
         await db.rollback()
+        log.info("auth.refused", extra={"reason": exc.reason, "method": "oidc"})
+        if exc.reason == "not_invited":
+            # Google just proved this browser owns the address: let it ask for an invite.
+            access.remember_identity(request, info["email"], info.get("name"), info.get("picture"))
         return RedirectResponse(f"/login?error={exc.reason}", status.HTTP_303_SEE_OTHER)
+    access.forget_identity(request)
     complete = True
     if settings.google_service_list:
         complete = await google.save_from_sign_in(db, settings, user.id, token)
@@ -161,7 +178,11 @@ async def dev_login(
         user = await resolve_sign_in(db, settings, email=body.email)
     except SignInRefused as exc:
         await db.rollback()
+        log.info("auth.refused", extra={"reason": exc.reason, "method": "dev"})
+        if exc.reason == "not_invited":
+            access.remember_identity(request, body.email)
         raise HTTPException(status.HTTP_403_FORBIDDEN, exc.reason) from exc
+    access.forget_identity(request)
     session_token = await start_session(db, settings, user, request)
     await db.commit()
     set_session_cookie(response, settings, request, session_token)
@@ -175,3 +196,46 @@ async def logout(request: Request, response: Response, db: DbDep, settings: Sett
         await revoke_token(db, token)
         await db.commit()
     response.delete_cookie(settings.session_cookie_name, path="/")
+
+
+def _identity_or_404(request: Request, settings: Settings) -> dict:
+    if not settings.access_requests_open:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Access requests are turned off")
+    who = access.identity(request)
+    if who is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "Sign in with Google first, then you can ask for access"
+        )
+    return who
+
+
+@router.get("/access-request", response_model=AccessStateOut)
+async def access_request_state(request: Request, db: DbDep, settings: SettingsDep):
+    """For the login page after a refused sign-in: may this person ask for access, or have they
+    already?"""
+    return await access.state(db, settings, _identity_or_404(request, settings))
+
+
+@router.post("/access-request", response_model=AccessStateOut)
+async def request_access(
+    body: AccessRequestIn,
+    request: Request,
+    db: DbDep,
+    settings: SettingsDep,
+    redis: RedisDep,
+    queue: QueueDep,
+):
+    """Ask for an invite, as the address the identity provider just verified."""
+    who = _identity_or_404(request, settings)
+    try:
+        out, created = await access.submit(db, settings, request, who, body.note)
+    except access.RequestsFull as exc:
+        log.warning("access.requests_full", extra={"limit": settings.access_request_max_pending})
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Too many requests are waiting right now. Try again in a few days.",
+        ) from exc
+    if created is not None:
+        log.info("access.requested", extra={"access_request_id": str(created.id)})
+        await access.announce(db, redis, queue, "requested", created.id)
+    return out

@@ -168,6 +168,13 @@ class ApprovalStatus(enum.StrEnum):
     rejected = "rejected"
 
 
+class AccessRequestStatus(enum.StrEnum):
+    pending = "pending"
+    # An admin approved it: the person now has an invite and joins on their next sign-in.
+    approved = "approved"
+    denied = "denied"
+
+
 def _enum(cls: type[enum.Enum], name: str, length: int = 16) -> Enum:
     return Enum(
         cls,
@@ -210,6 +217,48 @@ class User(Base):
 
     def has_role(self, minimum: RoleName) -> bool:
         return ROLE_RANK[self.role] >= ROLE_RANK[minimum]
+
+
+class AccessRequest(Base):
+    """Someone without an invite asking to join. Only made from an email the identity provider
+    verified moments before (see routes/auth.py), so nobody can ask on another person's behalf.
+    Rows are kept after a decision, as the history of who asked and who decided."""
+
+    __tablename__ = "access_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(320))
+    name: Mapped[str | None] = mapped_column(String(200))
+    avatar_url: Mapped[str | None] = mapped_column(String(1000))
+    # Why they want in, in their own words, for the admin deciding.
+    note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[AccessRequestStatus] = mapped_column(
+        _enum(AccessRequestStatus, "access_request_status")
+    )
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The invited user an approval made.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    __table_args__ = (
+        # One open request per address; asking again while pending updates it.
+        Index(
+            "ix_access_requests_pending_email",
+            "email",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_access_requests_email_created", "email", "created_at"),
+        Index("ix_access_requests_status_created", "status", "created_at"),
+    )
 
 
 class Role(Base):

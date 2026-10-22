@@ -143,3 +143,19 @@ body {
     animation: none;
   }
 }
+
+/* Toasts slide up into place. */
+.toast-in {
+  animation: toast-in 180ms ease-out;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-in {
+    animation: none;
+  }
+}

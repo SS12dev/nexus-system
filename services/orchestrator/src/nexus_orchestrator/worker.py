@@ -17,10 +17,11 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.logs import configure_logging
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
-from nexus_orchestrator import deploy, links, memory
+from nexus_orchestrator import deploy, links, memory, notify
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
 from nexus_orchestrator.sandbox import SandboxClient
@@ -30,9 +31,9 @@ from nexus_orchestrator.turn import run_turn as _run_turn
 from nexus_orchestrator.web import WebClient
 from nexus_orchestrator.workbench import WorkbenchClient
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-log = logging.getLogger(__name__)
 settings = get_settings()
+configure_logging(settings, "orchestrator")
+log = logging.getLogger(__name__)
 
 
 def psycopg_url(url: str) -> str:
@@ -131,6 +132,11 @@ async def link_preview(ctx: dict, link_id: str) -> None:
     await links.refresh_preview(ctx["deps"], uuid.UUID(link_id))
 
 
+async def notify_access(ctx: dict, kind: str, request_id: str) -> None:
+    """Email admins about a new access request, or the person about their approval."""
+    await notify.access(ctx["deps"], kind, uuid.UUID(request_id), attempt=ctx.get("job_try", 1))
+
+
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -156,6 +162,8 @@ class WorkerSettings:
         func(run_system, timeout=settings.run_job_timeout_s, keep_result=0),
         func(continue_run, timeout=settings.run_job_timeout_s, keep_result=0),
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
+        # Emails are safe to retry: the job checks the request is still in the state it's about.
+        func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
     ]
     cron_jobs = [
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),

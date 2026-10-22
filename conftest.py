@@ -31,7 +31,7 @@ TABLES = (
     "message_links, links, projects, approvals, run_events, agent_runs, agent_systems, "
     "skill_usages, skill_versions, "
     "skills, instructions, tool_grants, memory_events, memories, episodes, profiles, attachments, "
-    "file_chunks, files, backups, app_settings, "
+    "file_chunks, files, backups, app_settings, access_requests, "
     "embedding_cache, audit_log, messages, chats, budgets, google_grants, api_keys, sessions, "
     "user_roles, users"
 )

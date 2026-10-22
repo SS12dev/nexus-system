@@ -270,3 +270,11 @@ describe("orb data", () => {
     expect(s.messages.c1[1].steps).toHaveLength(1);
   });
 });
+
+describe("access requests", () => {
+  it("keeps the waiting count from the live event", () => {
+    const state = applyEvent(initialState, { type: "access.pending", data: { count: 3 } });
+    expect(state.pendingAccess).toBe(3);
+    expect(applyEvent(state, { type: "access.pending", data: { count: 0 } }).pendingAccess).toBe(0);
+  });
+});

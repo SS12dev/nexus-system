@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-async def _admin_view(db, settings: Settings, gateway: LiteLLMAdmin, user: User) -> AdminUserOut:
+async def admin_view(db, settings: Settings, gateway: LiteLLMAdmin, user: User) -> AdminUserOut:
     budget = await get_budget(db, settings, user)
     key = await active_key(db, user.id)
     # Not cached: this follows a change, so show LiteLLM's current figure.
@@ -94,7 +94,7 @@ async def invite_user(
         )
     )
     await db.commit()
-    return await _admin_view(db, settings, gateway, user)
+    return await admin_view(db, settings, gateway, user)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)
@@ -158,7 +158,7 @@ async def update_user(
             AuditLog(actor_id=actor.id, action="user.updated", target=str(user.id), data=changes)
         )
     await db.commit()
-    return await _admin_view(db, settings, gateway, user)
+    return await admin_view(db, settings, gateway, user)
 
 
 async def _gateway_call(coro) -> None:
@@ -209,6 +209,31 @@ async def set_grants(user_id: uuid.UUID, body: GrantsIn, actor: AdminUser, db: D
     )
     await db.commit()
     return await get_grants(user_id, actor, db)
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_invite(user_id: uuid.UUID, actor: AdminUser, db: DbDep) -> None:
+    """Take back an invite nobody has used yet. People who have signed in are disabled
+    instead, which keeps their data and the audit trail."""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if not can_manage(actor, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change this user")
+    if user.status != UserStatus.invited or user.last_login_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Only unused invites can be removed; disable the user"
+        )
+    db.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="user.invite_revoked",
+            target=str(user.id),
+            data={"email": user.email, "role": user.role},
+        )
+    )
+    await db.delete(user)
+    await db.commit()
 
 
 @router.post("/users/{user_id}/sign-out", status_code=status.HTTP_204_NO_CONTENT)

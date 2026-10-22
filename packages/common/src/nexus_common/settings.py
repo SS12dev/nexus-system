@@ -12,6 +12,11 @@ class Settings(BaseSettings):
 
     env: Literal["development", "production", "test"] = "development"
 
+    # Logs: "text" for reading in a terminal, "json" (one object per line, with the request id)
+    # for a log collector such as Loki, Datadog or CloudWatch.
+    log_format: Literal["text", "json"] = "text"
+    log_level: str = "INFO"
+
     database_url: str = "postgresql+asyncpg://nexus:nexus@localhost:5432/nexus"
     redis_url: str = "redis://localhost:6379/0"
 
@@ -40,6 +45,15 @@ class Settings(BaseSettings):
     # Force the Secure flag on cookies; otherwise it follows the request scheme.
     session_cookie_secure: bool = False
     signup_policy: Literal["invite_only", "open"] = "invite_only"
+    # With invite_only: someone whose Google sign-in is refused for lack of an invite may ask
+    # for one from the login page. Admins see it on the People page and get an email.
+    access_requests_enabled: bool = True
+    # After a denial, how long before the same address may ask again.
+    access_request_cooldown_days: int = 7
+    # Open requests kept at once; beyond this new ones are refused until admins catch up.
+    access_request_max_pending: int = 200
+    # Who is emailed about a new request (comma separated). Empty: every active owner and admin.
+    access_request_notify: str = ""
 
     oidc_issuer: str = "https://accounts.google.com"
     oidc_client_id: str = ""
@@ -198,6 +212,14 @@ class Settings(BaseSettings):
     @property
     def smtp_enabled(self) -> bool:
         return bool(self.smtp_host and (self.smtp_from or self.smtp_username))
+
+    @property
+    def access_requests_open(self) -> bool:
+        return self.access_requests_enabled and self.signup_policy == "invite_only"
+
+    @property
+    def access_request_notify_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.access_request_notify.split(",") if e.strip()]
 
     @property
     def max_tier_role_list(self) -> list[str]:

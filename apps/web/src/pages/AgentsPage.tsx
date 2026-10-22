@@ -11,6 +11,7 @@ import { formatDate } from "../lib/format";
 import { hasRole, type AgentSystem, type RunDetail, type SystemDetail } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
+import { confirmAction } from "../components/Feedback";
 
 const TOPOLOGY: Record<AgentSystem["topology"], string> = {
   single: "Single agent",
@@ -285,8 +286,16 @@ export function AgentsPage() {
                   )}
                   <button
                     disabled={isLive(liveRun)}
-                    onClick={() => {
-                      if (!confirm(`Delete ${detail.name} and its run history?`)) return;
+                    onClick={async () => {
+                      if (
+                        !(await confirmAction({
+                          title: `Delete ${detail.name}?`,
+                          body: "Its run history goes too.",
+                          confirmLabel: "Delete",
+                          danger: true,
+                        }))
+                      )
+                        return;
                       act(async () => {
                         await api.deleteSystem(detail.id);
                         navigate("/agents");

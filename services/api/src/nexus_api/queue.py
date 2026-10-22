@@ -13,6 +13,7 @@ class JobQueue(Protocol):
     async def enqueue_run(self, function: str, run_id: uuid.UUID) -> None: ...
     async def enqueue_deploy(self, project_id: uuid.UUID) -> None: ...
     async def enqueue_link_preview(self, link_id: uuid.UUID) -> None: ...
+    async def enqueue_access_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -49,3 +50,9 @@ class ArqJobQueue:
     async def enqueue_link_preview(self, link_id: uuid.UUID) -> None:
         """Fetch a link's preview in the orchestrator, which can read Nexus's private repos."""
         await self.pool.enqueue_job("link_preview", str(link_id))
+
+    async def enqueue_access_notice(self, kind: str, request_id: uuid.UUID) -> None:
+        """Email about an access request: "requested" to the deciders, "approved" to the person."""
+        await self.pool.enqueue_job(
+            "notify_access", kind, str(request_id), _job_id=f"access:{kind}:{request_id}"
+        )

@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 
 from arq import create_pool
@@ -12,6 +11,7 @@ from nexus_api import ws
 from nexus_api.middleware import GuardMiddleware
 from nexus_api.queue import ArqJobQueue, JobQueue
 from nexus_api.routes import (
+    access_requests,
     admin,
     app_access,
     apps,
@@ -31,10 +31,9 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.logs import configure_logging
 from nexus_common.settings import Settings, get_settings
 from nexus_common.storage import S3Storage, Storage
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
 def create_app(
@@ -44,6 +43,7 @@ def create_app(
     embedder: Embedder | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    configure_logging(settings, "api")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -102,6 +102,7 @@ def create_app(
     app.include_router(instructions.router)
     app.include_router(systems.router)
     app.include_router(admin.router)
+    app.include_router(access_requests.router)
     app.include_router(ops.router)
     app.include_router(ws.router)
 
