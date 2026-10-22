@@ -269,7 +269,7 @@ export function AgentsPage() {
               </span>
               {canEdit && (
                 <div className="ml-auto flex gap-2">
-                  {detail.lifetime !== "template" && (
+                  {detail.lifetime !== "template" && detail.topology !== "dev_project" && (
                     <button
                       onClick={() =>
                         act(async () => {

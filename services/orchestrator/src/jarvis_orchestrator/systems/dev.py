@@ -364,7 +364,12 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         elif not dev.get("approved"):
             facts["live_note"] = "not deployed, as the reviewer hasn't approved it"
         elif not releasing.passed(dev):
-            facts["live_note"] = "not deployed, as not every test passed"
+            tests = dev.get("tests") or {}
+            facts["live_note"] = (
+                "not deployed, as not every test passed"
+                if int(tests.get("failed") or 0)
+                else "not deployed, as no tests ran"
+            )
         else:
             result = await deploy_project(
                 rc.deps, uuid.UUID(facts["project_id"]), run_id=rc.run_id, chat_id=rc.chat_id

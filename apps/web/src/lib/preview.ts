@@ -118,3 +118,11 @@ export function notebookCells(text: string): NotebookCell[] | null {
     return null;
   }
 }
+
+/** The text Jarvis read from a converted file, ready for Markdown. Raw HTML never renders, so
+ * the comments MarkItDown leaves would show as text; each slide's marker becomes a heading. */
+export function readableText(text: string): string {
+  return text
+    .replace(/<!--\s*Slide number:\s*(\d+)\s*-->/gi, "\n\n**Slide $1**\n\n")
+    .replace(/<!--[\s\S]*?-->/g, "");
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeLanguage, notebookCells, parseCsv, prettyJson, previewKind } from "./preview";
+import { codeLanguage, notebookCells, parseCsv, prettyJson, previewKind, readableText } from "./preview";
 
 describe("file previews", () => {
   it("picks a view from the file name", () => {
@@ -11,6 +11,10 @@ describe("file previews", () => {
     expect(previewKind("plan.docx")).toBe("docx");
     expect(previewKind("deck.pptx")).toBe("extracted");
     expect(previewKind("server.log")).toBe("text");
+  });
+
+  it("turns slide markers into headings and drops other comments", () => {
+    expect(readableText("<!-- Slide number: 2 -->\n# Plan<!-- note -->")).toBe("\n\n**Slide 2**\n\n\n# Plan");
   });
 
   it("parses quoted CSV fields", () => {

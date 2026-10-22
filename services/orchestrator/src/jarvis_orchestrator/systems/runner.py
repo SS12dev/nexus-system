@@ -372,6 +372,11 @@ def result_text(system: AgentSystem, run: AgentRun, files: list[File]) -> str:
     if files:
         parts.append("Files, if you want them: " + ", ".join(f"`{f.name}`" for f in files))
     parts.append(f"_Run cost {cost} of a ${float(run.budget_usd):.2f} budget._")
-    if run.status == RunStatus.completed and system.lifetime == SystemLifetime.ephemeral:
+    # A software request always gets the house team, so a dev team is never kept as a template.
+    if (
+        run.status == RunStatus.completed
+        and system.lifetime == SystemLifetime.ephemeral
+        and system.topology != "dev_project"
+    ):
         parts.append("Want me to keep this team as a template for next time?")
     return "\n\n".join(p for p in parts if p)

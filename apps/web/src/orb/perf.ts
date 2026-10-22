@@ -47,12 +47,20 @@ export function usePerf(): Perf {
   return perf;
 }
 
-/** Whether this browser can draw WebGL at all; without it the page shows the list view. */
+let webgl: boolean | undefined;
+
+/** Whether this browser can draw WebGL at all; without it the page shows the list view.
+ * Checked once: every probe makes a real WebGL context, and browsers keep only about 16, so
+ * probing on each render pushed out the orb's own context and left the scene blank. */
 export function hasWebGL(): boolean {
+  if (webgl !== undefined) return webgl;
   try {
     const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") ?? c.getContext("webgl"));
+    const gl = c.getContext("webgl2") ?? c.getContext("webgl");
+    webgl = !!gl;
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
   } catch {
-    return false;
+    webgl = false;
   }
+  return webgl;
 }

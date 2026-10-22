@@ -94,7 +94,8 @@ async def _services(db, redis, gateway, storage) -> list[ServiceOut]:
             raise RuntimeError("no heartbeat in the last minute")
         info = info.decode() if isinstance(info, bytes) else info
         # "Oct-20 11:00:00 j_complete=3 j_failed=0 j_retried=0 j_ongoing=1 queued=0"
-        return " ".join(p for p in info.split() if p.startswith(("j_ongoing", "j_failed")))
+        stats = dict(p.split("=", 1) for p in info.split() if "=" in p)
+        return f"{stats.get('j_ongoing', '0')} running, {stats.get('j_failed', '0')} failed"
 
     async def object_store():
         await storage.ping()
