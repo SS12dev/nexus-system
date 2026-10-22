@@ -51,6 +51,13 @@ from nexus_orchestrator.tools import ToolContext, build_tools
 log = logging.getLogger(__name__)
 
 TOOL_OUTPUT_CHARS = 12000
+# How many read-only tool calls from one batch run at once (searches and page fetches).
+PARALLEL_READS = 4
+
+
+def is_read(name: str) -> bool:
+    info = BY_NAME.get(name)
+    return info is not None and info.risk == "read"
 
 
 class RunCancelled(Exception):
@@ -245,7 +252,7 @@ class RunContext:
                 "generation_name": f"agent.{agent.id}",
                 "session_id": str(self.chat_id) if self.chat_id else None,
                 "trace_user_id": str(self.user.id),
-                "tags": ["jarvis", "system", self.deps.settings.env],
+                "tags": ["nexus", "system", self.deps.settings.env],
                 "trace_metadata": {
                     "system_id": str(self.system_id),
                     "run_id": str(self.run_id),
@@ -335,6 +342,7 @@ def build_agent(
     by_name = {t.name: t for t in tools}
     max_steps = agent.max_steps or rc.deps.settings.agent_max_steps
     approval_extra = set(rc.spec.approval.required_for)
+    read_slots = asyncio.Semaphore(PARALLEL_READS)
 
     async def model_node(state: AgentState) -> dict:
         await rc.checkpoint_control()
@@ -382,9 +390,41 @@ def build_agent(
                 interrupt({"kind": "approval", "approval_id": str(a.id)})
                 a = await rc.reload_approval(a.id)
             decided[cid] = a
-        out: list[ToolMessage] = []
+        out: list[ToolMessage | None] = []
         done = None
-        for call in calls:
+        # Consecutive read-only calls (a batch of web searches, say) run side by side; anything
+        # that writes or runs code waits for the calls before it, so order still holds.
+        reads: list[tuple[int, BaseTool, dict, str, Approval | None]] = []
+
+        async def limited(tool: BaseTool, args: dict, name: str, a: Approval | None) -> str:
+            async with read_slots:
+                return await run_one(tool, args, name, a)
+
+        async def flush_reads() -> None:
+            if not reads:
+                return
+            results = await asyncio.gather(
+                *(limited(tool, args, name, a) for _, tool, args, name, a in reads)
+            )
+            for (i, _, _, name, _), text in zip(reads, results, strict=True):
+                out[i] = ToolMessage(text, tool_call_id=calls[i]["id"], name=name)
+            reads.clear()
+
+        async def run_one(tool: BaseTool, args: dict, name: str, a: Approval | None) -> str:
+            await rc.agent_status(agent.id, "working", tool=name)
+            try:
+                result = await tool.ainvoke(args)
+            except Exception as exc:
+                log.warning("Tool %s failed for agent %s: %s", name, agent.id, exc)
+                result = f"Tool error: {exc.__class__.__name__}: {str(exc)[:500]}"
+            text = str(result)
+            if len(text) > TOOL_OUTPUT_CHARS:
+                text = text[:TOOL_OUTPUT_CHARS] + f"\n… [{len(text) - TOOL_OUTPUT_CHARS} chars cut]"
+            if a is not None and a.decided_args:
+                text = f"(The user edited the arguments before approving.)\n{text}"
+            return text
+
+        for i, call in enumerate(calls):
             name, cid = call["name"], call["id"]
             if name in terminal_names:
                 done = {"tool": name, "args": call.get("args") or {}}
@@ -413,18 +453,13 @@ def build_agent(
                 )
                 continue
             args = (a.decided_args if a is not None and a.decided_args else None) or call["args"]
-            await rc.agent_status(agent.id, "working", tool=name)
-            try:
-                result = await tool.ainvoke(args)
-            except Exception as exc:
-                log.warning("Tool %s failed for agent %s: %s", name, agent.id, exc)
-                result = f"Tool error: {exc.__class__.__name__}: {str(exc)[:500]}"
-            text = str(result)
-            if len(text) > TOOL_OUTPUT_CHARS:
-                text = text[:TOOL_OUTPUT_CHARS] + f"\n… [{len(text) - TOOL_OUTPUT_CHARS} chars cut]"
-            if a is not None and a.decided_args:
-                text = f"(The user edited the arguments before approving.)\n{text}"
-            out.append(ToolMessage(text, tool_call_id=cid, name=name))
+            out.append(None)
+            if is_read(name):
+                reads.append((i, tool, args, name, a))
+                continue
+            await flush_reads()
+            out[i] = ToolMessage(await run_one(tool, args, name, a), tool_call_id=cid, name=name)
+        await flush_reads()
         return {"messages": out, "done": done}
 
     def after_model(state: AgentState) -> str:

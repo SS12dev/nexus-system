@@ -88,7 +88,7 @@ async def draft_skill(deps, run_id: uuid.UUID) -> Skill | None:
             "trace_name": "nexus.system",
             "generation_name": "nexus.draft_skill",
             "trace_user_id": str(user.id),
-            "tags": ["jarvis", "skills", deps.settings.env],
+            "tags": ["nexus", "skills", deps.settings.env],
         },
     ).bind(response_format={"type": "json_object"})
     reply = await model.ainvoke([SystemMessage(DRAFT), HumanMessage(prompt)])

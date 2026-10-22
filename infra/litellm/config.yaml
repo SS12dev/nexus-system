@@ -27,6 +27,9 @@ model_list:
     litellm_params:
       model: ollama/bge-m3
       api_base: os.environ/OLLAMA_BASE_URL
+      # Ollama unloads an idle model after 5 minutes, and loading bge-m3 again adds about
+      # 1.2 s to the next message. It is about 650 MB, so keep it loaded.
+      keep_alive: -1
 
 litellm_settings:
   # Every generation, with cost, goes to Langfuse (LANGFUSE_* env vars).

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -301,6 +302,10 @@ async def systems_context(db, user_id: uuid.UUID, chat_id: uuid.UUID) -> str:
     return "<agent_systems>\n" + "\n".join(lines) + "\n</agent_systems>" if lines else ""
 
 
+async def _no_route() -> Route:
+    return Route()
+
+
 async def route_to_team(
     deps, user: User, chat: Chat, msg: Message, history: list[Message], api_key: str
 ) -> Route:
@@ -323,7 +328,7 @@ async def route_to_team(
             "generation_name": "nexus.route",
             "session_id": str(chat.id),
             "trace_user_id": str(user.id),
-            "tags": ["jarvis", "route", deps.settings.env],
+            "tags": ["nexus", "route", deps.settings.env],
         },
     )
     return await route(model, question, previous, msg.trace_id)
@@ -362,39 +367,48 @@ async def _generate(
             "generation_name": "nexus.respond",
             "session_id": str(chat.id),
             "trace_user_id": str(user.id),
-            "tags": ["jarvis", "chat", deps.settings.env],
+            "tags": ["nexus", "chat", deps.settings.env],
         },
     )
-    context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
     allowed = allowed_tools(user, await granted_capabilities(db, user.id))
     grant = await get_grant(db, deps.settings, user.id)
     allowed = connected_only(allowed, services_in(grant.scopes) if grant else [])
-    # Outbound and destructive tools are for agents in a system, where every call is approved.
-    names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
-    extra = []
-    layers = await instruction_layers(db, Path(deps.settings.library_path), user, None)
-    if layers.global_extra:
-        extra.append(f"<shared_instructions>\n{layers.global_extra}\n</shared_instructions>")
-    if layers.user:
-        extra.append(f"<user_instructions>\n{layers.user}\n</user_instructions>")
-    if skills_block := await skills_context(db, deps.embedder, user.id, question):
-        extra.append(skills_block)
-    if allowed:
-        extra.append(await systems_context(db, user.id, chat.id))
-    rendered = "\n\n".join(x for x in [context.render(), *extra] if x)
-    # Release the connection while the model runs; tools open their own sessions.
-    await db.commit()
-    ctx = ToolContext(
-        deps=deps,
-        user_id=user.id,
-        chat_id=chat.id,
-        emit=emit,
-        memory_enabled=context.memory_enabled,
-        file_ids=[f.id for f in context.chat_files],
+    # The router is a model call that needs nothing from the database, so it runs while the
+    # context is gathered rather than after it.
+    routing = asyncio.create_task(
+        route_to_team(deps, user, chat, msg, history, api_key) if allowed else _no_route()
     )
-    tools = build_tools(ctx, names)
-    # When the router says this is work for a team, Nexus's first move is to build one.
-    decision = await route_to_team(deps, user, chat, msg, history, api_key) if allowed else Route()
+    try:
+        context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
+        # Outbound and destructive tools are for agents in a system, where every call is approved.
+        names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
+        extra = []
+        layers = await instruction_layers(db, Path(deps.settings.library_path), user, None)
+        if layers.global_extra:
+            extra.append(f"<shared_instructions>\n{layers.global_extra}\n</shared_instructions>")
+        if layers.user:
+            extra.append(f"<user_instructions>\n{layers.user}\n</user_instructions>")
+        if skills_block := await skills_context(db, deps.embedder, user.id, question):
+            extra.append(skills_block)
+        if allowed:
+            extra.append(await systems_context(db, user.id, chat.id))
+        rendered = "\n\n".join(x for x in [context.render(), *extra] if x)
+        # Release the connection while the model runs; tools open their own sessions.
+        await db.commit()
+        ctx = ToolContext(
+            deps=deps,
+            user_id=user.id,
+            chat_id=chat.id,
+            emit=emit,
+            memory_enabled=context.memory_enabled,
+            file_ids=[f.id for f in context.chat_files],
+        )
+        tools = build_tools(ctx, names)
+        # When the router says this is work for a team, the assistant's first move is to build one.
+        decision = await routing
+    finally:
+        # Only still running when something above failed; a finished task ignores this.
+        routing.cancel()
     if allowed:
         tools += system_tools(
             ctx, user, allowed, msg.trace_id, asked=question, software=decision.software

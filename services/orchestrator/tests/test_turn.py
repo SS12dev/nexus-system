@@ -18,6 +18,7 @@ from nexus_common.models import (
     User,
     UserStatus,
 )
+from nexus_orchestrator import turn
 from nexus_orchestrator.turn import finished, run_turn, track_step
 
 
@@ -217,6 +218,32 @@ async def test_router_leaves_other_messages_to_jarvis(setup, settings, sessionma
     reply_id = await ask(sessionmaker, chat_id, "What is on my calendar for the rest of this week?")
     await run_turn(deps, chat_id, reply_id)
     assert not any("tool_choice" in b for b in model.binds)
+    async with sessionmaker() as db:
+        assert (await db.get(Message, reply_id)).content == "Two meetings."
+
+
+async def test_router_runs_while_the_context_is_gathered(
+    setup, settings, sessionmaker, monkeypatch
+):
+    deps, model, _calls, (_u, chat_id, _m) = setup
+    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    model.script = ['{"route": "self", "reason": "calendar question"}', "Two meetings."]
+    real_assemble = turn.assemble
+    routed_during_assembly = []
+
+    async def slow_assemble(*args, **kwargs):
+        # Give the router a moment; it should already be on its way.
+        for _ in range(50):
+            if model.seen:
+                break
+            await asyncio.sleep(0.01)
+        routed_during_assembly.append(bool(model.seen))
+        return await real_assemble(*args, **kwargs)
+
+    monkeypatch.setattr(turn, "assemble", slow_assemble)
+    reply_id = await ask(sessionmaker, chat_id, "What is on my calendar for the rest of this week?")
+    await run_turn(deps, chat_id, reply_id)
+    assert routed_during_assembly == [True]
     async with sessionmaker() as db:
         assert (await db.get(Message, reply_id)).content == "Two meetings."
 

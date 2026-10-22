@@ -151,7 +151,7 @@ async def design(
             "generation_name": "nexus.design_system",
             "session_id": str(chat_id) if chat_id else None,
             "trace_user_id": str(user.id),
-            "tags": ["jarvis", "design", settings.env],
+            "tags": ["nexus", "design", settings.env],
         },
     ).bind(response_format={"type": "json_object"})
     # The model call can be slow; don't hold a connection open through it.

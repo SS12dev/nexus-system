@@ -77,7 +77,7 @@ async def _ask(
             "generation_name": f"nexus.{name}",
             "session_id": session_id,
             "trace_user_id": str(user.id),
-            "tags": ["jarvis", "memory", deps.settings.env],
+            "tags": ["nexus", "memory", deps.settings.env],
         },
     )
     runnable = model.bind(response_format={"type": "json_object"}) if json_mode else model
