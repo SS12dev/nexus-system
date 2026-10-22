@@ -9,7 +9,7 @@ Your assistant stays Jarvis. jarvis.servhub.cc keeps working throughout, so noth
   - `JARVIS_HTTP_PORT` is now `NEXUS_HTTP_PORT`.
   - `NEXUS_HOST=nexus.servhub.cc` is added.
   - The old file is saved as `backups/env.before-nexus`.
-  - The running app doesn't use any of this until you deploy PR #33.
+  - The running app doesn't use any of this until you deploy PR #35.
 
 ## 1. Claude project: point it at the renamed repo
 Open Claude project settings → Repositories. Remove `SS12dev/jarvis-system` and add `SS12dev/nexus-system`. GitHub redirects the old name, so nothing breaks in the meantime.
@@ -32,7 +32,7 @@ Your tunnel already has the `*.servhub.cc → http://traefik:80` route, so nexus
 Renaming the tunnel from "jarvis" to "nexus" is optional, cosmetic, and doesn't change the token.
 
 ## 4. Mac: deploy
-Merge [PR #33](https://github.com/SS12dev/nexus-system/pull/33), then in Terminal:
+Merge [PR #35](https://github.com/SS12dev/nexus-system/pull/35), then in Terminal:
 
     cd ~/Desktop/"jarvis local"/jarvis-system
     git pull
