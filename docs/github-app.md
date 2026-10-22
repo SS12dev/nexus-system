@@ -5,6 +5,11 @@ Jarvis writes to it as a GitHub App called Jarvis, so commits show as `<app-name
 tokens last an hour, and it can only touch that organisation. Without this setup, projects
 still build and show in the Library; they just stay in the workbench.
 
+Each release also adds a link to the repo (and, once deployed, to the live app) to the user's
+Library, shown on the team's answer. The orchestrator reads the repo as the App for the link's
+preview (description, README), so previews work although the repos are private. Links to repos
+outside the organisation are read without signing in, so only public ones preview.
+
 ## 1. The organisation
 
 Create a free organisation for Jarvis's projects (Settings → Organizations → New

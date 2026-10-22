@@ -15,6 +15,7 @@ from jarvis_common.deployer import DeployerError, DeployResult
 from jarvis_common.hostnames import NoFreeName
 from jarvis_common.models import Project, RoleName, User, utcnow
 from jarvis_orchestrator.artifacts import save_generated
+from jarvis_orchestrator.links import keep_release_link
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,19 @@ async def deploy_project(
             row.live_url, row.deployed_at = result.url, utcnow()
         row.updated_at = utcnow()
         await db.commit()
+        name = row.name
+    if result.ok:
+        await keep_release_link(
+            deps,
+            row.user_id,
+            result.url,
+            title=f"{name} (live app)",
+            note=f"{name}, running.",
+            kind="app",
+            chat_id=chat_id,
+            run_id=run_id,
+            project_id=project_id,
+        )
     if result.ok and result.screenshot and deps.storage is not None:
         try:
             shot = await save_generated(

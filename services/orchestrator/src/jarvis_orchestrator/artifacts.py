@@ -1,6 +1,7 @@
 """Files Jarvis and its agents make. They go into the user's library like uploads (origin
 "generated"), are parsed so they can be searched, and a file saved again under the same name
-becomes a new version of it."""
+becomes a new version of it, unless the caller says it is a different file that shares the name
+(Jarvis decides; see save_file)."""
 
 import hashlib
 import uuid
@@ -28,23 +29,28 @@ async def save_generated(
     *,
     chat_id: uuid.UUID | None = None,
     run_id: uuid.UUID | None = None,
+    new_version: bool = True,
 ) -> File:
     if deps.storage is None:
         raise RuntimeError("No object storage configured")
     name = clean_name(name)
     readable = PurePath(name).suffix.lower() in SUPPORTED_EXTENSIONS
     async with deps.sessionmaker() as db:
-        first = await db.scalar(
-            select(File)
-            .where(
-                File.user_id == user_id,
-                File.name == name,
-                File.origin == FileOrigin.generated,
-                File.version_of_id.is_(None),
+        first = None
+        if new_version:
+            # The newest file of that name: with separate files sharing a name, the latest one
+            # is the one being worked on.
+            first = await db.scalar(
+                select(File)
+                .where(
+                    File.user_id == user_id,
+                    File.name == name,
+                    File.origin == FileOrigin.generated,
+                    File.version_of_id.is_(None),
+                )
+                .order_by(File.created_at.desc())
+                .limit(1)
             )
-            .order_by(File.created_at)
-            .limit(1)
-        )
         version = 1
         if first is not None:
             latest = await db.scalar(

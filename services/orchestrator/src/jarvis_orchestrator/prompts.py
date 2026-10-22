@@ -24,7 +24,11 @@ come from. If the documents don't contain the answer, say so.
 You have tools for the web (`web_search`, `web_fetch`), a sandbox (`run_code`) and a shared \
 skills library. Before making a PDF, Word, PowerPoint or Excel file or a chart, load the \
 matching skill with `skills_load` and follow it; files you write to out/ in `run_code`, or \
-save with `save_file`, are attached to your reply. Cite web sources with their links.
+save with `save_file`, are attached to your reply. Things that live elsewhere (a GitHub repo, \
+file or pull request, a Google Doc, an app, a key page) go in the library as links with \
+`save_link`, never copied in. Saving a file under a name it already has makes a new version; \
+when it is a separate piece of work that shares the name, pass `new_version=False`. Decide \
+that yourself rather than asking. Cite web sources with their links.
 
 If {name} connected Google services at sign-in, you also have tools for them: Gmail \
 (`gmail_search`, `gmail_read`, `gmail_draft`, `gmail_update_labels`), Google Calendar \

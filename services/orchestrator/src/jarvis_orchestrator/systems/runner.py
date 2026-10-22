@@ -18,6 +18,7 @@ from sqlalchemy import func, select, update
 
 from jarvis_common.events import Event, publish
 from jarvis_common.library import file_payload
+from jarvis_common.links import link_payload
 from jarvis_common.litellm import MODEL_ALIASES, GatewayError
 from jarvis_common.models import (
     AgentRun,
@@ -27,7 +28,9 @@ from jarvis_common.models import (
     Attachment,
     Chat,
     File,
+    Link,
     Message,
+    MessageLink,
     MessageRole,
     MessageStatus,
     RunEvent,
@@ -285,6 +288,10 @@ async def finish(
         files = (
             await db.scalars(select(File).where(File.run_id == run_id).order_by(File.created_at))
         ).all()
+        # Links the run saved: its repo and live app, and any its agents kept (save_link).
+        links = (
+            await db.scalars(select(Link).where(Link.run_id == run_id).order_by(Link.created_at))
+        ).all()
         if status == RunStatus.completed:
             run.output = await answer_from_files(deps, run.output or "", files)
         message = None
@@ -304,6 +311,8 @@ async def finish(
                 await db.flush()
                 for f in files:
                     db.add(Attachment(message_id=message.id, file_id=f.id))
+                for link in links:
+                    db.add(MessageLink(message_id=message.id, link_id=link.id))
                 run.message_id = message.id
                 chat.updated_at = utcnow()
         tool_calls = await db.scalar(
@@ -314,6 +323,7 @@ async def finish(
         if message is not None:
             payload = message_payload(message)
             payload["attachments"] = [file_payload(f) for f in files]
+            payload["links"] = [link_payload(x) for x in links]
             await publish(
                 deps.redis,
                 run.user_id,

@@ -12,6 +12,7 @@ class JobQueue(Protocol):
     async def enqueue_profile_rebuild(self, user_id: uuid.UUID) -> None: ...
     async def enqueue_run(self, function: str, run_id: uuid.UUID) -> None: ...
     async def enqueue_deploy(self, project_id: uuid.UUID) -> None: ...
+    async def enqueue_link_preview(self, link_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -44,3 +45,7 @@ class ArqJobQueue:
     async def enqueue_deploy(self, project_id: uuid.UUID) -> None:
         """A redeploy from the Apps page; one at a time per project."""
         await self.pool.enqueue_job("deploy_app", str(project_id), _job_id=f"deploy:{project_id}")
+
+    async def enqueue_link_preview(self, link_id: uuid.UUID) -> None:
+        """Fetch a link's preview in the orchestrator, which can read Jarvis's private repos."""
+        await self.pool.enqueue_job("link_preview", str(link_id))

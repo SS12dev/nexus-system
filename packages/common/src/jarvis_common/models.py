@@ -845,6 +845,58 @@ class Project(Base):
     )
 
 
+class Link(Base):
+    """A pointer in the library to something that lives elsewhere: a project's GitHub repo, a
+    file, folder or pull request in it, a Google Doc, a running app, a web page. Only the address
+    and a snapshot for the preview are kept, never the thing itself. One row per address: saving
+    the same address again updates it."""
+
+    __tablename__ = "links"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    url: Mapped[str] = mapped_column(String(2048))
+    # What it points to (jarvis_common.links.LINK_KINDS), worked out from the address.
+    kind: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(String(300))
+    # Why it's in the library, in a sentence: shown under the title and searched.
+    note: Mapped[str | None] = mapped_column(Text)
+    # Who added it: the user, Jarvis in a chat, or a team's run.
+    source: Mapped[str] = mapped_column(String(16), default="user", server_default="user")
+    # Where it came from, if anywhere. Links stay in the library when these are deleted.
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL")
+    )
+    # What the preview shows (a repo's description and README, a file's text, a pull request's
+    # state), fetched when the link was saved or last refreshed.
+    preview: Mapped[dict | None] = mapped_column(JSON)
+    preview_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "url"),
+        Index("ix_links_user_updated", "user_id", "updated_at"),
+    )
+
+
+class MessageLink(Base):
+    """A link Jarvis or a team saved while writing a message, shown on that message."""
+
+    __tablename__ = "message_links"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    link_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("links.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 class RunEvent(Base):
     """What happened in a run, for the Agents page timeline."""
 

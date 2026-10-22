@@ -49,6 +49,13 @@ TOOLS: list[ToolInfo] = [
         "save_file", "Save a file", "write", "Save text or Markdown as a file in the library."
     ),
     ToolInfo(
+        "save_link",
+        "Save a link",
+        "write",
+        "Keep a link in the library (a GitHub repo, file or pull request, a Google Doc, an app, "
+        "a page) with a preview, without copying what it points to.",
+    ),
+    ToolInfo(
         "run_code",
         "Run code",
         "exec",

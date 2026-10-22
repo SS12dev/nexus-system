@@ -13,7 +13,9 @@ from jarvis_common.models import (
     AgentRun,
     AgentSystem,
     File,
+    Link,
     Message,
+    MessageLink,
     Project,
     RoleName,
     RunStatus,
@@ -142,6 +144,14 @@ async def test_an_approved_green_app_is_deployed_with_a_screenshot(ddeps, owner,
     # The screenshot comes with the team's result.
     assert [f.name for f in files] == ["2048-screenshot.png"]
     assert "`2048-screenshot.png`" in final
+    # And a link to the running app, in the library and on the answer.
+    async with ddeps.sessionmaker() as db:
+        link = await db.scalar(select(Link))
+        shown = await db.scalar(
+            select(MessageLink.message_id).where(MessageLink.link_id == link.id)
+        )
+    assert (link.url, link.kind, link.title) == (URL, "app", "2048 (live app)")
+    assert link.project_id == project.id and shown is not None
 
 
 async def test_a_failed_health_check_goes_back_to_the_builders_first(ddeps, owner, scripts, seen):

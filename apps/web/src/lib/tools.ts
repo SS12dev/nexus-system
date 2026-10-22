@@ -19,6 +19,7 @@ export const TOOL_LABEL: Record<string, string> = {
   ws_diff: "Checking the changes",
   ws_commit: "Committing the changes",
   save_file: "Saving a file",
+  save_link: "Saving a link",
   send_email: "Sending an email",
   gmail_search: "Searching your email",
   gmail_read: "Reading an email",

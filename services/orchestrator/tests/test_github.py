@@ -16,7 +16,9 @@ from sqlalchemy import select
 from jarvis_common.models import (
     AgentRun,
     AgentSystem,
+    Link,
     Message,
+    MessageLink,
     Project,
     RoleName,
     RunStatus,
@@ -311,6 +313,16 @@ async def test_release_pushes_and_merges_an_approved_green_run(
     assert (p.last_commit, p.last_commit_message) == ("abc1234full", "Add the score")
     final = await final_message(release_deps, chat_id)
     assert f"- Repo: https://github.com/{ORG}/2048 (on main)" in final
+    # The library keeps a link to the repo (the code isn't copied in), on the team's answer.
+    async with release_deps.sessionmaker() as db:
+        link = await db.scalar(select(Link))
+        shown = await db.scalar(select(MessageLink).where(MessageLink.link_id == link.id))
+        message = await db.get(Message, shown.message_id)
+    assert (link.url, link.kind, link.title) == (p.repo_url, "github_repo", "2048")
+    assert (link.project_id, link.run_id, link.source) == (p.id, run_id, "team")
+    assert message.chat_id == chat_id
+    # Read as the App (the repo is private); the fake has no README, so it's left out.
+    assert "error" not in link.preview and "readme" not in link.preview
 
 
 @pytest.mark.parametrize(
