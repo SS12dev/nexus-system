@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Outlet, useParams } from "react-router";
 import { OrbStage } from "../components/OrbStage";
 
-const ORB_KEY = "jarvis.chat.orb";
+const ORB_KEY = "nexus.chat.orb";
 
 function savedOrbOpen(): boolean {
   try {

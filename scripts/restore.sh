@@ -43,19 +43,22 @@ dc up -d postgres
 step "Restoring databases"
 for dump in "$src"/*.dump; do
   db=$(basename "$dump" .dump)
+  # Backups from before the rename to Nexus call the main database jarvis.
+  [[ "$db" == jarvis ]] && db=nexus
   echo "  $db"
+  dump_in=/backups/$name/$(basename "$dump")
   run backup sh -c "
     set -e
     until pg_isready -q; do sleep 1; done
     dropdb --if-exists --force '$db'
     createdb '$db'
-    pg_restore --no-owner --exit-on-error -d '$db' '/backups/$name/$db.dump'
+    pg_restore --no-owner --exit-on-error -d '$db' '$dump_in'
   "
 done
 
 if [[ -f "$src/minio.tar.gz" ]]; then
   step "Restoring files (MinIO)"
-  run -v "${COMPOSE_PROJECT_NAME:-jarvis}_minio:/restore" backup \
+  run -v "${COMPOSE_PROJECT_NAME:-nexus}_minio:/restore" backup \
     sh -c "find /restore -mindepth 1 -delete && tar -xzf '/backups/$name/minio.tar.gz' -C /restore"
 fi
 

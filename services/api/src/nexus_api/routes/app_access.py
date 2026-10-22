@@ -1,7 +1,7 @@
 """Private apps. Traefik asks /auth/app/check before every request to a private app (its
 forwardAuth middleware, app-auth). Without a valid app cookie the visitor goes to Nexus's own
 host to sign in (/auth/app/start); Nexus sends them back to the app with a signed one-time
-token on /_jarvis/auth, which check swaps for a cookie on that app's host alone.
+token on /_nexus/auth, which check swaps for a cookie on that app's host alone.
 
 The Nexus session cookie never leaves Nexus's host: it has no Domain, so browsers keep it to
 nexus.servhub.cc, and check only ever reads the app cookie. An app's cookie opens that one app,
@@ -28,13 +28,13 @@ from nexus_common.settings import Settings
 
 router = APIRouter(prefix="/auth/app", tags=["apps"])
 
-COOKIE = "jarvis_app"
-CALLBACK = "/_jarvis/auth"
+COOKIE = "nexus_app"
+CALLBACK = "/_nexus/auth"
 TOKEN_SECONDS = 120
 
 
 def signer(settings: Settings, what: str) -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(settings.secret_key, salt=f"jarvis-app-{what}")
+    return URLSafeTimedSerializer(settings.secret_key, salt=f"nexus-app-{what}")
 
 
 def preview_key(settings: Settings, host: str) -> str:
@@ -132,7 +132,7 @@ async def exchange(db, settings: Settings, redis, row: Project, query: str, secu
         return refuse("This sign-in link isn't valid. Open the app again.")
     if data.get("a") != str(row.id):
         return refuse("This sign-in link is for another app.")
-    if not await redis.set(f"jarvis:apptoken:{data['n']}", 1, nx=True, ex=TOKEN_SECONDS * 2):
+    if not await redis.set(f"nexus:apptoken:{data['n']}", 1, nx=True, ex=TOKEN_SECONDS * 2):
         return refuse("This sign-in link was already used. Open the app again.")
     user = await db.get(User, uuid.UUID(data["u"]))
     if not allowed(user, row):

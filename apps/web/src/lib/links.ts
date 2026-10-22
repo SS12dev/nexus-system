@@ -29,7 +29,7 @@ export function shortUrl(url: string, max = 60): string {
 /** Who put the link in the library, in a few words. */
 export function linkSource(link: Pick<LinkItem, "source">, assistant: string): string {
   if (link.source === "team") return `saved by ${assistant}'s team`;
-  if (link.source === "jarvis") return `saved by ${assistant}`;
+  if (link.source === "assistant") return `saved by ${assistant}`;
   return "added by you";
 }
 

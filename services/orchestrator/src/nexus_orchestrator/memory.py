@@ -255,7 +255,7 @@ async def apply_candidates(
         if op == "NOOP" and old is not None:
             old.confidence = min(1.0, old.confidence + 0.1)
             old.reinforced_at = now
-            record(db, old, "reinforce", "jarvis", None, source.id)
+            record(db, old, "reinforce", "assistant", None, source.id)
             changed.append((old, "reinforce"))
         elif op == "UPDATE" and old is not None and not old.pinned:
             content = str(act.get("content") or cand["content"]).strip()[:500]
@@ -263,12 +263,12 @@ async def apply_candidates(
             old.kind = MemoryKind(cand["kind"])
             old.confidence = min(1.0, max(old.confidence, cand["confidence"]) + 0.05)
             old.updated_at = old.reinforced_at = now
-            old.source, old.source_chat_id, old.source_message_id = "jarvis", chat.id, source.id
+            old.source, old.source_chat_id, old.source_message_id = "assistant", chat.id, source.id
             if content == cand["content"] and vec is not None:
                 old.embedding, old.embedding_model = vec, model
             else:
                 old.embedding = old.embedding_model = None  # the backfill re-embeds it
-            record(db, old, "update", "jarvis", content, source.id)
+            record(db, old, "update", "assistant", content, source.id)
             changed.append((old, "update"))
         elif op in ("ADD", "UPDATE"):
             # UPDATE of a pinned or unknown memory falls back to adding the new fact.
@@ -278,7 +278,7 @@ async def apply_candidates(
                 kind=MemoryKind(cand["kind"]),
                 content=cand["content"],
                 confidence=cand["confidence"],
-                source="jarvis",
+                source="assistant",
                 source_chat_id=chat.id,
                 source_message_id=source.id,
                 embedding=vec,
@@ -286,7 +286,7 @@ async def apply_candidates(
             )
             db.add(m)
             await db.flush()
-            record(db, m, "add", "jarvis", m.content, source.id)
+            record(db, m, "add", "assistant", m.content, source.id)
             changed.append((m, "add"))
 
     deleted: list[Memory] = []
@@ -504,7 +504,7 @@ async def nightly(deps: TurnDeps) -> None:
             if drop.pinned:
                 continue
             keep.confidence = min(1.0, max(keep.confidence, drop.confidence) + 0.05)
-            record(db, keep, "merge", "jarvis", drop.content)
+            record(db, keep, "merge", "assistant", drop.content)
             await mark_profile_stale(db, drop.user_id)
             await db.delete(drop)
             gone.add(drop.id)

@@ -14,7 +14,7 @@ interface LayerInfo {
   /** One line under the title in the stack. */
   summary: string;
   /** Who gets it in their prompt. */
-  jarvis: boolean;
+  assistant: boolean;
   agents: boolean;
   /** Who can change it. */
   editedBy: "Built in" | "Admins" | "You";
@@ -79,7 +79,7 @@ export function InstructionsPanel({
       title: "Safety rules",
       icon: <ShieldCheck size={16} />,
       summary: "Ground rules no other layer can override.",
-      jarvis: false,
+      assistant: false,
       agents: true,
       editedBy: "Built in",
     },
@@ -88,7 +88,7 @@ export function InstructionsPanel({
       title: "House conventions",
       icon: <Sparkles size={16} />,
       summary: "How dates, numbers, sources and files are written.",
-      jarvis: true,
+      assistant: true,
       agents: true,
       editedBy: "Built in",
     },
@@ -99,7 +99,7 @@ export function InstructionsPanel({
       summary: data.global
         ? "Extra rules for everyone on this server."
         : "Not set. Optional rules for everyone.",
-      jarvis: true,
+      assistant: true,
       agents: true,
       editedBy: "Admins",
     },
@@ -108,7 +108,7 @@ export function InstructionsPanel({
       title: "Agent roles",
       icon: <Bot size={16} />,
       summary: `${data.roles.length} job descriptions, one per kind of sub-agent.`,
-      jarvis: false,
+      assistant: false,
       agents: true,
       editedBy: "Admins",
     },
@@ -119,7 +119,7 @@ export function InstructionsPanel({
       summary: data.user
         ? "Your personal style and preferences."
         : "Not set yet. Tell agents how you like things.",
-      jarvis: true,
+      assistant: true,
       agents: true,
       editedBy: "You",
     },
@@ -161,7 +161,7 @@ export function InstructionsPanel({
                 </div>
                 <p className="mt-1 pl-7 text-xs text-slate-400">{l.summary}</p>
                 <div className="mt-1.5 flex gap-1.5 pl-7">
-                  <Audience on={l.jarvis} label={assistant} />
+                  <Audience on={l.assistant} label={assistant} />
                   <Audience on={l.agents} label="Sub-agents" />
                 </div>
               </button>

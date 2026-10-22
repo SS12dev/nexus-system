@@ -196,7 +196,7 @@ async def test_supervisor_delegates_then_finishes(sdeps, owner, scripts, seen):
     # The worker's result went back into the lead's transcript.
     assert '<result from="analyst">\n3 apples' in human_texts(seen["lead"][1])
     assert {"delegate", "finish"} <= set(seen["lead:tools"][0])
-    assert ("lead", "jarvis-pro") in seen["models"]
+    assert ("lead", "nexus-pro") in seen["models"]
 
 
 async def test_map_reduce_fans_out(sdeps, owner, scripts, seen):
@@ -421,9 +421,9 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
     run, _ = await load(sdeps, run_id)
     await runner.run_system(sdeps, run_id)
     models = seen["models"]
-    assert models[0] == ("lead", "jarvis-mini") and models[1] == ("lead", "jarvis-pro")
+    assert models[0] == ("lead", "nexus-mini") and models[1] == ("lead", "nexus-pro")
     # The helper asked for max but isn't the lead: capped at pro.
-    assert ("helper", "jarvis-pro") in models
+    assert ("helper", "nexus-pro") in models
 
     seen.clear()
     scripts["lead"] = ["lead ok"]
@@ -440,8 +440,8 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
 
     gateway.generate_run_key = spent_key
     await runner.run_system(sdeps, run_id)
-    assert ("lead", "jarvis-max") in seen["models"]
-    assert ("helper", "jarvis-mini") in seen["models"]
+    assert ("lead", "nexus-max") in seen["models"]
+    assert ("helper", "nexus-mini") in seen["models"]
     run, _ = await load(sdeps, run_id)
     assert run.cost_usd == Decimal("0.45")
 

@@ -44,7 +44,7 @@ class Event(BaseModel):
 
 
 def user_channel(user_id: uuid.UUID | str) -> str:
-    return f"jarvis:user:{user_id}"
+    return f"nexus:user:{user_id}"
 
 
 async def publish(redis: Redis, user_id: uuid.UUID | str, event: Event) -> None:

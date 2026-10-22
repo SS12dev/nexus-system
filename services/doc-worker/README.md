@@ -9,7 +9,7 @@ Turns uploads into text Nexus can search and read. It takes `parse_file` jobs fr
    text and code;
 3. splits the Markdown into chunks that follow headings and spreadsheet sheets, keeping tables
    whole where they fit and repeating the header row where they don't;
-4. embeds the chunks through LiteLLM (`jarvis-embed`), reusing cached vectors by text hash, and
+4. embeds the chunks through LiteLLM (`nexus-embed`), reusing cached vectors by text hash, and
    stores them in `file_chunks` with a full-text index;
 5. marks the file ready and tells the user's browser over the WebSocket.
 

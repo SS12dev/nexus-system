@@ -9,7 +9,7 @@ import string
 from collections.abc import Awaitable, Callable
 
 # Never handed to an app: Nexus's own and the usual service names. RESERVED_HOSTNAMES adds more.
-RESERVED = {"nexus", "jarvis", "www", "mail", "api", "admin", "traefik"}
+RESERVED = {"nexus", "www", "mail", "api", "admin", "traefik"}
 LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 NOT_LABEL = re.compile(r"[^a-z0-9]+")
 BASE_CHARS = 40

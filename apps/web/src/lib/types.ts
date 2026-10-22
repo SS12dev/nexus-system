@@ -112,7 +112,7 @@ export interface LinkItem {
   kind: LinkKind;
   title: string;
   note: string | null;
-  source: "user" | "jarvis" | "team";
+  source: "user" | "assistant" | "team";
   chat_id: string | null;
   run_id: string | null;
   project_id: string | null;
@@ -186,7 +186,7 @@ export interface Memory {
   content: string;
   confidence: number;
   pinned: boolean;
-  source: "jarvis" | "user";
+  source: "assistant" | "user";
   source_chat_id: string | null;
   created_at: string;
   updated_at: string;

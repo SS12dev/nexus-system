@@ -17,7 +17,7 @@ const msg = (over: Partial<Message> = {}): Message => ({
   role: "assistant",
   content: "",
   status: "streaming",
-  model: "jarvis-mini",
+  model: "nexus-mini",
   input_tokens: null,
   output_tokens: null,
   trace_id: null,

@@ -36,7 +36,7 @@ TOPOLOGIES: tuple[str, ...] = (
     "dev_project",
 )
 TIERS: tuple[str, ...] = ("nano", "mini", "pro", "max")
-TIER_MODEL: dict[str, str] = {t: f"jarvis-{t}" for t in TIERS}
+TIER_MODEL: dict[str, str] = {t: f"nexus-{t}" for t in TIERS}
 
 # Rough list prices in USD per million tokens (input, output), only for the cost estimate shown
 # before a run. LiteLLM records the real cost of every call.

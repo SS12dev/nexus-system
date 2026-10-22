@@ -1,20 +1,19 @@
 # Nexus on one machine. `cp .env.example .env` (or run scripts/init-env.sh), then
 # `docker compose up -d --build` and open http://localhost:8080. Once the secrets are encrypted
 # (scripts/secrets.sh init), use ./scripts/compose.sh in place of docker compose.
-# The project keeps its pre-Nexus name: volume, network, container and built-image names derive
-# from it (jarvis_postgres, jarvis-api-1, jarvis-workbench), so renaming it would start Nexus on
-# empty volumes and cut running apps off their network.
-name: jarvis
+# Volume, network, container and built-image names derive from the project name (nexus_postgres,
+# nexus-api-1, nexus-workbench), so changing it starts Nexus on empty volumes.
+name: nexus
 
 x-nexus-env: &nexus-env
   ENV: ${ENV:-development}
-  DATABASE_URL: postgresql+asyncpg://jarvis:${POSTGRES_PASSWORD}@postgres:5432/jarvis
+  DATABASE_URL: postgresql+asyncpg://nexus:${POSTGRES_PASSWORD}@postgres:5432/nexus
   REDIS_URL: redis://redis:6379/0
   LITELLM_BASE_URL: ${LITELLM_BASE_URL:-http://litellm:4000}
   LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
   LITELLM_VIRTUAL_KEYS: ${LITELLM_VIRTUAL_KEYS:-true}
   LITELLM_API_KEY: ${LITELLM_API_KEY:-}
-  CHAT_MODEL: ${CHAT_MODEL:-${JARVIS_CHAT_MODEL:-jarvis-mini}}
+  CHAT_MODEL: ${CHAT_MODEL:-nexus-mini}
   DEFAULT_BUDGET_USD: ${DEFAULT_BUDGET_USD:-5}
   OWNER_BUDGET_USD: ${OWNER_BUDGET_USD:-50}
   SECRET_KEY: ${SECRET_KEY:?SECRET_KEY missing, use ./scripts/compose.sh or set it in .env}
@@ -29,15 +28,15 @@ x-nexus-env: &nexus-env
   DEV_LOGIN_TOKEN: ${DEV_LOGIN_TOKEN:-}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
   S3_ENDPOINT_URL: http://minio:9000
-  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-jarvis}
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-nexus}
   S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-  S3_BUCKET: jarvis
+  S3_BUCKET: nexus
   MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
-  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-jarvis-embed}
-  MEMORY_MODEL: ${MEMORY_MODEL:-jarvis-nano}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nexus-embed}
+  MEMORY_MODEL: ${MEMORY_MODEL:-nexus-nano}
   # Agent systems
-  DESIGN_MODEL: ${DESIGN_MODEL:-jarvis-pro}
-  ROUTE_MODEL: ${ROUTE_MODEL-jarvis-nano}
+  DESIGN_MODEL: ${DESIGN_MODEL:-nexus-pro}
+  ROUTE_MODEL: ${ROUTE_MODEL-nexus-nano}
   DEFAULT_RUN_BUDGET_USD: ${DEFAULT_RUN_BUDGET_USD:-0.50}
   DEV_RUN_BUDGET_USD: ${DEV_RUN_BUDGET_USD:-2}
   MAX_RUN_BUDGET_USD: ${MAX_RUN_BUDGET_USD:-5}
@@ -56,7 +55,7 @@ x-nexus-env: &nexus-env
   DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
   MEMBER_APP_LIMIT: ${MEMBER_APP_LIMIT:-3}
   APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
-  NEXUS_URL: ${NEXUS_URL:-${JARVIS_URL:-https://${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}}}
+  NEXUS_URL: ${NEXUS_URL:-https://${NEXUS_HOST:-nexus.servhub.cc}}
   RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
   APP_COOKIE_HOURS: ${APP_COOKIE_HOURS:-12}
   WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
@@ -78,7 +77,7 @@ x-nexus-env: &nexus-env
   BACKUP_STALE_HOURS: ${BACKUP_STALE_HOURS:-36}
 
 x-langfuse-env: &langfuse-env
-  DATABASE_URL: postgresql://jarvis:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+  DATABASE_URL: postgresql://nexus:${POSTGRES_PASSWORD}@postgres:5432/langfuse
   SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT missing, use ./scripts/compose.sh or set it in .env}
   ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY missing, use ./scripts/compose.sh or set it in .env}
   TELEMETRY_ENABLED: "false"
@@ -90,14 +89,14 @@ x-langfuse-env: &langfuse-env
   REDIS_CONNECTION_STRING: redis://redis:6379/1
   LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
   LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-jarvis}
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-nexus}
   LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
   LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
   LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
   LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
   LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
   LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
-  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-jarvis}
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-nexus}
   LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
   LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
   LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
@@ -111,7 +110,7 @@ services:
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=jarvis_default
+      - --providers.docker.network=nexus_default
       - --entrypoints.web.address=:80
       # cloudflared (and Docker Desktop's port forwarding) connect from private addresses; trust
       # their X-Forwarded-Proto so the API builds https:// callback URLs behind the tunnel.
@@ -119,7 +118,7 @@ services:
       - --ping=true
       - --accesslog=true
     ports:
-      - "${NEXUS_HTTP_PORT:-${JARVIS_HTTP_PORT:-8080}}:80"
+      - "${NEXUS_HTTP_PORT:-8080}:80"
     # apps: to route to the apps users build; deployer: so the deployer can check them.
     networks: [default, apps, apps_egress, deployer]
     volumes:
@@ -144,7 +143,7 @@ services:
       - traefik.enable=true
       # Nexus answers on its own host and on any host outside the apps domain (localhost, the
       # Mac's address), never on <name>.APPS_DOMAIN: an app's name that isn't running is a 404.
-      - traefik.http.routers.web.rule=PathPrefix(`/`) && (Host(`${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}`) || Host(`${OLD_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
+      - traefik.http.routers.web.rule=PathPrefix(`/`) && (Host(`${NEXUS_HOST:-nexus.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.web.priority=1
       - traefik.http.services.web.loadbalancer.server.port=80
     restart: unless-stopped
@@ -167,7 +166,7 @@ services:
       replicas: ${API_REPLICAS:-2}
     labels:
       - traefik.enable=true
-      - traefik.http.routers.api.rule=(PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)) && (Host(`${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}`) || Host(`${OLD_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
+      - traefik.http.routers.api.rule=(PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)) && (Host(`${NEXUS_HOST:-nexus.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.api.priority=100
       - traefik.http.services.api.loadbalancer.server.port=8000
       - traefik.http.services.api.loadbalancer.healthcheck.path=/healthz
@@ -281,15 +280,15 @@ services:
     environment:
       DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
       DOCKER_URL: http://docker-gate:2375
-      APPS_NETWORK: jarvis_apps
-      APPS_EGRESS_NETWORK: jarvis_apps_egress
+      APPS_NETWORK: nexus_apps
+      APPS_EGRESS_NETWORK: nexus_apps_egress
       APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
       # Empty: https://<name>.APPS_DOMAIN, or http://<name>.apps.localhost:<port> locally.
       APPS_URL: ${APPS_URL:-}
-      NEXUS_HTTP_PORT: ${NEXUS_HTTP_PORT:-${JARVIS_HTTP_PORT:-8080}}
+      NEXUS_HTTP_PORT: ${NEXUS_HTTP_PORT:-8080}
       RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
       TRAEFIK_URL: http://traefik
-      SCREENSHOT_IMAGE: jarvis-workbench:latest
+      SCREENSHOT_IMAGE: nexus-workbench:latest
       APP_MEMORY_MB: "512"
       APP_CPUS: "0.5"
     networks: [deployer, docker-gate]
@@ -314,7 +313,7 @@ services:
     restart: unless-stopped
 
   # The deployer's only door to Docker and the only container with the Docker socket. It allows
-  # a short list of calls (offline builds; creating, starting, stopping and deleting jarvis-app
+  # a short list of calls (offline builds; creating, starting, stopping and deleting nexus-app
   # containers with fixed limits) and refuses exec, volumes, swarm and everything else
   # (services/deployer/src/nexus_deployer/gate.py). Root inside, to open the socket, but with no
   # capabilities and only the deployer able to reach it.
@@ -323,9 +322,9 @@ services:
     command: ["uvicorn", "nexus_deployer.gate:app", "--host", "0.0.0.0", "--port", "2375"]
     user: "0"
     environment:
-      APPS_NETWORK: jarvis_apps
-      APPS_EGRESS_NETWORK: jarvis_apps_egress
-      SCREENSHOT_IMAGE: jarvis-workbench:latest
+      APPS_NETWORK: nexus_apps
+      APPS_EGRESS_NETWORK: nexus_apps_egress
+      SCREENSHOT_IMAGE: nexus-workbench:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [docker-gate]
@@ -361,7 +360,7 @@ services:
     build: infra/backup
     environment:
       PGHOST: postgres
-      PGUSER: jarvis
+      PGUSER: nexus
       PGPASSWORD: ${POSTGRES_PASSWORD}
       BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-21}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
@@ -379,16 +378,16 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_USER: jarvis
+      POSTGRES_USER: nexus
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
-      POSTGRES_DB: jarvis
+      POSTGRES_DB: nexus
     volumes:
       - postgres:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      test: ["CMD-SHELL", "pg_isready -U nexus -d nexus"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -410,10 +409,10 @@ services:
   minio:
     image: cgr.dev/chainguard/minio
     entrypoint: sh
-    # Folders under /data are buckets: jarvis for uploads, langfuse for trace events.
-    command: -c 'mkdir -p /data/jarvis /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    # Folders under /data are buckets: nexus for uploads, langfuse for trace events.
+    command: -c 'mkdir -p /data/nexus /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-jarvis}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nexus}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
     volumes:
       - minio:/data
@@ -433,7 +432,7 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY missing, use ./scripts/compose.sh or set it in .env}
-      DATABASE_URL: postgresql://jarvis:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      DATABASE_URL: postgresql://nexus:${POSTGRES_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
@@ -494,13 +493,13 @@ services:
       NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:${LANGFUSE_PORT:-3000}}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET missing, use ./scripts/compose.sh or set it in .env}
       # Creates the org, project, API keys and an admin login on first start.
-      LANGFUSE_INIT_ORG_ID: jarvis
+      LANGFUSE_INIT_ORG_ID: nexus
       LANGFUSE_INIT_ORG_NAME: Nexus
-      LANGFUSE_INIT_PROJECT_ID: jarvis
+      LANGFUSE_INIT_PROJECT_ID: nexus
       LANGFUSE_INIT_PROJECT_NAME: Nexus
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
-      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@jarvis.local}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@nexus.local}
       LANGFUSE_INIT_USER_NAME: Nexus admin
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:?LANGFUSE_ADMIN_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
       AUTH_DISABLE_SIGNUP: "true"

@@ -8,7 +8,7 @@ from nexus_common.settings import Settings
 
 
 def chat_model(settings: Settings, *, model: str, api_key: str, metadata: dict) -> BaseChatModel:
-    """A chat model bound to one turn. Calls go to LiteLLM under a jarvis-* alias; the metadata
+    """A chat model bound to one turn. Calls go to LiteLLM under a nexus-* alias; the metadata
     lets LiteLLM's Langfuse callback group generations into a trace per turn and a session per
     chat, attributed to the user."""
     return ChatOpenAI(

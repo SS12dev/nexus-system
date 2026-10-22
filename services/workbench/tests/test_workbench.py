@@ -209,7 +209,7 @@ async def test_token_is_checked(workbench, monkeypatch):
 async def test_identity_sets_who_commits(workbench, project, run):
     resp = await workbench.put(
         f"{project}/git/identity",
-        json={"name": "jarvis[bot]", "email": "123+jarvis[bot]@users.noreply.github.com"},
+        json={"name": "nexus[bot]", "email": "123+nexus[bot]@users.noreply.github.com"},
     )
     assert resp.status_code == 200
     await workbench.put(f"{project}/file", json={"path": "a.txt", "content": "x"})
@@ -217,7 +217,7 @@ async def test_identity_sets_who_commits(workbench, project, run):
     # Agents' own git commits get it too.
     await run("echo y > b.txt && git add b.txt && git commit -qm 'By hand'")
     log = (await run("git log -2 --format='%an <%ae>'"))["stdout"].splitlines()
-    assert log == ["jarvis[bot] <123+jarvis[bot]@users.noreply.github.com>"] * 2
+    assert log == ["nexus[bot] <123+nexus[bot]@users.noreply.github.com>"] * 2
     bad = await workbench.put(f"{project}/git/identity", json={"name": "x\nevil", "email": "a@b"})
     assert bad.status_code == 422
 
@@ -234,12 +234,12 @@ async def test_push_sends_head_to_a_branch(workbench, project, run, monkeypatch)
     monkeypatch.setattr(module, "PUSH_URL", __import__("re").compile(r"^/.*\.git$"))
     await workbench.put(f"{project}/file", json={"path": "a.txt", "content": "x"})
     await workbench.post(f"{project}/git/commit", json={"message": "Add a"})
-    body = {"url": remote, "branch": "jarvis/run-1", "token": "ghs_secret"}
+    body = {"url": remote, "branch": "nexus/run-1", "token": "ghs_secret"}
     resp = await workbench.post(f"{project}/git/push", json=body)
     assert resp.status_code == 200, resp.text
     head = (await run("git rev-parse HEAD"))["stdout"].strip()
-    assert resp.json() == {"branch": "jarvis/run-1", "commit": head}
-    pushed = await run("git --git-dir=.home/remote.git rev-parse refs/heads/jarvis/run-1")
+    assert resp.json() == {"branch": "nexus/run-1", "commit": head}
+    pushed = await run("git --git-dir=.home/remote.git rev-parse refs/heads/nexus/run-1")
     assert pushed["stdout"].strip() == head
     # The token is never written into the project's git config.
     assert "ghs_secret" not in (await run("cat .git/config"))["stdout"]

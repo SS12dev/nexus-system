@@ -12,7 +12,7 @@ async def test_send_message_queues_a_turn(owner, queue):
     assert body["chat"]["title"] == "Hello Nexus"
     assert body["user_message"]["status"] == "complete"
     assistant = body["assistant_message"]
-    assert assistant["status"] == "streaming" and assistant["model"] == "jarvis-mini"
+    assert assistant["status"] == "streaming" and assistant["model"] == "nexus-mini"
     assert assistant["trace_id"]
     assert [str(m) for m in queue.turns[0]] == [chat_id, assistant["id"]]
 

@@ -1,19 +1,19 @@
-# LiteLLM proxy for Nexus. Agents only ever name the jarvis-* aliases, so swapping a model is a
+# LiteLLM proxy for Nexus. Agents only ever name the nexus-* aliases, so swapping a model is a
 # change here, not in code. Prices and tiers: see the architecture doc.
 model_list:
-  - model_name: jarvis-nano     # routing, intent, memory extraction, titles, summaries
+  - model_name: nexus-nano     # routing, intent, memory extraction, titles, summaries
     litellm_params:
       model: openai/gpt-5.4-nano
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: jarvis-mini     # most sub-agents, tool calling, RAG answers, plain chat
+  - model_name: nexus-mini     # most sub-agents, tool calling, RAG answers, plain chat
     litellm_params:
       model: openai/gpt-5.4-mini
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: jarvis-pro      # planning, designing agent systems, hard reasoning
+  - model_name: nexus-pro      # planning, designing agent systems, hard reasoning
     litellm_params:
       model: openai/gpt-5.4
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: jarvis-max      # escalation only
+  - model_name: nexus-max      # escalation only
     litellm_params:
       model: openai/gpt-5.5
       api_key: os.environ/OPENAI_API_KEY
@@ -23,7 +23,7 @@ model_list:
   #   api_key: os.environ/OPENAI_API_KEY
   #   dimensions: 1024
   # then restart the workers; a background job re-embeds everything with the new model.
-  - model_name: jarvis-embed
+  - model_name: nexus-embed
     litellm_params:
       model: ollama/bge-m3
       api_base: os.environ/OLLAMA_BASE_URL
@@ -44,8 +44,8 @@ litellm_settings:
     namespace: litellm.cache
     ttl: 3600
   drop_params: true
-  # jarvis-mini falls back to jarvis-nano if it is down.
-  fallbacks: [{"jarvis-mini": ["jarvis-nano"]}]
+  # nexus-mini falls back to nexus-nano if it is down.
+  fallbacks: [{"nexus-mini": ["nexus-nano"]}]
 
 router_settings:
   num_retries: 2

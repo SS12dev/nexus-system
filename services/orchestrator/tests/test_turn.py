@@ -52,7 +52,7 @@ async def setup(sessionmaker, deps, model):
             role=MessageRole.assistant,
             content="",
             status=MessageStatus.streaming,
-            model="jarvis-mini",
+            model="nexus-mini",
             trace_id="t1",
         )
         db.add(reply)
@@ -98,7 +98,7 @@ async def test_turn_streams_and_stores_reply(setup, redis, sessionmaker):
 
     # The call used the user's own budgeted key and carries Langfuse trace metadata.
     call = factory_calls[0]
-    assert call["api_key"] == key.secret and call["model"] == "jarvis-mini"
+    assert call["api_key"] == key.secret and call["model"] == "nexus-mini"
     assert call["metadata"]["trace_id"] == "t1"
     assert call["metadata"]["session_id"] == str(chat_id)
     assert call["metadata"]["trace_user_id"] == str(user_id)
@@ -117,7 +117,7 @@ async def test_key_is_minted_once(setup, redis, sessionmaker, gateway):
             role=MessageRole.assistant,
             content="",
             status=MessageStatus.streaming,
-            model="jarvis-mini",
+            model="nexus-mini",
         )
         db.add(reply)
         await db.commit()
@@ -179,7 +179,7 @@ async def ask(sessionmaker, chat_id, text: str) -> uuid.UUID:
             role=MessageRole.assistant,
             content="",
             status=MessageStatus.streaming,
-            model="jarvis-mini",
+            model="nexus-mini",
             trace_id="t2",
         )
         db.add(reply)
@@ -195,15 +195,15 @@ RESEARCH = (
 
 async def test_router_hands_team_work_to_build_agent_system(setup, settings, sessionmaker):
     deps, model, factory_calls, (_u, chat_id, _m) = setup
-    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    deps.settings = settings.model_copy(update={"route_model": "nexus-nano"})
     await run_turn(deps, chat_id, _m)  # "Hi Jarvis" is too short to route
-    assert [c["model"] for c in factory_calls] == ["jarvis-mini"]
+    assert [c["model"] for c in factory_calls] == ["nexus-mini"]
 
     model.seen.clear()
     model.script = ['{"route": "team", "reason": "literature research"}', "On it."]
     reply_id = await ask(sessionmaker, chat_id, RESEARCH)
     await run_turn(deps, chat_id, reply_id)
-    assert factory_calls[-1]["model"] == "jarvis-nano"
+    assert factory_calls[-1]["model"] == "nexus-nano"
     assert factory_calls[-1]["metadata"]["generation_name"] == "nexus.route"
     # The router saw the request; Nexus's first call was made to call build_agent_system.
     assert RESEARCH in model.seen[0][-1].content
@@ -211,9 +211,9 @@ async def test_router_hands_team_work_to_build_agent_system(setup, settings, ses
     assert "build_agent_system" in model.tools
 
 
-async def test_router_leaves_other_messages_to_jarvis(setup, settings, sessionmaker):
+async def test_router_leaves_other_messages_to_the_assistant(setup, settings, sessionmaker):
     deps, model, _calls, (_u, chat_id, _m) = setup
-    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    deps.settings = settings.model_copy(update={"route_model": "nexus-nano"})
     model.script = ['{"route": "self", "reason": "calendar question"}', "Two meetings."]
     reply_id = await ask(sessionmaker, chat_id, "What is on my calendar for the rest of this week?")
     await run_turn(deps, chat_id, reply_id)
@@ -226,7 +226,7 @@ async def test_router_runs_while_the_context_is_gathered(
     setup, settings, sessionmaker, monkeypatch
 ):
     deps, model, _calls, (_u, chat_id, _m) = setup
-    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    deps.settings = settings.model_copy(update={"route_model": "nexus-nano"})
     model.script = ['{"route": "self", "reason": "calendar question"}', "Two meetings."]
     real_assemble = turn.assemble
     routed_during_assembly = []
@@ -248,9 +248,9 @@ async def test_router_runs_while_the_context_is_gathered(
         assert (await db.get(Message, reply_id)).content == "Two meetings."
 
 
-async def test_router_failure_falls_back_to_jarvis(setup, settings, sessionmaker):
+async def test_router_failure_falls_back_to_the_assistant(setup, settings, sessionmaker):
     deps, model, _calls, (_u, chat_id, _m) = setup
-    deps.settings = settings.model_copy(update={"route_model": "jarvis-nano"})
+    deps.settings = settings.model_copy(update={"route_model": "nexus-nano"})
     model.script = ["not json at all", "Here you go."]
     reply_id = await ask(sessionmaker, chat_id, RESEARCH)
     await run_turn(deps, chat_id, reply_id)

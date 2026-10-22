@@ -35,23 +35,23 @@ async def test_static_app_is_built_offline_and_run_boxed_in(
     assert out["url"] == "http://2048.apps.localhost:8080" and out["stack"] == "static"
     assert out["screenshot"] == "iVBORw0KGgo="
     build = fake_docker.builds[0]
-    assert build["networkmode"] == "none" and build["t"] == "jarvis-app-2048-web:latest"
-    c = fake_docker.containers["jarvis-app-2048-web"]
+    assert build["networkmode"] == "none" and build["t"] == "nexus-app-2048-web:latest"
+    c = fake_docker.containers["nexus-app-2048-web"]
     host = c["HostConfig"]
     assert host["Memory"] == 512 * 1024 * 1024 and host["NanoCpus"] == 500_000_000
-    assert host["NetworkMode"] == "jarvis_apps" and host["CapDrop"] == ["ALL"]
+    assert host["NetworkMode"] == "nexus_apps" and host["CapDrop"] == ["ALL"]
     assert host["RestartPolicy"] == {"Name": "unless-stopped"} and host["ReadonlyRootfs"]
     assert "Binds" not in host and c["User"] == "101"
     labels = c["Labels"]
-    assert labels["jarvis.app"] == "p1" and labels["jarvis.owner"] == "u1"
-    assert labels["traefik.docker.network"] == "jarvis_apps"
+    assert labels["nexus.app"] == "p1" and labels["nexus.owner"] == "u1"
+    assert labels["traefik.docker.network"] == "nexus_apps"
     assert labels["traefik.http.routers.app-2048-web.rule"] == "Host(`2048.apps.localhost`)"
     assert labels["traefik.http.services.app-2048-web.loadbalancer.server.port"] == "8080"
     # No internet unless asked for; checked through Traefik by host.
     assert fake_docker.networks == {}
     assert ("2048.apps.localhost", "/") in traefik
     # The screenshot container is gone again.
-    assert "jarvis-shot-2048" not in fake_docker.containers
+    assert "nexus-shot-2048" not in fake_docker.containers
 
 
 async def test_backends_get_api_routes_and_internet_on_request(
@@ -60,14 +60,14 @@ async def test_backends_get_api_routes_and_internet_on_request(
     node_project(tmp_path)
     resp = await deployer.post("/apps/2048/deploy", json={**BODY, "internet": True})
     assert resp.json()["ok"] and resp.json()["stack"] == "node"
-    api = fake_docker.containers["jarvis-app-2048-api"]["Labels"]
+    api = fake_docker.containers["nexus-app-2048-api"]["Labels"]
     assert api["traefik.http.routers.app-2048-api.rule"] == (
         "Host(`2048.apps.localhost`) && PathPrefix(`/api`)"
     )
     assert api["traefik.http.routers.app-2048-api.priority"] == "1100"
-    assert fake_docker.containers["jarvis-app-2048-api"]["User"] == "1000"
-    assert sorted(fake_docker.networks["jarvis_apps_egress"]) == [
-        "jarvis-app-2048-api", "jarvis-app-2048-web",
+    assert fake_docker.containers["nexus-app-2048-api"]["User"] == "1000"
+    assert sorted(fake_docker.networks["nexus_apps_egress"]) == [
+        "nexus-app-2048-api", "nexus-app-2048-web",
     ]  # fmt: skip
     assert ("2048.apps.localhost", "/api/health") in traefik
 
@@ -78,7 +78,7 @@ async def test_redeploy_replaces_in_place_and_drops_the_old_image(
     static_project(tmp_path)
     await deployer.post("/apps/2048/deploy", json=BODY)
     await deployer.post("/apps/2048/deploy", json=BODY)
-    assert list(fake_docker.containers) == ["jarvis-app-2048-web"]
+    assert list(fake_docker.containers) == ["nexus-app-2048-web"]
     deletes = [p for m, p, _ in fake_docker.calls if m == "DELETE" and p.startswith("/images/")]
     assert deletes == ["/images/sha256:1"]
 
@@ -93,7 +93,7 @@ async def test_a_failed_build_or_health_check_comes_back_with_logs(
     assert "npm run build exited 1" in out["logs"]
 
     fake_docker.build_error = None
-    fake_docker.crash.add("jarvis-app-2048-api")
+    fake_docker.crash.add("nexus-app-2048-api")
     out = (await deployer.post("/apps/2048/deploy", json=BODY)).json()
     assert not out["ok"] and "the api stopped" in out["error"]
     assert "cannot find module 'express'" in out["logs"]
@@ -121,7 +121,7 @@ async def test_stop_restart_list_and_delete(deployer, fake_docker, traefik, tmp_
     assert (await deployer.post("/apps/2048/stop")).status_code == 404
 
 
-@pytest.mark.parametrize("slug", ["../x", "UPPER", "a" * 64, "jarvis", "traefik"])
+@pytest.mark.parametrize("slug", ["../x", "UPPER", "a" * 64, "nexus", "traefik"])
 async def test_bad_names_and_paths_are_refused(deployer, fake_docker, slug):
     resp = await deployer.post(f"/apps/{slug}/deploy", json=BODY)
     assert resp.status_code in (400, 404)
@@ -168,15 +168,15 @@ async def test_apps_are_private_unless_asked_and_the_checks_get_past_sign_in(
     monkeypatch.setattr(module, "probe", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     auth = {"Authorization": "Bearer s3cret"}
     assert (await deployer.post("/apps/2048/deploy", json=BODY, headers=auth)).json()["ok"]
-    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    labels = fake_docker.containers["nexus-app-2048-web"]["Labels"]
     assert labels["traefik.http.routers.app-2048-web.middlewares"] == "app-auth@docker"
     # The health check and the screenshot carry the key for this host alone.
     key = hmac.new(b"s3cret", b"preview:2048.apps.localhost", hashlib.sha256).hexdigest()
     assert seen and set(seen) == {key}
-    assert fake_docker.created["jarvis-shot-2048"]["Cmd"][-2:] == ["2048.apps.localhost", key]
+    assert fake_docker.created["nexus-shot-2048"]["Cmd"][-2:] == ["2048.apps.localhost", key]
     resp = await deployer.post("/apps/2048/deploy", json={**BODY, "private": False}, headers=auth)
     assert resp.json()["ok"]
-    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    labels = fake_docker.containers["nexus-app-2048-web"]["Labels"]
     assert not any(k.endswith(".middlewares") for k in labels)
 
 
@@ -186,11 +186,11 @@ async def test_making_public_or_private_reuses_the_images(deployer, fake_docker,
     out = (await deployer.post("/apps/2048/deploy", json={**BODY, "build": False})).json()
     assert not out["ok"] and "no image yet" in out["error"]
     await deployer.post("/apps/2048/deploy", json=BODY)
-    fake_docker.containers.pop("jarvis-shot-2048", None)
+    fake_docker.containers.pop("nexus-shot-2048", None)
     out = (
         await deployer.post("/apps/2048/deploy", json={**BODY, "build": False, "private": False})
     ).json()
     assert out["ok"] and out["screenshot"] is None
     assert len(fake_docker.builds) == 1
-    labels = fake_docker.containers["jarvis-app-2048-web"]["Labels"]
+    labels = fake_docker.containers["nexus-app-2048-web"]["Labels"]
     assert "traefik.http.routers.app-2048-web.middlewares" not in labels

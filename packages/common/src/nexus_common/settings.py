@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,10 +12,10 @@ class Settings(BaseSettings):
 
     env: Literal["development", "production", "test"] = "development"
 
-    database_url: str = "postgresql+asyncpg://jarvis:jarvis@localhost:5432/jarvis"
+    database_url: str = "postgresql+asyncpg://nexus:nexus@localhost:5432/nexus"
     redis_url: str = "redis://localhost:6379/0"
 
-    # Model gateway. Every LLM call goes through LiteLLM using the jarvis-* aliases.
+    # Model gateway. Every LLM call goes through LiteLLM using the nexus-* aliases.
     litellm_base_url: str = "http://localhost:4000"
     # Admin key for the proxy: used to mint and manage per-user virtual keys.
     litellm_master_key: str = ""
@@ -24,10 +24,7 @@ class Settings(BaseSettings):
     litellm_virtual_keys: bool = True
     litellm_api_key: str = ""
     litellm_budget_duration: str = "30d"
-    # Older .env files call it JARVIS_CHAT_MODEL.
-    chat_model: str = Field(
-        default="jarvis-mini", validation_alias=AliasChoices("CHAT_MODEL", "JARVIS_CHAT_MODEL")
-    )
+    chat_model: str = "nexus-mini"
 
     # Budgets in USD per budget period, applied when a user's gateway key is created.
     default_budget_usd: float = 5.0
@@ -65,19 +62,19 @@ class Settings(BaseSettings):
 
     # Object storage (MinIO locally, any S3 API later) for uploads.
     s3_endpoint_url: str = "http://localhost:9000"
-    s3_access_key: str = "jarvis"
+    s3_access_key: str = "nexus"
     s3_secret_key: str = ""
-    s3_bucket: str = "jarvis"
+    s3_bucket: str = "nexus"
     s3_region: str = "us-east-1"
     max_upload_mb: int = 50
 
     # Embeddings go through LiteLLM too. The default alias points at bge-m3 in Ollama on the
     # host, so they cost nothing; see infra/litellm/config.yaml.
-    embedding_model: str = "jarvis-embed"
+    embedding_model: str = "nexus-embed"
     embedding_batch_size: int = 32
 
     # Memory. Extraction, summaries and the profile use the cheapest tier.
-    memory_model: str = "jarvis-nano"
+    memory_model: str = "nexus-nano"
     # Memories, past-chat summaries and document chunks put in the prompt each turn.
     memory_top_k: int = 8
     episode_top_k: int = 2
@@ -93,11 +90,11 @@ class Settings(BaseSettings):
     # Skills library: shipped skills and instructions, read at startup (library/ in the repo).
     library_path: str = "library"
 
-    # Agent systems. Nexus designs them with jarvis-pro; each run gets its own LiteLLM key.
-    design_model: str = "jarvis-pro"
+    # Agent systems. Nexus designs them with nexus-pro; each run gets its own LiteLLM key.
+    design_model: str = "nexus-pro"
     # Before Nexus answers, this model decides whether the message is work for a team (empty
     # turns the router off). Messages shorter than route_min_chars ("hi", "thanks") skip it.
-    route_model: str = "jarvis-nano"
+    route_model: str = "nexus-nano"
     route_min_chars: int = 15
     default_run_budget_usd: float = 0.50
     # Software teams (dev_project) plan, build, test and review in rounds, so they get more.
@@ -108,7 +105,7 @@ class Settings(BaseSettings):
     max_map_items: int = 8
     # Model calls one agent may make in one turn of a run before it has to stop.
     agent_max_steps: int = 12
-    # Roles whose systems may use jarvis-max for the lead agent when asked for the best model.
+    # Roles whose systems may use nexus-max for the lead agent when asked for the best model.
     max_tier_roles: str = "owner,admin"
     # After a run with at least this many tool calls, Nexus offers to save what it learned
     # as a skill (0 turns it off).
@@ -145,13 +142,9 @@ class Settings(BaseSettings):
     member_app_limit: int = 3
     # Apps answer at <name>.<apps_domain>; nexus_url is where people sign in to open a private
     # one. reserved_hostnames: names apps may never take (comma separated), on top of nexus,
-    # jarvis, www, mail, api, admin and traefik, e.g. the names your other servers use.
+    # www, mail, api, admin and traefik, e.g. the names your other servers use.
     apps_domain: str = "apps.localhost"
-    # Older .env files call it JARVIS_URL.
-    nexus_url: str = Field(
-        default="https://nexus.servhub.cc",
-        validation_alias=AliasChoices("NEXUS_URL", "JARVIS_URL"),
-    )
+    nexus_url: str = "https://nexus.servhub.cc"
     reserved_hostnames: str = ""
     # How long one sign-in to a private app lasts on that app's host.
     app_cookie_hours: int = 12

@@ -78,7 +78,7 @@ async def test_file_folder_and_pr_previews():
             ],
             "/repos/a/b/pulls/3": {
                 "title": "Add score", "state": "closed", "merged": True, "body": "Adds it.",
-                "user": {"login": "jarvis[bot]"}, "head": {"ref": "jarvis/1"},
+                "user": {"login": "nexus[bot]"}, "head": {"ref": "nexus/1"},
                 "base": {"ref": "main"},
             },
         }
@@ -88,7 +88,7 @@ async def test_file_folder_and_pr_previews():
     d = await github_preview(parse_link("https://github.com/a/b/tree/main/src"), get)
     assert [e["name"] for e in d["entries"]] == ["lib", "z.py"]
     pr = await github_preview(parse_link("https://github.com/a/b/pull/3"), get)
-    assert (pr["state"], pr["author"], pr["head"]) == ("merged", "jarvis[bot]", "jarvis/1")
+    assert (pr["state"], pr["author"], pr["head"]) == ("merged", "nexus[bot]", "nexus/1")
 
 
 async def test_an_unreadable_link_still_saves(deps, owner, monkeypatch):
@@ -122,7 +122,7 @@ async def test_save_link_tool_keeps_one_row_per_address(deps, owner, monkeypatch
     async with deps.sessionmaker() as db:
         rows = (await db.scalars(select(Link).where(Link.user_id == user.id))).all()
     assert len(rows) == 1 and rows[0].title == "Game"
-    assert rows[0].note == "Now with a leaderboard." and rows[0].source == "jarvis"
+    assert rows[0].note == "Now with a leaderboard." and rows[0].source == "assistant"
     assert [x.id for x in ctx.links] == [rows[0].id]
     listing = await tools["list_documents"].ainvoke({})
     assert "Links:" in listing and "https://github.com/acme/game" in listing
@@ -130,7 +130,7 @@ async def test_save_link_tool_keeps_one_row_per_address(deps, owner, monkeypatch
     assert bad.startswith("Not saved")
 
 
-async def test_jarvis_decides_new_version_or_separate_file(deps, owner, storage):
+async def test_assistant_decides_new_version_or_separate_file(deps, owner, storage):
     user, chat_id = owner
     deps.storage = storage
     first = await save_generated(deps, user.id, "README.md", b"# Game")

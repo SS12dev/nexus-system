@@ -493,8 +493,8 @@ class Memory(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.6)
     # Pinned memories are always in the profile and Nexus never changes or drops them itself.
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-    # "jarvis" when learned from a chat, "user" when added or edited on the Memory page.
-    source: Mapped[str] = mapped_column(String(16), default="jarvis")
+    # "assistant" when learned from a chat, "user" when added or edited on the Memory page.
+    source: Mapped[str] = mapped_column(String(16), default="assistant")
     source_chat_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("chats.id", ondelete="SET NULL")
     )
@@ -531,7 +531,7 @@ class MemoryEvent(Base):
     memory_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("memories.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     op: Mapped[str] = mapped_column(String(16))  # add, update, reinforce, pin, unpin, decay
-    actor: Mapped[str] = mapped_column(String(16))  # jarvis or user
+    actor: Mapped[str] = mapped_column(String(16))  # assistant or user
     content: Mapped[str | None] = mapped_column(Text)
     message_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL")

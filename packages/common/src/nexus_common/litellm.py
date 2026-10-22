@@ -12,7 +12,7 @@ from nexus_common.models import ApiKey, Budget, RoleName, User, utcnow
 from nexus_common.settings import Settings
 
 PROVIDER = "litellm"
-MODEL_ALIASES = ["jarvis-nano", "jarvis-mini", "jarvis-pro", "jarvis-max"]
+MODEL_ALIASES = ["nexus-nano", "nexus-mini", "nexus-pro", "nexus-max"]
 
 
 class GatewayError(RuntimeError):
@@ -44,7 +44,7 @@ class LiteLLMAdmin:
         data = await self._post(
             "/key/generate",
             {
-                "key_alias": f"jarvis-user-{user.id}",
+                "key_alias": f"nexus-user-{user.id}",
                 "user_id": str(user.id),
                 "models": MODEL_ALIASES,
                 "max_budget": float(max_usd),
@@ -62,7 +62,7 @@ class LiteLLMAdmin:
         data = await self._post(
             "/key/generate",
             {
-                "key_alias": f"jarvis-run-{run_id}",
+                "key_alias": f"nexus-run-{run_id}",
                 "user_id": str(user.id),
                 "models": models,
                 "max_budget": float(max_usd),

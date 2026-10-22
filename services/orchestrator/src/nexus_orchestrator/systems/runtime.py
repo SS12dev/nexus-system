@@ -221,7 +221,7 @@ class RunContext:
         return 0.0
 
     async def tier_for(self, agent: AgentSpec, escalated: bool) -> str:
-        """The spec's tier, adjusted by policy: jarvis-max only for the lead when the user's role
+        """The spec's tier, adjusted by policy: nexus-max only for the lead when the user's role
         allows it; one tier up after a failure; non-lead agents one tier down once less than
         20% of the run's budget is left."""
         is_lead = agent.id == self.spec.lead.id

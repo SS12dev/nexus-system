@@ -1,6 +1,6 @@
 """Text embeddings through LiteLLM, with a cache keyed by a hash of the text.
 
-The default `jarvis-embed` alias runs bge-m3 in Ollama on the host, so embedding is free and
+The default `nexus-embed` alias runs bge-m3 in Ollama on the host, so embedding is free and
 local. Every stored vector records the model that made it; when the model changes, the
 backfill jobs re-embed whatever was made with the old one.
 """

@@ -25,7 +25,7 @@ import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Orb } from "./Orb";
 
-const SIDEBAR_KEY = "jarvis.sidebar";
+const SIDEBAR_KEY = "nexus.sidebar";
 
 function savedCollapsed(): boolean {
   try {

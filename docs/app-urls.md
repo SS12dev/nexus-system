@@ -8,7 +8,7 @@ Every app a software team deploys gets its own address on `APPS_DOMAIN`, for exa
 - The owner's apps are named after the app: `2048.servhub.cc`.
 - Other people's carry their first name too: `2048-priya.servhub.cc`.
 - A taken name gets a short random suffix: `2048-k7.servhub.cc`.
-- `jarvis`, `www`, `mail`, `api`, `admin` and `traefik` are never given out, nor anything in
+- `nexus`, `www`, `mail`, `api`, `admin` and `traefik` are never given out, nor anything in
   `RESERVED_HOSTNAMES` (comma separated in `.env`). List every name your other services use on
   the same domain there, for example the homeserver tunnel's hostnames, so an app can never
   take one.
@@ -29,9 +29,9 @@ Traefik asks the API (`/auth/app/check`):
 1. With no app cookie, the visitor goes to `https://nexus.servhub.cc/auth/app/start`, signs in
    with Google if they aren't already, and Nexus checks they may open the app: its owner and
    Nexus's owner may.
-2. Nexus sends them back to `https://<app>.servhub.cc/_jarvis/auth` with a signed token that
+2. Nexus sends them back to `https://<app>.servhub.cc/_nexus/auth` with a signed token that
    works once, for that app only, for two minutes.
-3. Traefik passes that to the API, which swaps it for a `jarvis_app` cookie on the app's host
+3. Traefik passes that to the API, which swaps it for a `nexus_app` cookie on the app's host
    alone (no `Domain`), good for `APP_COOKIE_HOURS` (12), then sends them to the page they
    wanted.
 
@@ -70,7 +70,7 @@ The Nexus tunnel needs two public hostnames, both to `http://traefik:80`:
 1. `nexus.servhub.cc`
 2. `*.servhub.cc`
 
-and a DNS record `*` → `<jarvis tunnel id>.cfargotunnel.com`, proxied. Specific records (the
+and a DNS record `*` → `<tunnel id>.cfargotunnel.com`, proxied. Specific records (the
 homeserver tunnel's hostnames) win over the wildcard, so they keep working.
 
 If adding the wildcard route says "An A, AAAA, or CNAME record with that host already exists",

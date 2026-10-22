@@ -381,7 +381,7 @@ async def _generate(
     try:
         context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
         # Outbound and destructive tools are for agents in a system, where every call is approved.
-        names = {t.name for t in TOOLS if t.jarvis and t.name in allowed} | {"remember"}
+        names = {t.name for t in TOOLS if t.assistant and t.name in allowed} | {"remember"}
         extra = []
         layers = await instruction_layers(db, Path(deps.settings.library_path), user, None)
         if layers.global_extra:

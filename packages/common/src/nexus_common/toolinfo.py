@@ -29,7 +29,7 @@ class ToolInfo:
     risk: Risk
     description: str
     # Nexus itself can call it in a chat (not only agents in a system).
-    jarvis: bool = True
+    assistant: bool = True
     # The Google service it acts on; offered only to users who granted it.
     service: str | None = None
     # Only the owner may have it, whatever their grants.
@@ -70,28 +70,28 @@ TOOLS: list[ToolInfo] = [
         "List project files",
         "read",
         "List the files in the project folder, with sizes.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_read",
         "Read a project file",
         "read",
         "Read a text file from the project folder, with line numbers.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_write",
         "Write a project file",
         "write",
         "Create or overwrite a file in the project folder.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_edit",
         "Edit a project file",
         "write",
         "Replace an exact piece of text in a project file.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_run",
@@ -99,21 +99,21 @@ TOOLS: list[ToolInfo] = [
         "exec",
         "Run a shell command in the project folder: npm, uv, git, Playwright with headless "
         "Chromium. Internet reaches only npm, PyPI and GitHub.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_diff",
         "See project changes",
         "read",
         "Show what changed in the project since the last commit, or since a branch or commit.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "ws_commit",
         "Commit project changes",
         "write",
         "Commit every change in the project folder to its git history with a message.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "app_visibility",
@@ -128,7 +128,7 @@ TOOLS: list[ToolInfo] = [
         "outbound",
         "Transfer a software project's repo from Nexus's GitHub organisation to someone's own "
         "GitHub account; GitHub emails them to accept it. Asks the user first.",
-        jarvis=False,
+        assistant=False,
         owner_only=True,
     ),
     ToolInfo(
@@ -137,14 +137,14 @@ TOOLS: list[ToolInfo] = [
         "outbound",
         "Send an email from Nexus's own mail account (SMTP), optionally with library files "
         "attached. Prefer gmail_send when the user has Gmail connected. Asks the user first.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "delete_document",
         "Delete a document",
         "destructive",
         "Delete a document from the user's library. Asks the user first.",
-        jarvis=False,
+        assistant=False,
     ),
     ToolInfo(
         "gmail_search",
@@ -174,7 +174,7 @@ TOOLS: list[ToolInfo] = [
         "outbound",
         "Send an email or reply from the user's own Gmail, optionally with library files "
         "attached. Asks the user first.",
-        jarvis=False,
+        assistant=False,
         service="gmail",
     ),
     ToolInfo(
@@ -203,7 +203,7 @@ TOOLS: list[ToolInfo] = [
         "Send calendar invite",
         "outbound",
         "Create an event and email invitations to guests. Asks the user first.",
-        jarvis=False,
+        assistant=False,
         service="calendar",
     ),
     ToolInfo(
@@ -211,7 +211,7 @@ TOOLS: list[ToolInfo] = [
         "Delete calendar event",
         "destructive",
         "Delete an event from the user's calendar, telling any guests. Asks the user first.",
-        jarvis=False,
+        assistant=False,
         service="calendar",
     ),
     ToolInfo(
