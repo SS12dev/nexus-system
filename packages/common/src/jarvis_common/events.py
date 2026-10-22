@@ -17,6 +17,9 @@ EventType = Literal[
     "tool.done",
     "file.updated",
     "file.deleted",
+    # Links in the library (jarvis_common.links).
+    "link.updated",
+    "link.deleted",
     "memory.updated",
     "profile.updated",
     # Agent systems. system.* carry the nodes and edges the UI draws.

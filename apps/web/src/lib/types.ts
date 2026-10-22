@@ -88,6 +88,80 @@ export interface Project {
   updated_at: string;
 }
 
+/** What a link points to; see jarvis_common.links. */
+export type LinkKind =
+  | "github_repo"
+  | "github_file"
+  | "github_folder"
+  | "github_pr"
+  | "github_issue"
+  | "github_commit"
+  | "google_doc"
+  | "google_sheet"
+  | "google_slides"
+  | "google_drive"
+  | "app"
+  | "video"
+  | "design"
+  | "web";
+
+/** A link in the library: a pointer to something that lives elsewhere, with a preview snapshot. */
+export interface LinkItem {
+  id: string;
+  url: string;
+  kind: LinkKind;
+  title: string;
+  note: string | null;
+  source: "user" | "jarvis" | "team";
+  chat_id: string | null;
+  run_id: string | null;
+  project_id: string | null;
+  /** Fetched from GitHub when saved or refreshed; null for other kinds. */
+  preview: LinkPreviewData | null;
+  preview_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LinkPreviewData {
+  error?: string;
+  // Repos
+  description?: string | null;
+  default_branch?: string | null;
+  language?: string | null;
+  stars?: number | null;
+  private?: boolean | null;
+  pushed_at?: string | null;
+  topics?: string[];
+  readme?: string;
+  readme_truncated?: boolean;
+  // Files and folders
+  name?: string;
+  size?: number;
+  text?: string;
+  truncated?: boolean;
+  note?: string;
+  entries?: { name: string; type: string; size: number }[];
+  entries_total?: number;
+  // Pull requests, issues and commits
+  title?: string;
+  state?: string;
+  draft?: boolean;
+  author?: string | null;
+  head?: string | null;
+  base?: string | null;
+  additions?: number | null;
+  deletions?: number | null;
+  changed_files?: number | null;
+  comments?: number | null;
+  labels?: string[];
+  body?: string;
+  body_truncated?: boolean;
+  message?: string;
+  date?: string;
+  files?: { name: string; status: string; additions: number; deletions: number }[];
+}
+
 export interface FileItem extends FileBrief {
   error: string | null;
   parser: string | null;
@@ -148,6 +222,8 @@ export interface Message {
   error: string | null;
   created_at: string;
   attachments?: FileBrief[];
+  /** Links Jarvis or a team saved for this reply (a repo, an app, a Google Doc). */
+  links?: LinkItem[];
   /** Tools Jarvis used for this reply, in order. */
   steps?: ToolStep[] | null;
 }
@@ -399,6 +475,8 @@ export type ServerEvent =
   | { type: "approval.resolved"; chat_id?: string | null; data: { approval: Approval; run_continues: boolean } }
   | { type: "artifact.created"; chat_id?: string | null; data: { file: FileItem } }
   | { type: "skill.updated"; chat_id?: null; data: { skill: Skill } }
+  | { type: "link.updated"; chat_id?: null; data: { link: LinkItem } }
+  | { type: "link.deleted"; chat_id?: null; data: { id: string } }
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 

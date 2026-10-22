@@ -18,6 +18,7 @@ from jarvis_common.embeddings import CachedEmbedder
 from jarvis_common.events import Event, publish
 from jarvis_common.google import get_grant, services_in
 from jarvis_common.library import file_payload
+from jarvis_common.links import link_payload
 from jarvis_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
 from jarvis_common.models import (
     AgentRun,
@@ -25,6 +26,7 @@ from jarvis_common.models import (
     Attachment,
     Chat,
     Message,
+    MessageLink,
     MessageRole,
     MessageStatus,
     SystemLifetime,
@@ -219,7 +221,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
 
         try:
             await emit("jarvis.state", state="thinking")
-            content, usage, learn, saved = await _generate(deps, db, chat, user, msg, emit)
+            content, usage, learn, saved, links = await _generate(deps, db, chat, user, msg, emit)
         except Exception as exc:
             if not isinstance(exc, TurnFailed):
                 log.exception("Turn %s failed", assistant_message_id)
@@ -242,10 +244,15 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         # Files Jarvis made in this turn (save_file, run_code) are attached to its reply.
         for f in saved:
             db.add(Attachment(message_id=msg.id, file_id=f.id))
+        # So are the links it saved (save_link).
+        for link in links:
+            db.add(MessageLink(message_id=msg.id, link_id=link.id))
         await db.commit()
         payload = message_payload(msg)
         if saved:
             payload["attachments"] = [file_payload(f) for f in saved]
+        if links:
+            payload["links"] = [link_payload(x) for x in links]
         await emit("message.completed", message=payload)
         await emit("jarvis.state", state="idle")
 
@@ -419,4 +426,4 @@ async def _generate(
             # One turn can make several model calls (tool rounds); count them all.
             usage["input_tokens"] += chunk.usage_metadata.get("input_tokens", 0)
             usage["output_tokens"] += chunk.usage_metadata.get("output_tokens", 0)
-    return content, usage, context.memory_enabled, ctx.saved
+    return content, usage, context.memory_enabled, ctx.saved, ctx.links

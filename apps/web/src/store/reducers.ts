@@ -29,6 +29,8 @@ export interface ChatState {
   agentsVersion: number;
   /** Bumped when a skill changes (Jarvis drafted one, or someone edited one). */
   skillsVersion: number;
+  /** Bumped when a link is added, changed or deleted, so the Library reloads its links. */
+  linksVersion: number;
   /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
   runFeed: Record<string, FeedItem[]>;
 }
@@ -44,6 +46,7 @@ export const initialState: ChatState = {
   approvals: {},
   agentsVersion: 0,
   skillsVersion: 0,
+  linksVersion: 0,
   runFeed: {},
 };
 
@@ -249,6 +252,9 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       };
     case "skill.updated":
       return { ...state, skillsVersion: state.skillsVersion + 1 };
+    case "link.updated":
+    case "link.deleted":
+      return { ...state, linksVersion: state.linksVersion + 1 };
     case "artifact.created":
       return { ...state, files: upsertFile(state.files, event.data.file) };
     case "file.deleted": {
@@ -288,6 +294,7 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       const message = {
         ...event.data.message,
         attachments: event.data.message.attachments ?? prev?.attachments ?? [],
+        links: event.data.message.links ?? prev?.links ?? [],
         steps: event.data.message.steps ?? prev?.steps ?? null,
       };
       return addMessages(next, event.chat_id, [message]);

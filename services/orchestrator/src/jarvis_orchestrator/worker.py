@@ -20,7 +20,7 @@ from jarvis_common.litellm import LiteLLMAdmin
 from jarvis_common.settings import get_settings
 from jarvis_common.skills import sync_library
 from jarvis_common.storage import S3Storage
-from jarvis_orchestrator import deploy, memory
+from jarvis_orchestrator import deploy, links, memory
 from jarvis_orchestrator.github import GitHubApp
 from jarvis_orchestrator.llm import chat_model
 from jarvis_orchestrator.sandbox import SandboxClient
@@ -126,6 +126,11 @@ async def deploy_app(ctx: dict, project_id: str) -> None:
     await deploy.deploy_project(ctx["deps"], uuid.UUID(project_id))
 
 
+async def link_preview(ctx: dict, link_id: str) -> None:
+    """Fetch the preview of a link the user added in the Library."""
+    await links.refresh_preview(ctx["deps"], uuid.UUID(link_id))
+
+
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -144,6 +149,7 @@ class WorkerSettings:
         extract_memories,
         rebuild_profile,
         draft_skill,
+        func(link_preview, timeout=60, keep_result=0),
         # A run can take a while; when it parks on an approval or a pause the job ends and a
         # later continue_run picks it up from its checkpoint. keep_result=0 so the shared
         # run:<id> job id only blocks a second job while one is queued or running.

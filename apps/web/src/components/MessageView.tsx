@@ -1,5 +1,6 @@
 import type { Message } from "../lib/types";
 import { FileChip } from "./FileChip";
+import { LinkChip } from "./LinkChip";
 import { Markdown } from "./Markdown";
 import { ToolSteps } from "./ToolSteps";
 import { useAssistantName } from "../lib/assistant";
@@ -44,11 +45,14 @@ export function MessageView({ message, activity }: { message: Message; activity?
       ) : (
         <Markdown>{message.content}</Markdown>
       )}
-      {/* Files Jarvis made for this reply. */}
-      {!!message.attachments?.length && (
+      {/* Files Jarvis made for this reply, and links it saved (a repo, an app, a Google Doc). */}
+      {(!!message.attachments?.length || !!message.links?.length) && (
         <div className="mt-2 flex flex-wrap gap-2">
-          {message.attachments.map((f) => (
+          {message.attachments?.map((f) => (
             <FileChip key={f.id} file={f} status={f.status} />
+          ))}
+          {message.links?.map((l) => (
+            <LinkChip key={l.id} link={l} />
           ))}
         </div>
       )}

@@ -7,6 +7,7 @@ import type {
   Chat,
   FileItem,
   GoogleAccess,
+  LinkItem,
   Grants,
   Instructions,
   Memory,
@@ -101,6 +102,13 @@ export const api = {
 
   files: () => request<FileItem[]>("/api/files"),
   projects: () => request<Project[]>("/api/projects"),
+  links: (q?: string) => request<LinkItem[]>(`/api/links${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  addLink: (url: string, title?: string, note?: string) =>
+    request<LinkItem>("/api/links", { method: "POST", body: json({ url, title: title || null, note: note || null }) }),
+  editLink: (id: string, changes: { title?: string; note?: string }) =>
+    request<LinkItem>(`/api/links/${id}`, { method: "PATCH", body: json(changes) }),
+  refreshLink: (id: string) => request<LinkItem>(`/api/links/${id}/refresh`, { method: "POST" }),
+  deleteLink: (id: string) => request<void>(`/api/links/${id}`, { method: "DELETE" }),
   apps: () => request<AppItem[]>("/api/apps"),
   appAction: (id: string, action: "stop" | "restart" | "redeploy") =>
     request<AppItem>(`/api/apps/${id}/${action}`, { method: "POST" }),
