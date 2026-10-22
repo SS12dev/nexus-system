@@ -3,23 +3,21 @@ one user, so a tool can only ever see that user's data. Which tools exist and ho
 are is in nexus_common.toolinfo; which ones a given caller gets is decided by its owner's role
 and grants (and, for agents, the system spec)."""
 
-import asyncio
 import contextvars
 import functools
 import logging
 import re
-import smtplib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from email.message import EmailMessage
 from pathlib import PurePath
 from typing import Literal
 
 from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import or_, select
 
+from nexus_common import mail
 from nexus_common.apps import set_visibility
 from nexus_common.deployer import DeployerError
 from nexus_common.events import Event, publish
@@ -633,11 +631,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         settings = deps.settings
         if not settings.smtp_enabled:
             return "Email isn't set up on this server (SMTP_HOST and SMTP_FROM in .env)."
-        msg = EmailMessage()
-        msg["From"] = settings.smtp_from or settings.smtp_username
-        msg["To"] = ", ".join(to)
-        msg["Subject"] = subject
-        msg.set_content(body)
+        msg = mail.message(settings, to, subject, body)
         ids = [u for u in (_uuid(x) for x in (file_ids or [])) if u]
         if ids:
             async with sessionmaker() as db:
@@ -650,19 +644,10 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                     msg.add_attachment(
                         data, maintype=main, subtype=sub or "octet-stream", filename=f.name
                     )
-
-        def send() -> None:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-                if settings.smtp_starttls:
-                    smtp.starttls()
-                if settings.smtp_username:
-                    smtp.login(settings.smtp_username, settings.smtp_password)
-                smtp.send_message(msg)
-
         try:
-            await asyncio.to_thread(send)
-        except (smtplib.SMTPException, OSError) as exc:
-            return f"Sending failed: {exc.__class__.__name__}: {str(exc)[:200]}"
+            await mail.send(settings, msg)
+        except mail.MailError as exc:
+            return f"Sending failed: {exc}"
         return f"Sent to {', '.join(to)}."
 
     async def app_visibility(app: str, public: bool) -> str:

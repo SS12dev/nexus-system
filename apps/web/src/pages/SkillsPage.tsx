@@ -14,6 +14,7 @@ import {
 } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
+import { confirmAction } from "../components/Feedback";
 
 const SCOPE_LABEL: Record<SkillScope, string> = {
   core: "Core",
@@ -358,9 +359,13 @@ export function SkillsPage() {
                     </button>
                     {isAdmin && selected.owner_id === user.id && (
                       <button
-                        onClick={() => {
-                          if (!confirm(`Share ${selected.name} with everyone? It moves to the shared library, turned on.`))
-                            return;
+                        onClick={async () => {
+                          const ok = await confirmAction({
+                            title: `Share ${selected.name} with everyone?`,
+                            body: "It moves to the shared library, turned on.",
+                            confirmLabel: "Share",
+                          });
+                          if (!ok) return;
                           act(async () => {
                             setSelected(await api.shareSkill(selected.id));
                             setVersions(null);
@@ -374,8 +379,13 @@ export function SkillsPage() {
                     )}
                     {selected.scope !== "core" && (
                       <button
-                        onClick={() => {
-                          if (!confirm(`Delete ${selected.name}?`)) return;
+                        onClick={async () => {
+                          const ok = await confirmAction({
+                            title: `Delete ${selected.name}?`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (!ok) return;
                           act(async () => {
                             await api.deleteSkill(selected.id);
                             setSelected(null);

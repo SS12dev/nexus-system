@@ -1,4 +1,8 @@
 import type {
+  AccessRequest,
+  AccessRequestList,
+  AccessState,
+  AuthConfig,
   AppItem,
   AgentSystem,
   Approval,
@@ -74,8 +78,13 @@ function forUsers(ids: string[]): URLSearchParams {
 }
 
 export const api = {
-  authConfig: () =>
-    request<{ oidc_enabled: boolean; dev_login_enabled: boolean }>("/auth/config"),
+  authConfig: () => request<AuthConfig>("/auth/config"),
+  accessState: () => request<AccessState>("/auth/access-request"),
+  requestAccess: (note: string) =>
+    request<AccessState>("/auth/access-request", {
+      method: "POST",
+      body: json({ note: note.trim() || null }),
+    }),
   devLogin: (email: string, token: string) =>
     request<User>("/auth/dev-login", { method: "POST", body: json({ email, token }) }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
@@ -223,6 +232,16 @@ export const api = {
       method: "POST",
       body: json({ email, role, ...(budget_usd ? { budget_usd } : {}) }),
     }),
+  revokeInvite: (id: string) => request<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
+  accessRequests: (status: "pending" | "decided" = "pending") =>
+    request<AccessRequestList>(`/api/admin/access-requests?status=${status}`),
+  approveAccess: (id: string, role: Role, budget_usd?: string) =>
+    request<{ request: AccessRequest; user: User }>(`/api/admin/access-requests/${id}/approve`, {
+      method: "POST",
+      body: json({ role, ...(budget_usd ? { budget_usd } : {}) }),
+    }),
+  denyAccess: (id: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${id}/deny`, { method: "POST" }),
   signOutUser: (id: string) =>
     request<void>(`/api/admin/users/${id}/sign-out`, { method: "POST" }),
   systemStatus: (userIds: string[] = []) =>

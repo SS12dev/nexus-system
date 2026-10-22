@@ -40,6 +40,7 @@ async def test_auth_config(client_for):
     assert (await client.get("/auth/config")).json() == {
         "oidc_enabled": False,
         "dev_login_enabled": True,
+        "access_requests": True,
     }
 
 

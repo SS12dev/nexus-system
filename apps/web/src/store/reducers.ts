@@ -33,6 +33,8 @@ export interface ChatState {
   linksVersion: number;
   /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
   runFeed: Record<string, FeedItem[]>;
+  /** Owners and admins: access requests waiting for a decision; null for everyone else. */
+  pendingAccess: number | null;
 }
 
 export const initialState: ChatState = {
@@ -48,6 +50,7 @@ export const initialState: ChatState = {
   skillsVersion: 0,
   linksVersion: 0,
   runFeed: {},
+  pendingAccess: null,
 };
 
 /** Most feed lines kept per run; older ones drop off the top. */
@@ -185,6 +188,8 @@ export function mergeFetched(state: ChatState, chatId: string, fetched: Message[
 /** Apply one WebSocket event. Pure, so it is easy to test. */
 export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
   switch (event.type) {
+    case "access.pending":
+      return { ...state, pendingAccess: event.data.count };
     case "assistant.state":
       return {
         ...state,
