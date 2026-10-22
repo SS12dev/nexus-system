@@ -17,7 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from nexus_api.ratelimit import METRICS_TTL_S, hit, metrics_key
 from nexus_api.sessions import client_ip
-from nexus_common import logs
+from nexus_common import logs, metrics
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -206,7 +206,8 @@ class RequestContextMiddleware:
             await send({"type": "http.response.body", "body": body})
         finally:
             if scope["path"] not in HEALTH_PATHS:
-                route = scope.get("route")
+                route = getattr(scope.get("route"), "path", None)
+                ms = int((time.monotonic() - started) * 1000)
                 access_log.info(
                     "%s %s %s",
                     scope["method"],
@@ -215,8 +216,10 @@ class RequestContextMiddleware:
                     extra={
                         "method": scope["method"],
                         "path": scope["path"],
-                        "route": getattr(route, "path", None),
+                        "route": route,
                         "status": status_code,
-                        "duration_ms": int((time.monotonic() - started) * 1000),
+                        "duration_ms": ms,
                     },
                 )
+                redis = getattr(scope["app"].state, "redis", None)
+                await metrics.record_request(redis, scope["method"], route, status_code, ms)

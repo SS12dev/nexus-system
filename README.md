@@ -366,6 +366,17 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   rate-limited calls, and the latest failed turns, runs and file parses with their error.
   The owner sees counts, costs and error messages, never chat content. Per-call traces stay in
   Langfuse (`LANGFUSE_URL`).
+- **Monitoring:** active alerts and the last 50 raised or resolved, then, over the last hour,
+  6 hours or 24 hours, every API route and every background job with its calls, failures, the
+  time half of them beat and the time 95% beat (and, for jobs, how long they waited in the
+  queue), and the latest 200 errors logged by the API, the workers or someone's browser, each
+  with its request, user, chat, job and trace ids and its stack. Figures are kept a day in Valkey.
+- **Alerts:** every `ALERT_INTERVAL_S` (60) one API replica checks the services above, the
+  worker heartbeats, the last backup, API errors in the last 5 minutes
+  (`ALERT_API_ERRORS_5M`, 5) and failed jobs in the last 15 (`ALERT_JOB_FAILURES_15M`, 3). A
+  problem seen in two checks in a row is raised; with SMTP set up every owner gets an email, and
+  another when it clears (`ALERT_EMAIL=false` keeps them on the page only). If the API itself is
+  down nothing can send, so a dead Mac or Docker stays silent.
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or
   upgrading Nexus.

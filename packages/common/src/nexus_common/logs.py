@@ -28,6 +28,8 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
+from nexus_common import metrics
+
 _fields: ContextVar[dict[str, Any] | None] = ContextVar("nexus_log_fields", default=None)
 
 # Ids callers may pass in X-Request-ID: short and plain, so nothing odd lands in the logs.
@@ -120,6 +122,9 @@ def configure_logging(service: str, level: str | None = None, fmt: str | None = 
     handler.setFormatter(JsonFormatter(service) if fmt == "json" else TextFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
+    # Errors also go to the Admin page's recent-errors list (metrics.py).
+    if sink := metrics.error_sink(service):
+        root.addHandler(sink)
     root.setLevel(level)
     # uvicorn and arq install their own handlers; route them through ours instead.
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "arq"):
@@ -133,28 +138,18 @@ def configure_logging(service: str, level: str | None = None, fmt: str | None = 
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-@contextmanager
-def job_scope(ctx: dict, name: str, request_id: str | None, **ids: Any) -> Iterator[None]:
-    """Log context and start/finish lines for one arq job. `ctx` is arq's job context."""
-    log = logging.getLogger("nexus.jobs")
-    with scope(job=name, job_id=ctx.get("job_id"), request_id=request_id, **ids):
-        enqueued = ctx.get("enqueue_time")
-        wait_ms = None
-        if isinstance(enqueued, datetime):
-            wait_ms = max(0, int((datetime.now(UTC) - enqueued).total_seconds() * 1000))
-        started = time.monotonic()
-        try:
-            yield
-        except BaseException as exc:
-            ms = int((time.monotonic() - started) * 1000)
-            log.exception(
-                "job failed",
-                extra={"duration_ms": ms, "queue_ms": wait_ms, "error": type(exc).__name__},
-            )
-            raise
-        else:
-            ms = int((time.monotonic() - started) * 1000)
-            log.info("job done", extra={"duration_ms": ms, "queue_ms": wait_ms})
+def _queue_ms(ctx: dict) -> int | None:
+    enqueued = ctx.get("enqueue_time")
+    if not isinstance(enqueued, datetime):
+        return None
+    return max(0, int((datetime.now(UTC) - enqueued).total_seconds() * 1000))
+
+
+job_log = logging.getLogger("nexus.jobs")
+
+
+def _ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
 
 
 def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -166,8 +161,37 @@ def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any
     async def wrapper(ctx: dict, *args: Any, request_id: str | None = None, **kwargs: Any) -> Any:
         bound = sig.bind_partial(ctx, *args, **kwargs).arguments
         ids = {k: v for k, v in bound.items() if k.endswith("_id")}
-        with job_scope(ctx, fn.__name__, clean_request_id(request_id), **ids):
-            return await fn(ctx, *args, **kwargs)
+        wait_ms = _queue_ms(ctx)
+        started = time.monotonic()
+        failed = True
+        with scope(
+            job=fn.__name__,
+            job_id=ctx.get("job_id"),
+            request_id=clean_request_id(request_id),
+            **ids,
+        ):
+            try:
+                result = await fn(ctx, *args, **kwargs)
+                failed = False
+                return result
+            except BaseException as exc:
+                job_log.exception(
+                    "job failed",
+                    extra={
+                        "duration_ms": _ms(started),
+                        "queue_ms": wait_ms,
+                        "error": type(exc).__name__,
+                    },
+                )
+                raise
+            finally:
+                if not failed:
+                    job_log.info(
+                        "job done", extra={"duration_ms": _ms(started), "queue_ms": wait_ms}
+                    )
+                await metrics.record_job(
+                    ctx.get("redis"), fn.__name__, _ms(started), failed, wait_ms
+                )
 
     return wrapper
 

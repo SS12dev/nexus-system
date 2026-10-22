@@ -17,11 +17,13 @@ from redis.exceptions import RedisError
 from sqlalchemy import Date, cast, func, or_, select, text
 from sqlalchemy.orm import aliased
 
+from nexus_api import alerts
 from nexus_api.appsettings import MAINTENANCE, get_setting, maintenance_notice, put_setting
 from nexus_api.cache import cached_spend
 from nexus_api.deps import DbDep, GatewayDep, OwnerUser, RedisDep, SettingsDep, StorageDep
 from nexus_api.ratelimit import metrics_key
 from nexus_api.schemas import MaintenanceIn
+from nexus_common import metrics
 from nexus_common.litellm import PROVIDER
 from nexus_common.models import (
     AgentRun,
@@ -536,6 +538,22 @@ def _backup_out(b: Backup) -> dict:
         "created_at": b.created_at,
         "started_at": b.started_at,
         "finished_at": b.finished_at,
+    }
+
+
+@router.get("/monitoring")
+async def monitoring(
+    actor: OwnerUser, redis: RedisDep, minutes: int = Query(default=60, ge=5, le=1440)
+):
+    """Alerts, per-route and per-job figures over the last `minutes`, and the latest errors
+    logged by any service. Nexus-wide; error entries carry ids, never chat content."""
+    figures = await metrics.summary(redis, minutes)
+    return {
+        "minutes": minutes,
+        "alerts": await alerts.active_and_recent(redis),
+        "routes": figures["routes"],
+        "jobs": figures["jobs"],
+        "errors": await metrics.recent_errors(redis),
     }
 
 

@@ -205,7 +205,7 @@ async def test_admin_page_is_owner_only(owner, invite, client_for):
     # Admins still manage people...
     assert (await admin.get("/api/admin/users")).status_code == 200
     # ...but the Admin page is the owner's alone.
-    for path in ("status", "usage", "audit", "backups", "maintenance"):
+    for path in ("status", "usage", "audit", "backups", "maintenance", "monitoring"):
         assert (await admin.get(f"/api/admin/{path}")).status_code == 403, path
     assert (await admin.post("/api/admin/backups")).status_code == 403
     assert (await admin.put("/api/admin/maintenance", json={"enabled": True})).status_code == 403

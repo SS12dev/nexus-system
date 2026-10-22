@@ -7,7 +7,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
-from nexus_api import ws
+from nexus_api import alerts, ws
 from nexus_api.middleware import GuardMiddleware, RequestContextMiddleware
 from nexus_api.queue import ArqJobQueue, JobQueue
 from nexus_api.routes import (
@@ -62,7 +62,8 @@ def create_app(
             app.state.queue = ArqJobQueue(pool)
         else:
             app.state.queue = queue
-        yield
+        async with alerts.running(app):
+            yield
         if pool is not None:
             await pool.aclose()
         await inner.aclose()

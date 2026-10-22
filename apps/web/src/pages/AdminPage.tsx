@@ -12,18 +12,19 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/format";
-import type { AuditEntry, Backup, OpsStatus, Usage, User } from "../lib/types";
+import type { AuditEntry, Backup, LoggedError, Monitoring, MonitorRow, OpsStatus, Usage, User } from "../lib/types";
 import { APP_NAME } from "../lib/assistant";
 
-type Tab = "status" | "usage" | "audit" | "backups";
+type Tab = "status" | "monitoring" | "usage" | "audit" | "backups";
 const TABS: { key: Tab; label: string }[] = [
   { key: "status", label: "Status" },
+  { key: "monitoring", label: "Monitoring" },
   { key: "usage", label: "Usage" },
   { key: "audit", label: "Audit log" },
   { key: "backups", label: "Backups" },
 ];
 
-/** Health, traffic, usage, the audit log, backups and maintenance mode. Owners only. */
+/** Health, monitoring, usage, the audit log, backups and maintenance mode. Owners only. */
 export function AdminPage() {
   const [tab, setTab] = useState<Tab>("status");
   const [error, setError] = useState("");
@@ -56,7 +57,7 @@ export function AdminPage() {
               {t.label}
             </button>
           ))}
-          {tab !== "backups" && (
+          {tab !== "backups" && tab !== "monitoring" && (
             <div className="ml-auto">
               <PeopleFilter people={people} picked={picked} onChange={setPicked} />
             </div>
@@ -64,6 +65,7 @@ export function AdminPage() {
         </div>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {tab === "status" && <StatusPanel onError={setError} userIds={picked} />}
+        {tab === "monitoring" && <MonitoringPanel onError={setError} />}
         {tab === "usage" && <UsagePanel onError={setError} userIds={picked} />}
         {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
         {tab === "backups" && <BackupsPanel onError={setError} />}
@@ -760,6 +762,227 @@ function BackupsPanel({ onError }: PanelProps) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+const WINDOWS = [
+  { minutes: 60, label: "Last hour" },
+  { minutes: 360, label: "6 hours" },
+  { minutes: 1440, label: "24 hours" },
+];
+
+function ms(n: number | null | undefined, slow = false): string {
+  if (n == null) return slow ? "over 2 min" : "–";
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)} s` : `${n} ms`;
+}
+
+/** Routes or jobs: calls, failures and how long they took. */
+function MonitorTable({ rows, kind }: { rows: MonitorRow[]; kind: "route" | "job" }) {
+  if (rows.length === 0) return <p className="text-sm text-slate-500">Nothing in this window.</p>;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-edge bg-panel">
+      <table className="w-full min-w-[560px] text-sm">
+        <thead className="text-left text-xs text-slate-400">
+          <tr className="border-b border-edge">
+            <th className="px-3 py-2 font-normal">{kind === "route" ? "Route" : "Job"}</th>
+            <th className="px-3 py-2 text-right font-normal">Calls</th>
+            <th className="px-3 py-2 text-right font-normal">Failed</th>
+            <th className="px-3 py-2 text-right font-normal">Typical</th>
+            <th className="px-3 py-2 text-right font-normal">Slowest 5%</th>
+            {kind === "job" && <th className="px-3 py-2 text-right font-normal">Queue wait</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.name} className="border-b border-edge/60 last:border-0">
+              <td className="max-w-[22rem] truncate px-3 py-1.5 font-mono text-xs" title={r.name}>
+                {r.name}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{r.count}</td>
+              <td className={`px-3 py-1.5 text-right tabular-nums ${r.failed ? "text-rose-400" : "text-slate-500"}`}>
+                {r.failed}
+                {r.failed > 0 && r.count > 0 && (
+                  <span className="ml-1 text-xs">({Math.round((r.failed / r.count) * 100)}%)</span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">≤ {ms(r.p50_ms, r.count > 0)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">≤ {ms(r.p95_ms, r.count > 0)}</td>
+              {kind === "job" && (
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{ms(r.avg_wait_ms)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ErrorRow({ e }: { e: LoggedError }) {
+  const [open, setOpen] = useState(false);
+  const ids = (["request_id", "user_id", "chat_id", "run_id", "job", "trace_id"] as const).filter((k) => e[k]);
+  return (
+    <li className="px-3 py-2">
+      <button onClick={() => setOpen(!open)} className="flex w-full flex-wrap items-baseline gap-x-3 text-left">
+        <span className="w-28 shrink-0 text-xs text-slate-500">{formatDateTime(e.ts)}</span>
+        <span className="w-24 shrink-0 text-xs text-slate-400">{e.service}</span>
+        <ChevronDown
+          size={14}
+          className={`order-last ml-auto shrink-0 text-slate-500 transition sm:order-none ${open ? "rotate-180" : ""}`}
+        />
+        <span className="order-last min-w-0 basis-full break-words text-slate-200 sm:order-none sm:basis-0 sm:flex-1">
+          {e.error ?? e.msg}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 text-xs">
+          {e.error && <p className="text-slate-300">{e.msg}</p>}
+          {e.page && <p className="text-slate-400">Page: {e.page}</p>}
+          {ids.length > 0 && (
+            <p className="flex flex-wrap gap-x-3 font-mono text-slate-400">
+              {ids.map((k) => (
+                <span key={k}>
+                  {k}={e[k]}
+                </span>
+              ))}
+            </p>
+          )}
+          {e.stack && (
+            <pre className="max-h-64 overflow-auto rounded-md bg-ink p-2 whitespace-pre-wrap text-slate-400">{e.stack}</pre>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function MonitoringPanel({ onError }: PanelProps) {
+  const [minutes, setMinutes] = useState(60);
+  const [data, setData] = useState<Monitoring | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api
+      .monitoring(minutes)
+      .then(setData)
+      .catch((e) => onError(e.message))
+      .finally(() => setLoading(false));
+  }, [minutes, onError]);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30_000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
+  const active = data.alerts.active;
+
+  return (
+    <div>
+      <div
+        className={`mb-6 flex items-center gap-2 rounded-lg border px-4 py-3 text-sm ${
+          active.length ? "border-rose-500/50 bg-rose-500/10" : "border-emerald-500/40 bg-emerald-500/10"
+        }`}
+      >
+        {active.length ? (
+          <AlertTriangle size={18} className="shrink-0 text-rose-400" />
+        ) : (
+          <CheckCircle2 size={18} className="shrink-0 text-emerald-400" />
+        )}
+        <span>{active.length ? `${active.length} active ${active.length === 1 ? "alert" : "alerts"}` : "No alerts"}</span>
+        <button
+          onClick={load}
+          className="ml-auto flex items-center gap-1 text-slate-400 hover:text-white"
+          aria-label="Refresh"
+        >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      <Section title="Alerts">
+        <p className="mb-2 text-sm text-slate-400">
+          Every minute {APP_NAME} checks its services, workers and backups, API errors in the last 5
+          minutes and failed jobs in the last 15. A problem seen twice in a row becomes an alert; you also
+          get an email when email (SMTP) is set up. A note follows when it clears.
+        </p>
+        {active.length > 0 && (
+          <ul className="mb-3 divide-y divide-edge rounded-lg border border-rose-500/40 bg-panel text-sm">
+            {active.map((a) => (
+              <li key={a.key} className="flex flex-wrap gap-x-3 px-3 py-2">
+                <span className="font-medium text-rose-300">{a.title}</span>
+                <span className="text-slate-400">{a.detail}</span>
+                {a.since && <span className="ml-auto text-xs text-slate-500">since {formatAgo(a.since)}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {data.alerts.recent.length > 0 ? (
+          <ul className="divide-y divide-edge rounded-lg border border-edge bg-panel text-sm">
+            {data.alerts.recent.slice(0, 10).map((a, i) => (
+              <li key={i} className="flex flex-wrap gap-x-3 px-3 py-1.5">
+                <span className="w-28 text-xs text-slate-500">{a.at ? formatDateTime(a.at) : ""}</span>
+                <span className={`w-16 text-xs ${a.state === "raised" ? "text-rose-400" : "text-emerald-400"}`}>
+                  {a.state}
+                </span>
+                <span className="text-slate-300">{a.title}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-500">No alerts so far.</p>
+        )}
+      </Section>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-slate-400">Figures for</span>
+        {WINDOWS.map((w) => (
+          <button
+            key={w.minutes}
+            onClick={() => setMinutes(w.minutes)}
+            className={`rounded-md px-3 py-1 ${minutes === w.minutes ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
+          >
+            {w.label}
+          </button>
+        ))}
+      </div>
+
+      <Section title="API routes">
+        <p className="mb-2 text-sm text-slate-400">
+          Every API call, by route. "Failed" counts server errors (5xx), not refusals like a wrong
+          password. "Typical" is the time half the calls beat; "Slowest 5%" is the time 95% beat. Live
+          chat streams over the WebSocket, so a reply's length doesn't show here.
+        </p>
+        <MonitorTable rows={data.routes} kind="route" />
+      </Section>
+
+      <Section title="Background jobs">
+        <p className="mb-2 text-sm text-slate-400">
+          Work the orchestrator and document worker do off the request: chat turns, agent runs, memory,
+          file reading and the timed jobs. "Queue wait" is how long a job sat before a worker took it.
+        </p>
+        <MonitorTable rows={data.jobs} kind="job" />
+      </Section>
+
+      <Section title="Recent errors">
+        <p className="mb-2 text-sm text-slate-400">
+          The last errors logged by the API, the workers and people's browsers, newest first. Tap one for
+          its ids and stack. Find everything a request did with{" "}
+          <code className="text-slate-300">compose logs api orchestrator | grep &lt;request_id&gt;</code>; the
+          trace_id opens the same turn in Langfuse.
+        </p>
+        {data.errors.length === 0 ? (
+          <p className="text-sm text-slate-500">No errors logged.</p>
+        ) : (
+          <ul className="divide-y divide-edge rounded-lg border border-edge bg-panel text-sm">
+            {data.errors.map((e, i) => (
+              <ErrorRow key={`${e.ts}-${i}`} e={e} />
+            ))}
+          </ul>
+        )}
+      </Section>
     </div>
   );
 }

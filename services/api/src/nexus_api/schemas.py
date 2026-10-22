@@ -60,6 +60,14 @@ class MeIn(BaseModel):
     ]
 
 
+class ClientErrorIn(BaseModel):
+    """A page that crashed in the browser (the web app's ErrorBoundary)."""
+
+    message: str = Field(max_length=1000)
+    stack: str = Field(default="", max_length=4000)
+    page: str = Field(default="", max_length=300)
+
+
 class SessionOut(BaseModel):
     """A browser signed in as the user, for "signed-in devices"."""
 
