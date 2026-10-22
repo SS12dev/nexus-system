@@ -1,7 +1,9 @@
 """Agent systems end to end with scripted models: each topology, approvals (approve, edit,
 reject), pause/resume, cancel, budget checks, tier policy and Jarvis's build tool."""
 
+import asyncio
 import json
+import time
 import uuid
 from decimal import Decimal
 
@@ -27,7 +29,7 @@ from jarvis_common.models import (
 )
 from jarvis_common.spec import AgentSystemSpec
 from jarvis_common.systems import BudgetProblem, control_run, decide_approval, new_run
-from jarvis_orchestrator.systems import runner
+from jarvis_orchestrator.systems import runner, runtime
 from jarvis_orchestrator.systems.learn import draft_skill
 from jarvis_orchestrator.systems.manage import system_tools
 from jarvis_orchestrator.tools import ToolContext
@@ -507,3 +509,51 @@ def test_keeping_a_team_takes_the_users_own_words():
     assert not asked_to_keep("Email a two-line note about EV prices, keep the budget small")
     assert not asked_to_keep("keep it cheap")
     assert not asked_to_keep("Research the best-selling EVs in Europe")
+
+
+class SlowWeb:
+    """Searches that take a while, recording how many ran at once and the order they began."""
+
+    def __init__(self):
+        self.running = 0
+        self.peak = 0
+        self.log: list[str] = []
+
+    async def search(self, query: str, limit: int = 8):
+        from jarvis_orchestrator.web import SearchResult
+
+        self.running += 1
+        self.peak = max(self.peak, self.running)
+        self.log.append(f"start {query}")
+        await asyncio.sleep(0.05)
+        self.running -= 1
+        self.log.append(f"end {query}")
+        return [SearchResult(f"Result for {query}", f"https://example.com/{query}", "snippet")]
+
+
+async def test_a_batch_of_searches_runs_side_by_side(sdeps, owner, scripts, seen):
+    sdeps.web = SlowWeb()
+    queries = [f"q{i}" for i in range(6)]
+    scripts["solo"] = [
+        [{"tool": "web_search", "args": {"query": q}} for q in queries]
+        + [{"tool": "save_file", "args": {"name": "n.md", "content": "# N"}}],
+        "Done.",
+    ]
+    _, run_id = await make_run(
+        sdeps, owner, "single", [agent("solo", tools=["web_search", "save_file"])]
+    )
+    started = time.monotonic()
+    await runner.run_system(sdeps, run_id)
+    elapsed = time.monotonic() - started
+
+    run, _ = await load(sdeps, run_id)
+    assert run.status == RunStatus.completed
+    # Up to four at a time, not one after another.
+    assert sdeps.web.peak == runtime.PARALLEL_READS
+    assert elapsed < 0.05 * len(queries)
+    # Results come back in the order the agent asked, and the write ran after every search.
+    tool_msgs = [m for m in seen["solo"][1] if isinstance(m, ToolMessage)]
+    assert [m.name for m in tool_msgs] == ["web_search"] * 6 + ["save_file"]
+    assert [m.content.split("\n")[0] for m in tool_msgs[:6]] == [
+        f"1. Result for {q}" for q in queries
+    ]
