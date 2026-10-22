@@ -22,7 +22,7 @@ const SCOPE_LABEL: Record<SkillScope, string> = {
   learned: "Learned",
 };
 
-// Shelves in the order the library uses (jarvis_common.skills.CATEGORIES).
+// Shelves in the order the library uses (nexus_common.skills.CATEGORIES).
 const SHELVES = ["documents", "research", "writing", "data", "productivity", "agents", "engineering", "other"];
 
 const STATUS_STYLE: Record<Skill["status"], string> = {

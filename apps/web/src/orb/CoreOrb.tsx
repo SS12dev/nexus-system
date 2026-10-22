@@ -1,11 +1,11 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import { AdditiveBlending, BackSide, Color } from "three";
-import type { JarvisState } from "../lib/types";
+import type { AssistantState } from "../lib/types";
 import { ORB_R } from "./model";
 
 /** Look of each state: base colour, how much the surface churns and how fast. */
-const LOOK: Record<JarvisState, { color: string; amp: number; speed: number; pulse: number }> = {
+const LOOK: Record<AssistantState, { color: string; amp: number; speed: number; pulse: number }> = {
   idle: { color: "#38bdf8", amp: 0.025, speed: 0.25, pulse: 0 },
   thinking: { color: "#a78bfa", amp: 0.07, speed: 0.9, pulse: 0.02 },
   speaking: { color: "#67e8f9", amp: 0.05, speed: 0.6, pulse: 0.05 },
@@ -70,7 +70,7 @@ void main(){
   gl_FragColor = vec4(col, alpha);
 }`;
 
-export function CoreOrb({ state, still }: { state: JarvisState; still: boolean }) {
+export function CoreOrb({ state, still }: { state: AssistantState; still: boolean }) {
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },

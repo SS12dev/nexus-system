@@ -4,7 +4,7 @@ import re
 import httpx
 import pytest
 
-import jarvis_deployer.gate as gate
+import nexus_deployer.gate as gate
 
 APP_LABELS = {"jarvis.app": "p1"}
 
@@ -110,7 +110,7 @@ async def test_allowed_calls_pass(through):
 )
 async def test_everything_else_is_refused(through, docker, method, path):
     resp = await through.request(method, path, json={})
-    assert resp.status_code == 403 and "Jarvis Docker gate" in resp.json()["message"]
+    assert resp.status_code == 403 and "Nexus Docker gate" in resp.json()["message"]
     assert all(p != path for _, p in docker)
 
 

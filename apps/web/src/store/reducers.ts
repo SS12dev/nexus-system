@@ -5,7 +5,7 @@ import type {
   Chat,
   FeedItem,
   FileItem,
-  JarvisState,
+  AssistantState,
   Message,
   ServerEvent,
   ToolStep,
@@ -14,12 +14,12 @@ import type {
 export interface ChatState {
   chats: Chat[];
   messages: Record<string, Message[]>;
-  jarvis: JarvisState;
-  /** What Jarvis is doing right now, such as searching documents, while it works. */
+  assistantState: AssistantState;
+  /** What Nexus is doing right now, such as searching documents, while it works. */
   activity: string | null;
   /** Files whose live status the UI shows, keyed by id. */
   files: Record<string, FileItem>;
-  /** Bumped whenever Jarvis changes a memory or the profile, so open pages can refresh. */
+  /** Bumped whenever Nexus changes a memory or the profile, so open pages can refresh. */
   memoryVersion: number;
   /** Agent systems seen this session, with their latest run, kept live by events. */
   systems: Record<string, AgentSystem>;
@@ -27,7 +27,7 @@ export interface ChatState {
   approvals: Record<string, Approval>;
   /** Bumped on any agent-system change, so the Agents page can refresh its details. */
   agentsVersion: number;
-  /** Bumped when a skill changes (Jarvis drafted one, or someone edited one). */
+  /** Bumped when a skill changes (Nexus drafted one, or someone edited one). */
   skillsVersion: number;
   /** Bumped when a link is added, changed or deleted, so the Library reloads its links. */
   linksVersion: number;
@@ -38,7 +38,7 @@ export interface ChatState {
 export const initialState: ChatState = {
   chats: [],
   messages: {},
-  jarvis: "idle",
+  assistantState: "idle",
   activity: null,
   files: {},
   memoryVersion: 0,
@@ -67,7 +67,7 @@ export function upsertStep<T extends ToolStep>(list: T[], step: T): T[] {
   return next;
 }
 
-/** Add a step to the reply Jarvis is writing in a chat. */
+/** Add a step to the reply Nexus is writing in a chat. */
 function stepOnReply(state: ChatState, chatId: string | null, step: ToolStep): ChatState {
   const list = chatId ? state.messages[chatId] : undefined;
   if (!chatId || !list) return state;
@@ -185,17 +185,17 @@ export function mergeFetched(state: ChatState, chatId: string, fetched: Message[
 /** Apply one WebSocket event. Pure, so it is easy to test. */
 export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
   switch (event.type) {
-    case "jarvis.state":
+    case "assistant.state":
       return {
         ...state,
-        jarvis: event.data.state,
+        assistantState: event.data.state,
         activity: event.data.state === "idle" ? null : state.activity,
       };
     case "tool.call": {
       const { name, call_id, agent, run_id } = event.data;
       const id = call_id ?? `${name}-${Date.now()}`;
       const step: ToolStep = { id, name, args: argsOf(event.data), status: "running" };
-      // Tools that agents in a run call show on the run's card, not as Jarvis's activity.
+      // Tools that agents in a run call show on the run's card, not as Nexus's activity.
       if (run_id)
         return feedOn(state, run_id, { ...step, kind: "tool", agent: agent ?? null, at: new Date().toISOString() });
       return stepOnReply({ ...state, activity: toolLabel(name) }, event.chat_id, step);
@@ -289,7 +289,7 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     case "message.failed": {
       const next = { ...state, activity: null };
       if (!state.messages[event.chat_id]) return next;
-      // Replies with files Jarvis or a team made carry them; otherwise keep the ones shown.
+      // Replies with files Nexus or a team made carry them; otherwise keep the ones shown.
       const prev = state.messages[event.chat_id].find((m) => m.id === event.data.message.id);
       const message = {
         ...event.data.message,

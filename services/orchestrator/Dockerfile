@@ -14,7 +14,7 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-orchestrator --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-orchestrator --no-install-workspace
 
 COPY packages/common packages/common
 COPY services/orchestrator services/orchestrator
@@ -22,8 +22,8 @@ COPY services/orchestrator services/orchestrator
 COPY library library
 # Absolute, so it resolves whatever the working directory is.
 ENV LIBRARY_PATH=/app/library
-RUN uv sync --frozen --no-dev --package jarvis-orchestrator
+RUN uv sync --frozen --no-dev --package nexus-orchestrator
 
-RUN useradd --system --uid 10001 jarvis
-USER jarvis
-CMD ["arq", "jarvis_orchestrator.worker.WorkerSettings"]
+RUN useradd --system --uid 10001 nexus
+USER nexus
+CMD ["arq", "nexus_orchestrator.worker.WorkerSettings"]

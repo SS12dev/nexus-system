@@ -4,9 +4,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.engine import Connection
 
-from jarvis_common.db import make_engine
-from jarvis_common.models import Base
-from jarvis_common.settings import get_settings
+from nexus_common.db import make_engine
+from nexus_common.models import Base
+from nexus_common.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):

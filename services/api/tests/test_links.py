@@ -1,27 +1,27 @@
 import uuid
 
-from jarvis_common.models import Link, Message, MessageLink, MessageRole, MessageStatus
+from nexus_common.models import Link, Message, MessageLink, MessageRole, MessageStatus
 
 
-async def add(client, url="https://github.com/SS12dev/jarvis-system", **body):
+async def add(client, url="https://github.com/SS12dev/nexus-system", **body):
     return await client.post("/api/links", json={"url": url, **body})
 
 
 async def test_add_list_edit_delete(owner, queue):
-    resp = await add(owner, note="Jarvis itself.")
+    resp = await add(owner, note="Nexus itself.")
     assert resp.status_code == 201, resp.text
     link = resp.json()
     assert (link["kind"], link["title"], link["source"]) == (
-        "github_repo", "SS12dev/jarvis-system", "user",
+        "github_repo", "SS12dev/nexus-system", "user",
     )  # fmt: skip
     # The orchestrator fetches the preview (it holds the GitHub App's key).
     assert [str(x) for x in queue.link_previews] == [link["id"]]
     # The same address again is the same link, not a second one.
     again = (
-        await add(owner, url="https://github.com/SS12dev/jarvis-system/", title="Jarvis")
+        await add(owner, url="https://github.com/SS12dev/nexus-system/", title="Jarvis")
     ).json()
     assert again["id"] == link["id"] and again["title"] == "Jarvis"
-    assert again["note"] == "Jarvis itself."
+    assert again["note"] == "Nexus itself."
     web = (await add(owner, url="example.com/guide", title="Guide")).json()
     assert web["kind"] == "web" and web["url"] == "https://example.com/guide"
     assert len(queue.link_previews) == 2  # Web pages have no preview to fetch.

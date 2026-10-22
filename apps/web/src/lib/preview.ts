@@ -10,7 +10,7 @@ export type PreviewKind =
   | "html"
   | "code"
   | "text"
-  /** No browser view of the file itself: show the text Jarvis extracted from it. */
+  /** No browser view of the file itself: show the text Nexus extracted from it. */
   | "extracted";
 
 const CODE_LANGUAGES: Record<string, string> = {
@@ -119,7 +119,7 @@ export function notebookCells(text: string): NotebookCell[] | null {
   }
 }
 
-/** The text Jarvis read from a converted file, ready for Markdown. Raw HTML never renders, so
+/** The text Nexus read from a converted file, ready for Markdown. Raw HTML never renders, so
  * the comments MarkItDown leaves would show as text; each slide's marker becomes a heading. */
 export function readableText(text: string): string {
   return text

@@ -3,7 +3,7 @@ import { changeSummary, isGitHub, linkPath, linkSource, shortUrl, stripComments 
 
 describe("links", () => {
   it("shortens addresses", () => {
-    expect(shortUrl("https://github.com/SS12dev/jarvis-system/")).toBe("github.com/SS12dev/jarvis-system");
+    expect(shortUrl("https://github.com/SS12dev/nexus-system/")).toBe("github.com/SS12dev/nexus-system");
     expect(shortUrl("https://example.com/" + "a".repeat(80), 20)).toHaveLength(20);
   });
 

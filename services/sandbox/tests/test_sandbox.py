@@ -41,7 +41,7 @@ async def test_rejects_paths_outside_the_job(sandbox, b64):
 
 
 async def test_token_is_checked(sandbox, monkeypatch):
-    import jarvis_sandbox.app as module
+    import nexus_sandbox.app as module
 
     monkeypatch.setattr(module, "TOKEN", "s3cret")
     resp = await sandbox.post("/run", json={"code": "print(1)"})

@@ -3,7 +3,7 @@ import uuid
 import httpx
 import pytest
 
-from jarvis_api.main import create_app
+from nexus_api.main import create_app
 
 
 class RecordingQueue:

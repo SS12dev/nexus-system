@@ -45,7 +45,7 @@ export function StepRow({
   );
 }
 
-/** The tools Jarvis used for a reply. Open while it works so you can follow along, folded
+/** The tools Nexus used for a reply. Open while it works so you can follow along, folded
  * into one line once the answer is in. */
 export function ToolSteps({ steps, live }: { steps: ToolStep[]; live: boolean }) {
   const [open, setOpen] = useState<boolean | null>(null);

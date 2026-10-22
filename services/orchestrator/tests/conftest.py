@@ -8,8 +8,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-from jarvis_common.models import Chat, RoleName, UserStatus
-from jarvis_orchestrator.turn import TurnDeps
+from nexus_common.models import Chat, RoleName, UserStatus
+from nexus_orchestrator.turn import TurnDeps
 
 
 class ScriptedModel(BaseChatModel):
@@ -219,7 +219,7 @@ def sdeps(settings, sessionmaker, redis, gateway, embedder, enqueued, storage, s
 
 @pytest.fixture
 async def owner(sessionmaker):
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         user = await create_user(

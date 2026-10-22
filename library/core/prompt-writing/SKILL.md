@@ -22,7 +22,7 @@ metadata:
    or when every supplier has a source"), and what to do when information is missing
    ("write 'not found', don't estimate").
 
-## For sub-agents in a Jarvis team
+## For sub-agents in a Nexus team
 
 - Each agent's `instructions` are task-specific: they get safety rules, their role and
   shared conventions automatically, so don't repeat those.

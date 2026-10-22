@@ -14,7 +14,7 @@ import { TeamGraph } from "./TeamGraph";
 const EMPTY: FeedItem[] = [];
 const FEED_SHOWN = 8;
 
-/** A team Jarvis started from this chat: who is in it, what each agent is doing right now,
+/** A team Nexus started from this chat: who is in it, what each agent is doing right now,
  * a running log of their steps, and cost and controls. Finished runs fold into one line. */
 export function SystemCard({ system }: { system: AgentSystem }) {
   const run = system.run;

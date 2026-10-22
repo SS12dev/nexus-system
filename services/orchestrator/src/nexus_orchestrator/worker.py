@@ -1,0 +1,178 @@
+"""arq worker entry point: `arq nexus_orchestrator.worker.WorkerSettings`."""
+
+import logging
+import uuid
+from functools import partial
+from pathlib import Path
+
+import httpx
+from arq import cron, func
+from arq.connections import RedisSettings
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+from redis.asyncio import Redis
+
+from nexus_common.db import make_engine, make_sessionmaker
+from nexus_common.deployer import DeployerClient
+from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
+from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.settings import get_settings
+from nexus_common.skills import sync_library
+from nexus_common.storage import S3Storage
+from nexus_orchestrator import deploy, links, memory
+from nexus_orchestrator.github import GitHubApp
+from nexus_orchestrator.llm import chat_model
+from nexus_orchestrator.sandbox import SandboxClient
+from nexus_orchestrator.systems import learn, runner
+from nexus_orchestrator.turn import TurnDeps
+from nexus_orchestrator.turn import run_turn as _run_turn
+from nexus_orchestrator.web import WebClient
+from nexus_orchestrator.workbench import WorkbenchClient
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+log = logging.getLogger(__name__)
+settings = get_settings()
+
+
+def psycopg_url(url: str) -> str:
+    """The checkpointer uses psycopg; the app's URL names the asyncpg driver."""
+    return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+async def startup(ctx: dict) -> None:
+    engine = make_engine(settings.database_url)
+    ctx["engine"] = engine
+    # Agent-system runs keep their LangGraph checkpoints here, so a run parked on an approval
+    # or a pause survives restarts.
+    pool = AsyncConnectionPool(
+        psycopg_url(settings.database_url),
+        min_size=1,
+        max_size=8,
+        open=False,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    )
+    await pool.open()
+    ctx["pool"] = pool
+    checkpointer = AsyncPostgresSaver(pool)
+    await checkpointer.setup()
+    ctx["deps"] = TurnDeps(
+        settings=settings,
+        sessionmaker=make_sessionmaker(engine),
+        redis=Redis.from_url(settings.redis_url),
+        gateway=LiteLLMAdmin(settings),
+        model_factory=partial(chat_model, settings),
+        embedder=CachedEmbedder(LiteLLMEmbedder(settings), settings.embedding_batch_size),
+        # arq's own pool, already connected when startup runs.
+        enqueue=ctx["redis"].enqueue_job,
+        storage=S3Storage(settings),
+        sandbox=SandboxClient(settings),
+        workbench=WorkbenchClient(settings),
+        github=GitHubApp(settings) if settings.github_enabled else None,
+        deployer=DeployerClient(settings),
+        web=WebClient(settings),
+        google_http=httpx.AsyncClient(timeout=30),
+        checkpointer=checkpointer,
+    )
+    async with ctx["deps"].sessionmaker() as db:
+        changed = await sync_library(db, Path(settings.library_path))
+    if changed:
+        log.info("Skills library: %d core skills added or updated", changed)
+
+
+async def shutdown(ctx: dict) -> None:
+    deps: TurnDeps = ctx["deps"]
+    await deps.embedder.inner.aclose()
+    await deps.gateway.aclose()
+    await deps.redis.aclose()
+    await deps.storage.aclose()
+    await deps.sandbox.aclose()
+    await deps.workbench.aclose()
+    if deps.github is not None:
+        await deps.github.aclose()
+    await deps.deployer.aclose()
+    await deps.web.aclose()
+    await deps.google_http.aclose()
+    await ctx["pool"].close()
+    await ctx["engine"].dispose()
+
+
+async def run_turn(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
+    await _run_turn(ctx["deps"], uuid.UUID(chat_id), uuid.UUID(assistant_message_id))
+
+
+async def extract_memories(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
+    await memory.extract_memories(ctx["deps"], uuid.UUID(chat_id), uuid.UUID(assistant_message_id))
+
+
+async def rebuild_profile(ctx: dict, user_id: str) -> None:
+    await memory.rebuild_profile(ctx["deps"], uuid.UUID(user_id))
+
+
+async def run_system(ctx: dict, run_id: str) -> None:
+    await runner.run_system(ctx["deps"], uuid.UUID(run_id))
+
+
+async def continue_run(ctx: dict, run_id: str) -> None:
+    await runner.continue_run(ctx["deps"], uuid.UUID(run_id))
+
+
+async def draft_skill(ctx: dict, run_id: str) -> None:
+    await learn.draft_skill(ctx["deps"], uuid.UUID(run_id))
+
+
+async def deploy_app(ctx: dict, project_id: str) -> None:
+    """Redeploy from the Apps page."""
+    await deploy.deploy_project(ctx["deps"], uuid.UUID(project_id))
+
+
+async def link_preview(ctx: dict, link_id: str) -> None:
+    """Fetch the preview of a link the user added in the Library."""
+    await links.refresh_preview(ctx["deps"], uuid.UUID(link_id))
+
+
+async def every_ten_minutes(ctx: dict) -> None:
+    deps: TurnDeps = ctx["deps"]
+    summarised = await memory.summarize_chats(deps)
+    embedded = await memory.embed_missing(deps)
+    if summarised or embedded:
+        log.info("Summarised %d chats, embedded %d rows", summarised, embedded)
+
+
+async def nightly(ctx: dict) -> None:
+    await memory.nightly(ctx["deps"])
+
+
+class WorkerSettings:
+    functions = [
+        run_turn,
+        extract_memories,
+        rebuild_profile,
+        draft_skill,
+        func(link_preview, timeout=60, keep_result=0),
+        # A run can take a while; when it parks on an approval or a pause the job ends and a
+        # later continue_run picks it up from its checkpoint. keep_result=0 so the shared
+        # run:<id> job id only blocks a second job while one is queued or running.
+        func(run_system, timeout=settings.run_job_timeout_s, keep_result=0),
+        func(continue_run, timeout=settings.run_job_timeout_s, keep_result=0),
+        func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
+    ]
+    cron_jobs = [
+        cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
+        cron(
+            nightly,
+            hour=settings.memory_nightly_hour_utc,
+            minute=settings.memory_nightly_minute_utc,
+            unique=True,
+            timeout=1800,
+        ),
+    ]
+    on_startup = startup
+    on_shutdown = shutdown
+    # The Admin page reads <queue>:health-check to tell whether a worker is alive.
+    health_check_interval = 30
+    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    max_jobs = 20
+    job_timeout = 300
+    # A turn streams to the user as it runs, so a retry would duplicate output.
+    max_tries = 1

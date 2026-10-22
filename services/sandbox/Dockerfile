@@ -21,13 +21,13 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-sandbox --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-sandbox --no-install-workspace
 
 COPY services/sandbox services/sandbox
-RUN uv sync --frozen --no-dev --package jarvis-sandbox \
+RUN uv sync --frozen --no-dev --package nexus-sandbox \
     && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas, scipy, sklearn, zoneinfo; zoneinfo.ZoneInfo('Asia/Kolkata')"
 
 RUN useradd --system --uid 10002 sandbox
 USER sandbox
 EXPOSE 8100
-CMD ["uvicorn", "jarvis_sandbox.app:app", "--host", "0.0.0.0", "--port", "8100"]
+CMD ["uvicorn", "nexus_sandbox.app:app", "--host", "0.0.0.0", "--port", "8100"]

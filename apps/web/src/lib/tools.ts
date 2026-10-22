@@ -1,6 +1,6 @@
 import type { AgentLive, AgentNode } from "./types";
 
-/** How tools read in the UI: what Jarvis or an agent is doing while one runs. */
+/** How tools read in the UI: what Nexus or an agent is doing while one runs. */
 export const TOOL_LABEL: Record<string, string> = {
   search_documents: "Searching your documents",
   read_document: "Reading a document",

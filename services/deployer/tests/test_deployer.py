@@ -4,7 +4,7 @@ import hmac
 import httpx
 import pytest
 
-import jarvis_deployer.app as module
+import nexus_deployer.app as module
 
 BODY = {"app_id": "p1", "owner": "u1", "user": "u1", "project": "w1"}
 
@@ -162,7 +162,7 @@ async def test_apps_are_private_unless_asked_and_the_checks_get_past_sign_in(
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.headers.get("x-jarvis-preview", ""))
+        seen.append(request.headers.get("x-nexus-preview", ""))
         return httpx.Response(200, text="ok")
 
     monkeypatch.setattr(module, "probe", httpx.AsyncClient(transport=httpx.MockTransport(handler)))

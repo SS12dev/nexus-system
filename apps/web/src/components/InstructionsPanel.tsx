@@ -27,8 +27,8 @@ const roleLabel = (role: string) => {
 };
 
 /** The standing instructions, shown as the stack they form in every prompt: pick a layer to
- * read or edit it. Order and audiences mirror jarvis_common.skills.instruction_layers and
- * how the orchestrator uses it (Jarvis's own chat leaves out the safety rules and roles). */
+ * read or edit it. Order and audiences mirror nexus_common.skills.instruction_layers and
+ * how the orchestrator uses it (Nexus's own chat leaves out the safety rules and roles). */
 export function InstructionsPanel({
   isAdmin,
   canWrite,

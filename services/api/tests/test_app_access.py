@@ -1,6 +1,6 @@
-"""Private apps' sign-in (forwardAuth): the round trip through Jarvis, one-time tokens (valid,
+"""Private apps' sign-in (forwardAuth): the round trip through Nexus, one-time tokens (valid,
 expired, for another app, reused), the app's own cookie, who may open an app, and that the
-Jarvis session cookie never reaches or opens an app."""
+Nexus session cookie never reaches or opens an app."""
 
 import hashlib
 import hmac
@@ -9,8 +9,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-import jarvis_api.routes.app_access as access
-from jarvis_common.models import Project
+import nexus_api.routes.app_access as access
+from nexus_common.models import Project
 
 HOST = "2048.apps.localhost"
 
@@ -33,7 +33,7 @@ def forwarded(host=HOST, uri="/", method="GET", **headers) -> dict:
 
 @pytest.fixture
 async def visitor(client_for):
-    """A browser on the app's host: it never has Jarvis's session cookie."""
+    """A browser on the app's host: it never has Nexus's session cookie."""
     return await client_for(None)
 
 
@@ -54,13 +54,13 @@ async def token_for(client, app_id, next_path="/play") -> str:
 
 async def test_the_round_trip(owner, me, visitor, sessionmaker, settings):
     app_id = await add_app(sessionmaker, me)
-    # 1. No app cookie: off to Jarvis's own host, remembering where they were going.
+    # 1. No app cookie: off to Nexus's own host, remembering where they were going.
     resp = await visitor.get("/auth/app/check", headers=forwarded(uri="/play?level=2"))
     assert resp.status_code == 302
     start = urlsplit(resp.headers["location"])
-    assert f"{start.scheme}://{start.netloc}" == settings.jarvis_url
+    assert f"{start.scheme}://{start.netloc}" == settings.nexus_url
     assert parse_qs(start.query) == {"app": [str(app_id)], "next": ["/play?level=2"]}
-    # 2. Signed in to Jarvis: back to the app with a one-time token.
+    # 2. Signed in to Nexus: back to the app with a one-time token.
     token = await token_for(owner, app_id, "/play?level=2")
     # 3. The app's host swaps it for its own cookie, and goes on to the page.
     uri = f"/_jarvis/auth?token={token}"
@@ -70,7 +70,7 @@ async def test_the_round_trip(owner, me, visitor, sessionmaker, settings):
     assert resp.headers["location"] == f"http://{HOST}:8080/play?level=2"
     cookie = resp.headers["set-cookie"]
     assert cookie.startswith("jarvis_app=") and "HttpOnly" in cookie and "Secure" in cookie
-    # Host-only: no Domain, so it never reaches other apps or Jarvis.
+    # Host-only: no Domain, so it never reaches other apps or Nexus.
     assert "domain" not in cookie.lower()
     value = resp.cookies["jarvis_app"]
     # 4. With the cookie, requests go through.
@@ -158,7 +158,7 @@ async def test_who_may_open_an_app(owner, me, invite, client_for, sessionmaker):
     # A member can't get into someone else's app...
     resp = await priya.get("/auth/app/start", params={"app": str(mine)})
     assert resp.status_code == 403 and "make it public" in resp.text
-    # ...but can into her own, and Jarvis's owner can into hers.
+    # ...but can into her own, and Nexus's owner can into hers.
     assert (await priya.get("/auth/app/start", params={"app": str(hers)})).status_code == 303
     assert (await owner.get("/auth/app/start", params={"app": str(hers)})).status_code == 303
 
@@ -175,7 +175,7 @@ async def test_unknown_public_preview_and_non_get(visitor, me, sessionmaker, set
         await visitor.get("/auth/app/check", headers=forwarded(host="nope.apps.localhost"))
     ).status_code == 404
     assert (
-        await visitor.get("/auth/app/check", headers=forwarded(host="jarvis.servhub.cc"))
+        await visitor.get("/auth/app/check", headers=forwarded(host="nexus.servhub.cc"))
     ).status_code == 404
     await add_app(sessionmaker, me, slug="open", public=True)
     resp = await visitor.get("/auth/app/check", headers=forwarded(host="open.apps.localhost"))
@@ -184,18 +184,18 @@ async def test_unknown_public_preview_and_non_get(visitor, me, sessionmaker, set
     # The deployer's own health check and screenshot, with the key for this host only.
     key = hmac.new(settings.deployer_token.encode(), f"preview:{HOST}".encode(), hashlib.sha256)
     ok = await visitor.get(
-        "/auth/app/check", headers=forwarded(**{"X-Jarvis-Preview": key.hexdigest()})
+        "/auth/app/check", headers=forwarded(**{"X-Nexus-Preview": key.hexdigest()})
     )
     assert ok.status_code == 200
     other = hmac.new(settings.deployer_token.encode(), b"preview:x.apps.localhost", hashlib.sha256)
     bad = await visitor.get(
-        "/auth/app/check", headers=forwarded(**{"X-Jarvis-Preview": other.hexdigest()})
+        "/auth/app/check", headers=forwarded(**{"X-Nexus-Preview": other.hexdigest()})
     )
     assert bad.status_code == 302
     # Without DEPLOYER_TOKEN there is no preview key at all.
     monkeypatch.setattr(settings, "deployer_token", "")
     empty = hmac.new(b"", f"preview:{HOST}".encode(), hashlib.sha256).hexdigest()
-    resp = await visitor.get("/auth/app/check", headers=forwarded(**{"X-Jarvis-Preview": empty}))
+    resp = await visitor.get("/auth/app/check", headers=forwarded(**{"X-Nexus-Preview": empty}))
     assert resp.status_code == 302
     # An app's own fetch or form without a cookie: refused, not redirected.
     post = await visitor.get("/auth/app/check", headers=forwarded(method="POST"))

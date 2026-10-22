@@ -1,6 +1,6 @@
 export type Role = "owner" | "admin" | "member" | "viewer";
 export type UserStatus = "invited" | "active" | "disabled";
-export type JarvisState = "idle" | "thinking" | "speaking";
+export type AssistantState = "idle" | "thinking" | "speaking";
 
 export interface Budget {
   max_usd: string;
@@ -88,7 +88,7 @@ export interface Project {
   updated_at: string;
 }
 
-/** What a link points to; see jarvis_common.links. */
+/** What a link points to; see nexus_common.links. */
 export type LinkKind =
   | "github_repo"
   | "github_file"
@@ -222,9 +222,9 @@ export interface Message {
   error: string | null;
   created_at: string;
   attachments?: FileBrief[];
-  /** Links Jarvis or a team saved for this reply (a repo, an app, a Google Doc). */
+  /** Links Nexus or a team saved for this reply (a repo, an app, a Google Doc). */
   links?: LinkItem[];
-  /** Tools Jarvis used for this reply, in order. */
+  /** Tools Nexus used for this reply, in order. */
   steps?: ToolStep[] | null;
 }
 
@@ -449,7 +449,7 @@ export interface Grants {
 type RunScoped = { system_id: string; run_id: string; agent?: string };
 
 export type ServerEvent =
-  | { type: "jarvis.state"; chat_id: string | null; data: { state: JarvisState } }
+  | { type: "assistant.state"; chat_id: string | null; data: { state: AssistantState } }
   | { type: "message.delta"; chat_id: string; data: { message_id: string; delta: string } }
   | { type: "message.completed"; chat_id: string; data: { message: Message } }
   | { type: "message.failed"; chat_id: string; data: { message: Message } }

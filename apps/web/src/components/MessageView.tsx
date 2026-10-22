@@ -45,7 +45,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
       ) : (
         <Markdown>{message.content}</Markdown>
       )}
-      {/* Files Jarvis made for this reply, and links it saved (a repo, an app, a Google Doc). */}
+      {/* Files Nexus made for this reply, and links it saved (a repo, an app, a Google Doc). */}
       {(!!message.attachments?.length || !!message.links?.length) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {message.attachments?.map((f) => (

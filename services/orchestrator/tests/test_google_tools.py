@@ -7,8 +7,8 @@ from email import policy
 import httpx
 import pytest
 
-from jarvis_common.google import SERVICE_SCOPES, encrypt
-from jarvis_common.models import (
+from nexus_common.google import SERVICE_SCOPES, encrypt
+from nexus_common.models import (
     Chat,
     GoogleGrant,
     Message,
@@ -18,9 +18,9 @@ from jarvis_common.models import (
     UserStatus,
     utcnow,
 )
-from jarvis_orchestrator.google_tools import message_body, parse_when
-from jarvis_orchestrator.tools import ToolContext, build_tools
-from jarvis_orchestrator.turn import run_turn
+from nexus_orchestrator.google_tools import message_body, parse_when
+from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.turn import run_turn
 
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 CAL = "https://www.googleapis.com/calendar/v3"
@@ -63,7 +63,7 @@ class Google:
 
 @pytest.fixture
 async def user(sessionmaker):
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         u = await create_user(

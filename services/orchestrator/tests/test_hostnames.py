@@ -2,8 +2,8 @@
 
 import pytest
 
-from jarvis_common import hostnames
-from jarvis_common.hostnames import NoFreeName, base_name, pick, usable
+from nexus_common import hostnames
+from nexus_common.hostnames import NoFreeName, base_name, pick, usable
 
 
 def taken_from(names: set[str]):

@@ -41,7 +41,7 @@ export function Shell() {
   const chats = useStore((s) => s.chats);
   const setChats = useStore((s) => s.setChats);
   const removeChat = useStore((s) => s.removeChat);
-  const jarvis = useStore((s) => s.jarvis);
+  const state = useStore((s) => s.assistantState);
   const connected = useStore((s) => s.connected);
   const waiting = useStore(
     (s) => Object.values(s.approvals).filter((a) => a.status === "pending").length,
@@ -112,7 +112,7 @@ export function Shell() {
             aria-label={`${assistant} home`}
           >
             <span className="relative">
-              <Orb state={jarvis} />
+              <Orb state={state} />
               {collapsed && (
                 <span
                   className={`absolute -right-0.5 -top-0.5 hidden size-2 rounded-full ring-2 ring-panel md:block ${connected ? "bg-emerald-400" : "bg-slate-600"}`}
@@ -240,7 +240,7 @@ export function Shell() {
             <Menu size={20} />
           </button>
           <Link to="/" className="flex items-center gap-3" aria-label={`${assistant} home`}>
-            <Orb state={jarvis} size={22} />
+            <Orb state={state} size={22} />
             <span className="font-semibold">{assistant}</span>
           </Link>
         </header>

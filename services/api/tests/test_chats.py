@@ -6,12 +6,10 @@ async def new_chat(client) -> str:
 
 async def test_send_message_queues_a_turn(owner, queue):
     chat_id = await new_chat(owner)
-    resp = await owner.post(
-        f"/api/chats/{chat_id}/messages", json={"content": "Hello Jarvis\nmore"}
-    )
+    resp = await owner.post(f"/api/chats/{chat_id}/messages", json={"content": "Hello Nexus\nmore"})
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert body["chat"]["title"] == "Hello Jarvis"
+    assert body["chat"]["title"] == "Hello Nexus"
     assert body["user_message"]["status"] == "complete"
     assistant = body["assistant_message"]
     assert assistant["status"] == "streaming" and assistant["model"] == "jarvis-mini"

@@ -70,7 +70,7 @@ export function MemoryPage() {
     load().catch((e) => setError(e.message));
   }, [load]);
 
-  // Follow what Jarvis learns and rebuilds while the page is open.
+  // Follow what Nexus learns and rebuilds while the page is open.
   useEffect(
     () =>
       useStore.subscribe((s, prev) => {

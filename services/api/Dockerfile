@@ -14,7 +14,7 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-api --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-api --no-install-workspace
 
 COPY packages/common packages/common
 COPY services/api services/api
@@ -22,12 +22,12 @@ COPY services/api services/api
 COPY library library
 # Absolute, so it resolves whatever the working directory is.
 ENV LIBRARY_PATH=/app/library
-RUN uv sync --frozen --no-dev --package jarvis-api
+RUN uv sync --frozen --no-dev --package nexus-api
 
-RUN useradd --system --uid 10001 jarvis
-USER jarvis
+RUN useradd --system --uid 10001 nexus
+USER nexus
 WORKDIR /app/services/api
 EXPOSE 8000
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"
-CMD ["uvicorn", "jarvis_api.app:app", "--host", "0.0.0.0", "--port", "8000", \
+CMD ["uvicorn", "nexus_api.app:app", "--host", "0.0.0.0", "--port", "8000", \
      "--proxy-headers", "--forwarded-allow-ips", "*"]

@@ -6,9 +6,9 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from jarvis_common.apps import app_name
-from jarvis_common.deployer import DeployerError, DeployResult
-from jarvis_common.models import Project, User
+from nexus_common.apps import app_name
+from nexus_common.deployer import DeployerError, DeployResult
+from nexus_common.models import Project, User
 
 
 class FakeDeployer:
@@ -164,7 +164,7 @@ async def test_public_and_private(owner, people, sessionmaker, deployer):
     assert deployer.deploys[0]["build"] is False and deployer.deploys[0]["private"] is False
     resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": False})
     assert resp.json()["public"] is False and deployer.deploys[1]["private"] is True
-    # Only the app's owner (or Jarvis's) may change it.
+    # Only the app's owner (or Nexus's) may change it.
     mine = await add_app(sessionmaker, owner_id, "2048")
     assert (
         await member.post(f"/api/apps/{mine}/visibility", json={"public": True})

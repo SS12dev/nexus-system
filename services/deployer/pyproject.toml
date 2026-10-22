@@ -1,7 +1,7 @@
 [project]
-name = "jarvis-deployer"
+name = "nexus-deployer"
 version = "0.1.0"
-description = "Jarvis deployer: builds software projects into containers on the apps network, through a Docker API gate"
+description = "Nexus deployer: builds software projects into containers on the apps network, through a Docker API gate"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -14,4 +14,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/jarvis_deployer"]
+packages = ["src/nexus_deployer"]

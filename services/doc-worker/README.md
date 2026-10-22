@@ -1,6 +1,6 @@
 # doc-worker
 
-Turns uploads into text Jarvis can search and read. It takes `parse_file` jobs from the
+Turns uploads into text Nexus can search and read. It takes `parse_file` jobs from the
 `arq:docs` queue, then:
 
 1. reuses the earlier parse if the same user already uploaded the same bytes (by SHA-256);

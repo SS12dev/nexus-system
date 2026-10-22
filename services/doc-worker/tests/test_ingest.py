@@ -6,16 +6,16 @@ import pytest
 from openpyxl import Workbook
 from sqlalchemy import select
 
-from jarvis_common.events import user_channel
-from jarvis_common.models import File, FileChunk, FileStatus, RoleName, UserStatus
-from jarvis_common.storage import file_key
-from jarvis_doc_worker.chunk import chunk_markdown
-from jarvis_doc_worker.ingest import DocDeps, embed_missing, ingest_file
+from nexus_common.events import user_channel
+from nexus_common.models import File, FileChunk, FileStatus, RoleName, UserStatus
+from nexus_common.storage import file_key
+from nexus_doc_worker.chunk import chunk_markdown
+from nexus_doc_worker.ingest import DocDeps, embed_missing, ingest_file
 
 
 @pytest.fixture
 async def user_id(sessionmaker):
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         user = await create_user(
@@ -109,10 +109,10 @@ async def test_spreadsheets_become_tables(deps, upload, sessionmaker):
 
 
 async def test_same_upload_again_reuses_the_parse(deps, upload, sessionmaker, fake_embedder):
-    first = await upload("a.txt", b"Jarvis remembers things.", sha="same")
+    first = await upload("a.txt", b"Nexus remembers things.", sha="same")
     await ingest_file(deps, first)
     calls = fake_embedder.calls
-    second = await upload("b.txt", b"Jarvis remembers things.", sha="same")
+    second = await upload("b.txt", b"Nexus remembers things.", sha="same")
     await ingest_file(deps, second)
     assert fake_embedder.calls == calls
     async with sessionmaker() as db:

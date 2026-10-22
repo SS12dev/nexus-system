@@ -50,7 +50,7 @@ export function LibraryPage() {
       .catch(() => {});
   }, [upsertFile]);
 
-  // Links reload whenever one is added, changed or removed, here or by Jarvis in a chat.
+  // Links reload whenever one is added, changed or removed, here or by Nexus in a chat.
   useEffect(() => {
     api
       .links()

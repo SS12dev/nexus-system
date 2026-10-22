@@ -5,8 +5,8 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
-from jarvis_common.memory import get_profile
-from jarvis_common.models import (
+from nexus_common.memory import get_profile
+from nexus_common.models import (
     Chat,
     Episode,
     File,
@@ -22,14 +22,14 @@ from jarvis_common.models import (
     UserStatus,
     utcnow,
 )
-from jarvis_orchestrator import memory
-from jarvis_orchestrator.turn import run_turn
+from nexus_orchestrator import memory
+from nexus_orchestrator.turn import run_turn
 
 
 @pytest.fixture
 async def chat(sessionmaker):
     """An owner with one finished exchange; returns (user_id, chat_id, reply_id)."""
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         user = await create_user(
@@ -114,7 +114,7 @@ async def test_new_preference_is_added_with_its_source(deps, model, chat, sessio
     assert len(model.seen) == 1
     assert model.calls[0]["response_format"] == {"type": "json_object"}
     assert deps.factory_calls[0]["model"] == "jarvis-nano"
-    assert deps.factory_calls[0]["metadata"]["trace_name"] == "jarvis.memory.extract"
+    assert deps.factory_calls[0]["metadata"]["trace_name"] == "nexus.memory.extract"
     # A first memory schedules the first profile.
     assert enqueued.jobs == [("rebuild_profile", str(user_id))]
 
@@ -301,7 +301,7 @@ async def test_tool_calls_read_documents_and_count_every_call(
 
 
 async def test_tools_cannot_read_other_users_documents(deps, model, chat, sessionmaker):
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     user_id, chat_id, _ = chat
     async with sessionmaker() as db:

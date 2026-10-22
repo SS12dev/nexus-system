@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-import jarvis_workbench.app as module
-from jarvis_workbench.app import app
+import nexus_workbench.app as module
+from nexus_workbench.app import app
 
 USER = "u1"
 

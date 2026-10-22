@@ -35,7 +35,7 @@ body {
 }
 
 /* Small 2D orb for the sidebar, headers and the 3D scene's loading state: colour and pulse
-   follow Jarvis's state. */
+   follow Nexus's state. */
 .orb {
   border-radius: 9999px;
   background: radial-gradient(circle at 50% 40%, #e0f2fe, #38bdf8 35%, #1e3a8a 75%, transparent);
@@ -76,7 +76,7 @@ body {
   user-select: none;
 }
 
-/* What Jarvis is doing, under the orb, and the tool a busy agent is using, under the agent. */
+/* What Nexus is doing, under the orb, and the tool a busy agent is using, under the agent. */
 .orb-label-activity {
   max-width: 16rem;
   font-size: 12px;

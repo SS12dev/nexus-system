@@ -12,14 +12,14 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "jarvis-api",
-    "jarvis-common",
-    "jarvis-deployer",
-    "jarvis-doc-worker",
-    "jarvis-orchestrator",
-    "jarvis-sandbox",
-    "jarvis-system",
-    "jarvis-workbench",
+    "nexus-api",
+    "nexus-common",
+    "nexus-deployer",
+    "nexus-doc-worker",
+    "nexus-orchestrator",
+    "nexus-sandbox",
+    "nexus-system",
+    "nexus-workbench",
 ]
 
 [[package]]
@@ -1480,230 +1480,6 @@ wheels = [
 ]
 
 [[package]]
-name = "jarvis-api"
-version = "0.1.0"
-source = { editable = "services/api" }
-dependencies = [
-    { name = "alembic" },
-    { name = "arq" },
-    { name = "authlib" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "itsdangerous" },
-    { name = "jarvis-common" },
-    { name = "pydantic", extra = ["email"] },
-    { name = "python-multipart" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.14" },
-    { name = "arq", specifier = ">=0.26" },
-    { name = "authlib", specifier = ">=1.3" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "itsdangerous", specifier = ">=2.2" },
-    { name = "jarvis-common", editable = "packages/common" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.9" },
-    { name = "python-multipart", specifier = ">=0.0.18" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-]
-
-[[package]]
-name = "jarvis-common"
-version = "0.1.0"
-source = { editable = "packages/common" }
-dependencies = [
-    { name = "aiobotocore" },
-    { name = "asyncpg" },
-    { name = "cryptography" },
-    { name = "httpx" },
-    { name = "pgvector" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "redis" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiobotocore", specifier = ">=2.15" },
-    { name = "asyncpg", specifier = ">=0.30" },
-    { name = "cryptography", specifier = ">=43" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "pgvector", specifier = ">=0.4" },
-    { name = "pydantic", specifier = ">=2.9" },
-    { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "redis", specifier = ">=5.2" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
-]
-
-[[package]]
-name = "jarvis-deployer"
-version = "0.1.0"
-source = { editable = "services/deployer" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-]
-
-[[package]]
-name = "jarvis-doc-worker"
-version = "0.1.0"
-source = { editable = "services/doc-worker" }
-dependencies = [
-    { name = "arq" },
-    { name = "jarvis-common" },
-    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xls", "xlsx"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arq", specifier = ">=0.26" },
-    { name = "jarvis-common", editable = "packages/common" },
-    { name = "markitdown", extras = ["pdf", "docx", "pptx", "xlsx", "xls"], specifier = ">=0.1.3" },
-]
-
-[[package]]
-name = "jarvis-orchestrator"
-version = "0.1.0"
-source = { editable = "services/orchestrator" }
-dependencies = [
-    { name = "arq" },
-    { name = "jarvis-common" },
-    { name = "langchain-core" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint-postgres" },
-    { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pypdf" },
-    { name = "tzdata" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arq", specifier = ">=0.26" },
-    { name = "jarvis-common", editable = "packages/common" },
-    { name = "langchain-core", specifier = ">=0.3" },
-    { name = "langchain-openai", specifier = ">=0.3" },
-    { name = "langgraph", specifier = ">=0.4" },
-    { name = "langgraph-checkpoint-postgres", specifier = ">=2.0" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
-    { name = "pypdf", specifier = ">=5.1" },
-    { name = "tzdata", specifier = ">=2024.1" },
-]
-
-[[package]]
-name = "jarvis-sandbox"
-version = "0.1.0"
-source = { editable = "services/sandbox" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "markdown" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "openpyxl" },
-    { name = "pandas" },
-    { name = "pdfplumber" },
-    { name = "pillow" },
-    { name = "pypdf" },
-    { name = "python-docx" },
-    { name = "python-pptx" },
-    { name = "reportlab" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "tzdata" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "weasyprint" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "markdown", specifier = ">=3.7" },
-    { name = "matplotlib", specifier = ">=3.9" },
-    { name = "numpy", specifier = ">=2.1" },
-    { name = "openpyxl", specifier = ">=3.1" },
-    { name = "pandas", specifier = ">=2.2" },
-    { name = "pdfplumber", specifier = ">=0.11" },
-    { name = "pillow", specifier = ">=11.0" },
-    { name = "pypdf", specifier = ">=5.1" },
-    { name = "python-docx", specifier = ">=1.1" },
-    { name = "python-pptx", specifier = ">=1.0" },
-    { name = "reportlab", specifier = ">=4.2" },
-    { name = "scikit-learn", specifier = ">=1.6" },
-    { name = "scipy", specifier = ">=1.14" },
-    { name = "tzdata", specifier = ">=2024.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-    { name = "weasyprint", specifier = ">=63" },
-]
-
-[[package]]
-name = "jarvis-system"
-version = "0.1.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "fakeredis" },
-    { name = "httpx" },
-    { name = "jarvis-api" },
-    { name = "jarvis-common" },
-    { name = "jarvis-deployer" },
-    { name = "jarvis-doc-worker" },
-    { name = "jarvis-orchestrator" },
-    { name = "jarvis-sandbox" },
-    { name = "jarvis-workbench" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fakeredis", specifier = ">=2.26" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "jarvis-api", editable = "services/api" },
-    { name = "jarvis-common", editable = "packages/common" },
-    { name = "jarvis-deployer", editable = "services/deployer" },
-    { name = "jarvis-doc-worker", editable = "services/doc-worker" },
-    { name = "jarvis-orchestrator", editable = "services/orchestrator" },
-    { name = "jarvis-sandbox", editable = "services/sandbox" },
-    { name = "jarvis-workbench", editable = "services/workbench" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-asyncio", specifier = ">=1.0" },
-    { name = "ruff", specifier = ">=0.8" },
-]
-
-[[package]]
-name = "jarvis-workbench"
-version = "0.1.0"
-source = { editable = "services/workbench" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-]
-
-[[package]]
 name = "jiter"
 version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2649,6 +2425,230 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bf/21/f64d6b2dbea7bf3f8c38cdc786dcc6ef012ca3d173ad208c782c9a7bedf6/narwhals-2.27.1.tar.gz", hash = "sha256:aed93076a3ea42d9c32c88e4eb5ea422a21937011cbe1f480f9572a523c82094", size = 735013, upload-time = "2026-10-10T06:52:18.113Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/89/5d4c86da1130d9059681e5b6cd7645df5c10279a6a079c5c37dcb2cc6f3f/narwhals-2.27.1-py3-none-any.whl", hash = "sha256:d057df13f5852b8e157596e82eb5e955fad267425df5e420e0ee9863da483b31", size = 483211, upload-time = "2026-10-10T06:52:16.32Z" },
+]
+
+[[package]]
+name = "nexus-api"
+version = "0.1.0"
+source = { editable = "services/api" }
+dependencies = [
+    { name = "alembic" },
+    { name = "arq" },
+    { name = "authlib" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "itsdangerous" },
+    { name = "nexus-common" },
+    { name = "pydantic", extra = ["email"] },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.14" },
+    { name = "arq", specifier = ">=0.26" },
+    { name = "authlib", specifier = ">=1.3" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "itsdangerous", specifier = ">=2.2" },
+    { name = "nexus-common", editable = "packages/common" },
+    { name = "pydantic", extras = ["email"], specifier = ">=2.9" },
+    { name = "python-multipart", specifier = ">=0.0.18" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[[package]]
+name = "nexus-common"
+version = "0.1.0"
+source = { editable = "packages/common" }
+dependencies = [
+    { name = "aiobotocore" },
+    { name = "asyncpg" },
+    { name = "cryptography" },
+    { name = "httpx" },
+    { name = "pgvector" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiobotocore", specifier = ">=2.15" },
+    { name = "asyncpg", specifier = ">=0.30" },
+    { name = "cryptography", specifier = ">=43" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "pgvector", specifier = ">=0.4" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", specifier = ">=5.2" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
+]
+
+[[package]]
+name = "nexus-deployer"
+version = "0.1.0"
+source = { editable = "services/deployer" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[[package]]
+name = "nexus-doc-worker"
+version = "0.1.0"
+source = { editable = "services/doc-worker" }
+dependencies = [
+    { name = "arq" },
+    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xls", "xlsx"] },
+    { name = "nexus-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arq", specifier = ">=0.26" },
+    { name = "markitdown", extras = ["pdf", "docx", "pptx", "xlsx", "xls"], specifier = ">=0.1.3" },
+    { name = "nexus-common", editable = "packages/common" },
+]
+
+[[package]]
+name = "nexus-orchestrator"
+version = "0.1.0"
+source = { editable = "services/orchestrator" }
+dependencies = [
+    { name = "arq" },
+    { name = "langchain-core" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint-postgres" },
+    { name = "nexus-common" },
+    { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pypdf" },
+    { name = "tzdata" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arq", specifier = ">=0.26" },
+    { name = "langchain-core", specifier = ">=0.3" },
+    { name = "langchain-openai", specifier = ">=0.3" },
+    { name = "langgraph", specifier = ">=0.4" },
+    { name = "langgraph-checkpoint-postgres", specifier = ">=2.0" },
+    { name = "nexus-common", editable = "packages/common" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
+    { name = "pypdf", specifier = ">=5.1" },
+    { name = "tzdata", specifier = ">=2024.1" },
+]
+
+[[package]]
+name = "nexus-sandbox"
+version = "0.1.0"
+source = { editable = "services/sandbox" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "markdown" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "pdfplumber" },
+    { name = "pillow" },
+    { name = "pypdf" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
+    { name = "reportlab" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "tzdata" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "weasyprint" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "markdown", specifier = ">=3.7" },
+    { name = "matplotlib", specifier = ">=3.9" },
+    { name = "numpy", specifier = ">=2.1" },
+    { name = "openpyxl", specifier = ">=3.1" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "pdfplumber", specifier = ">=0.11" },
+    { name = "pillow", specifier = ">=11.0" },
+    { name = "pypdf", specifier = ">=5.1" },
+    { name = "python-docx", specifier = ">=1.1" },
+    { name = "python-pptx", specifier = ">=1.0" },
+    { name = "reportlab", specifier = ">=4.2" },
+    { name = "scikit-learn", specifier = ">=1.6" },
+    { name = "scipy", specifier = ">=1.14" },
+    { name = "tzdata", specifier = ">=2024.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "weasyprint", specifier = ">=63" },
+]
+
+[[package]]
+name = "nexus-system"
+version = "0.1.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis" },
+    { name = "httpx" },
+    { name = "nexus-api" },
+    { name = "nexus-common" },
+    { name = "nexus-deployer" },
+    { name = "nexus-doc-worker" },
+    { name = "nexus-orchestrator" },
+    { name = "nexus-sandbox" },
+    { name = "nexus-workbench" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fakeredis", specifier = ">=2.26" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "nexus-api", editable = "services/api" },
+    { name = "nexus-common", editable = "packages/common" },
+    { name = "nexus-deployer", editable = "services/deployer" },
+    { name = "nexus-doc-worker", editable = "services/doc-worker" },
+    { name = "nexus-orchestrator", editable = "services/orchestrator" },
+    { name = "nexus-sandbox", editable = "services/sandbox" },
+    { name = "nexus-workbench", editable = "services/workbench" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=1.0" },
+    { name = "ruff", specifier = ">=0.8" },
+]
+
+[[package]]
+name = "nexus-workbench"
+version = "0.1.0"
+source = { editable = "services/workbench" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 
 [[package]]

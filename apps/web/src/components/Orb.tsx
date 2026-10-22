@@ -1,7 +1,7 @@
-import type { JarvisState } from "../lib/types";
+import type { AssistantState } from "../lib/types";
 import { useAssistantName } from "../lib/assistant";
 
-export function Orb({ state, size = 28 }: { state: JarvisState; size?: number }) {
+export function Orb({ state, size = 28 }: { state: AssistantState; size?: number }) {
   const assistant = useAssistantName();
   return (
     <div

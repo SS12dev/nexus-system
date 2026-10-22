@@ -1,7 +1,7 @@
 # GitHub App setup
 
 Every app a software team builds gets its own private repo in a GitHub organisation you own.
-Jarvis writes to it as a GitHub App called Jarvis, so commits show as `<app-name>[bot]`, its
+Nexus writes to it as a GitHub App called Nexus, so commits show as `<app-name>[bot]`, its
 tokens last an hour, and it can only touch that organisation. Without this setup, projects
 still build and show in the Library; they just stay in the workbench.
 
@@ -12,8 +12,8 @@ outside the organisation are read without signing in, so only public ones previe
 
 ## 1. The organisation
 
-Create a free organisation for Jarvis's projects (Settings → Organizations → New
-organization), for example `servhub-apps`. Keeping them out of your own account means Jarvis
+Create a free organisation for Nexus's projects (Settings → Organizations → New
+organization), for example `servhub-apps`. Keeping them out of your own account means Nexus
 never has access to your other repos.
 
 ## 2. The App
@@ -23,9 +23,9 @@ In the organisation: Settings → Developer settings → GitHub Apps → New Git
 | Field | Value |
 | --- | --- |
 | GitHub App name | must be unique on all of GitHub, e.g. `servhub-jarvis`; commits show as `<name>[bot]` |
-| Homepage URL | `https://jarvis.servhub.cc` |
+| Homepage URL | `https://nexus.servhub.cc` |
 | Callback URL, Setup URL | leave empty; leave every box under them unticked |
-| Webhook | untick **Active**: Jarvis doesn't listen for events |
+| Webhook | untick **Active**: Nexus doesn't listen for events |
 | Where can this GitHub App be installed? | Only on this account |
 
 Repository permissions, and nothing else:
@@ -44,11 +44,11 @@ choose **Generate a private key**; your browser downloads a `.pem` file.
 
 ## 3. Install it
 
-On the App's page: Install App → your organisation → **All repositories** (so the repos Jarvis
+On the App's page: Install App → your organisation → **All repositories** (so the repos Nexus
 creates are covered). The address you land on ends in `/installations/<number>`: that number
 is the installation id.
 
-## 4. Tell Jarvis
+## 4. Tell Nexus
 
 Plain settings go in `.env`:
 
@@ -84,9 +84,9 @@ Then delete the downloaded `.pem` (GitHub can make a new one any time) and resta
 
 ## Moving a repo to your account
 
-Say "move 2048 to my GitHub, I'm SS12dev". Jarvis starts a small team whose agent asks you on
+Say "move 2048 to my GitHub, I'm SS12dev". Nexus starts a small team whose agent asks you on
 an approval card before calling `github_transfer`. GitHub then emails that account to accept
-the transfer. Only the owner can do this. Once moved, Jarvis stops pushing to it; later
+the transfer. Only the owner can do this. Once moved, Nexus stops pushing to it; later
 changes stay in the workbench.
 
 ## If something goes wrong

@@ -3,11 +3,11 @@ import uuid
 import httpx
 import pytest
 
-import jarvis_workbench.app as workbench_app
-from jarvis_common.models import Capability
-from jarvis_common.toolinfo import BY_NAME, RISK_CAPABILITY
-from jarvis_orchestrator.tools import ToolContext, build_tools
-from jarvis_orchestrator.workbench import CommandResult, WorkbenchClient, WorkbenchError
+import nexus_workbench.app as workbench_app
+from nexus_common.models import Capability
+from nexus_common.toolinfo import BY_NAME, RISK_CAPABILITY
+from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.workbench import CommandResult, WorkbenchClient, WorkbenchError
 
 WS_TOOLS = ["ws_tree", "ws_read", "ws_write", "ws_edit", "ws_run", "ws_diff", "ws_commit"]
 

@@ -2,7 +2,7 @@ import { Html, OrbitControls, Stars } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useRef } from "react";
-import type { JarvisState } from "../lib/types";
+import type { AssistantState } from "../lib/types";
 import { CoreOrb } from "./CoreOrb";
 import { Crystals, MemoryCloud } from "./Inside";
 import {
@@ -27,7 +27,7 @@ export function selectionId(s: Selection | null): string | null {
 
 /** The whole 3D home scene. Lazy-loaded, so three.js only downloads on the orb page. */
 export default function OrbScene({
-  jarvis,
+  assistantState,
   activity = null,
   clusters,
   memories,
@@ -36,8 +36,8 @@ export default function OrbScene({
   selected,
   onSelect,
 }: {
-  jarvis: JarvisState;
-  /** What Jarvis is doing right now, shown under the orb while it works. */
+  assistantState: AssistantState;
+  /** What Nexus is doing right now, shown under the orb while it works. */
   activity?: string | null;
   clusters: OrbCluster[];
   memories: MemoryPoint[];
@@ -63,7 +63,7 @@ export default function OrbScene({
       <directionalLight position={[4, 6, 5]} intensity={0.8} />
       <Stars radius={60} depth={40} count={perf.stars} factor={3} fade speed={still ? 0 : 0.4} />
 
-      <CoreOrb state={jarvis} still={still} />
+      <CoreOrb state={assistantState} still={still} />
       {activity && (
         <Html center position={[0, -1.3, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
           <div className="orb-label orb-label-activity">{activity}</div>

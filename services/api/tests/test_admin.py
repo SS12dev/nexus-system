@@ -43,8 +43,8 @@ async def test_last_owner_cannot_be_demoted(invite, owner):
 async def test_disable_revokes_sessions_and_blocks_key(
     invite, owner, client_for, gateway, sessionmaker, settings
 ):
-    from jarvis_common.litellm import ensure_user_key
-    from jarvis_common.models import User
+    from nexus_common.litellm import ensure_user_key
+    from nexus_common.models import User
 
     target = await invite(owner, "m@example.com")
     member = await client_for("m@example.com")
