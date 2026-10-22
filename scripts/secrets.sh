@@ -102,7 +102,9 @@ cmd_set() {
   [[ "$name" =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "$name isn't a valid name."
   [[ -f "$FILE" ]] || die "No $FILE yet. Run: $0 init"
   local value
-  if [[ -t 0 ]]; then read -r -s -p "$name: " value; echo; else IFS= read -r value; fi
+  # A piped value may have no final newline (base64 | tr -d '\n'), so read's EOF status is fine.
+  if [[ -t 0 ]]; then read -r -s -p "$name: " value; echo; else IFS= read -r value || true; fi
+  [[ -n "$value" ]] || die "No value given for $name."
   [[ "$value" != *$'\n'* ]] || die "Values must be one line."
   umask 077
   plain=$(mktemp secrets/.plain.XXXXXX)
