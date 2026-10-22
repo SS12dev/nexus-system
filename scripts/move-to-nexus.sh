@@ -61,21 +61,19 @@ done
 step "Postgres: database and user"
 dc up -d --wait postgres
 pg() { docker exec -i nexus-postgres-1 sh -c "psql -X -q -v ON_ERROR_STOP=1 $*"; }
-# The password comes from the container's own environment and never reaches this shell.
-pg '-U jarvis -d postgres -v pw="$POSTGRES_PASSWORD"' <<'SQL'
-CREATE ROLE nexus SUPERUSER LOGIN PASSWORD :'pw';
+# jarvis made the cluster, so it owns the system catalogs and can't be dropped; rename it
+# instead, from a temporary superuser (a role can't rename itself). The password comes from the
+# container's own environment and never reaches this shell.
+pg '-U jarvis -d postgres' <<'SQL'
+CREATE ROLE rename_tmp SUPERUSER LOGIN;
 SQL
-pg '-U nexus -d postgres' <<'SQL'
+pg '-U rename_tmp -d postgres -v pw="$POSTGRES_PASSWORD"' <<'SQL'
 ALTER DATABASE jarvis RENAME TO nexus;
+ALTER ROLE jarvis RENAME TO nexus;
+ALTER ROLE nexus PASSWORD :'pw';
 SQL
-for db in nexus litellm langfuse postgres template1; do
-  pg "-U nexus -d $db" <<'SQL'
-REASSIGN OWNED BY jarvis TO nexus;
-DROP OWNED BY jarvis;
-SQL
-done
 pg '-U nexus -d postgres' <<'SQL'
-DROP ROLE jarvis;
+DROP ROLE rename_tmp;
 SQL
 
 step "LiteLLM: keys allowed the jarvis-* models"
@@ -123,5 +121,14 @@ docker exec nexus-redis-1 sh -c "valkey-cli --scan --pattern 'jarvis:*' | xargs 
 
 step "Starting Nexus"
 if [[ -n "$tunnel" ]]; then dc --profile tunnel up -d --build; else dc up -d --build; fi
+
+step "Langfuse: the API key moves to the new nexus project"
+# Langfuse makes the nexus org and project on start, then fails to add the key because the old
+# one has the same secret; hand it the old key instead.
+until docker exec nexus-postgres-1 psql -U nexus -d langfuse -Atc \
+  "select 1 from projects where id = 'nexus'" 2>/dev/null | grep -q 1; do sleep 2; done
+docker exec nexus-postgres-1 psql -U nexus -d langfuse -Atc \
+  "update api_keys set public_key = 'pk-lf-nexus', project_id = 'nexus' where public_key = 'pk-lf-jarvis'"
+dc restart langfuse-web langfuse-worker litellm
 echo
 echo "Done. The jarvis_* volumes are still there; delete them once Nexus looks right."
