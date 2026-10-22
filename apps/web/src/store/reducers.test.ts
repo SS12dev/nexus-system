@@ -51,9 +51,9 @@ describe("applyEvent", () => {
     expect(s).toBe(initialState);
   });
 
-  it("tracks Jarvis's state", () => {
-    const s = applyEvent(initialState, { type: "jarvis.state", chat_id: "c1", data: { state: "thinking" } });
-    expect(s.jarvis).toBe("thinking");
+  it("tracks Nexus's state", () => {
+    const s = applyEvent(initialState, { type: "assistant.state", chat_id: "c1", data: { state: "thinking" } });
+    expect(s.assistantState).toBe("thinking");
   });
 });
 
@@ -92,7 +92,7 @@ describe("phase 2 events", () => {
     expect(s.messages.c1[0].attachments?.[0].status).toBe("ready");
   });
 
-  it("shows what Jarvis is doing until the reply finishes, and keeps attachments", () => {
+  it("shows what Nexus is doing until the reply finishes, and keeps attachments", () => {
     let s = addMessages(initialState, "c1", [msg({ attachments: [file] })]);
     s = applyEvent(s, { type: "tool.call", chat_id: "c1", data: { name: "search_documents" } });
     expect(s.activity).toBe("Searching your documents");
@@ -173,7 +173,7 @@ describe("agent systems", () => {
     expect(s.systems.s1).toBeUndefined();
   });
 
-  it("keeps agent tool calls out of Jarvis's own activity and logs them on the run", () => {
+  it("keeps agent tool calls out of Nexus's own activity and logs them on the run", () => {
     let s = applyEvent(initialState, { type: "system.created", chat_id: "c1", data: { system } });
     s = applyEvent(s, {
       type: "agent.status",
@@ -248,7 +248,7 @@ describe("orb data", () => {
     expect(Object.keys(syncFiles(current, [file("new")])).sort()).toEqual(["new", "up"]);
   });
 
-  it("shows the tools Jarvis uses on the reply it is writing, and keeps them when it completes", () => {
+  it("shows the tools Nexus uses on the reply it is writing, and keeps them when it completes", () => {
     let s = addMessages(initialState, "c1", [msg({ id: "u1", role: "user", status: "complete" }), msg()]);
     s = applyEvent(s, {
       type: "tool.call",

@@ -7,8 +7,8 @@ import openai
 import pytest
 from sqlalchemy import select
 
-from jarvis_common.events import user_channel
-from jarvis_common.models import (
+from nexus_common.events import user_channel
+from nexus_common.models import (
     ApiKey,
     Chat,
     Message,
@@ -18,14 +18,14 @@ from jarvis_common.models import (
     User,
     UserStatus,
 )
-from jarvis_orchestrator import turn
-from jarvis_orchestrator.turn import finished, run_turn, track_step
+from nexus_orchestrator import turn
+from nexus_orchestrator.turn import finished, run_turn, track_step
 
 
 @pytest.fixture
 async def setup(sessionmaker, deps, model):
     """A user with a chat holding one question and a streaming placeholder for the reply."""
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         user = await create_user(
@@ -82,11 +82,11 @@ async def test_turn_streams_and_stores_reply(setup, redis, sessionmaker):
     events = await run_and_collect(deps, redis, user_id, chat_id, msg_id)
 
     types = [e["type"] for e in events]
-    assert types[0] == "jarvis.state" and events[0]["data"]["state"] == "thinking"
+    assert types[0] == "assistant.state" and events[0]["data"]["state"] == "thinking"
     assert events[1]["data"]["state"] == "speaking"
     deltas = [e["data"]["delta"] for e in events if e["type"] == "message.delta"]
     assert "".join(deltas) == "Hello there, Shivam."
-    assert types[-2:] == ["message.completed", "jarvis.state"]
+    assert types[-2:] == ["message.completed", "assistant.state"]
     assert events[-1]["data"]["state"] == "idle"
 
     async with sessionmaker() as db:
@@ -204,8 +204,8 @@ async def test_router_hands_team_work_to_build_agent_system(setup, settings, ses
     reply_id = await ask(sessionmaker, chat_id, RESEARCH)
     await run_turn(deps, chat_id, reply_id)
     assert factory_calls[-1]["model"] == "jarvis-nano"
-    assert factory_calls[-1]["metadata"]["generation_name"] == "jarvis.route"
-    # The router saw the request; Jarvis's first call was made to call build_agent_system.
+    assert factory_calls[-1]["metadata"]["generation_name"] == "nexus.route"
+    # The router saw the request; Nexus's first call was made to call build_agent_system.
     assert RESEARCH in model.seen[0][-1].content
     assert {"tool_choice": "build_agent_system"} in model.binds
     assert "build_agent_system" in model.tools

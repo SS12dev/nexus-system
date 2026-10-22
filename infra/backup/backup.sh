@@ -1,11 +1,11 @@
 #!/bin/sh
-# Jarvis backups. Each backup is a folder under $BACKUP_OUT named by its UTC time, holding a
+# Nexus backups. Each backup is a folder under $BACKUP_OUT named by its UTC time, holding a
 # pg_dump of every database, a tarball of the MinIO data, the encrypted secrets file (if there is
 # one) and SHA256SUMS. Progress is recorded in
 # the jarvis database's backups table, which the Admin page reads.
 #
-#   jarvis-backup loop   check every minute: a "back up now" from the Admin page, or the daily one
-#   jarvis-backup once   one backup now, then exit
+#   nexus-backup loop   check every minute: a "back up now" from the Admin page, or the daily one
+#   nexus-backup once   one backup now, then exit
 #
 # Restore with scripts/restore.sh. Settings (compose.yaml passes them):
 #   PGHOST PGUSER PGPASSWORD   Postgres connection
@@ -19,7 +19,9 @@ set -u
 
 OUT=${BACKUP_OUT:-/backups}
 MINIO_DATA=${MINIO_DATA:-/minio}
-SECRETS_FILE=${SECRETS_FILE:-/secrets/jarvis.sops.env}
+SECRETS_FILE=${SECRETS_FILE:-/secrets/nexus.sops.env}
+# Its name before the rename to Nexus.
+[ -f "$SECRETS_FILE" ] || [ ! -f /secrets/jarvis.sops.env ] || SECRETS_FILE=/secrets/jarvis.sops.env
 DATABASES=${BACKUP_DATABASES:-jarvis litellm langfuse}
 HOUR=${BACKUP_HOUR_UTC:-21}
 KEEP_DAYS=${BACKUP_KEEP_DAYS:-14}
@@ -53,7 +55,7 @@ backup() {
     fi
     # Encrypted with your age key, so it is safe here; restoring on a new machine needs it.
     if [ -f "$SECRETS_FILE" ]; then
-      cp "$SECRETS_FILE" jarvis.sops.env || exit 1
+      cp "$SECRETS_FILE" nexus.sops.env || exit 1
     fi
     sha256sum $(ls | grep -v -e '^backup.log$' -e '^SHA256SUMS$') > SHA256SUMS || exit 1
   ) > "$dir/backup.log" 2>&1; then
@@ -121,7 +123,7 @@ case "${1:-loop}" in
     done
     ;;
   *)
-    echo "usage: jarvis-backup loop|once" >&2
+    echo "usage: nexus-backup loop|once" >&2
     exit 2
     ;;
 esac

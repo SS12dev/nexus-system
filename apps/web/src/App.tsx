@@ -10,7 +10,7 @@ import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { HomePage } from "./pages/HomePage";
-import { JarvisLayout } from "./pages/JarvisLayout";
+import { OrbLayout } from "./pages/OrbLayout";
 import { AppsPage } from "./pages/AppsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -60,7 +60,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route element={<JarvisLayout />}>
+        <Route element={<OrbLayout />}>
           <Route index element={<HomePage />} />
           <Route path="c/:chatId" element={<ChatPage />} />
         </Route>

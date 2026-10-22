@@ -7,8 +7,8 @@ import pytest
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
-from jarvis_common import google
-from jarvis_common.models import GoogleGrant, User, utcnow
+from nexus_common import google
+from nexus_common.models import GoogleGrant, User, utcnow
 
 GMAIL = google.SERVICE_SCOPES["gmail"]
 CALENDAR = google.SERVICE_SCOPES["calendar"]

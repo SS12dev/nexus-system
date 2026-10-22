@@ -4,7 +4,7 @@ import { useSend } from "../lib/useSend";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
 
-/** The home screen's chat dock, under the orb (see JarvisLayout). Sending opens the chat
+/** The home screen's chat dock, under the orb (see OrbLayout). Sending opens the chat
  * beside the orb. */
 export function HomePage() {
   const assistant = useAssistantName();

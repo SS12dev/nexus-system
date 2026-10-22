@@ -1,7 +1,7 @@
 [project]
-name = "jarvis-system"
+name = "nexus-system"
 version = "0.1.0"
-description = "Jarvis: a supervisor agent that builds and runs sub-agent systems"
+description = "Nexus: a supervisor agent that builds and runs sub-agent systems"
 requires-python = ">=3.12"
 
 [tool.uv]
@@ -25,23 +25,23 @@ dev = [
     "ruff>=0.8",
     "httpx>=0.28",
     "fakeredis>=2.26",
-    "jarvis-common",
-    "jarvis-api",
-    "jarvis-orchestrator",
-    "jarvis-doc-worker",
-    "jarvis-sandbox",
-    "jarvis-workbench",
-    "jarvis-deployer",
+    "nexus-common",
+    "nexus-api",
+    "nexus-orchestrator",
+    "nexus-doc-worker",
+    "nexus-sandbox",
+    "nexus-workbench",
+    "nexus-deployer",
 ]
 
 [tool.uv.sources]
-jarvis-common = { workspace = true }
-jarvis-api = { workspace = true }
-jarvis-orchestrator = { workspace = true }
-jarvis-doc-worker = { workspace = true }
-jarvis-sandbox = { workspace = true }
-jarvis-workbench = { workspace = true }
-jarvis-deployer = { workspace = true }
+nexus-common = { workspace = true }
+nexus-api = { workspace = true }
+nexus-orchestrator = { workspace = true }
+nexus-doc-worker = { workspace = true }
+nexus-sandbox = { workspace = true }
+nexus-workbench = { workspace = true }
+nexus-deployer = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -68,11 +68,11 @@ addopts = "--import-mode=importlib"
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "jarvis_common",
-    "jarvis_api",
-    "jarvis_orchestrator",
-    "jarvis_doc_worker",
-    "jarvis_sandbox",
-    "jarvis_workbench",
-    "jarvis_deployer",
+    "nexus_common",
+    "nexus_api",
+    "nexus_orchestrator",
+    "nexus_doc_worker",
+    "nexus_sandbox",
+    "nexus_workbench",
+    "nexus_deployer",
 ]

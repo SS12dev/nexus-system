@@ -1,6 +1,6 @@
 import uuid
 
-from jarvis_common.models import File, FileChunk, FileStatus
+from nexus_common.models import File, FileChunk, FileStatus
 
 
 async def upload(client, name="notes.txt", data=b"Quarterly revenue grew 12 percent.", **form):

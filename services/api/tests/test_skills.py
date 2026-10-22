@@ -2,7 +2,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from jarvis_common.skills import sync_library
+from nexus_common.skills import sync_library
 
 SKILL = """---
 name: meeting-notes

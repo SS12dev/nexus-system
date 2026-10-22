@@ -5,7 +5,7 @@ import { KIND_COLOR, type Crystal, type MemoryPoint } from "./model";
 
 const GROW_S = 0.9;
 
-/** Memories as instanced particles inside the orb, clustered by kind. A memory Jarvis just
+/** Memories as instanced particles inside the orb, clustered by kind. A memory Nexus just
  * learned grows in with a flash; pinned ones are larger and brighter. */
 export function MemoryCloud({
   points,
@@ -92,7 +92,7 @@ export function MemoryCloud({
   );
 }
 
-/** Artifacts (files Jarvis or a team made) as small spinning crystals inside the orb. */
+/** Artifacts (files Nexus or a team made) as small spinning crystals inside the orb. */
 export function Crystals({
   items,
   still,

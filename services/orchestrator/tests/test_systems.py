@@ -1,5 +1,5 @@
 """Agent systems end to end with scripted models: each topology, approvals (approve, edit,
-reject), pause/resume, cancel, budget checks, tier policy and Jarvis's build tool."""
+reject), pause/resume, cancel, budget checks, tier policy and Nexus's build tool."""
 
 import asyncio
 import json
@@ -11,7 +11,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from sqlalchemy import select
 
-from jarvis_common.models import (
+from nexus_common.models import (
     AgentRun,
     AgentSystem,
     Approval,
@@ -27,12 +27,12 @@ from jarvis_common.models import (
     SystemLifetime,
     SystemStatus,
 )
-from jarvis_common.spec import AgentSystemSpec
-from jarvis_common.systems import BudgetProblem, control_run, decide_approval, new_run
-from jarvis_orchestrator.systems import runner, runtime
-from jarvis_orchestrator.systems.learn import draft_skill
-from jarvis_orchestrator.systems.manage import system_tools
-from jarvis_orchestrator.tools import ToolContext
+from nexus_common.spec import AgentSystemSpec
+from nexus_common.systems import BudgetProblem, control_run, decide_approval, new_run
+from nexus_orchestrator.systems import runner, runtime
+from nexus_orchestrator.systems.learn import draft_skill
+from nexus_orchestrator.systems.manage import system_tools
+from nexus_orchestrator.tools import ToolContext
 
 
 def agent(id_, **kw) -> dict:
@@ -151,7 +151,7 @@ async def test_finished_run_drafts_a_learned_skill(sdeps, owner, scripts):
     scripts["solo"] = ["Done."]
     _, run_id = await make_run(sdeps, owner, "single", [agent("solo")])
     await runner.run_system(sdeps, run_id)
-    scripts["jarvis.draft_skill"] = [
+    scripts["nexus.draft_skill"] = [
         json.dumps(
             {
                 "name": "EV market report",
@@ -335,7 +335,7 @@ async def test_pause_parks_and_resume_finishes(sdeps, owner, scripts):
     sdeps.model_factory = pausing_factory
 
     # Pause as soon as the first tool runs.
-    from jarvis_orchestrator.systems import runtime
+    from nexus_orchestrator.systems import runtime
 
     real_status = runtime.RunContext.agent_status
 
@@ -460,8 +460,8 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
         "budget_usd": 40,  # the architect's guess is ignored
     }
     bad = {**spec, "agents": [agent("researcher", tools=["teleport"]), spec["agents"][1]]}
-    scripts["jarvis.design_system"] = [json.dumps({"spec": bad}), json.dumps({"spec": spec})]
-    from jarvis_common.skills import sync_library
+    scripts["nexus.design_system"] = [json.dumps({"spec": bad}), json.dumps({"spec": spec})]
+    from nexus_common.skills import sync_library
 
     async with sdeps.sessionmaker() as db:
         from pathlib import Path
@@ -483,7 +483,7 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
     assert system.lifetime == SystemLifetime.ephemeral and system.chat_id == chat_id
     assert run.status == RunStatus.queued and run.trace_id == "trace1"
     assert run.budget_usd == Decimal(str(sdeps.settings.default_run_budget_usd))
-    # The team gets the user's own words, so a step Jarvis left out (the email) isn't lost.
+    # The team gets the user's own words, so a step Nexus left out (the email) isn't lost.
     assert run.input.startswith("EV report please") and asked in run.input
     assert ("run_system", str(run.id)) in enqueued.jobs
 
@@ -500,7 +500,7 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
 
 
 def test_keeping_a_team_takes_the_users_own_words():
-    from jarvis_orchestrator.systems.manage import asked_to_keep
+    from nexus_orchestrator.systems.manage import asked_to_keep
 
     assert asked_to_keep("Research EV prices and keep this team for next month")
     assert asked_to_keep("save it as a template")
@@ -520,7 +520,7 @@ class SlowWeb:
         self.log: list[str] = []
 
     async def search(self, query: str, limit: int = 8):
-        from jarvis_orchestrator.web import SearchResult
+        from nexus_orchestrator.web import SearchResult
 
         self.running += 1
         self.peak = max(self.peak, self.running)

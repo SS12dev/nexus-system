@@ -1,4 +1,4 @@
-# LiteLLM proxy for Jarvis. Agents only ever name the jarvis-* aliases, so swapping a model is a
+# LiteLLM proxy for Nexus. Agents only ever name the jarvis-* aliases, so swapping a model is a
 # change here, not in code. Prices and tiers: see the architecture doc.
 model_list:
   - model_name: jarvis-nano     # routing, intent, memory extraction, titles, summaries

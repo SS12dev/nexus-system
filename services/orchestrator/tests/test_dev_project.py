@@ -12,8 +12,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from sqlalchemy import select
 
-from jarvis_common.devteam import DEV_IDS
-from jarvis_common.models import (
+from nexus_common.devteam import DEV_IDS
+from nexus_common.models import (
     AgentRun,
     AgentSystem,
     Approval,
@@ -23,14 +23,14 @@ from jarvis_common.models import (
     SystemLifetime,
     SystemStatus,
 )
-from jarvis_common.spec import AgentSystemSpec
-from jarvis_common.systems import control_run, decide_approval, new_run
-from jarvis_orchestrator.route import Route, route
-from jarvis_orchestrator.systems import runner
-from jarvis_orchestrator.systems.dev import plan_first
-from jarvis_orchestrator.systems.manage import system_tools
-from jarvis_orchestrator.tools import ToolContext
-from jarvis_orchestrator.workbench import CommandResult
+from nexus_common.spec import AgentSystemSpec
+from nexus_common.systems import control_run, decide_approval, new_run
+from nexus_orchestrator.route import Route, route
+from nexus_orchestrator.systems import runner
+from nexus_orchestrator.systems.dev import plan_first
+from nexus_orchestrator.systems.manage import system_tools
+from nexus_orchestrator.tools import ToolContext
+from nexus_orchestrator.workbench import CommandResult
 
 PLAN = "# Plan\n\n1. A 4x4 grid\n2. Arrow keys merge tiles\n3. Score"
 DEV_TOOLS = {
@@ -208,7 +208,7 @@ async def test_plan_first_waits_for_go(sdeps, owner, scripts, seen, wb):
     assert len(messages) == 1 and "Reply **go**" in messages[0]
     assert "frontend" not in seen
 
-    # The user says go: Jarvis resumes the run like any paused run.
+    # The user says go: Nexus resumes the run like any paused run.
     async with sdeps.sessionmaker() as db:
         run = await db.get(AgentRun, run_id)
         system = await db.get(AgentSystem, run.system_id)
@@ -297,14 +297,14 @@ def dev_spec(**kw) -> str:
 async def test_software_requests_get_the_dev_team(sdeps, owner, scripts, seen, enqueued):
     other = {"name": "x", "goal": "g", "topology": "single",
              "agents": [{"id": "a", "name": "A", "instructions": "do"}]}  # fmt: skip
-    scripts["jarvis.design_system"] = [json.dumps({"spec": other}), dev_spec()]
+    scripts["nexus.design_system"] = [json.dumps({"spec": other}), dev_spec()]
     out = await build_tool(sdeps, owner).ainvoke({"request": "Build me a 2048 game"})
     assert "Started 2048" in out and "workbench project" in out
 
-    prompt = seen["jarvis.design_system"][0][-1].content
+    prompt = seen["nexus.design_system"][0][-1].content
     assert "use dev_project" in prompt
     # The first, non-dev design was sent back.
-    assert "use topology dev_project" in seen["jarvis.design_system"][1][-1].content
+    assert "use topology dev_project" in seen["nexus.design_system"][1][-1].content
     async with sdeps.sessionmaker() as db:
         run = await db.scalar(select(AgentRun))
         system = await db.get(AgentSystem, run.system_id)
@@ -316,7 +316,7 @@ async def test_software_requests_get_the_dev_team(sdeps, owner, scripts, seen, e
 
 
 async def test_follow_up_reuses_the_project(sdeps, owner, scripts, seen):
-    scripts["jarvis.design_system"] = [dev_spec()]
+    scripts["nexus.design_system"] = [dev_spec()]
     await build_tool(sdeps, owner).ainvoke({"request": "Build me a 2048 game"})
     async with sdeps.sessionmaker() as db:
         first = await db.scalar(select(AgentSystem))
@@ -327,16 +327,16 @@ async def test_follow_up_reuses_the_project(sdeps, owner, scripts, seen):
         await db.commit()
     project = first.spec["project"]
 
-    scripts["jarvis.design_system"] = [dev_spec(project=project)]
+    scripts["nexus.design_system"] = [dev_spec(project=project)]
     out = await build_tool(sdeps, owner, asked="Add a high score table").ainvoke(
         {"request": "Add a high score table to the 2048 game"}
     )
     assert f"workbench project {project}" in out
     # The architect was shown the earlier project to pick.
-    assert f"- {project}: 2048: A 2048 game" in seen["jarvis.design_system"][-1][-1].content
+    assert f"- {project}: 2048: A 2048 game" in seen["nexus.design_system"][-1][-1].content
 
     # A project id the user doesn't own is never continued.
-    scripts["jarvis.design_system"] = [dev_spec(project="someone-elses")]
+    scripts["nexus.design_system"] = [dev_spec(project="someone-elses")]
     await build_tool(sdeps, owner).ainvoke({"request": "Build a snake game"})
     async with sdeps.sessionmaker() as db:
         systems = (await db.scalars(select(AgentSystem).order_by(AgentSystem.created_at))).all()
@@ -349,7 +349,7 @@ async def test_building_software_needs_the_exec_capability(sdeps, owner, scripts
         {"request": "Build me a 2048 game"}
     )
     assert "Run code permission" in out
-    assert "jarvis.design_system" not in scripts
+    assert "nexus.design_system" not in scripts
 
 
 async def test_run_against_the_real_workbench(
@@ -359,8 +359,8 @@ async def test_run_against_the_real_workbench(
     project folder (the workbench app in-process)."""
     import httpx
 
-    import jarvis_workbench.app as workbench_app
-    from jarvis_orchestrator.workbench import WorkbenchClient
+    import nexus_workbench.app as workbench_app
+    from nexus_orchestrator.workbench import WorkbenchClient
 
     monkeypatch.setattr(workbench_app, "ROOT", tmp_path)
     http = httpx.AsyncClient(

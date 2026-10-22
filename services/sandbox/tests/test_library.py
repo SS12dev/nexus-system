@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from PIL import Image
 from pypdf import PdfReader
 
-from jarvis_common.skills import CATEGORIES, read_folder, shipped_instructions, shipped_shared
+from nexus_common.skills import CATEGORIES, read_folder, shipped_instructions, shipped_shared
 
 from .conftest import LIBRARY
 

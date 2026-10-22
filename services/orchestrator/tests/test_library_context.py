@@ -1,20 +1,20 @@
-"""What the shared library puts into prompts: house conventions for every agent and Jarvis,
+"""What the shared library puts into prompts: house conventions for every agent and Nexus,
 a shelf index instead of the full catalogue once the library is big, and roles for the
 designer."""
 
 from pathlib import Path
 
-from jarvis_api.users import create_user
-from jarvis_common.models import RoleName, UserStatus
-from jarvis_common.skills import (
+from nexus_api.users import create_user
+from nexus_common.models import RoleName, UserStatus
+from nexus_common.skills import (
     catalogue,
     instruction_layers,
     role_names,
     sync_library,
     usable_skills,
 )
-from jarvis_orchestrator.systems.prompts import design_request
-from jarvis_orchestrator.turn import CATALOGUE_LIMIT, skills_context
+from nexus_orchestrator.systems.prompts import design_request
+from nexus_orchestrator.turn import CATALOGUE_LIMIT, skills_context
 
 
 async def make_user(db):
@@ -36,7 +36,7 @@ async def test_big_library_lists_relevant_skills_and_shelves(sessionmaker, setti
         )
     assert "Likely relevant to this message:" in block
     assert "core/research-gaps:" in block
-    # Every skill is still named, by shelf, so Jarvis knows the rest exists.
+    # Every skill is still named, by shelf, so Nexus knows the rest exists.
     assert "- research: core/" in block and "core/pdf" in block
     assert len(block) < len(catalogue(skills)) / 2
 

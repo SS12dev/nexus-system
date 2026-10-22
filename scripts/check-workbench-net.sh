@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Prove the workbench's network is boxed in. Starts egress-proxy, workbench, postgres and redis
 # in a throwaway Compose project (jarvis-netcheck, removed at the end, with no published ports;
-# your running Jarvis is not touched), then from inside the workbench checks that:
+# your running Nexus is not touched), then from inside the workbench checks that:
 #   - npm, PyPI and GitHub answer through the proxy,
 #   - any other site is refused by the proxy,
 #   - nothing is reachable directly: not postgres or redis (running, and reachable from the
-#     default network, which is checked as a control), not the other Jarvis services, not the
+#     default network, which is checked as a control), not the other Nexus services, not the
 #     Mac, the LAN or the internet.
 # Used by scripts/check.sh; run it alone after changing compose.yaml or infra/egress-proxy.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Publish no ports, so this runs next to a live Jarvis that already holds 5432 and the rest.
+# Publish no ports, so this runs next to a live Nexus that already holds 5432 and the rest.
 override=$(mktemp)
 printf 'services:\n  postgres:\n    ports: !reset []\n' > "$override"
 dc() { docker compose -p jarvis-netcheck --env-file .env.example -f compose.yaml -f "$override" "$@"; }
@@ -66,7 +66,7 @@ for url in ("https://example.com", "http://example.com", "https://postgres:5432"
     except (urllib.error.URLError, OSError) as exc:
         check(f"proxy refuses {url}", "403" in str(exc), str(exc)[:80])
 
-# Directly, nothing: Jarvis's services, the Mac, the LAN, the internet.
+# Directly, nothing: Nexus's services, the Mac, the LAN, the internet.
 for host, port in [
     ("postgres", 5432), (os.environ["PG_IP"], 5432), ("redis", 6379),
     (os.environ["REDIS_IP"], 6379), ("minio", 9000), ("litellm", 4000), ("api", 8000),

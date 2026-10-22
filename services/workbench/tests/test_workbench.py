@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-import jarvis_workbench.app as module
+import nexus_workbench.app as module
 
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="Landlock is Linux-only")
 

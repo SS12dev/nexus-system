@@ -1,7 +1,7 @@
 import { useStore } from "../store/chat";
 
 /** The product's own name, shown before anyone signs in (login page, tab title). */
-export const APP_NAME = "Jarvis";
+export const APP_NAME = "Nexus";
 
 /** What an assistant is called until its user picks a name. */
 export const DEFAULT_ASSISTANT_NAME = "Jarvis";

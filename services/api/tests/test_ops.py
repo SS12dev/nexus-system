@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from jarvis_common.models import (
+from nexus_common.models import (
     AuditLog,
     Backup,
     BackupStatus,
@@ -53,7 +53,7 @@ async def test_message_rate_limit(app, owner, queue):
 async def _finish_turns(app):
     from sqlalchemy import update
 
-    from jarvis_common.models import Message, MessageStatus
+    from nexus_common.models import Message, MessageStatus
 
     async with app.state.sessionmaker() as db:
         await db.execute(update(Message).values(status=MessageStatus.complete))
@@ -63,7 +63,7 @@ async def _finish_turns(app):
 async def test_sign_in_rate_limit_per_ip(app):
     app.state.settings = app.state.settings.model_copy(update={"rate_limit_auth_per_minute": 3})
     # The middleware keeps the settings it was built with; rebuild with the lower limit.
-    from jarvis_api.main import create_app
+    from nexus_api.main import create_app
 
     strict = create_app(
         app.state.settings,

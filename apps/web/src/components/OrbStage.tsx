@@ -34,9 +34,9 @@ function savedView(): "orb" | "list" {
   }
 }
 
-/** Jarvis as a 3D orb with the live agent network around it and memories and artifacts inside
+/** Nexus as a 3D orb with the live agent network around it and memories and artifacts inside
  * it, or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
- * phones) so you can watch Jarvis and its teams work while you talk. */
+ * phones) so you can watch Nexus and its teams work while you talk. */
 export function OrbStage({
   mode,
   collapsed = false,
@@ -51,7 +51,7 @@ export function OrbStage({
 }) {
   const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
-  const jarvis = useStore((s) => s.jarvis);
+  const state = useStore((s) => s.assistantState);
   const activity = useStore((s) => s.activity);
   const connected = useStore((s) => s.connected);
   const systems = useStore((s) => s.systems);
@@ -111,8 +111,8 @@ export function OrbStage({
   const working = clusters.filter((c) => ["queued", "running", "awaiting_approval"].includes(c.status)).length;
   const agentCount = clusters.reduce((n, c) => n + c.nodes.length, 0);
   const status =
-    jarvis !== "idle"
-      ? (activity ?? (jarvis === "thinking" ? "Thinking…" : "Answering…"))
+    state !== "idle"
+      ? (activity ?? (state === "thinking" ? "Thinking…" : "Answering…"))
       : summary(clusters.length, agentCount, working, memories.length, artifactList.length);
 
   if (chat && collapsed) {
@@ -120,7 +120,7 @@ export function OrbStage({
       <div
         className={`flex shrink-0 items-center gap-3 border-b border-edge bg-panel/60 px-3 py-1.5 lg:w-14 lg:flex-col lg:border-b-0 lg:border-r lg:px-0 lg:py-3 ${className}`}
       >
-        <Orb state={jarvis} size={22} />
+        <Orb state={state} size={22} />
         <p className="min-w-0 flex-1 truncate text-xs text-slate-400 lg:hidden" aria-live="polite">
           {status}
         </p>
@@ -150,13 +150,13 @@ export function OrbStage({
             <Suspense
               fallback={
                 <div className="grid h-full place-items-center">
-                  <Orb state={jarvis} size={chat ? 90 : 140} />
+                  <Orb state={state} size={chat ? 90 : 140} />
                 </div>
               }
             >
               <OrbScene
-                jarvis={jarvis}
-                activity={jarvis !== "idle" ? activity : null}
+                assistantState={state}
+                activity={state !== "idle" ? activity : null}
                 clusters={clusters}
                 memories={points}
                 artifacts={crystalList}

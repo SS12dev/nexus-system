@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import select
 
-from jarvis_common.models import (
+from nexus_common.models import (
     AgentRun,
     AgentSystem,
     Approval,

@@ -1,18 +1,19 @@
-# Jarvis
+# Nexus
 
-Jarvis is a supervisor agent you chat with. It answers simple asks itself and, from phase 3 on,
+Nexus (code name Nexus, which the repo and packages still use) gives each person an assistant
+they name themselves. The assistant is a supervisor agent: it answers simple asks itself and
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
-design lives in the architecture doc, "Jarvis: Architecture & Research".
+design lives in the architecture doc, "Nexus: Architecture & Research".
 
 This repository is at **phase 5, production hardening**. Phase 1 gave sign-in
-with invites and roles, private chats per user, Jarvis streaming replies over a WebSocket, every
+with invites and roles, private chats per user, Nexus streaming replies over a WebSocket, every
 model call going through LiteLLM with a per-user budget, and every call traced with its cost in
 Langfuse. Phase 2 adds long-term memory (a profile of you, facts and preferences, summaries of
 past chats) and a document library: upload PDF, Word, PowerPoint, Excel and more in a chat or on
-the Library page and ask Jarvis about them. Phase 3 lets Jarvis build teams of sub-agents for
+the Library page and ask Nexus about them. Phase 3 lets Nexus build teams of sub-agents for
 bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
 shared skills library, per-run budgets, and your approval before anything risky. Phase 4 makes
-the home screen a 3D orb: Jarvis in the middle, its live agent teams growing out of it and
+the home screen a 3D orb: Nexus in the middle, its live agent teams growing out of it and
 pulling back in, and your memories and artifacts inside it. Phase 5 makes it safe to invite
 people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
@@ -29,7 +30,7 @@ ollama pull bge-m3             # then keep Ollama running (the menu bar app, or 
 docker compose up -d --build
 ```
 
-Before others use it, encrypt the secrets with `./scripts/secrets.sh init` and start Jarvis with
+Before others use it, encrypt the secrets with `./scripts/secrets.sh init` and start Nexus with
 `./scripts/compose.sh` from then on (see [Secrets](#secrets)).
 
 The first build takes a while: the doc-worker image includes Docling with CPU PyTorch and its
@@ -37,7 +38,7 @@ models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without
 
 | What | Where |
 | --- | --- |
-| Jarvis | http://localhost:8080 |
+| Nexus | http://localhost:8080 |
 | Langfuse (traces, cost) | http://localhost:3000 (`LANGFUSE_PORT`), login from `LANGFUSE_ADMIN_EMAIL` / `LANGFUSE_ADMIN_PASSWORD` |
 | LiteLLM admin API | http://localhost:4000, `LITELLM_MASTER_KEY` |
 | MinIO console | http://localhost:9001 |
@@ -53,7 +54,7 @@ ClickHouse (for Langfuse) is the heaviest container.
 
 - **Google (OIDC).** Create an OAuth client of type "Web application" in Google Cloud and add
   every callback URL you will use, for example `http://localhost:8080/auth/callback` and
-  `https://jarvis.servhub.cc/auth/callback`. Put the client id and secret in `OIDC_CLIENT_ID` and
+  `https://nexus.servhub.cc/auth/callback`. Put the client id and secret in `OIDC_CLIENT_ID` and
   `OIDC_CLIENT_SECRET`. Any OIDC provider works; set `OIDC_ISSUER`.
   Google sign-in also asks for the Google services in `GOOGLE_SERVICES`; see below.
 - **Dev sign-in.** With `DEV_LOGIN_ENABLED=true`, the login page also accepts an email plus
@@ -64,7 +65,7 @@ ClickHouse (for Langfuse) is the heaviest container.
 
 With Google sign-in, the same consent screen also asks for the services in `GOOGLE_SERVICES`
 (default `gmail,calendar,contacts,tasks`; `drive` is also available, read-only). Each one has
-its own checkbox, so people can untick any of them and still sign in. Jarvis keeps a refresh
+its own checkbox, so people can untick any of them and still sign in. Nexus keeps a refresh
 token per user, encrypted with a key derived from `SECRET_KEY` (changing it disconnects
 everyone until they sign in again). Each person sees what they allowed on the **Connections**
 page, can allow more there, or disconnect, which also revokes the token at Google.
@@ -85,21 +86,21 @@ One-time setup in Google Cloud, on the project that holds the OAuth client:
    for the services you ask for.
 3. **Audience:** choose how the app is published:
    - **In production, unverified (recommended for you and a few invitees).** Everyone sees a
-     "Google hasn't verified this app" screen and clicks *Advanced → Go to Jarvis*. Refresh
+     "Google hasn't verified this app" screen and clicks *Advanced → Go to Nexus*. Refresh
      tokens last until revoked. Google caps an unverified app with sensitive or restricted
      scopes at 100 users, ever.
    - **Testing.** Only people listed as test users (up to 100) can sign in, and Google expires
      their refresh tokens after 7 days, so agents lose Gmail and Calendar access weekly until
      the person signs in again.
-   - **Verified.** Needed only to open Jarvis to the public: sensitive scopes need Google's
+   - **Verified.** Needed only to open Nexus to the public: sensitive scopes need Google's
      review, and restricted ones (Gmail, Drive) also a yearly third-party security assessment.
-     Not worth it for a private Jarvis.
+     Not worth it for a private Nexus.
 
 To sign in with name and email only, set `GOOGLE_SERVICES=` (empty).
 
-What Jarvis and agents can do with them (only for services the person allowed):
+What Nexus and agents can do with them (only for services the person allowed):
 
-| Service | Jarvis in chat | Agents only, approved on a card first |
+| Service | Nexus in chat | Agents only, approved on a card first |
 |---|---|---|
 | Gmail | search, read, save drafts, archive / mark read / star / label | send (`gmail_send`) |
 | Calendar | list events, add or change own events without guests | send invitations, delete events |
@@ -111,8 +112,8 @@ calendar's own time zone.
 
 ### On your phone
 
-Jarvis is an installable PWA. For Google sign-in from a phone, publish it through the Cloudflare
-Tunnel at `jarvis.servhub.cc` (see [infra/cloudflared](infra/cloudflared/README.md)) and use
+Nexus is an installable PWA. For Google sign-in from a phone, publish it through the Cloudflare
+Tunnel at `nexus.servhub.cc` (see [infra/cloudflared](infra/cloudflared/README.md)) and use
 "Add to Home Screen". On your home network you can also open `http://<mac-ip>:8080` with dev
 sign-in, since Google does not accept private IP addresses as callbacks.
 
@@ -132,7 +133,7 @@ sign-in, since Google does not accept private IP addresses as callbacks.
 - **Budgets:** each user gets their own LiteLLM virtual key the first time they chat, capped at
   `DEFAULT_BUDGET_USD` (owner: `OWNER_BUDGET_USD`) per 30 days. Admins change budgets on the
   People page; disabling a user signs them out everywhere and blocks their key. When a budget runs
-  out, Jarvis says so in the chat instead of failing silently.
+  out, Nexus says so in the chat instead of failing silently.
 - Admin actions, sign-ins and sign-ups are recorded in `audit_log`, shown on the Admin page.
 
 ## Models
@@ -161,7 +162,7 @@ per chat and attributed to the user's id.
 2. An orchestrator worker assembles context: your profile, the memories and past-chat summaries
    closest to the message, and the documents attached to the chat (whole if short, otherwise the
    best-matching excerpts).
-3. It runs the Jarvis LangGraph graph, calling LiteLLM with the user's own key. Jarvis can call
+3. It runs the Nexus LangGraph graph, calling LiteLLM with the user's own key. Nexus can call
    its own tools in a loop: `search_documents`, `read_document`, `list_documents`,
    `search_memory` and `remember`. Each tool sees only that user's data.
 4. Tokens are published on the user's Redis channel as `message.delta` events (and tool use as
@@ -181,7 +182,7 @@ per chat and attributed to the user's id.
 After each turn `jarvis-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
 memory's confidence, contradictions update it, and "forget that" deletes it. Pinned memories are
-never changed by Jarvis. Each night, memories no chat has confirmed in 60 days lose confidence
+never changed by Nexus. Each night, memories no chat has confirmed in 60 days lose confidence
 (and go below 0.2), near duplicates are merged, and stale profiles are rebuilt; set the time with
 `MEMORY_NIGHTLY_HOUR_UTC` (default 21:30 UTC, 03:00 IST).
 
@@ -209,18 +210,18 @@ OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 
 ## Agent systems
 
-For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Jarvis
-calls `build_agent_system`. Before Jarvis answers a message, the cheapest tier (`ROUTE_MODEL`,
-jarvis-nano) decides whether it is work for a team; when it is, Jarvis's first move is to build
-one. Jarvis is an orchestrator: any real piece of work (research, writing, analysis, code,
-documents) goes to a team, as small as one agent, and Jarvis itself only does direct one-step
+For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Nexus
+calls `build_agent_system`. Before Nexus answers a message, the cheapest tier (`ROUTE_MODEL`,
+jarvis-nano) decides whether it is work for a team; when it is, Nexus's first move is to build
+one. Nexus is an orchestrator: any real piece of work (research, writing, analysis, code,
+documents) goes to a team, as small as one agent, and Nexus itself only does direct one-step
 things (chat, a quick fact, one look at mail or calendar, adding a task) and manages teams. The architect model (`DESIGN_MODEL`, jarvis-pro) writes an
 AgentSystemSpec: a small team, a topology, each agent's role, instructions, model tier, tools and
 skills. The spec is validated against what you may use, compiled to a LangGraph graph and run on
 the orchestrator queue; the team's card in the chat shows each agent live, and the result and
 files are posted in the chat when it finishes. One-off teams are archived after their run, and
-the orb only shows teams with a run in progress; "keep it" saves one as a template Jarvis
-reuses for similar asks (Jarvis only keeps a team up front when you say so).
+the orb only shows teams with a run in progress; "keep it" saves one as a template Nexus
+reuses for similar asks (Nexus only keeps a team up front when you say so).
 
 - **Topologies:** single agent, pipeline, lead and workers (`supervisor_workers`), parallel
   map-reduce, and worker with critic.
@@ -248,7 +249,7 @@ tiers), else DuckDuckGo's HTML page, which needs no key but is less reliable. Em
 ### The sandbox
 
 `run_code` runs Python or bash in the `sandbox` service: a read-only container on an internal
-network (no internet, no access to Jarvis's databases or your LAN), all capabilities dropped,
+network (no internet, no access to Nexus's databases or your LAN), all capabilities dropped,
 memory, CPU and process limits, and per-job CPU, memory, file-size and time limits. The task's
 files go in `in/`, the agent's skills in `skills/`, and whatever it writes to `out/` is saved to
 your Library as a generated file (saving the same name again makes a new version). It has
@@ -267,7 +268,7 @@ for builds. Details and the network check are in [docs/containers.md](docs/conta
 
 ### Software teams
 
-Asking Jarvis to build, fix or extend software ("make me a 2048 game") starts its fixed
+Asking Nexus to build, fix or extend software ("make me a 2048 game") starts its fixed
 software team, `dev_project`, in a workbench project:
 
 | Stage | Agent (tier) | Does |
@@ -286,15 +287,15 @@ Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD`
 capped by `MAX_RUN_BUDGET_USD`. It needs the Run code (exec) permission.
 
 Projects show in the Library as one card each (stack, latest commit, repo link), never as loose
-files. With the Jarvis GitHub App set up ([docs/github-app.md](docs/github-app.md)), each gets a
+files. With the Nexus GitHub App set up ([docs/github-app.md](docs/github-app.md)), each gets a
 private repo in `GITHUB_APPS_ORG`: the run's work goes to a `jarvis/<run id>` branch, and `main`
 moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
 transfers a repo to your own account, after you approve it on a card (owner only).
 
 When the reviewer approved and every test passed, the `deployer` runs the app as a container and
 the reply gives its link, `https://<name>.servhub.cc` (`2048`, or `2048-priya` for other people),
-with a screenshot. Apps are private: only their owner and Jarvis's owner can open them, after
-signing in to Jarvis. "Make it public" (in chat or on the **Apps** page) shares the link with
+with a screenshot. Apps are private: only their owner and Nexus's owner can open them, after
+signing in to Nexus. "Make it public" (in chat or on the **Apps** page) shares the link with
 anyone. The Apps page lists them with stop, restart, redeploy, public or private and delete;
 members can run three at once. How addresses and sign-in work, and moving them to another
 server: [docs/app-urls.md](docs/app-urls.md). How apps are built and boxed in:
@@ -316,19 +317,19 @@ writing) and engineering (code review). Every script is tested in the sandbox; s
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version
 history, rollback, enable/disable and import (a `SKILL.md` or a `.zip`). Imported skills, and
-skills Jarvis drafts after a long successful run, stay off until reviewed; skills whose runs
+skills Nexus drafts after a long successful run, stay off until reviewed; skills whose runs
 keep failing are flagged; it filters by shelf, and admins can share one of their own skills
-(say, one Jarvis learned) with everyone. Its Instructions tab holds the layers every agent gets,
+(say, one Nexus learned) with everyone. Its Instructions tab holds the layers every agent gets,
 in order: the shipped safety rules and house conventions
 ([library/instructions](library/instructions)), global and per-role instructions (admins), then
-your own house style. Jarvis's own chat follows the conventions, global instructions and yours.
+your own house style. Nexus's own chat follows the conventions, global instructions and yours.
 
 ## The orb
 
 The home screen is a React Three Fiber scene ([apps/web/src/orb](apps/web/src/orb)) with the chat
 box docked underneath; sending a message opens the chat.
 
-- **The orb** is a shader sphere whose colour, churn and pulse follow what Jarvis is doing: blue
+- **The orb** is a shader sphere whose colour, churn and pulse follow what Nexus is doing: blue
   and calm when idle, violet while thinking, bright and pulsing while answering.
 - **Around it**, every team that isn't archived is a cluster tied to the orb by an edge: the
   lead hangs from the orb, workers from the lead (a pipeline is a chain). Agents are coloured
@@ -337,7 +338,7 @@ box docked underneath; sending a message opens the chat.
   team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
   springs, so nothing jumps.
 - **Inside it**, memories are particles clustered by kind (preferences, facts, goals,
-  instructions), pinned ones brighter; artifacts (files Jarvis or a team made) are small
+  instructions), pinned ones brighter; artifacts (files Nexus or a team made) are small
   crystals. A new one grows in with a flash.
 - **Tap** an agent, memory or crystal for a card that opens the team, the memory on the Memory
   page, or the file. Drag to turn, pinch or scroll to zoom.
@@ -346,7 +347,7 @@ box docked underneath; sending a message opens the chat.
   artifacts as plain lists; it is also what shows when the device has no WebGL. With
   reduced motion turned on in the OS, nothing spins or pulses and objects snap into place.
 
-Everything is driven by the existing WebSocket events (`jarvis.state`, `system.*`, `run.updated`,
+Everything is driven by the existing WebSocket events (`assistant.state`, `system.*`, `run.updated`,
 `agent.status`, `approval.*`, `memory.updated`, `artifact.created`, `file.*`), with a fresh fetch
 on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
 
@@ -356,7 +357,7 @@ on open and after a reconnect. three.js loads only on the home screen, as its ow
 
 Only owners get **Admin** in the menu (admins get **People** but not this page). A person
 filter at the top narrows Status, Usage and the Audit log to one person (tap a name) or several
-(tick them); service health, queues, API traffic and backups always cover all of Jarvis.
+(tick them); service health, queues, API traffic and backups always cover all of Nexus.
 
 - **Status:** whether Postgres, Valkey, LiteLLM, MinIO and both workers are up (workers report a
   heartbeat every 30 seconds), jobs waiting in each queue, the last 24 hours (turns, tokens,
@@ -367,7 +368,7 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   Langfuse (`LANGFUSE_URL`).
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or
-  upgrading Jarvis.
+  upgrading Nexus.
 - **Usage:** turns, tokens, agent runs and their cost, and files per person and per day, over 7,
   30 or 90 days.
 - **Audit log:** sign-ins (with IP), invites, role, budget and grant changes, approvals,
@@ -395,15 +396,15 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
 - **Cross-site requests:** the session cookie is `SameSite=Lax` and `HttpOnly`, and the API also
   refuses any write whose `Origin` is another site (other apps on servhub.cc included). Add an
   origin to `ALLOWED_ORIGINS` only if you serve the web app from somewhere else.
-- **Headers:** the web app sends a Content Security Policy (scripts only from Jarvis itself, no
+- **Headers:** the web app sends a Content Security Policy (scripts only from Nexus itself, no
   framing), `nosniff`, a strict referrer policy and, over https, HSTS. API responses are
   `Cache-Control: no-store`. Uploaded files download as attachments with `CSP: sandbox` (from
   phase 2).
-- **Exposure:** only Traefik's port (`JARVIS_HTTP_PORT`) listens beyond the Mac's loopback;
+- **Exposure:** only Traefik's port (`NEXUS_HTTP_PORT`) listens beyond the Mac's loopback;
   Postgres, LiteLLM, Langfuse and the MinIO console are bound to 127.0.0.1, and the API docs
   (`/docs`) aren't routed. Keep `DEV_LOGIN_ENABLED=false` and `SESSION_COOKIE_SECURE=true`
   on the public hostname.
-- **Cloudflare Access** (optional) can sit in front of `jarvis.servhub.cc` for an extra
+- **Cloudflare Access** (optional) can sit in front of `nexus.servhub.cc` for an extra
   Google or email check before anyone reaches the sign-in page; it needs no change here.
 
 ### Caching and load balancing
@@ -423,14 +424,14 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
 
 `.env` starts out holding everything: plain settings and about twenty secrets (the OpenAI key,
 the Google client secret, the tunnel token, database passwords). For production the secrets move
-into `secrets/jarvis.sops.env`, encrypted with [SOPS](https://getsops.io) and an
+into `secrets/nexus.sops.env`, encrypted with [SOPS](https://getsops.io) and an
 [age](https://age-encryption.org) key, and `.env` keeps only settings:
 
 ```sh
 brew install sops age
-./scripts/secrets.sh init       # makes ~/.config/jarvis/age.key, moves the secrets, adds
+./scripts/secrets.sh init       # makes ~/.config/nexus/age.key, moves the secrets, adds
                                 # TOKEN_ENCRYPTION_KEYS; checks the file decrypts first
-cat ~/.config/jarvis/age.key    # save this in your password manager
+cat ~/.config/nexus/age.key    # save this in your password manager
 ./scripts/compose.sh up -d      # docker compose with the secrets loaded, same arguments
 ```
 
@@ -449,14 +450,16 @@ Afterwards:
   can be changed without signing everyone out of Google. To rotate the token key, put a new
   one first (`new,old`); each grant is re-encrypted the next time it is used, and the old key
   can be dropped later. Grants still under `SECRET_KEY` move over the same way.
+- A key made before the rename to Nexus is at `~/.config/jarvis/age.key` and the file was
+  `secrets/jarvis.sops.env`; both scripts still find the key there and rename the file once.
 - Every backup includes the encrypted file. It is useless without the age key, so keep the key
   somewhere other than the Mac.
 
-On a new machine: clone the repo, put the age key at `~/.config/jarvis/age.key`, copy
-`jarvis.sops.env` from a backup into `secrets/`, recreate `.env` from `.env.example` (settings
+On a new machine: clone the repo, put the age key at `~/.config/nexus/age.key`, copy
+`nexus.sops.env` from a backup into `secrets/`, recreate `.env` from `.env.example` (settings
 only), then restore the backup.
 
-When Jarvis moves to a server, the same file can also be opened by a cloud key (SOPS supports
+When Nexus moves to a server, the same file can also be opened by a cloud key (SOPS supports
 GCP KMS, AWS KMS and others as extra recipients), so the server needs no copy of the age key.
 
 ### Backups
@@ -481,7 +484,7 @@ To restore, with the same secrets:
 ./scripts/restore.sh backups/2026-10-20T210000Z
 ```
 
-It checks the checksums, asks you to type `restore`, stops Jarvis, recreates each database from
+It checks the checksums, asks you to type `restore`, stops Nexus, recreates each database from
 its dump, replaces the MinIO data, and starts everything again (the tunnel too, if it was up).
 
 ## Repository layout
@@ -491,7 +494,7 @@ apps/web/               React + Vite + Tailwind PWA (orb home, chat, Library, Me
                         Skills, People); the 3D scene is in src/orb
 services/api/           FastAPI: auth, chats, files, memories, skills, agents, approvals, admin,
                         WebSocket; Alembic migrations
-services/orchestrator/  arq worker: the Jarvis graph, the Tool Registry, agent systems (design,
+services/orchestrator/  arq worker: the Nexus graph, the Tool Registry, agent systems (design,
                         compile, run, approvals), the memory and learned-skill jobs
 services/sandbox/       FastAPI: runs agent code with no network and resource limits
 services/workbench/     FastAPI: dev teams' persistent project folders, commands and git
@@ -530,12 +533,12 @@ Run the API and worker on the host against the Compose services with the matchin
 `DATABASE_URL=postgresql+asyncpg://jarvis:<password>@localhost:5432/jarvis`,
 `REDIS_URL=redis://localhost:6379/0` (publish Redis's port first),
 `LITELLM_BASE_URL=http://localhost:4000` and `S3_ENDPOINT_URL=http://localhost:9000` with
-`S3_SECRET_KEY` (publish MinIO's port 9000 first), then `uv run uvicorn jarvis_api.app:app
---reload` in `services/api`, `uv run arq jarvis_orchestrator.worker.WorkerSettings` and
-`uv run arq jarvis_doc_worker.worker.WorkerSettings`. Without Docling installed the doc-worker
+`S3_SECRET_KEY` (publish MinIO's port 9000 first), then `uv run uvicorn nexus_api.app:app
+--reload` in `services/api`, `uv run arq nexus_orchestrator.worker.WorkerSettings` and
+`uv run arq nexus_doc_worker.worker.WorkerSettings`. Without Docling installed the doc-worker
 falls back to MarkItDown for PDFs.
 
-Schema changes: edit `packages/common/src/jarvis_common/models.py`, then
+Schema changes: edit `packages/common/src/nexus_common/models.py`, then
 `uv run alembic revision --autogenerate -m "..."` in `services/api`.
 
 ## Roadmap

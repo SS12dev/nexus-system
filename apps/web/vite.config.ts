@@ -5,7 +5,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // In development Vite proxies the API so the app, cookies and WebSocket share one origin,
 // the same way Traefik serves them in Docker Compose.
-const api = process.env.JARVIS_API_URL ?? "http://localhost:8000";
+const api = process.env.NEXUS_API_URL ?? process.env.JARVIS_API_URL ?? "http://localhost:8000";
 
 export default defineConfig({
   plugins: [
@@ -15,9 +15,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],
       manifest: {
-        name: "Jarvis",
-        short_name: "Jarvis",
-        description: "Your personal supervisor agent",
+        name: "Nexus",
+        short_name: "Nexus",
+        description: "Your own assistant and its agent teams",
         theme_color: "#05070d",
         background_color: "#05070d",
         display: "standalone",

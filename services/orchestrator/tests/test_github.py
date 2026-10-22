@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from sqlalchemy import select
 
-from jarvis_common.models import (
+from nexus_common.models import (
     AgentRun,
     AgentSystem,
     Link,
@@ -27,14 +27,14 @@ from jarvis_common.models import (
     User,
     UserStatus,
 )
-from jarvis_common.spec import AgentSystemSpec
-from jarvis_common.systems import new_run
-from jarvis_common.toolinfo import BY_NAME, allowed_tools
-from jarvis_orchestrator.github import GitHubApp, GitHubError
-from jarvis_orchestrator.systems import runner
-from jarvis_orchestrator.systems.release import base_repo_name
-from jarvis_orchestrator.tools import ToolContext, build_tools
-from jarvis_orchestrator.workbench import CommandResult
+from nexus_common.spec import AgentSystemSpec
+from nexus_common.systems import new_run
+from nexus_common.toolinfo import BY_NAME, allowed_tools
+from nexus_orchestrator.github import GitHubApp, GitHubError
+from nexus_orchestrator.systems import runner
+from nexus_orchestrator.systems.release import base_repo_name
+from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.workbench import CommandResult
 
 ORG = "servhub-apps"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -192,7 +192,7 @@ def test_repo_names():
     owner.roles = []
     member = User(email="priya@example.com", name="Priya Rao")
     member.roles = []
-    from jarvis_common.models import Role
+    from nexus_common.models import Role
 
     owner.roles = [Role(name=RoleName.owner)]
     member.roles = [Role(name=RoleName.member)]
@@ -400,7 +400,7 @@ async def test_a_github_failure_still_finishes_the_run(release_deps, owner, scri
 def test_transfer_is_owner_only_and_asks_first():
     info = BY_NAME["github_transfer"]
     assert info.risk == "outbound" and not info.jarvis and info.owner_only
-    from jarvis_common.models import Role
+    from nexus_common.models import Role
 
     owner, admin = User(email="o@x.com"), User(email="a@x.com")
     owner.roles, admin.roles = [Role(name=RoleName.owner)], [Role(name=RoleName.admin)]
@@ -442,7 +442,7 @@ async def test_transfer_tool(release_deps, owner, fake_gh):
 
 
 async def test_projects_api_lists_only_your_own(release_deps, owner, sessionmaker):
-    from jarvis_api.routes.projects import list_projects
+    from nexus_api.routes.projects import list_projects
 
     user, _ = owner
     async with sessionmaker() as db:

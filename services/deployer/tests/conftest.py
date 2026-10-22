@@ -5,8 +5,8 @@ from collections import defaultdict
 import httpx
 import pytest
 
-import jarvis_deployer.app as module
-from jarvis_deployer.docker import Docker
+import nexus_deployer.app as module
+from nexus_deployer.docker import Docker
 
 
 def frames(text: str) -> bytes:

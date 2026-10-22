@@ -1,6 +1,6 @@
-# Jarvis skills library
+# Nexus skills library
 
-Shared, tested how-tos that Jarvis and every sub-agent load on demand, so nobody works out
+Shared, tested how-tos that the assistant and every sub-agent load on demand, so nobody works out
 "how do I edit a PPTX" twice. Skills use the open
 [Agent Skills](https://agentskills.io) format, so skills written for other agents can be
 imported on the Skills page.
@@ -10,9 +10,9 @@ library/
   instructions/
     global.md          safety rules in every agent's prompt; nothing later overrides them
     shared.md          house conventions (dates, sources, file names, hand-overs) for
-                       Jarvis and every agent
+                       the assistant and every agent
     roles/<role>.md    defaults for agents with that role (researcher, scientist, ...)
-  core/<name>/         skills shipped with Jarvis, synced into the database at startup
+  core/<name>/         skills shipped with Nexus, synced into the database at startup
     SKILL.md           frontmatter (name, description, metadata.category), then the steps
     scripts/           tested helpers agents run in the sandbox
     references/        longer material an agent reads only when it needs it
@@ -41,13 +41,13 @@ metadata:
 ---
 ```
 
-Shelves are listed in `CATEGORIES` in `packages/common/src/jarvis_common/skills.py`.
+Shelves are listed in `CATEGORIES` in `packages/common/src/nexus_common/skills.py`.
 
 ## Instruction layers
 
 Every agent's prompt gets, in order: the safety rules (`global.md`), the house conventions
 (`shared.md`) plus any global instructions an admin adds, its role's instructions (shipped
-plus admin additions), then the user's own instructions. Jarvis's own chat gets the
+plus admin additions), then the user's own instructions. the assistant's own chat gets the
 conventions, the admin's global instructions and the user's instructions. The team designer
 picks each agent's role from the files in `roles/`.
 
@@ -55,7 +55,7 @@ picks each agent's role from the files in `roles/`.
 
 1. **Discover.** An agent's prompt lists only the slug and description of each skill it was
    granted (`core/pdf: Create, merge, split...`), so a skill costs about 80 tokens until it
-   is needed. Jarvis's chat lists the whole library while it has 12 skills or fewer; beyond
+   is needed. The assistant's chat lists the whole library while it has 12 skills or fewer; beyond
    that it lists the skills that match the message in full and the rest by name per shelf.
 2. **Activate.** When a task matches, the agent calls `skills_load("core/pdf")` and gets the
    whole SKILL.md. `skills_search` finds other enabled skills.
@@ -68,11 +68,11 @@ picks each agent's role from the files in `roles/`.
 - Shipped skills (`core/`) are edited here, in git. On startup the orchestrator syncs any
   that changed into the database as a new version. An admin's edit on the Skills page lasts
   until the shipped files change again; both stay in the version history.
-- Personal skills, imported skills and skills Jarvis learns live in the database with their
+- Personal skills, imported skills and skills the assistant learns live in the database with their
   own version history. Imported and learned skills stay disabled until reviewed.
 - **Share with everyone** (admins, on the Skills page) moves one of your own skills, for
-  example one Jarvis learned from a run, into the shared library, turned on for every user.
-  It keeps its history; from then on admins edit it. To ship it with Jarvis for good, copy
+  example one the assistant learned from a run, into the shared library, turned on for every user.
+  It keeps its history; from then on admins edit it. To ship it with Nexus for good, copy
   it into `core/` here.
 
 Each script prints `--help`; the SKILL.md says when to use it. Keep scripts dependency-free

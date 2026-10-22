@@ -18,7 +18,7 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-doc-worker --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-doc-worker --no-install-workspace
 
 # Docling gives layout-aware PDF tables and OCR for scans and images. It needs PyTorch, taken
 # from the CPU wheel index (Docker on a Mac has no GPU), and its models are baked in so parsing
@@ -38,6 +38,6 @@ COPY packages/common packages/common
 COPY services/doc-worker services/doc-worker
 RUN uv pip install --python /app/.venv/bin/python --no-deps ./packages/common ./services/doc-worker
 
-RUN useradd --system --create-home --uid 10001 jarvis
-USER jarvis
-CMD ["arq", "jarvis_doc_worker.worker.WorkerSettings"]
+RUN useradd --system --create-home --uid 10001 nexus
+USER nexus
+CMD ["arq", "nexus_doc_worker.worker.WorkerSettings"]

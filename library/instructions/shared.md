@@ -1,4 +1,4 @@
-House conventions for Jarvis and every agent. They come after the safety rules and before
+House conventions for the assistant and every agent. They come after the safety rules and before
 role and personal instructions; personal instructions can change the style, not the rules.
 
 Formats

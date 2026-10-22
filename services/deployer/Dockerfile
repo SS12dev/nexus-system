@@ -15,13 +15,13 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-deployer --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-deployer --no-install-workspace
 
 COPY services/deployer services/deployer
-RUN uv sync --frozen --no-dev --package jarvis-deployer
+RUN uv sync --frozen --no-dev --package nexus-deployer
 
 # The workbench's user, so the deployer can read project folders (mounted read-only).
 RUN useradd --system --uid 10003 deployer
 USER deployer
 EXPOSE 8300
-CMD ["uvicorn", "jarvis_deployer.app:app", "--host", "0.0.0.0", "--port", "8300"]
+CMD ["uvicorn", "nexus_deployer.app:app", "--host", "0.0.0.0", "--port", "8300"]

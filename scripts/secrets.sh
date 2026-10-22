@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Jarvis's secrets, encrypted with SOPS and age (README: Secrets). Plain settings stay in .env;
-# API keys, passwords and tokens live in secrets/jarvis.sops.env, which only your age key opens.
+# Nexus's secrets, encrypted with SOPS and age (README: Secrets). Plain settings stay in .env;
+# API keys, passwords and tokens live in secrets/nexus.sops.env, which only your age key opens.
 #
 #   ./scripts/secrets.sh init        create your age key, move the secrets out of .env into the
 #                                    encrypted file and add TOKEN_ENCRYPTION_KEYS
@@ -8,14 +8,23 @@
 #   ./scripts/secrets.sh set NAME    set one secret, typed or piped in (stays out of history)
 #   ./scripts/secrets.sh list        names of the stored secrets, no values
 #
-# Then start Jarvis with ./scripts/compose.sh (same arguments as docker compose).
-# The key is at $SOPS_AGE_KEY_FILE (default ~/.config/jarvis/age.key). Keep a copy in your
+# Then start Nexus with ./scripts/compose.sh (same arguments as docker compose).
+# The key is at $SOPS_AGE_KEY_FILE (default ~/.config/nexus/age.key, or
+# ~/.config/jarvis/age.key if that is where it was made before the rename). Keep a copy in your
 # password manager: without it neither this file nor the copy in each backup can be opened.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FILE=secrets/jarvis.sops.env
-export SOPS_AGE_KEY_FILE=${SOPS_AGE_KEY_FILE:-$HOME/.config/jarvis/age.key}
+# Before the rename to Nexus the file was secrets/jarvis.sops.env; move it once.
+if [[ ! -f secrets/nexus.sops.env && -f secrets/jarvis.sops.env ]]; then
+  mv secrets/jarvis.sops.env secrets/nexus.sops.env
+  echo "Renamed secrets/jarvis.sops.env to secrets/nexus.sops.env" >&2
+fi
+# Your age key: ~/.config/nexus/age.key, or ~/.config/jarvis/age.key from before the rename.
+default_key=$HOME/.config/nexus/age.key
+[[ -f "$default_key" || ! -f $HOME/.config/jarvis/age.key ]] || default_key=$HOME/.config/jarvis/age.key
+FILE=secrets/nexus.sops.env
+export SOPS_AGE_KEY_FILE=${SOPS_AGE_KEY_FILE:-$default_key}
 
 # Everything in .env that is a credential. The rest of .env is plain settings.
 SECRET_NAMES="OPENAI_API_KEY SECRET_KEY TOKEN_ENCRYPTION_KEYS POSTGRES_PASSWORD MINIO_ROOT_PASSWORD

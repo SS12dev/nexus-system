@@ -8,12 +8,12 @@ each one is for, how they talk to each other, and which ones you can restart or 
 
 | Container | What it is | Needed? | Reachable from your Mac |
 | --- | --- | --- | --- |
-| `traefik` | Front door: routes every request to the web app or the API | yes | http://localhost:8080 (`JARVIS_HTTP_PORT`) |
-| `cloudflared` | Cloudflare Tunnel that publishes Jarvis at https://jarvis.servhub.cc | only for phone / public access (`--profile tunnel`) | no |
+| `traefik` | Front door: routes every request to the web app or the API | yes | http://localhost:8080 (`NEXUS_HTTP_PORT`) |
+| `cloudflared` | Cloudflare Tunnel that publishes Nexus at https://nexus.servhub.cc | only for phone / public access (`--profile tunnel`) | no |
 | `web` | nginx serving the React app (orb, chat, Library, Admin...) | yes | through Traefik |
 | `api` ×2 | FastAPI: sign-in, chats, files, admin, the WebSocket | yes | through Traefik |
 | `migrate` | Applies database migrations, then **exits** | runs once per start | no |
-| `orchestrator` | Worker that runs Jarvis's turns, agent teams and memory jobs | yes | no |
+| `orchestrator` | Worker that runs Nexus's turns, agent teams and memory jobs | yes | no |
 | `sandbox` | Locked-down box where agents run Python/bash (makes PDFs, Excel...) | for agent code | no |
 | `workbench` | Dev teams' workshop: a persistent git folder per project, with Node, Python and a browser | for dev teams | no |
 | `egress-proxy` | The workbench's only way out: lets through npm, PyPI and GitHub, nothing else | with the workbench | no |
@@ -62,7 +62,7 @@ flowchart LR
   ch[(clickhouse)]
   backup[backup]
 
-  user -->|jarvis.servhub.cc| cf --> traefik
+  user -->|nexus.servhub.cc| cf --> traefik
   user -->|localhost:8080| traefik
   traefik -->|/| web
   traefik -->|/api /auth /ws| api
@@ -117,12 +117,12 @@ API, everything else to `web`. It load-balances across the API replicas and stop
 whose `/healthz` fails. It mounts the Docker socket read-only to discover containers. Version 3.6
 or newer is required for Docker Engine 29.
 
-**cloudflared** opens an outbound tunnel to Cloudflare, so `https://jarvis.servhub.cc` reaches
+**cloudflared** opens an outbound tunnel to Cloudflare, so `https://nexus.servhub.cc` reaches
 Traefik without opening a port on your router. It only starts with
 `docker compose --profile tunnel up -d` and needs `CLOUDFLARE_TUNNEL_TOKEN`. Setup:
 [infra/cloudflared](../infra/cloudflared/README.md).
 
-### Jarvis itself (built from this repo)
+### Nexus itself (built from this repo)
 
 **web** ([apps/web](../apps/web)) is the React + Vite app, built into static files and served
 by nginx with the security headers (CSP and friends). It holds no data; rebuilding it is safe.
@@ -137,9 +137,9 @@ live in Postgres and Valkey.
 The API, orchestrator, doc-worker and backup only start after it succeeds, so a new release
 brings its database changes with it.
 
-**orchestrator** ([services/orchestrator](../services/orchestrator)) is an arq worker, Jarvis's
+**orchestrator** ([services/orchestrator](../services/orchestrator)) is an arq worker, Nexus's
 "brain". It runs:
-- each chat turn (the Jarvis LangGraph graph and its tools),
+- each chat turn (the Nexus LangGraph graph and its tools),
 - agent teams: design, compile, run, pause for approvals, resume,
 - memory extraction after each turn and learned-skill drafts,
 - every ten minutes, housekeeping; nightly (21:30 UTC, 03:00 IST), memory decay and profile
@@ -182,13 +182,13 @@ the workbench's requests to `registry.npmjs.org`, `pypi.org`, `files.pythonhoste
 only container on both the internal `workbench` network and the `egress` network, which has
 internet access. `./scripts/check-workbench-net.sh` (part of `./scripts/check.sh`) proves the
 box holds: it starts a throwaway copy of the workbench next to Postgres and Redis and checks that
-the allowed hosts answer, other sites are refused, and Postgres, Redis, the other Jarvis
+the allowed hosts answer, other sites are refused, and Postgres, Redis, the other Nexus
 services, the Mac, the LAN and the internet can't be reached directly.
 
 **deployer** ([services/deployer](../services/deployer)) runs the apps software teams build. At
 the end of a run whose reviewer approved and whose tests passed (or on **Redeploy** on the Apps
 page) it builds the project from its workbench folder, mounted read-only, using a house
-template ([templates](../services/deployer/src/jarvis_deployer/templates)): a static site on
+template ([templates](../services/deployer/src/nexus_deployer/templates)): a static site on
 unprivileged nginx, FastAPI on Python slim, or Express on Node. Agents never write their own
 Dockerfiles, and builds have **no network**: they use the `node_modules` or `.venv` the team
 installed in the workbench. Each app runs as `jarvis-app-<name>-web` (and `-api` for a back end)
@@ -205,11 +205,11 @@ logs, before the reply.
 **docker-gate** (same image) is the only container with the Docker socket, and only the deployer
 can reach it. Generic socket proxies allow or deny by URL prefix, so allowing containers would
 also allow `exec` and file writes into any container; this gate checks every call
-([gate.py](../services/deployer/src/jarvis_deployer/gate.py)): offline builds of `jarvis-app-*`
+([gate.py](../services/deployer/src/nexus_deployer/gate.py)): offline builds of `jarvis-app-*`
 images only; new containers named `jarvis-app-*`, non-root, on the apps network, with memory
 and CPU caps and no privileges, host mounts, devices, ports or added capabilities; starting,
-stopping, logs and deleting only for containers labelled as Jarvis apps (so not Postgres or any
-other Jarvis container); and nothing else: no exec, archive, attach, volumes, swarm or system
+stopping, logs and deleting only for containers labelled as Nexus apps (so not Postgres or any
+other Nexus container); and nothing else: no exec, archive, attach, volumes, swarm or system
 calls.
 
 **Apps page** (`/apps`): every app with its owner, state, link, repo and last deploy, and Stop,
@@ -242,7 +242,7 @@ The extra two are created by [infra/postgres/init.sql](../infra/postgres/init.sq
 time the volume is created.
 
 **redis** runs Valkey (an open-source Redis fork). It is shared plumbing: database 0 holds
-Jarvis's job queues (`arq`), the per-user live event channels, rate-limit counters, worker
+Nexus's job queues (`arq`), the per-user live event channels, rate-limit counters, worker
 heartbeats and LiteLLM's response cache; database 1 holds Langfuse's queues. It runs with
 `noeviction` because Langfuse's queues must never be dropped. Losing it loses only in-flight
 jobs and caches, so it is not backed up.
@@ -252,7 +252,7 @@ bucket `langfuse` holds raw trace events and media for Langfuse.
 
 ### Models and tracing
 
-**litellm** (`ghcr.io/berriai/litellm`) is the one door to every model. Jarvis only ever asks
+**litellm** (`ghcr.io/berriai/litellm`) is the one door to every model. Nexus only ever asks
 for the aliases in [infra/litellm/config.yaml](../infra/litellm/config.yaml)
 (`jarvis-nano`, `jarvis-mini`, `jarvis-pro`, `jarvis-max`, `jarvis-embed`); LiteLLM maps them to
 OpenAI models or to bge-m3 in Ollama, enforces each person's budget through their own virtual
@@ -264,17 +264,17 @@ another machine.
 observability stack: every turn is a `jarvis.turn` trace with each model call, its tokens and
 cost. `langfuse-web` is the UI and ingestion API, `langfuse-worker` processes events off the
 queue, and `clickhouse` stores the traces for fast querying. ClickHouse is the heaviest
-container in the stack; give Docker Desktop at least 8 GB. Jarvis works without these three
+container in the stack; give Docker Desktop at least 8 GB. Nexus works without these three
 (chats still run, traces are just not recorded), and ClickHouse data is not backed up.
 
 ## Networks and volumes
 
-- **Networks:** `jarvis_default` connects everything else; `jarvis_sandbox` is internal (no
-  internet) and connects only `orchestrator` and `sandbox`; `jarvis_workbench` is internal and
+- **Networks:** `jarvis_default` connects everything else; `nexus_sandbox` is internal (no
+  internet) and connects only `orchestrator` and `sandbox`; `nexus_workbench` is internal and
   connects only `orchestrator`, `workbench` and `egress-proxy`; `jarvis_egress` has internet
-  access and holds only `egress-proxy`; `jarvis_deployer` (internal) connects the orchestrator,
+  access and holds only `egress-proxy`; `nexus_deployer` (internal) connects the orchestrator,
   the API, Traefik and the deployer; `jarvis_docker-gate` (internal) only the deployer and the gate;
-  `jarvis_apps` (internal: no internet, no Jarvis services, no LAN) holds the apps and Traefik;
+  `jarvis_apps` (internal: no internet, no Nexus services, no LAN) holds the apps and Traefik;
   `jarvis_apps_egress` is where apps that were given internet access also sit. Apps on
   `jarvis_apps` can reach each other and Traefik's front door, nothing else.
 - **Volumes** (where data survives restarts): `jarvis_postgres`, `jarvis_redis`,
@@ -325,6 +325,6 @@ ones that matter most per container:
 | langfuse-web, langfuse-worker | `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET`, `CLICKHOUSE_PASSWORD`, `LANGFUSE_ADMIN_PASSWORD` |
 | postgres, minio, clickhouse, backup | their own passwords from the same `.env` |
 | workbench | `WORKBENCH_TOKEN`, `WORKBENCH_MEMORY_MB`, `WORKBENCH_MAX_TIMEOUT_S` |
-| deployer, api, orchestrator | `DEPLOYER_TOKEN`, `APPS_DOMAIN`, `APPS_URL`, `JARVIS_URL`, `RESERVED_HOSTNAMES`, `APP_COOKIE_HOURS`, `MEMBER_APP_LIMIT` |
+| deployer, api, orchestrator | `DEPLOYER_TOKEN`, `APPS_DOMAIN`, `APPS_URL`, `NEXUS_URL`, `RESERVED_HOSTNAMES`, `APP_COOKIE_HOURS`, `MEMBER_APP_LIMIT` |
 | orchestrator (GitHub) | `GITHUB_APPS_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_B64` ([setup](github-app.md)) |
 | cloudflared | `CLOUDFLARE_TUNNEL_TOKEN` |

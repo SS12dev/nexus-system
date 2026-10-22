@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from jarvis_common.models import AuditLog
+from nexus_common.models import AuditLog
 
 
 async def test_first_user_becomes_owner(client_for):
@@ -58,7 +58,7 @@ async def test_session_cookie_is_httponly(client_for, settings, app):
 
 
 async def test_oidc_identity_mismatch_is_refused(sessionmaker, settings):
-    from jarvis_api.users import SignInRefused, resolve_sign_in
+    from nexus_api.users import SignInRefused, resolve_sign_in
 
     async with sessionmaker() as db:
         await resolve_sign_in(db, settings, email="o@example.com", sub="google-1")
@@ -73,7 +73,7 @@ async def test_oidc_identity_mismatch_is_refused(sessionmaker, settings):
 
 
 async def test_open_signup_joins_as_member(sessionmaker, settings):
-    from jarvis_api.users import resolve_sign_in
+    from nexus_api.users import resolve_sign_in
 
     open_settings = settings.model_copy(update={"signup_policy": "open"})
     async with sessionmaker() as db:

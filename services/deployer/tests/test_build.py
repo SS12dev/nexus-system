@@ -3,7 +3,7 @@ import tarfile
 
 import pytest
 
-from jarvis_deployer.build import BuildProblem, context, detect_stack, parts
+from nexus_deployer.build import BuildProblem, context, detect_stack, parts
 
 
 def names(ctx) -> dict[str, tarfile.TarInfo]:

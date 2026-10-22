@@ -5,11 +5,11 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-import jarvis_orchestrator.links as orch_links
-from jarvis_common.links import LinkError, github_preview, parse_link
-from jarvis_common.models import File, Link
-from jarvis_orchestrator.artifacts import save_generated
-from jarvis_orchestrator.tools import ToolContext, build_tools
+import nexus_orchestrator.links as orch_links
+from nexus_common.links import LinkError, github_preview, parse_link
+from nexus_common.models import File, Link
+from nexus_orchestrator.artifacts import save_generated
+from nexus_orchestrator.tools import ToolContext, build_tools
 
 
 def responses(table: dict[str, object]):
@@ -27,7 +27,7 @@ def responses(table: dict[str, object]):
 @pytest.mark.parametrize(
     "url,kind,title",
     [
-        ("github.com/SS12dev/jarvis-system", "github_repo", "SS12dev/jarvis-system"),
+        ("github.com/SS12dev/nexus-system", "github_repo", "SS12dev/nexus-system"),
         ("https://www.github.com/a/b.git/", "github_repo", "a/b"),
         ("https://github.com/a/b/blob/main/src/x.py", "github_file", "b/src/x.py"),
         ("https://github.com/a/b/tree/main/docs", "github_folder", "b/docs"),

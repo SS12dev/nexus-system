@@ -36,10 +36,10 @@ COPY services/doc-worker/pyproject.toml services/doc-worker/
 COPY services/sandbox/pyproject.toml services/sandbox/
 COPY services/workbench/pyproject.toml services/workbench/
 COPY services/deployer/pyproject.toml services/deployer/
-RUN uv sync --frozen --no-dev --package jarvis-workbench --no-install-workspace
+RUN uv sync --frozen --no-dev --package nexus-workbench --no-install-workspace
 
 COPY services/workbench services/workbench
-RUN uv sync --frozen --no-dev --package jarvis-workbench
+RUN uv sync --frozen --no-dev --package nexus-workbench
 
 # Everything reaches the internet through the allowlist proxy; npm and git also get it in their
 # own config, for tools that ignore the environment.
@@ -55,4 +55,4 @@ RUN useradd --system --uid 10003 --home-dir /workspaces workbench \
     && mkdir -p /workspaces && chown workbench /workspaces
 USER workbench
 EXPOSE 8200
-CMD ["uvicorn", "jarvis_workbench.app:app", "--host", "0.0.0.0", "--port", "8200"]
+CMD ["uvicorn", "nexus_workbench.app:app", "--host", "0.0.0.0", "--port", "8200"]

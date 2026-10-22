@@ -1,6 +1,6 @@
 """The dev team's deploy stage with a fake deployer: a deployed app's link and screenshot in the
 reply, a failed health check going back to the builders first, the reviewer's and the tests'
-gate, the member limit, app names, and Jarvis's tool for making an app public or private."""
+gate, the member limit, app names, and Nexus's tool for making an app public or private."""
 
 import base64
 import uuid
@@ -8,8 +8,8 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from jarvis_common.deployer import DeployResult
-from jarvis_common.models import (
+from nexus_common.deployer import DeployResult
+from nexus_common.models import (
     AgentRun,
     AgentSystem,
     File,
@@ -23,12 +23,12 @@ from jarvis_common.models import (
     SystemStatus,
     UserStatus,
 )
-from jarvis_common.spec import AgentSystemSpec
-from jarvis_common.systems import new_run
-from jarvis_orchestrator.deploy import deploy_project
-from jarvis_orchestrator.systems import runner
-from jarvis_orchestrator.tools import ToolContext, build_tools
-from jarvis_orchestrator.workbench import CommandResult
+from nexus_common.spec import AgentSystemSpec
+from nexus_common.systems import new_run
+from nexus_orchestrator.deploy import deploy_project
+from nexus_orchestrator.systems import runner
+from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.workbench import CommandResult
 
 PNG = base64.b64encode(b"\x89PNG fake").decode()
 URL = "http://2048.apps.localhost:8080"
@@ -215,7 +215,7 @@ async def test_only_approved_green_apps_are_deployed(
 
 
 async def test_members_can_run_three_apps(ddeps, sessionmaker):
-    from jarvis_api.users import create_user
+    from nexus_api.users import create_user
 
     async with sessionmaker() as db:
         member = await create_user(

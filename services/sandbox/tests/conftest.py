@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from jarvis_sandbox.app import app
+from nexus_sandbox.app import app
 
 LIBRARY = Path(__file__).resolve().parents[3] / "library"
 

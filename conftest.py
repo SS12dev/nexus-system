@@ -16,11 +16,11 @@ from alembic.config import Config
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from jarvis_common.db import make_engine, make_sessionmaker
-from jarvis_common.embeddings import CachedEmbedder, EmbeddingError
-from jarvis_common.models import EMBEDDING_DIM
-from jarvis_common.settings import Settings
-from jarvis_common.storage import MemoryStorage
+from nexus_common.db import make_engine, make_sessionmaker
+from nexus_common.embeddings import CachedEmbedder, EmbeddingError
+from nexus_common.models import EMBEDDING_DIM
+from nexus_common.settings import Settings
+from nexus_common.storage import MemoryStorage
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/jarvis_test"

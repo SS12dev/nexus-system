@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Restore Jarvis from a backup folder made by the backup service (see README: Backups).
+# Restore Nexus from a backup folder made by the backup service (see README: Backups).
 #
 #   ./scripts/restore.sh backups/2026-10-20T213000Z
 #
-# Replaces every database in the backup and the MinIO files with the backup's copies. Jarvis is
+# Replaces every database in the backup and the MinIO files with the backup's copies. Nexus is
 # stopped while it runs. The secrets must be the ones the backup was made with: the token keys
 # decrypt the saved Google tokens, and the Postgres and MinIO passwords must match. Each backup
 # holds a copy of the encrypted secrets file; put it back in secrets/ first (README: Secrets).
@@ -31,10 +31,10 @@ run() { dc run --rm --no-deps -T "$@"; }
 step "Checking $name"
 run backup sh -c "cd /backups/$name && sha256sum -c SHA256SUMS"
 
-read -r -p "This replaces all of Jarvis's data with the backup from $name. Type restore to go on: " ok
+read -r -p "This replaces all of Nexus's data with the backup from $name. Type restore to go on: " ok
 [[ "$ok" == "restore" ]] || { echo "Stopped."; exit 1; }
 
-step "Stopping Jarvis"
+step "Stopping Nexus"
 tunnel=$(dc --profile tunnel ps -q cloudflared 2>/dev/null || true)
 dc --profile tunnel stop web api orchestrator doc-worker backup litellm langfuse-web langfuse-worker \
   cloudflared minio 2>/dev/null || true
@@ -59,6 +59,6 @@ if [[ -f "$src/minio.tar.gz" ]]; then
     sh -c "find /restore -mindepth 1 -delete && tar -xzf '/backups/$name/minio.tar.gz' -C /restore"
 fi
 
-step "Starting Jarvis"
+step "Starting Nexus"
 if [[ -n "$tunnel" ]]; then dc --profile tunnel up -d; else dc up -d; fi
 echo "Restored $name."

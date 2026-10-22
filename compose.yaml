@@ -1,9 +1,12 @@
-# Jarvis on one machine. `cp .env.example .env` (or run scripts/init-env.sh), then
+# Nexus on one machine. `cp .env.example .env` (or run scripts/init-env.sh), then
 # `docker compose up -d --build` and open http://localhost:8080. Once the secrets are encrypted
 # (scripts/secrets.sh init), use ./scripts/compose.sh in place of docker compose.
+# The project keeps its pre-Nexus name: volume, network, container and built-image names derive
+# from it (jarvis_postgres, jarvis-api-1, jarvis-workbench), so renaming it would start Nexus on
+# empty volumes and cut running apps off their network.
 name: jarvis
 
-x-jarvis-env: &jarvis-env
+x-nexus-env: &nexus-env
   ENV: ${ENV:-development}
   DATABASE_URL: postgresql+asyncpg://jarvis:${POSTGRES_PASSWORD}@postgres:5432/jarvis
   REDIS_URL: redis://redis:6379/0
@@ -11,7 +14,7 @@ x-jarvis-env: &jarvis-env
   LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
   LITELLM_VIRTUAL_KEYS: ${LITELLM_VIRTUAL_KEYS:-true}
   LITELLM_API_KEY: ${LITELLM_API_KEY:-}
-  JARVIS_CHAT_MODEL: ${JARVIS_CHAT_MODEL:-jarvis-mini}
+  CHAT_MODEL: ${CHAT_MODEL:-${JARVIS_CHAT_MODEL:-jarvis-mini}}
   DEFAULT_BUDGET_USD: ${DEFAULT_BUDGET_USD:-5}
   OWNER_BUDGET_USD: ${OWNER_BUDGET_USD:-50}
   SECRET_KEY: ${SECRET_KEY:?SECRET_KEY missing, use ./scripts/compose.sh or set it in .env}
@@ -53,7 +56,7 @@ x-jarvis-env: &jarvis-env
   DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
   MEMBER_APP_LIMIT: ${MEMBER_APP_LIMIT:-3}
   APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
-  JARVIS_URL: ${JARVIS_URL:-https://${JARVIS_HOST:-jarvis.servhub.cc}}
+  NEXUS_URL: ${NEXUS_URL:-${JARVIS_URL:-https://${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}}}
   RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
   APP_COOKIE_HOURS: ${APP_COOKIE_HOURS:-12}
   WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-auto}
@@ -116,7 +119,7 @@ services:
       - --ping=true
       - --accesslog=true
     ports:
-      - "${JARVIS_HTTP_PORT:-8080}:80"
+      - "${NEXUS_HTTP_PORT:-${JARVIS_HTTP_PORT:-8080}}:80"
     # apps: to route to the apps users build; deployer: so the deployer can check them.
     networks: [default, apps, apps_egress, deployer]
     volumes:
@@ -134,14 +137,14 @@ services:
     depends_on: [traefik]
     restart: unless-stopped
 
-  # --- Jarvis ----------------------------------------------------------------
+  # --- Nexus ----------------------------------------------------------------
   web:
     build: apps/web
     labels:
       - traefik.enable=true
-      # Jarvis answers on its own host and on any host outside the apps domain (localhost, the
+      # Nexus answers on its own host and on any host outside the apps domain (localhost, the
       # Mac's address), never on <name>.APPS_DOMAIN: an app's name that isn't running is a 404.
-      - traefik.http.routers.web.rule=PathPrefix(`/`) && (Host(`${JARVIS_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
+      - traefik.http.routers.web.rule=PathPrefix(`/`) && (Host(`${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}`) || Host(`${OLD_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.web.priority=1
       - traefik.http.services.web.loadbalancer.server.port=80
     restart: unless-stopped
@@ -149,13 +152,13 @@ services:
   migrate:
     build: { context: ., dockerfile: services/api/Dockerfile }
     command: ["alembic", "upgrade", "head"]
-    environment: *jarvis-env
+    environment: *nexus-env
     depends_on:
       postgres: { condition: service_healthy }
 
   api:
     build: { context: ., dockerfile: services/api/Dockerfile }
-    environment: *jarvis-env
+    environment: *nexus-env
     # deployer: the Apps page stops, restarts and deletes apps.
     networks: [default, deployer]
     # Traefik spreads requests over the replicas and drops one that fails /healthz. Any replica
@@ -164,7 +167,7 @@ services:
       replicas: ${API_REPLICAS:-2}
     labels:
       - traefik.enable=true
-      - traefik.http.routers.api.rule=(PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)) && (Host(`${JARVIS_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
+      - traefik.http.routers.api.rule=(PathPrefix(`/api`) || PathPrefix(`/auth`) || Path(`/ws`)) && (Host(`${NEXUS_HOST:-${JARVIS_HOST:-nexus.servhub.cc}}`) || Host(`${OLD_HOST:-jarvis.servhub.cc}`) || !HostRegexp(`^.+[.]${APPS_DOMAIN:-apps.localhost}$$`))
       - traefik.http.routers.api.priority=100
       - traefik.http.services.api.loadbalancer.server.port=8000
       - traefik.http.services.api.loadbalancer.healthcheck.path=/healthz
@@ -180,7 +183,7 @@ services:
 
   orchestrator:
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
-    environment: *jarvis-env
+    environment: *nexus-env
     # The only service that can reach the sandbox and the workbench.
     networks: [default, sandbox, workbench, deployer]
     # More workers take more turns and runs at once (each also uses more memory).
@@ -193,7 +196,7 @@ services:
       workbench: { condition: service_healthy }
     restart: unless-stopped
 
-  # Runs agent code. Its network is internal, so jobs can't reach the internet, Jarvis's
+  # Runs agent code. Its network is internal, so jobs can't reach the internet, Nexus's
   # databases or your LAN; the root filesystem is read-only and jobs run in /tmp.
   sandbox:
     build: { context: ., dockerfile: services/sandbox/Dockerfile }
@@ -219,7 +222,7 @@ services:
 
   # Where dev teams build software: a persistent git folder per project on the workspaces
   # volume, with Node, Python, git and headless Chromium. Its network is internal, so the only
-  # way out is egress-proxy, which allows npm, PyPI and GitHub and nothing else: no Jarvis
+  # way out is egress-proxy, which allows npm, PyPI and GitHub and nothing else: no Nexus
   # databases, no LAN, no other sites. Each command is locked to its own project folder.
   workbench:
     build: { context: ., dockerfile: services/workbench/Dockerfile }
@@ -283,7 +286,7 @@ services:
       APPS_DOMAIN: ${APPS_DOMAIN:-apps.localhost}
       # Empty: https://<name>.APPS_DOMAIN, or http://<name>.apps.localhost:<port> locally.
       APPS_URL: ${APPS_URL:-}
-      JARVIS_HTTP_PORT: ${JARVIS_HTTP_PORT:-8080}
+      NEXUS_HTTP_PORT: ${NEXUS_HTTP_PORT:-${JARVIS_HTTP_PORT:-8080}}
       RESERVED_HOSTNAMES: ${RESERVED_HOSTNAMES:-}
       TRAEFIK_URL: http://traefik
       SCREENSHOT_IMAGE: jarvis-workbench:latest
@@ -313,11 +316,11 @@ services:
   # The deployer's only door to Docker and the only container with the Docker socket. It allows
   # a short list of calls (offline builds; creating, starting, stopping and deleting jarvis-app
   # containers with fixed limits) and refuses exec, volumes, swarm and everything else
-  # (services/deployer/src/jarvis_deployer/gate.py). Root inside, to open the socket, but with no
+  # (services/deployer/src/nexus_deployer/gate.py). Root inside, to open the socket, but with no
   # capabilities and only the deployer able to reach it.
   docker-gate:
     build: { context: ., dockerfile: services/deployer/Dockerfile }
-    command: ["uvicorn", "jarvis_deployer.gate:app", "--host", "0.0.0.0", "--port", "2375"]
+    command: ["uvicorn", "nexus_deployer.gate:app", "--host", "0.0.0.0", "--port", "2375"]
     user: "0"
     environment:
       APPS_NETWORK: jarvis_apps
@@ -345,7 +348,7 @@ services:
       dockerfile: services/doc-worker/Dockerfile
       args:
         DOCLING: ${DOCLING:-true}
-    environment: *jarvis-env
+    environment: *nexus-env
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -492,13 +495,13 @@ services:
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET missing, use ./scripts/compose.sh or set it in .env}
       # Creates the org, project, API keys and an admin login on first start.
       LANGFUSE_INIT_ORG_ID: jarvis
-      LANGFUSE_INIT_ORG_NAME: Jarvis
+      LANGFUSE_INIT_ORG_NAME: Nexus
       LANGFUSE_INIT_PROJECT_ID: jarvis
-      LANGFUSE_INIT_PROJECT_NAME: Jarvis
+      LANGFUSE_INIT_PROJECT_NAME: Nexus
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@jarvis.local}
-      LANGFUSE_INIT_USER_NAME: Jarvis admin
+      LANGFUSE_INIT_USER_NAME: Nexus admin
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:?LANGFUSE_ADMIN_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
       AUTH_DISABLE_SIGNUP: "true"
     ports:
@@ -517,7 +520,7 @@ networks:
     internal: true
   docker-gate:
     internal: true
-  # The apps users build, and Traefik. Internal: no internet, no Jarvis services, no LAN.
+  # The apps users build, and Traefik. Internal: no internet, no Nexus services, no LAN.
   apps:
     internal: true
   # Apps that opt in to the internet join this one too.

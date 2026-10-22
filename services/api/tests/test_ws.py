@@ -6,8 +6,8 @@ from redis import Redis
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from jarvis_api.main import create_app
-from jarvis_common.events import Event, user_channel
+from nexus_api.main import create_app
+from nexus_common.events import Event, user_channel
 
 
 @pytest.fixture
