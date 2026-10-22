@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis_common.models import AppSetting, RoleName, User
 
 MAINTENANCE = "maintenance"
-DEFAULT_MAINTENANCE_MESSAGE = "Jarvis is down for maintenance. Back soon."
+DEFAULT_MAINTENANCE_MESSAGE = "Nexus is down for maintenance. Back soon."
 
 
 async def get_setting(db: AsyncSession, key: str) -> dict:

@@ -118,7 +118,7 @@ async def update_user(
         or body.status == UserStatus.disabled
     )
     if losing_owner and await owner_count(db) <= 1:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Jarvis needs at least one active owner")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Nexus needs at least one active owner")
 
     if body.role is not None and body.role != user.role:
         if not can_assign(actor, body.role):

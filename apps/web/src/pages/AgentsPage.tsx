@@ -32,7 +32,7 @@ const TOPOLOGY_HELP: Record<AgentSystem["topology"], string> = {
     "One agent splits the job into items, copies of a worker do them in parallel, and a third combines the results.",
   critic_loop: "A worker drafts and a critic reviews, sending it back until it passes.",
   dev_project:
-    "Jarvis's team for building software in a project folder: a brief, a plan, builders working side by side, tests, and a review that sends fixes back up to three times.",
+    "The team for building software in a project folder: a brief, a plan, builders working side by side, tests, and a review that sends fixes back up to three times.",
 };
 
 const LIFETIME: Record<AgentSystem["lifetime"], { label: string; help: string }> = {

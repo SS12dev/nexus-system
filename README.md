@@ -1,6 +1,7 @@
-# Jarvis
+# Nexus
 
-Jarvis is a supervisor agent you chat with. It answers simple asks itself and, from phase 3 on,
+Nexus (code name Jarvis, which the repo and packages still use) gives each person an assistant
+they name themselves. The assistant is a supervisor agent: it answers simple asks itself and
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Jarvis: Architecture & Research".
 

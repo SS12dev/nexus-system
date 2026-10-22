@@ -131,7 +131,9 @@ async def send_message(
         )
     )
     if busy:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Jarvis is still answering in this chat")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Your assistant is still answering in this chat"
+        )
     files: list[File] = []
     if body.file_ids:
         files = list(
@@ -177,7 +179,7 @@ async def send_message(
     except Exception as exc:
         log.exception("Could not queue turn")
         assistant_msg.status = MessageStatus.failed
-        assistant_msg.error = "Jarvis is unavailable right now. Try again in a moment."
+        assistant_msg.error = "Your assistant is unavailable right now. Try again in a moment."
         await db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, assistant_msg.error) from exc
 

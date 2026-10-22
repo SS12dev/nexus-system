@@ -66,7 +66,7 @@ async def upload(
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            f"Jarvis can't read {ext or 'files without an extension'} files yet.",
+            f"Your assistant can't read {ext or 'files without an extension'} files yet.",
         )
     if chat_id is not None:
         await own_chat(db, user, chat_id)
@@ -106,7 +106,7 @@ async def upload(
         await queue.enqueue_parse(f.id)
     except Exception:
         log.exception("Could not queue parse of %s", f.id)
-        f.status, f.error = FileStatus.failed, "Jarvis couldn't start reading this file. Retry."
+        f.status, f.error = FileStatus.failed, "Couldn't start reading this file. Retry."
         await db.commit()
     return f
 

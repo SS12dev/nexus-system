@@ -15,9 +15,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],
       manifest: {
-        name: "Jarvis",
-        short_name: "Jarvis",
-        description: "Your personal supervisor agent",
+        name: "Nexus",
+        short_name: "Nexus",
+        description: "Your own assistant and its agent teams",
         theme_color: "#05070d",
         background_color: "#05070d",
         display: "standalone",
