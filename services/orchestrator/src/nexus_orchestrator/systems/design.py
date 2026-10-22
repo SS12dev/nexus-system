@@ -1,4 +1,4 @@
-"""Design an agent system: the architect model (jarvis-pro by default) turns a request into an
+"""Design an agent system: the architect model (nexus-pro by default) turns a request into an
 AgentSystemSpec, or picks one of the user's saved templates. The spec is validated twice: by its
 Pydantic shape, then against what this user may actually use (tools, skills). One failed attempt
 is sent back with the problems for a fix."""

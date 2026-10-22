@@ -4,19 +4,19 @@ archive, attach, volumes, swarm, plugins, system...). Generic socket proxies all
 URL prefix, so allowing /containers would also allow /containers/<id>/exec and archive writes;
 this gate checks each call:
 
-- builds: offline only (networkmode=none), tagged jarvis-app-*, labelled with the app;
-- containers and images it touches must carry the jarvis.app (or jarvis.shot) label, so Nexus's
+- builds: offline only (networkmode=none), tagged nexus-app-*, labelled with the app;
+- containers and images it touches must carry the nexus.app (or nexus.shot) label, so Nexus's
   own containers can't be stopped, deleted or read;
-- a new container must be named jarvis-app-* or jarvis-shot-*, run as a non-root user on the
+- a new container must be named nexus-app-* or nexus-shot-*, run as a non-root user on the
   apps network, with a memory and CPU cap, and no privileges, host mounts, devices, published
   ports or extra capabilities;
 - networks: only joining or leaving the apps' internet network.
 
     GET  /_ping, /version
-    POST /build                              offline builds of jarvis-app-* images
+    POST /build                              offline builds of nexus-app-* images
     GET  /images/{ref}/json  DELETE /images/{ref}            managed images
     GET  /containers/json                                    list
-    POST /containers/create?name=jarvis-(app|shot)-*         checked body
+    POST /containers/create?name=nexus-(app|shot)-*         checked body
     GET  /containers/{id}/json|logs   POST start|stop|restart|wait   DELETE   managed only
     POST /networks/{apps internet network}/connect|disconnect          managed only
 """
@@ -32,15 +32,15 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 SOCKET = os.environ.get("DOCKER_SOCKET", "/var/run/docker.sock")
-APPS_NETWORK = os.environ.get("APPS_NETWORK", "jarvis_apps")
-EGRESS_NETWORK = os.environ.get("APPS_EGRESS_NETWORK", "jarvis_apps_egress")
-SHOT_IMAGE = os.environ.get("SCREENSHOT_IMAGE", "jarvis-workbench:latest")
+APPS_NETWORK = os.environ.get("APPS_NETWORK", "nexus_apps")
+EGRESS_NETWORK = os.environ.get("APPS_EGRESS_NETWORK", "nexus_apps_egress")
+SHOT_IMAGE = os.environ.get("SCREENSHOT_IMAGE", "nexus-workbench:latest")
 MAX_MEMORY = int(os.environ.get("GATE_MAX_MEMORY_MB", "1024")) * 1024 * 1024
 MAX_NANO_CPUS = int(float(os.environ.get("GATE_MAX_CPUS", "1")) * 1e9)
 
 VERSION = re.compile(r"^/v\d+(\.\d+)?(?=/)")
-MANAGED_NAME = re.compile(r"^jarvis-(app|shot)-[a-z0-9][a-z0-9-]{0,80}$")
-APP_TAG = re.compile(r"^jarvis-app-[a-z0-9][a-z0-9-]{0,80}(:[a-z0-9._-]{1,40})?$")
+MANAGED_NAME = re.compile(r"^nexus-(app|shot)-[a-z0-9][a-z0-9-]{0,80}$")
+APP_TAG = re.compile(r"^nexus-app-[a-z0-9][a-z0-9-]{0,80}(:[a-z0-9._-]{1,40})?$")
 ID = r"[A-Za-z0-9_.:-]{1,128}"
 BUILD_PARAMS = {
     "t",
@@ -126,7 +126,7 @@ async def managed(kind: str, ref: str) -> bool:
         return False
     data = resp.json()
     labels = (data.get("Config") or {}).get("Labels") or {}
-    return "jarvis.app" in labels or (kind == "containers" and "jarvis.shot" in labels)
+    return "nexus.app" in labels or (kind == "containers" and "nexus.shot" in labels)
 
 
 def check_build(query: dict) -> None:
@@ -139,28 +139,28 @@ def check_build(query: dict) -> None:
         raise Refused("only the classic builder")
     tags = query.get("t") or []
     if not tags or not all(APP_TAG.match(t) for t in tags):
-        raise Refused("images must be tagged jarvis-app-*")
+        raise Refused("images must be tagged nexus-app-*")
     try:
         labels = json.loads((query.get("labels") or ["{}"])[0])
     except ValueError as exc:
         raise Refused("bad labels") from exc
-    if "jarvis.app" not in labels:
-        raise Refused("images must be labelled jarvis.app")
+    if "nexus.app" not in labels:
+        raise Refused("images must be labelled nexus.app")
 
 
 def check_create(query: dict, body: dict) -> None:
     name = (query.get("name") or [""])[0]
     if not MANAGED_NAME.match(name):
-        raise Refused("containers must be named jarvis-app-* or jarvis-shot-*")
+        raise Refused("containers must be named nexus-app-* or nexus-shot-*")
     unknown = set(body) - CREATE_KEYS
     if unknown:
         raise Refused(f"container option {sorted(unknown)[0]}")
     image, labels = body.get("Image", ""), body.get("Labels") or {}
-    if name.startswith("jarvis-shot-"):
-        if image != SHOT_IMAGE or "jarvis.shot" not in labels:
-            raise Refused("screenshots use the workbench image and the jarvis.shot label")
-    elif not APP_TAG.match(image) or "jarvis.app" not in labels:
-        raise Refused("apps use jarvis-app-* images and the jarvis.app label")
+    if name.startswith("nexus-shot-"):
+        if image != SHOT_IMAGE or "nexus.shot" not in labels:
+            raise Refused("screenshots use the workbench image and the nexus.shot label")
+    elif not APP_TAG.match(image) or "nexus.app" not in labels:
+        raise Refused("apps use nexus-app-* images and the nexus.app label")
     user = str(body.get("User") or "").split(":")[0]
     if user in ("", "0", "root"):
         raise Refused("containers must run as a non-root user")

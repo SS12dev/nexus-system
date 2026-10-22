@@ -143,15 +143,15 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 
 | Alias | Model | Used for |
 | --- | --- | --- |
-| `jarvis-nano` | gpt-5.4-nano | routing, extraction, titles, summaries |
-| `jarvis-mini` | gpt-5.4-mini | plain chat (phase 1 default), most sub-agents |
-| `jarvis-pro` | gpt-5.4 | planning and designing agent systems |
-| `jarvis-max` | gpt-5.5 | escalation only |
-| `jarvis-embed` | bge-m3 in Ollama on the host | memory and document search |
+| `nexus-nano` | gpt-5.4-nano | routing, extraction, titles, summaries |
+| `nexus-mini` | gpt-5.4-mini | plain chat (phase 1 default), most sub-agents |
+| `nexus-pro` | gpt-5.4 | planning and designing agent systems |
+| `nexus-max` | gpt-5.5 | escalation only |
+| `nexus-embed` | bge-m3 in Ollama on the host | memory and document search |
 
 LiteLLM runs in Compose with an exact-match Redis cache and sends every generation to Langfuse.
 To use another LiteLLM (for example on a server later), set `LITELLM_BASE_URL` and its
-`LITELLM_MASTER_KEY`. Each turn is one Langfuse trace (named `jarvis.turn`) grouped into a session
+`LITELLM_MASTER_KEY`. Each turn is one Langfuse trace (named `nexus.turn`) grouped into a session
 per chat and attributed to the user's id.
 
 ## How a message flows
@@ -179,7 +179,7 @@ per chat and attributed to the user's id.
 | Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
 | Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
 
-After each turn `jarvis-nano` proposes memories from the exchange. Each is compared with its
+After each turn `nexus-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
 memory's confidence, contradictions update it, and "forget that" deletes it. Pinned memories are
 never changed by Nexus. Each night, memories no chat has confirmed in 60 days lose confidence
@@ -202,7 +202,7 @@ and sheet, embedded and indexed; see [services/doc-worker](services/doc-worker/R
 Library page lists, searches inside, previews the extracted text, renames, downloads and deletes
 files.
 
-Embeddings go through LiteLLM under the `jarvis-embed` alias, which points at bge-m3 in Ollama
+Embeddings go through LiteLLM under the `nexus-embed` alias, which points at bge-m3 in Ollama
 on the Mac (Docker on macOS can't use the GPU, so Ollama runs natively). Vectors are cached by
 text hash, and every stored vector records its model, so swapping the embedder (for example to
 OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
@@ -212,10 +212,10 @@ OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 
 For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Nexus
 calls `build_agent_system`. Before Nexus answers a message, the cheapest tier (`ROUTE_MODEL`,
-jarvis-nano) decides whether it is work for a team; when it is, Nexus's first move is to build
+nexus-nano) decides whether it is work for a team; when it is, Nexus's first move is to build
 one. Nexus is an orchestrator: any real piece of work (research, writing, analysis, code,
 documents) goes to a team, as small as one agent, and Nexus itself only does direct one-step
-things (chat, a quick fact, one look at mail or calendar, adding a task) and manages teams. The architect model (`DESIGN_MODEL`, jarvis-pro) writes an
+things (chat, a quick fact, one look at mail or calendar, adding a task) and manages teams. The architect model (`DESIGN_MODEL`, nexus-pro) writes an
 AgentSystemSpec: a small team, a topology, each agent's role, instructions, model tier, tools and
 skills. The spec is validated against what you may use, compiled to a LangGraph graph and run on
 the orchestrator queue; the team's card in the chat shows each agent live, and the result and
@@ -225,7 +225,7 @@ reuses for similar asks (Nexus only keeps a team up front when you say so).
 
 - **Topologies:** single agent, pipeline, lead and workers (`supervisor_workers`), parallel
   map-reduce, and worker with critic.
-- **Model tiers:** the spec picks nano, mini or pro per agent. jarvis-max is only for a team's
+- **Model tiers:** the spec picks nano, mini or pro per agent. nexus-max is only for a team's
   lead, and only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
   tier up; non-lead agents drop a tier once 80% of the run's budget is spent.
 - **Budgets:** each run gets its own LiteLLM key capped at its budget (`DEFAULT_RUN_BUDGET_USD`,
@@ -288,7 +288,7 @@ capped by `MAX_RUN_BUDGET_USD`. It needs the Run code (exec) permission.
 
 Projects show in the Library as one card each (stack, latest commit, repo link), never as loose
 files. With the Nexus GitHub App set up ([docs/github-app.md](docs/github-app.md)), each gets a
-private repo in `GITHUB_APPS_ORG`: the run's work goes to a `jarvis/<run id>` branch, and `main`
+private repo in `GITHUB_APPS_ORG`: the run's work goes to a `nexus/<run id>` branch, and `main`
 moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
 transfers a repo to your own account, after you approve it on a card (owner only).
 
@@ -450,8 +450,6 @@ Afterwards:
   can be changed without signing everyone out of Google. To rotate the token key, put a new
   one first (`new,old`); each grant is re-encrypted the next time it is used, and the old key
   can be dropped later. Grants still under `SECRET_KEY` move over the same way.
-- A key made before the rename to Nexus is at `~/.config/jarvis/age.key` and the file was
-  `secrets/jarvis.sops.env`; both scripts still find the key there and rename the file once.
 - Every backup includes the encrypted file. It is useless without the age key, so keep the key
   somewhere other than the Mac.
 
@@ -467,7 +465,7 @@ GCP KMS, AWS KMS and others as extra recipients), so the server needs no copy of
 The `backup` service backs up every night after `BACKUP_HOUR_UTC` (default 21, so 02:30 IST),
 on its first start, whenever none has run for 26 hours (the Mac was asleep), and on **Back up
 now**. Each backup is a folder in `BACKUP_DIR` (default `./backups`, gitignored) named by its
-UTC time, with a `pg_dump` of the jarvis, litellm and langfuse databases, a tarball of the MinIO
+UTC time, with a `pg_dump` of the nexus, litellm and langfuse databases, a tarball of the MinIO
 data (uploads and generated files) and `SHA256SUMS`. Backups older than `BACKUP_KEEP_DAYS`
 (14) are deleted, always keeping the newest `BACKUP_KEEP_MIN` (3). The Admin page warns when the
 last good one is older than `BACKUP_STALE_HOURS` (36).
@@ -530,7 +528,7 @@ npm test && npm run typecheck
 ```
 
 Run the API and worker on the host against the Compose services with the matching URLs, e.g.
-`DATABASE_URL=postgresql+asyncpg://jarvis:<password>@localhost:5432/jarvis`,
+`DATABASE_URL=postgresql+asyncpg://nexus:<password>@localhost:5432/nexus`,
 `REDIS_URL=redis://localhost:6379/0` (publish Redis's port first),
 `LITELLM_BASE_URL=http://localhost:4000` and `S3_ENDPOINT_URL=http://localhost:9000` with
 `S3_SECRET_KEY` (publish MinIO's port 9000 first), then `uv run uvicorn nexus_api.app:app

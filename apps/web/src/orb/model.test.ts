@@ -40,7 +40,7 @@ const mem = (id: string, over: Partial<Memory> = {}): Memory => ({
   content: `memory ${id}`,
   confidence: 0.9,
   pinned: false,
-  source: "jarvis",
+  source: "assistant",
   source_chat_id: null,
   created_at: "2026-10-20T00:00:00Z",
   updated_at: "2026-10-20T00:00:00Z",

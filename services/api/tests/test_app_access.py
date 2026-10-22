@@ -47,7 +47,7 @@ async def token_for(client, app_id, next_path="/play") -> str:
     assert resp.status_code == 303, resp.text
     location = urlsplit(resp.headers["location"])
     assert f"{location.scheme}://{location.netloc}{location.path}" == (
-        f"http://{HOST}:8080/_jarvis/auth"
+        f"http://{HOST}:8080/_nexus/auth"
     )
     return parse_qs(location.query)["token"][0]
 
@@ -63,19 +63,19 @@ async def test_the_round_trip(owner, me, visitor, sessionmaker, settings):
     # 2. Signed in to Nexus: back to the app with a one-time token.
     token = await token_for(owner, app_id, "/play?level=2")
     # 3. The app's host swaps it for its own cookie, and goes on to the page.
-    uri = f"/_jarvis/auth?token={token}"
+    uri = f"/_nexus/auth?token={token}"
     resp = await visitor.get("/auth/app/check", headers=forwarded(uri=uri))
     assert resp.status_code == 302
     # Absolute, on the app: Traefik reads a bare path as one on the API's own address.
     assert resp.headers["location"] == f"http://{HOST}:8080/play?level=2"
     cookie = resp.headers["set-cookie"]
-    assert cookie.startswith("jarvis_app=") and "HttpOnly" in cookie and "Secure" in cookie
+    assert cookie.startswith("nexus_app=") and "HttpOnly" in cookie and "Secure" in cookie
     # Host-only: no Domain, so it never reaches other apps or Nexus.
     assert "domain" not in cookie.lower()
-    value = resp.cookies["jarvis_app"]
+    value = resp.cookies["nexus_app"]
     # 4. With the cookie, requests go through.
     ok = await visitor.get(
-        "/auth/app/check", headers=forwarded(uri="/play"), cookies={"jarvis_app": value}
+        "/auth/app/check", headers=forwarded(uri="/play"), cookies={"nexus_app": value}
     )
     assert ok.status_code == 200
     # The same token can't be used twice.
@@ -88,7 +88,7 @@ async def test_an_expired_token(owner, me, visitor, sessionmaker, monkeypatch):
     token = await token_for(owner, app_id)
     monkeypatch.setattr(access, "TOKEN_SECONDS", -1)
     resp = await visitor.get(
-        "/auth/app/check", headers=forwarded(uri=f"/_jarvis/auth?token={token}")
+        "/auth/app/check", headers=forwarded(uri=f"/_nexus/auth?token={token}")
     )
     assert resp.status_code == 403 and "expired" in resp.text
     assert "set-cookie" not in resp.headers
@@ -100,26 +100,26 @@ async def test_a_token_or_cookie_for_another_app(owner, me, visitor, sessionmake
     snake = "snake.apps.localhost"
     token = await token_for(owner, app_id)
     resp = await visitor.get(
-        "/auth/app/check", headers=forwarded(host=snake, uri=f"/_jarvis/auth?token={token}")
+        "/auth/app/check", headers=forwarded(host=snake, uri=f"/_nexus/auth?token={token}")
     )
     assert resp.status_code == 403 and "another app" in resp.text
     # A cookie made for 2048 doesn't open snake.
     token = await token_for(owner, app_id)
     made = await visitor.get(
-        "/auth/app/check", headers=forwarded(uri=f"/_jarvis/auth?token={token}")
+        "/auth/app/check", headers=forwarded(uri=f"/_nexus/auth?token={token}")
     )
-    cookie = {"jarvis_app": made.cookies["jarvis_app"]}
+    cookie = {"nexus_app": made.cookies["nexus_app"]}
     assert (
         await visitor.get("/auth/app/check", headers=forwarded(host=snake), cookies=cookie)
     ).status_code == 302
     # A forged or tampered one opens nothing.
-    forged = {"jarvis_app": made.cookies["jarvis_app"][:-2] + "xx"}
+    forged = {"nexus_app": made.cookies["nexus_app"][:-2] + "xx"}
     assert (
         await visitor.get("/auth/app/check", headers=forwarded(), cookies=forged)
     ).status_code == 302
 
 
-async def test_the_jarvis_session_cookie_never_opens_an_app(
+async def test_the_nexus_session_cookie_never_opens_an_app(
     owner, me, visitor, sessionmaker, settings
 ):
     """The session cookie has no Domain, so app hosts never get it; and even sent by hand, the
@@ -135,7 +135,7 @@ async def test_the_jarvis_session_cookie_never_opens_an_app(
     assert resp.status_code == 302 and "set-cookie" not in resp.headers
     token = await token_for(owner, app_id)
     resp = await visitor.get(
-        "/auth/app/check", headers=forwarded(uri=f"/_jarvis/auth?token={token}")
+        "/auth/app/check", headers=forwarded(uri=f"/_nexus/auth?token={token}")
     )
     assert settings.session_cookie_name not in resp.headers.get("set-cookie", "")
 
@@ -204,9 +204,9 @@ async def test_unknown_public_preview_and_non_get(visitor, me, sessionmaker, set
 
 async def test_redirects_stay_on_the_app(owner, me, visitor, sessionmaker):
     app_id = await add_app(sessionmaker, me)
-    for evil in ("https://evil.example/", "//evil.example/x", "/_jarvis/auth?token=x"):
+    for evil in ("https://evil.example/", "//evil.example/x", "/_nexus/auth?token=x"):
         token = await token_for(owner, app_id, evil)
         resp = await visitor.get(
-            "/auth/app/check", headers=forwarded(uri=f"/_jarvis/auth?token={token}")
+            "/auth/app/check", headers=forwarded(uri=f"/_nexus/auth?token={token}")
         )
         assert resp.headers["location"] == f"http://{HOST}:8080/", evil

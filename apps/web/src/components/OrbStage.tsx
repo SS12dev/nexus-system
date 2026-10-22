@@ -23,7 +23,7 @@ import { useAssistantName } from "../lib/assistant";
 
 const OrbScene = lazy(() => import("../orb/OrbScene"));
 
-const VIEW_KEY = "jarvis.home.view";
+const VIEW_KEY = "nexus.home.view";
 
 function savedView(): "orb" | "list" {
   if (!hasWebGL()) return "list";

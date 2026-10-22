@@ -93,7 +93,7 @@ async def turn(sessionmaker, user):
             role=MessageRole.assistant,
             content="",
             status=MessageStatus.streaming,
-            model="jarvis-mini",
+            model="nexus-mini",
             trace_id="t1",
         )
         db.add(reply)

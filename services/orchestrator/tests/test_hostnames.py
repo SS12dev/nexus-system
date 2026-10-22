@@ -28,7 +28,7 @@ def test_names_are_single_dns_labels():
         assert not usable(bad), bad
 
 
-@pytest.mark.parametrize("name", ["jarvis", "www", "mail", "api", "admin", "traefik"])
+@pytest.mark.parametrize("name", ["nexus", "www", "mail", "api", "admin", "traefik"])
 async def test_reserved_names_get_a_suffix(name):
     picked = await pick(name, taken_from(set()))
     assert picked.startswith(f"{name}-") and len(picked) == len(name) + 3

@@ -113,7 +113,7 @@ async def test_new_preference_is_added_with_its_source(deps, model, chat, sessio
     # to the user's key with a memory trace.
     assert len(model.seen) == 1
     assert model.calls[0]["response_format"] == {"type": "json_object"}
-    assert deps.factory_calls[0]["model"] == "jarvis-nano"
+    assert deps.factory_calls[0]["model"] == "nexus-nano"
     assert deps.factory_calls[0]["metadata"]["trace_name"] == "nexus.memory.extract"
     # A first memory schedules the first profile.
     assert enqueued.jobs == [("rebuild_profile", str(user_id))]
@@ -230,7 +230,7 @@ async def test_turn_uses_memories_and_documents_then_queues_learning(
             role=MessageRole.assistant,
             status=MessageStatus.streaming,
             content="",
-            model="jarvis-mini",
+            model="nexus-mini",
             created_at=utcnow() + timedelta(seconds=5),
         )
         db.add(reply)
@@ -270,7 +270,7 @@ async def test_tool_calls_read_documents_and_count_every_call(
             role=MessageRole.assistant,
             status=MessageStatus.streaming,
             content="",
-            model="jarvis-mini",
+            model="nexus-mini",
             created_at=utcnow() + timedelta(seconds=5),
         )
         db.add(reply)
@@ -327,7 +327,7 @@ async def test_tools_cannot_read_other_users_documents(deps, model, chat, sessio
             role=MessageRole.assistant,
             status=MessageStatus.streaming,
             content="",
-            model="jarvis-mini",
+            model="nexus-mini",
             created_at=utcnow() + timedelta(seconds=5),
         )
         db.add(reply)

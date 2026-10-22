@@ -16,7 +16,7 @@ SPEND_TTL_S = 60
 
 def _spend_key(secret: str) -> str:
     # Never store the key itself, only a hash of it.
-    return "jarvis:cache:spend:" + hashlib.sha256(secret.encode()).hexdigest()[:32]
+    return "nexus:cache:spend:" + hashlib.sha256(secret.encode()).hexdigest()[:32]
 
 
 async def cached_spend(redis: Redis, gateway: LiteLLMAdmin, secret: str) -> float | None:

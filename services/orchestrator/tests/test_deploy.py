@@ -260,13 +260,13 @@ async def test_reserved_names_are_never_picked(ddeps, owner, sessionmaker, monke
     user, _ = owner
     monkeypatch.setattr(ddeps.settings, "reserved_hostnames", "plex, Nas")
     async with sessionmaker() as db:
-        rows = [Project(user_id=user.id, workbench_id=n, name=n) for n in ("Jarvis", "plex")]
+        rows = [Project(user_id=user.id, workbench_id=n, name=n) for n in ("Nexus", "plex")]
         db.add_all(rows)
         await db.commit()
     for row in rows:
         assert (await deploy_project(ddeps, row.id)).ok
     names = [slug for slug, _ in ddeps.deployer.deploys]
-    assert names[0].startswith("jarvis-") and names[1].startswith("plex-")
+    assert names[0].startswith("nexus-") and names[1].startswith("plex-")
 
 
 async def test_the_visibility_tool(ddeps, owner, sessionmaker):

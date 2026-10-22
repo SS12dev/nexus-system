@@ -163,7 +163,7 @@ async def test_outside_a_run_or_without_a_workbench(deps, fake):
 
 def test_catalogue():
     for name in WS_TOOLS:
-        assert not BY_NAME[name].jarvis, name
+        assert not BY_NAME[name].assistant, name
     assert BY_NAME["ws_run"].risk == "exec"
     assert RISK_CAPABILITY[BY_NAME["ws_run"].risk] == Capability.exec
     assert {BY_NAME[n].risk for n in ("ws_tree", "ws_read", "ws_diff")} == {"read"}

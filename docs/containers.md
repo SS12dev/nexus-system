@@ -1,7 +1,7 @@
 # The containers
 
-`docker compose up -d` starts about 20 containers, all in the Compose project `jarvis`, so
-Docker Desktop shows them under one group with names like `jarvis-api-1`. This page says what
+`docker compose up -d` starts about 20 containers, all in the Compose project `nexus`, so
+Docker Desktop shows them under one group with names like `nexus-api-1`. This page says what
 each one is for, how they talk to each other, and which ones you can restart or leave out.
 
 ## At a glance
@@ -19,7 +19,7 @@ each one is for, how they talk to each other, and which ones you can restart or 
 | `egress-proxy` | The workbench's only way out: lets through npm, PyPI and GitHub, nothing else | with the workbench | no |
 | `deployer` | Builds finished software projects into containers and runs them as apps | for running apps | no |
 | `docker-gate` | The deployer's only door to Docker: a short allowlist of API calls | with the deployer | no |
-| `jarvis-app-*` | The apps teams built (made by the deployer, not Compose) | | `<name>.<APPS_DOMAIN>` |
+| `nexus-app-*` | The apps teams built (made by the deployer, not Compose) | | `<name>.<APPS_DOMAIN>` |
 | `doc-worker` | Worker that parses uploads (PDF, Word, PPT, Excel) and indexes them | for documents | no |
 | `backup` | Nightly backups of databases and files to `./backups` | recommended | no |
 | `postgres` | The main database (with pgvector for search) | yes | 127.0.0.1:5432 |
@@ -80,7 +80,7 @@ flowchart LR
   workbench -->|allowlist only| egress --> registries
   deployer[deployer]
   gate[docker-gate]
-  apps[(jarvis-app-* containers)]
+  apps[(nexus-app-* containers)]
   orch -->|deploy| deployer
   api -->|stop, restart, delete| deployer
   deployer -->|allowlisted calls| gate
@@ -129,8 +129,8 @@ by nginx with the security headers (CSP and friends). It holds no data; rebuildi
 
 **api** ([services/api](../services/api)) is the FastAPI backend: Google sign-in and sessions,
 chats, uploads, memories, skills, agents, approvals, people, the Admin page and the WebSocket.
-It runs `API_REPLICAS` copies (default 2), which is why you see `jarvis-api-1` and
-`jarvis-api-2`. Any replica can serve anyone, because sessions, rate limits and live events all
+It runs `API_REPLICAS` copies (default 2), which is why you see `nexus-api-1` and
+`nexus-api-2`. Any replica can serve anyone, because sessions, rate limits and live events all
 live in Postgres and Valkey.
 
 **migrate** uses the API image to run `alembic upgrade head` against Postgres, then exits.
@@ -157,7 +157,7 @@ capabilities dropped, and caps of 3 GB memory, 2 CPUs and 256 processes.
 
 **workbench** ([services/workbench](../services/workbench)) is where dev teams build
 software. Each project is a git repository at `/workspaces/<user id>/<project id>` on the
-`jarvis_workspaces` volume, so it survives between steps, runs and restarts until it is deleted.
+`nexus_workspaces` volume, so it survives between steps, runs and restarts until it is deleted.
 A finished project is pushed from here to its GitHub repo through `egress-proxy`
 ([GitHub App setup](github-app.md)). Agents use it through the `ws_*` tools: list, read, write and edit files, run a command
 (`ws_run`, which needs the exec capability like `run_code`), see the diff and commit. An agent
@@ -191,10 +191,10 @@ page) it builds the project from its workbench folder, mounted read-only, using 
 template ([templates](../services/deployer/src/nexus_deployer/templates)): a static site on
 unprivileged nginx, FastAPI on Python slim, or Express on Node. Agents never write their own
 Dockerfiles, and builds have **no network**: they use the `node_modules` or `.venv` the team
-installed in the workbench. Each app runs as `jarvis-app-<name>-web` (and `-api` for a back end)
+installed in the workbench. Each app runs as `nexus-app-<name>-web` (and `-api` for a back end)
 on the `apps` network, replacing the previous version in place: non-root, read-only, 512 MB and
-half a CPU, no host folders, restarting unless stopped, and labelled `jarvis.app` and
-`jarvis.owner`. Traefik routes `<name>.<APPS_DOMAIN>` to it (`2048.servhub.cc`), and `/api` on
+half a CPU, no host folders, restarting unless stopped, and labelled `nexus.app` and
+`nexus.owner`. Traefik routes `<name>.<APPS_DOMAIN>` to it (`2048.servhub.cc`), and `/api` on
 that host to the back end; private apps go through the `app-auth` sign-in check first
 ([app-urls.md](app-urls.md)). Without a domain, `APPS_DOMAIN=apps.localhost` gives
 `http://2048.apps.localhost:8080`, which reaches your Mac by itself in Chrome and Firefox.
@@ -205,8 +205,8 @@ logs, before the reply.
 **docker-gate** (same image) is the only container with the Docker socket, and only the deployer
 can reach it. Generic socket proxies allow or deny by URL prefix, so allowing containers would
 also allow `exec` and file writes into any container; this gate checks every call
-([gate.py](../services/deployer/src/nexus_deployer/gate.py)): offline builds of `jarvis-app-*`
-images only; new containers named `jarvis-app-*`, non-root, on the apps network, with memory
+([gate.py](../services/deployer/src/nexus_deployer/gate.py)): offline builds of `nexus-app-*`
+images only; new containers named `nexus-app-*`, non-root, on the apps network, with memory
 and CPU caps and no privileges, host mounts, devices, ports or added capabilities; starting,
 stopping, logs and deleting only for containers labelled as Nexus apps (so not Postgres or any
 other Nexus container); and nothing else: no exec, archive, attach, volumes, swarm or system
@@ -226,14 +226,14 @@ GB, because of Docling and PyTorch); `DOCLING=false` in `.env` builds a small on
 
 **backup** ([infra/backup](../infra/backup)) checks every minute for a **Back up now** from the
 Admin page and runs the daily backup after `BACKUP_HOUR_UTC` (02:30 IST by default). Each backup
-in `./backups` holds a `pg_dump` of the `jarvis`, `litellm` and `langfuse` databases, a tarball
+in `./backups` holds a `pg_dump` of the `nexus`, `litellm` and `langfuse` databases, a tarball
 of the MinIO files, the encrypted secrets file (once there is one) and checksums; 14 days are
 kept. Restore with `scripts/restore.sh`.
 
 ### Data
 
 **postgres** (`pgvector/pgvector:pg17`) holds three databases:
-- `jarvis`: users, chats, messages, memories, files and their chunks with vectors, skills,
+- `nexus`: users, chats, messages, memories, files and their chunks with vectors, skills,
   agent teams and runs (with checkpoints), the audit log, backups;
 - `litellm`: per-user and per-run virtual keys, budgets and spend;
 - `langfuse`: Langfuse's users, projects and settings.
@@ -247,21 +247,21 @@ heartbeats and LiteLLM's response cache; database 1 holds Langfuse's queues. It 
 `noeviction` because Langfuse's queues must never be dropped. Losing it loses only in-flight
 jobs and caches, so it is not backed up.
 
-**minio** is S3-compatible file storage. Bucket `jarvis` holds uploads and files agents make;
+**minio** is S3-compatible file storage. Bucket `nexus` holds uploads and files agents make;
 bucket `langfuse` holds raw trace events and media for Langfuse.
 
 ### Models and tracing
 
 **litellm** (`ghcr.io/berriai/litellm`) is the one door to every model. Nexus only ever asks
 for the aliases in [infra/litellm/config.yaml](../infra/litellm/config.yaml)
-(`jarvis-nano`, `jarvis-mini`, `jarvis-pro`, `jarvis-max`, `jarvis-embed`); LiteLLM maps them to
+(`nexus-nano`, `nexus-mini`, `nexus-pro`, `nexus-max`, `nexus-embed`); LiteLLM maps them to
 OpenAI models or to bge-m3 in Ollama, enforces each person's budget through their own virtual
 key, caches identical calls for an hour and sends every call to Langfuse. It is the only
 container that holds `OPENAI_API_KEY`. Point `LITELLM_BASE_URL` elsewhere to use a LiteLLM on
 another machine.
 
 **langfuse-web**, **langfuse-worker** and **clickhouse** together are Langfuse v3, the
-observability stack: every turn is a `jarvis.turn` trace with each model call, its tokens and
+observability stack: every turn is a `nexus.turn` trace with each model call, its tokens and
 cost. `langfuse-web` is the UI and ingestion API, `langfuse-worker` processes events off the
 queue, and `clickhouse` stores the traces for fast querying. ClickHouse is the heaviest
 container in the stack; give Docker Desktop at least 8 GB. Nexus works without these three
@@ -269,16 +269,16 @@ container in the stack; give Docker Desktop at least 8 GB. Nexus works without t
 
 ## Networks and volumes
 
-- **Networks:** `jarvis_default` connects everything else; `nexus_sandbox` is internal (no
+- **Networks:** `nexus_default` connects everything else; `nexus_sandbox` is internal (no
   internet) and connects only `orchestrator` and `sandbox`; `nexus_workbench` is internal and
-  connects only `orchestrator`, `workbench` and `egress-proxy`; `jarvis_egress` has internet
+  connects only `orchestrator`, `workbench` and `egress-proxy`; `nexus_egress` has internet
   access and holds only `egress-proxy`; `nexus_deployer` (internal) connects the orchestrator,
-  the API, Traefik and the deployer; `jarvis_docker-gate` (internal) only the deployer and the gate;
-  `jarvis_apps` (internal: no internet, no Nexus services, no LAN) holds the apps and Traefik;
-  `jarvis_apps_egress` is where apps that were given internet access also sit. Apps on
-  `jarvis_apps` can reach each other and Traefik's front door, nothing else.
-- **Volumes** (where data survives restarts): `jarvis_postgres`, `jarvis_redis`,
-  `jarvis_minio`, `jarvis_clickhouse`, `jarvis_clickhouse-logs`, `jarvis_workspaces` (dev-team
+  the API, Traefik and the deployer; `nexus_docker-gate` (internal) only the deployer and the gate;
+  `nexus_apps` (internal: no internet, no Nexus services, no LAN) holds the apps and Traefik;
+  `nexus_apps_egress` is where apps that were given internet access also sit. Apps on
+  `nexus_apps` can reach each other and Traefik's front door, nothing else.
+- **Volumes** (where data survives restarts): `nexus_postgres`, `nexus_redis`,
+  `nexus_minio`, `nexus_clickhouse`, `nexus_clickhouse-logs`, `nexus_workspaces` (dev-team
   projects; not in the nightly backup, since the code goes to GitHub), plus the `./backups`
   folder.
   `docker compose down` keeps them; `docker compose down -v` **deletes them all**.
@@ -315,7 +315,7 @@ maintenance mode on the Admin page before restarting `postgres`, `redis` or `lit
 ## Where each container gets its settings
 
 All settings come from `.env` through [compose.yaml](../compose.yaml); once encrypted, the
-secrets below come from `secrets/jarvis.sops.env` instead, loaded by `./scripts/compose.sh`. The
+secrets below come from `secrets/nexus.sops.env` instead, loaded by `./scripts/compose.sh`. The
 ones that matter most per container:
 
 | Container | Secrets / key settings |

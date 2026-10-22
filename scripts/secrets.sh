@@ -9,20 +9,12 @@
 #   ./scripts/secrets.sh list        names of the stored secrets, no values
 #
 # Then start Nexus with ./scripts/compose.sh (same arguments as docker compose).
-# The key is at $SOPS_AGE_KEY_FILE (default ~/.config/nexus/age.key, or
-# ~/.config/jarvis/age.key if that is where it was made before the rename). Keep a copy in your
+# The key is at $SOPS_AGE_KEY_FILE (default ~/.config/nexus/age.key). Keep a copy in your
 # password manager: without it neither this file nor the copy in each backup can be opened.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Before the rename to Nexus the file was secrets/jarvis.sops.env; move it once.
-if [[ ! -f secrets/nexus.sops.env && -f secrets/jarvis.sops.env ]]; then
-  mv secrets/jarvis.sops.env secrets/nexus.sops.env
-  echo "Renamed secrets/jarvis.sops.env to secrets/nexus.sops.env" >&2
-fi
-# Your age key: ~/.config/nexus/age.key, or ~/.config/jarvis/age.key from before the rename.
 default_key=$HOME/.config/nexus/age.key
-[[ -f "$default_key" || ! -f $HOME/.config/jarvis/age.key ]] || default_key=$HOME/.config/jarvis/age.key
 FILE=secrets/nexus.sops.env
 export SOPS_AGE_KEY_FILE=${SOPS_AGE_KEY_FILE:-$default_key}
 
@@ -85,7 +77,7 @@ cmd_init() {
 Next:
   1. Save your age key in your password manager (it's the one thing to keep safe):
        cat "$SOPS_AGE_KEY_FILE"
-  2. Delete any plain copies of the old .env (for example jarvis-env.bak-*).
+  2. Delete any plain copies of the old .env (for example env.bak-*).
   3. Restart with the secrets loaded:  ./scripts/compose.sh up -d
 EOF
 }

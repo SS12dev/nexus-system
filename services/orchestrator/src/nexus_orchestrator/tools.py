@@ -316,7 +316,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 url,
                 title=title or None,
                 note=note or None,
-                source="team" if ctx.run_id else "jarvis",
+                source="team" if ctx.run_id else "assistant",
                 chat_id=ctx.chat_id,
                 run_id=ctx.run_id,
             )
@@ -384,14 +384,14 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 kind=MemoryKind(kind),
                 content=content.strip()[:1000],
                 confidence=0.95,
-                source="jarvis",
+                source="assistant",
                 source_chat_id=ctx.chat_id,
                 embedding=vec,
                 embedding_model=model or None,
             )
             db.add(m)
             await db.flush()
-            record(db, m, "add", "jarvis", m.content)
+            record(db, m, "add", "assistant", m.content)
             await mark_profile_stale(db, user_id)
             await db.commit()
             await publish(
@@ -744,7 +744,10 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             s.last_used_at = utcnow()
             db.add(
                 SkillUsage(
-                    skill_id=s.id, user_id=user_id, run_id=ctx.run_id, agent=ctx.agent or "jarvis"
+                    skill_id=s.id,
+                    user_id=user_id,
+                    run_id=ctx.run_id,
+                    agent=ctx.agent or "assistant",
                 )
             )
             await db.commit()

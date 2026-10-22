@@ -60,7 +60,8 @@ def services_in(scopes: str) -> list[str]:
 
 def _fernets(settings: Settings) -> list[Fernet]:
     """Tokens are encrypted under the first TOKEN_ENCRYPTION_KEYS entry and decrypt under any of
-    them, or under SECRET_KEY, which encrypted them before that setting existed."""
+    them, or under SECRET_KEY, which encrypted them before that setting existed. The salt predates
+    the rename to Nexus and stays: changing it would make every stored token unreadable."""
     secrets = [k.strip() for k in settings.token_encryption_keys.split(",") if k.strip()]
     digests = (
         hashlib.sha256(b"jarvis-google-tokens:" + s.encode()).digest()

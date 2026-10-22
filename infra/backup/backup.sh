@@ -2,14 +2,14 @@
 # Nexus backups. Each backup is a folder under $BACKUP_OUT named by its UTC time, holding a
 # pg_dump of every database, a tarball of the MinIO data, the encrypted secrets file (if there is
 # one) and SHA256SUMS. Progress is recorded in
-# the jarvis database's backups table, which the Admin page reads.
+# the nexus database's backups table, which the Admin page reads.
 #
 #   nexus-backup loop   check every minute: a "back up now" from the Admin page, or the daily one
 #   nexus-backup once   one backup now, then exit
 #
 # Restore with scripts/restore.sh. Settings (compose.yaml passes them):
 #   PGHOST PGUSER PGPASSWORD   Postgres connection
-#   BACKUP_DATABASES           databases to dump (default "jarvis litellm langfuse")
+#   BACKUP_DATABASES           databases to dump (default "nexus litellm langfuse")
 #   BACKUP_HOUR_UTC            daily backup at or after this hour (default 21, 02:30 IST)
 #   BACKUP_KEEP_DAYS           delete backups older than this (default 14) ...
 #   BACKUP_KEEP_MIN            ... but always keep this many (default 3)
@@ -20,15 +20,13 @@ set -u
 OUT=${BACKUP_OUT:-/backups}
 MINIO_DATA=${MINIO_DATA:-/minio}
 SECRETS_FILE=${SECRETS_FILE:-/secrets/nexus.sops.env}
-# Its name before the rename to Nexus.
-[ -f "$SECRETS_FILE" ] || [ ! -f /secrets/jarvis.sops.env ] || SECRETS_FILE=/secrets/jarvis.sops.env
-DATABASES=${BACKUP_DATABASES:-jarvis litellm langfuse}
+DATABASES=${BACKUP_DATABASES:-nexus litellm langfuse}
 HOUR=${BACKUP_HOUR_UTC:-21}
 KEEP_DAYS=${BACKUP_KEEP_DAYS:-14}
 KEEP_MIN=${BACKUP_KEEP_MIN:-3}
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
-sql() { psql -X -q -t -A -v ON_ERROR_STOP=1 -d jarvis -c "$1"; }
+sql() { psql -X -q -t -A -v ON_ERROR_STOP=1 -d nexus -c "$1"; }
 quote() { printf "%s" "$1" | sed "s/'/''/g"; }
 
 # Runs one backup for the backups row $1. Returns non-zero on failure.

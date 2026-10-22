@@ -81,7 +81,7 @@ class FakeDocker:
         if action == "wait":
             return httpx.Response(200, json={"StatusCode": 0})
         if action == "logs":
-            if name.startswith("jarvis-shot-"):
+            if name.startswith("nexus-shot-"):
                 return httpx.Response(200, content=frames(json.dumps(self.shot) + "\n"))
             return httpx.Response(200, content=frames("Error: cannot find module 'express'\n"))
         if action == "json":

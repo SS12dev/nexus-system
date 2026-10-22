@@ -24,7 +24,7 @@ METRICS_TTL_S = 3 * 3600
 
 
 def metrics_key(minute: int) -> str:
-    return f"jarvis:metrics:{minute}"
+    return f"nexus:metrics:{minute}"
 
 
 async def hit(redis: Redis, bucket: str, who: str, limit: int, window_s: int) -> int | None:
@@ -33,7 +33,7 @@ async def hit(redis: Redis, bucket: str, who: str, limit: int, window_s: int) ->
         return None
     now = time.time()
     window = int(now // window_s)
-    key = f"jarvis:rl:{bucket}:{who}:{window}"
+    key = f"nexus:rl:{bucket}:{who}:{window}"
     try:
         async with redis.pipeline(transaction=False) as pipe:
             pipe.incr(key)

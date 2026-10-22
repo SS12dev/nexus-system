@@ -42,7 +42,7 @@ async def keep_link(
     title: str | None = None,
     note: str | None = None,
     kind: str | None = None,
-    source: str = "jarvis",
+    source: str = "assistant",
     chat_id: uuid.UUID | None = None,
     run_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,

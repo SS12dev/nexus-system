@@ -7,7 +7,7 @@ const base: Project = {
   name: "2048",
   stack: "static",
   repo_url: "https://github.com/servhub-apps/2048",
-  branch: "jarvis/r1",
+  branch: "nexus/r1",
   merged: true,
   transferred_to: null,
   last_commit: "abc1234def",
@@ -24,7 +24,7 @@ const base: Project = {
 describe("project cards", () => {
   it("say where the latest work is", () => {
     expect(projectWhere(base)).toBe("on main");
-    expect(projectWhere({ ...base, merged: false })).toBe("on branch jarvis/r1");
+    expect(projectWhere({ ...base, merged: false })).toBe("on branch nexus/r1");
     expect(projectWhere({ ...base, transferred_to: "SS12dev" })).toBe("moved to SS12dev");
     expect(projectWhere({ ...base, repo_url: null, merged: false })).toBe("not on GitHub yet");
   });

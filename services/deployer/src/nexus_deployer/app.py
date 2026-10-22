@@ -35,8 +35,8 @@ log = logging.getLogger("nexus_deployer")
 
 TOKEN = os.environ.get("DEPLOYER_TOKEN", "")
 WORKSPACES = Path(os.environ.get("WORKSPACES", "/workspaces"))
-APPS_NETWORK = os.environ.get("APPS_NETWORK", "jarvis_apps")
-EGRESS_NETWORK = os.environ.get("APPS_EGRESS_NETWORK", "jarvis_apps_egress")
+APPS_NETWORK = os.environ.get("APPS_NETWORK", "nexus_apps")
+EGRESS_NETWORK = os.environ.get("APPS_EGRESS_NETWORK", "nexus_apps_egress")
 APPS_DOMAIN = os.environ.get("APPS_DOMAIN", "apps.localhost")
 # Where people open an app: https on a real domain (the tunnel), Traefik's port on *.localhost.
 APPS_URL = os.environ.get("APPS_URL") or (
@@ -45,13 +45,13 @@ APPS_URL = os.environ.get("APPS_URL") or (
     else "https://{host}"
 )
 # Never an app's name: Nexus's own and the usual service names, plus RESERVED_HOSTNAMES.
-RESERVED = {"nexus", "jarvis", "www", "mail", "api", "admin", "traefik"} | {
+RESERVED = {"nexus", "www", "mail", "api", "admin", "traefik"} | {
     h.strip().lower() for h in os.environ.get("RESERVED_HOSTNAMES", "").split(",") if h.strip()
 }
 # The Traefik middleware that lets only signed-in, allowed people into a private app.
 AUTH_MIDDLEWARE = os.environ.get("APPS_AUTH_MIDDLEWARE", "app-auth@docker")
 TRAEFIK_URL = os.environ.get("TRAEFIK_URL", "http://traefik")
-SHOT_IMAGE = os.environ.get("SCREENSHOT_IMAGE", "jarvis-workbench:latest")
+SHOT_IMAGE = os.environ.get("SCREENSHOT_IMAGE", "nexus-workbench:latest")
 APP_MEMORY_MB = int(os.environ.get("APP_MEMORY_MB", "512"))
 APP_CPUS = float(os.environ.get("APP_CPUS", "0.5"))
 BUILD_TIMEOUT_S = int(os.environ.get("BUILD_TIMEOUT_S", "900"))
@@ -150,10 +150,10 @@ def container_spec(body: DeployIn, slug: str, part: Part, tag: str) -> dict:
         "User": USERS[part.template],
         "Env": ["HOME=/tmp", "npm_config_cache=/tmp/.npm"],
         "Labels": {
-            "jarvis.app": body.app_id,
-            "jarvis.owner": body.owner,
-            "jarvis.slug": slug,
-            "jarvis.part": part.name,
+            "nexus.app": body.app_id,
+            "nexus.owner": body.owner,
+            "nexus.slug": slug,
+            "nexus.part": part.name,
             "traefik.enable": "true",
             "traefik.docker.network": APPS_NETWORK,
             f"traefik.http.routers.{router}.rule": rule,
@@ -188,7 +188,7 @@ async def healthy(slug: str, ps: list[Part]) -> tuple[bool, str]:
     while time.monotonic() < deadline:
         waiting = False
         for p in ps:
-            info = await docker.inspect(f"jarvis-app-{slug}-{p.name}") or {}
+            info = await docker.inspect(f"nexus-app-{slug}-{p.name}") or {}
             state = info.get("State") or {}
             if not state.get("Running") or state.get("Restarting"):
                 if state.get("Status") in ("exited", "dead") or info.get("RestartCount", 0) > 1:
@@ -216,7 +216,7 @@ async def healthy(slug: str, ps: list[Part]) -> tuple[bool, str]:
 
 async def screenshot(body: DeployIn, slug: str) -> dict:
     """{"png", "errors"} from a throwaway container of the workbench image; {} if it failed."""
-    name = f"jarvis-shot-{slug}"
+    name = f"nexus-shot-{slug}"
     host = host_for(slug)
     spec = {
         "Image": SHOT_IMAGE,
@@ -231,7 +231,7 @@ async def screenshot(body: DeployIn, slug: str) -> dict:
             "http_proxy=",
             "https_proxy=",
         ],
-        "Labels": {"jarvis.shot": body.app_id},
+        "Labels": {"nexus.shot": body.app_id},
         "HostConfig": {
             "Memory": 1024 * 1024 * 1024,
             "NanoCpus": int(1e9),
@@ -262,7 +262,7 @@ async def screenshot(body: DeployIn, slug: str) -> dict:
 
 
 async def app_containers(slug: str | None = None) -> list[dict]:
-    label = f"jarvis.slug={slug}" if slug else "jarvis.app"
+    label = f"nexus.slug={slug}" if slug else "nexus.app"
     return await docker.containers(label)
 
 
@@ -278,17 +278,17 @@ async def deploy(slug: str, body: DeployIn):
         ps = parts(root, stack)
     except BuildProblem as exc:
         return DeployOut(ok=False, url=url, stack=stack, error=str(exc))
-    labels = {"jarvis.app": body.app_id, "jarvis.owner": body.owner}
+    labels = {"nexus.app": body.app_id, "nexus.owner": body.owner}
     if not body.build:
         for p in ps:
-            if not await docker.image_id(f"jarvis-app-{slug}-{p.name}:latest"):
+            if not await docker.image_id(f"nexus-app-{slug}-{p.name}:latest"):
                 return DeployOut(
                     ok=False, url=url, stack=stack, error="It has no image yet; redeploy it."
                 )
     # Build everything first, so the running version stays up while the new one builds.
     old_images = []
     for p in ps if body.build else []:
-        tag = f"jarvis-app-{slug}-{p.name}:latest"
+        tag = f"nexus-app-{slug}-{p.name}:latest"
         old = await docker.image_id(tag)
         try:
             ctx = await asyncio.to_thread(context, root, p)
@@ -307,17 +307,17 @@ async def deploy(slug: str, body: DeployIn):
         if old and old != await docker.image_id(tag):
             old_images.append(old)
     # Swap the containers: same names, so Traefik's routes stay the same.
-    wanted = {f"jarvis-app-{slug}-{p.name}" for p in ps}
+    wanted = {f"nexus-app-{slug}-{p.name}" for p in ps}
     try:
         for c in await app_containers(slug):
             for n in c.get("Names", []):
                 if n.lstrip("/") not in wanted:
                     await docker.remove(n.lstrip("/"))
         for p in ps:
-            name = f"jarvis-app-{slug}-{p.name}"
+            name = f"nexus-app-{slug}-{p.name}"
             await docker.remove(name)
             await docker.create(
-                name, container_spec(body, slug, p, f"jarvis-app-{slug}-{p.name}:latest")
+                name, container_spec(body, slug, p, f"nexus-app-{slug}-{p.name}:latest")
             )
             if body.internet:
                 await docker.connect(EGRESS_NETWORK, name)
@@ -330,7 +330,7 @@ async def deploy(slug: str, body: DeployIn):
     if not ok:
         logs = ""
         for p in ps:
-            logs += f"--- {p.name} ---\n{await docker.logs(f'jarvis-app-{slug}-{p.name}')}\n"
+            logs += f"--- {p.name} ---\n{await docker.logs(f'nexus-app-{slug}-{p.name}')}\n"
         return DeployOut(
             ok=False,
             url=url,
@@ -355,20 +355,20 @@ async def list_apps():
     apps: dict[str, dict] = {}
     for c in await app_containers():
         labels = c.get("Labels") or {}
-        slug = labels.get("jarvis.slug")
+        slug = labels.get("nexus.slug")
         if not slug:
             continue
         a = apps.setdefault(
             slug,
             {
                 "slug": slug,
-                "app_id": labels.get("jarvis.app"),
-                "owner": labels.get("jarvis.owner"),
+                "app_id": labels.get("nexus.app"),
+                "owner": labels.get("nexus.owner"),
                 "parts": [],
             },
         )
         a["parts"].append(
-            {"part": labels.get("jarvis.part"), "state": c.get("State"), "status": c.get("Status")}
+            {"part": labels.get("nexus.part"), "state": c.get("State"), "status": c.get("Status")}
         )
     for a in apps.values():
         states = {p["state"] for p in a["parts"]}
@@ -409,7 +409,7 @@ async def delete(slug: str):
     for c in found:
         await docker.remove(c["Names"][0].lstrip("/"))
     for part in ("web", "api"):
-        await docker.remove_image(f"jarvis-app-{slug}-{part}:latest")
+        await docker.remove_image(f"nexus-app-{slug}-{part}:latest")
     return {"slug": slug, "containers": len(found)}
 
 

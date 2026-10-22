@@ -77,8 +77,8 @@ class FakeGitHub:
             expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
             return httpx.Response(201, json={"token": f"ghs_{self.tokens}", "expires_at": expires})
         if path == "/app":
-            return httpx.Response(200, json={"slug": "jarvis-servhub"})
-        if path == "/users/jarvis-servhub[bot]":
+            return httpx.Response(200, json={"slug": "nexus-servhub"})
+        if path == "/users/nexus-servhub[bot]":
             return httpx.Response(200, json={"id": 4242})
         if method == "POST" and path == f"/orgs/{ORG}/repos":
             assert body["private"] is True
@@ -174,12 +174,12 @@ async def test_installation_token_is_cached_until_near_expiry(gh, fake_gh):
 
 async def test_main_is_created_then_fast_forwarded_then_merged(gh, fake_gh):
     repo = await gh.create_repo("2048", "A game")
-    assert await gh.update_main(repo, "jarvis/r1", "aaa") == "main created"
+    assert await gh.update_main(repo, "nexus/r1", "aaa") == "main created"
     assert fake_gh.refs[("2048", "main")] == "aaa" and fake_gh.default_branch["2048"] == "main"
-    assert await gh.update_main(repo, "jarvis/r2", "bbb") == "main fast-forwarded"
+    assert await gh.update_main(repo, "nexus/r2", "bbb") == "main fast-forwarded"
     fake_gh.fast_forward = False
-    assert await gh.update_main(repo, "jarvis/r3", "ccc") == "merged into main"
-    assert fake_gh.calls[-1][2]["head"] == "jarvis/r3"
+    assert await gh.update_main(repo, "nexus/r3", "ccc") == "merged into main"
+    assert fake_gh.calls[-1][2]["head"] == "nexus/r3"
 
 
 async def test_errors_name_the_problem(gh):
@@ -294,10 +294,10 @@ async def test_release_pushes_and_merges_an_approved_green_run(
     wb = release_deps.workbench
     # Commits are by the App's bot, set before any agent works.
     assert wb.calls[0] == (
-        "identity", "jarvis-servhub[bot]", "4242+jarvis-servhub[bot]@users.noreply.github.com",
+        "identity", "nexus-servhub[bot]", "4242+nexus-servhub[bot]@users.noreply.github.com",
     )  # fmt: skip
     push = next(c for c in wb.calls if c[0] == "push")
-    assert push[1] == f"https://github.com/{ORG}/2048.git" and push[2] == f"jarvis/{run_id}"
+    assert push[1] == f"https://github.com/{ORG}/2048.git" and push[2] == f"nexus/{run_id}"
     # The workbench only ever gets a token limited to this repo.
     scoped = [c for c in fake_gh.calls if c[1].endswith("/access_tokens") and c[2]]
     assert scoped[-1][2]["repositories"] == ["2048"] and push[3] == f"ghs_{fake_gh.tokens}"
@@ -340,9 +340,9 @@ async def test_release_leaves_main_alone_unless_approved_and_green(
     assert ("2048", "main") not in fake_gh.refs
     async with release_deps.sessionmaker() as db:
         p = await db.scalar(select(Project))
-    assert p.repo_name == "2048" and not p.merged and p.branch == f"jarvis/{run_id}"
+    assert p.repo_name == "2048" and not p.merged and p.branch == f"nexus/{run_id}"
     final = await final_message(release_deps, chat_id)
-    assert f"(on branch jarvis/{run_id}, not merged: {why})" in final
+    assert f"(on branch nexus/{run_id}, not merged: {why})" in final
 
 
 async def test_follow_ups_reuse_the_repo_and_new_apps_get_a_free_name(
@@ -399,7 +399,7 @@ async def test_a_github_failure_still_finishes_the_run(release_deps, owner, scri
 
 def test_transfer_is_owner_only_and_asks_first():
     info = BY_NAME["github_transfer"]
-    assert info.risk == "outbound" and not info.jarvis and info.owner_only
+    assert info.risk == "outbound" and not info.assistant and info.owner_only
     from nexus_common.models import Role
 
     owner, admin = User(email="o@x.com"), User(email="a@x.com")

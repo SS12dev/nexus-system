@@ -22,7 +22,7 @@ In the organisation: Settings → Developer settings → GitHub Apps → New Git
 
 | Field | Value |
 | --- | --- |
-| GitHub App name | must be unique on all of GitHub, e.g. `servhub-jarvis`; commits show as `<name>[bot]` |
+| GitHub App name | must be unique on all of GitHub, e.g. `servhub-nexus`; commits show as `<name>[bot]` |
 | Homepage URL | `https://nexus.servhub.cc` |
 | Callback URL, Setup URL | leave empty; leave every box under them unticked |
 | Webhook | untick **Active**: Nexus doesn't listen for events |
@@ -62,7 +62,7 @@ The private key is a secret. `scripts/secrets.sh` stores one line per value, so 
 base64 on one line, straight from the file (it never appears on screen or in your history):
 
 ```sh
-base64 -i ~/Downloads/jarvis.*.private-key.pem | tr -d '\n' \
+base64 -i ~/Downloads/<app name>.*.private-key.pem | tr -d '\n' \
   | ./scripts/secrets.sh set GITHUB_APP_PRIVATE_KEY_B64
 ```
 
@@ -76,7 +76,7 @@ Then delete the downloaded `.pem` (GitHub can make a new one any time) and resta
 
 - The repo is named after the app (`2048`); projects of people other than the owner get their
   name in front (`priya-2048`). A taken name gets `-2`, `-3` and so on.
-- Each run pushes to `jarvis/<run id>`. `main` moves to it only when the reviewer approved and
+- Each run pushes to `nexus/<run id>`. `main` moves to it only when the reviewer approved and
   every test passed; otherwise the reply says why it stayed on the branch.
 - A follow-up ("add a high score table") pushes to the same repo.
 - Pushes go from the workbench through its allowlist proxy, with a token limited to that one

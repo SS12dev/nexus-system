@@ -43,7 +43,7 @@ class RecordingQueue:
 async def clean_counters(redis):
     """Rate-limit windows and caches would otherwise carry over between tests."""
     yield
-    keys = [k async for k in redis.scan_iter("jarvis:*")]
+    keys = [k async for k in redis.scan_iter("nexus:*")]
     if keys:
         await redis.delete(*keys)
 

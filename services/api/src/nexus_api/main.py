@@ -81,7 +81,7 @@ def create_app(
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.secret_key,
-        session_cookie="jarvis_oauth",
+        session_cookie="nexus_oauth",
         same_site="lax",
         https_only=settings.session_cookie_secure,
         max_age=600,
