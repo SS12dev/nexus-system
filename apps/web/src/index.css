@@ -109,3 +109,37 @@ body {
 @media (max-width: 640px) {
   .docx-host .docx-wrapper > section.docx { zoom: 0.5; }
 }
+
+/* Login page: a soft glow behind the content and a slowly turning agent network. */
+.login-bg {
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, rgb(56 189 248 / 0.14), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 110%, rgb(99 102 241 / 0.12), transparent 60%),
+    var(--color-ink);
+}
+.login-orbit {
+  transform-origin: 70px 70px;
+  animation: login-spin 60s linear infinite;
+}
+.login-node {
+  animation: login-blink 3s ease-in-out infinite;
+}
+.login-core {
+  filter: drop-shadow(0 0 10px rgb(56 189 248 / 0.6));
+}
+@keyframes login-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes login-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-orbit,
+  .login-node {
+    animation: none;
+  }
+}
