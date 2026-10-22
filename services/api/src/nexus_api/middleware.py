@@ -1,5 +1,7 @@
-"""The API's outer layer: cross-site request checks, the per-IP and sign-in rate limits,
-security headers, and per-minute request counters for the Admin page.
+"""The API's outer layers. RequestContextMiddleware gives each request an id, writes the access
+line, and turns an unhandled error into a 500 that names that id. GuardMiddleware does the
+cross-site request checks, the per-IP and sign-in rate limits, security headers, and per-minute
+request counters for the Admin page.
 
 A plain ASGI middleware rather than BaseHTTPMiddleware, so streamed downloads pass straight
 through. WebSockets check their own Origin (see ws.py).
@@ -15,6 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from nexus_api.ratelimit import METRICS_TTL_S, hit, metrics_key
 from nexus_api.sessions import client_ip
+from nexus_common import logs
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -29,6 +32,8 @@ SECURITY_HEADERS = [
     (b"permissions-policy", b"camera=(), geolocation=(), payment=()"),
 ]
 HSTS = (b"strict-transport-security", b"max-age=31536000")
+HEALTH_PATHS = ("/healthz", "/readyz")
+access_log = logging.getLogger("nexus.access")
 
 
 def same_origin(origin: str, host: str | None, settings: Settings) -> bool:
@@ -46,7 +51,7 @@ class GuardMiddleware:
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]
-        if path in ("/healthz", "/readyz"):
+        if path in HEALTH_PATHS:
             await self.app(scope, receive, send)
             return
 
@@ -140,3 +145,78 @@ class GuardMiddleware:
                 await pipe.execute()
         except RedisError:
             pass
+
+
+class RequestContextMiddleware:
+    """Outermost. Takes the caller's X-Request-ID if it is a plain id, else makes one, binds it
+    to every log line of the request (and to the jobs it queues), returns it in X-Request-ID, and
+    logs one access line per request. An error nothing else caught is logged here with its stack
+    and answered with a JSON 500 that carries the id, so a person can quote it."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        request_id = logs.clean_request_id(headers.get("x-request-id")) or logs.new_request_id()
+        scope.setdefault("state", {})["request_id"] = request_id
+        with logs.scope(request_id=request_id):
+            if scope["type"] == "websocket":
+                await self.app(scope, receive, send)
+                return
+            await self._http(scope, receive, send, request_id)
+
+    async def _http(self, scope: Scope, receive: Receive, send: Send, request_id: str) -> None:
+        started = time.monotonic()
+        status_code = 500
+        response_started = False
+        rid = request_id.encode()
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code, response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+                status_code = message["status"]
+                message["headers"] = [*message.get("headers", []), (b"x-request-id", rid)]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            log.exception("Unhandled error in %s %s", scope["method"], scope["path"])
+            if response_started:
+                raise
+            body = json.dumps(
+                {"detail": "Something went wrong on our side.", "request_id": request_id}
+            ).encode()
+            await send_wrapper(
+                {
+                    "type": "http.response.start",
+                    "status": 500,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        *SECURITY_HEADERS,
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+        finally:
+            if scope["path"] not in HEALTH_PATHS:
+                route = scope.get("route")
+                access_log.info(
+                    "%s %s %s",
+                    scope["method"],
+                    scope["path"],
+                    status_code,
+                    extra={
+                        "method": scope["method"],
+                        "path": scope["path"],
+                        "route": getattr(route, "path", None),
+                        "status": status_code,
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                )

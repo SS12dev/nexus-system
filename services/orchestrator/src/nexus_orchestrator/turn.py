@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from nexus_common import logs
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder
 from nexus_common.events import Event, publish
@@ -213,6 +214,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         chat = await db.get(Chat, chat_id)
         user = await db.get(User, chat.user_id)
         user_id = user.id
+        logs.bind(user_id=user_id, chat_id=chat_id, trace_id=msg.trace_id)
 
         steps: list[dict] = []
 

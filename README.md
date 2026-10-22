@@ -378,6 +378,26 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
 On the People page an admin can also **sign someone out** on every device. Everyone can see and
 sign out their own signed-in devices on the Connections page.
 
+### Logs and request ids
+
+The API, orchestrator and doc-worker write one JSON object per line (`LOG_FORMAT=text` for the
+old plain line) with `service`, `level`, `logger`, `msg` and whatever is known at the time:
+`request_id`, `user_id`, `chat_id`, `run_id`, `job`, `job_id` and `trace_id`, the turn's or run's
+Langfuse trace. Every API response carries `X-Request-ID`; the jobs a request queues carry the
+same id, and so does each model call's metadata in Langfuse. An unexpected error answers
+`{"detail": ..., "request_id": ...}`, so one id finds every line it caused:
+
+```sh
+./scripts/compose.sh logs api orchestrator doc-worker | grep 4f1c2a9e0b7d4e21
+./scripts/compose.sh logs orchestrator | grep '"level": "error"'
+```
+
+The API writes one access line per request (`nexus.access`, with the route, status and time;
+health checks left out), and each worker writes `job done` or `job failed` per job with its run
+time and how long it waited in the queue. Docker keeps 5 files of 10 MB per container, so logs
+can't fill the disk. The orchestrator and doc-worker have Docker health checks on their arq
+heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
+
 ### Limits and security
 
 | Limit | Default | Setting |

@@ -17,6 +17,7 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
@@ -30,7 +31,7 @@ from nexus_orchestrator.turn import run_turn as _run_turn
 from nexus_orchestrator.web import WebClient
 from nexus_orchestrator.workbench import WorkbenchClient
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging("orchestrator")
 log = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -64,7 +65,7 @@ async def startup(ctx: dict) -> None:
         model_factory=partial(chat_model, settings),
         embedder=CachedEmbedder(LiteLLMEmbedder(settings), settings.embedding_batch_size),
         # arq's own pool, already connected when startup runs.
-        enqueue=ctx["redis"].enqueue_job,
+        enqueue=with_request_id(ctx["redis"].enqueue_job),
         storage=S3Storage(settings),
         sandbox=SandboxClient(settings),
         workbench=WorkbenchClient(settings),
@@ -97,40 +98,49 @@ async def shutdown(ctx: dict) -> None:
     await ctx["engine"].dispose()
 
 
+@traced_job
 async def run_turn(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
     await _run_turn(ctx["deps"], uuid.UUID(chat_id), uuid.UUID(assistant_message_id))
 
 
+@traced_job
 async def extract_memories(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
     await memory.extract_memories(ctx["deps"], uuid.UUID(chat_id), uuid.UUID(assistant_message_id))
 
 
+@traced_job
 async def rebuild_profile(ctx: dict, user_id: str) -> None:
     await memory.rebuild_profile(ctx["deps"], uuid.UUID(user_id))
 
 
+@traced_job
 async def run_system(ctx: dict, run_id: str) -> None:
     await runner.run_system(ctx["deps"], uuid.UUID(run_id))
 
 
+@traced_job
 async def continue_run(ctx: dict, run_id: str) -> None:
     await runner.continue_run(ctx["deps"], uuid.UUID(run_id))
 
 
+@traced_job
 async def draft_skill(ctx: dict, run_id: str) -> None:
     await learn.draft_skill(ctx["deps"], uuid.UUID(run_id))
 
 
+@traced_job
 async def deploy_app(ctx: dict, project_id: str) -> None:
     """Redeploy from the Apps page."""
     await deploy.deploy_project(ctx["deps"], uuid.UUID(project_id))
 
 
+@traced_job
 async def link_preview(ctx: dict, link_id: str) -> None:
     """Fetch the preview of a link the user added in the Library."""
     await links.refresh_preview(ctx["deps"], uuid.UUID(link_id))
 
 
+@traced_job
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -139,6 +149,7 @@ async def every_ten_minutes(ctx: dict) -> None:
         log.info("Summarised %d chats, embedded %d rows", summarised, embedded)
 
 
+@traced_job
 async def nightly(ctx: dict) -> None:
     await memory.nightly(ctx["deps"])
 

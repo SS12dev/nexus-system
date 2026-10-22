@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_api.queue import JobQueue
 from nexus_api.sessions import user_for_token
+from nexus_common import logs
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder
 from nexus_common.litellm import LiteLLMAdmin
@@ -61,6 +62,7 @@ async def current_user(request: Request, db: DbDep, settings: SettingsDep) -> Us
     user = await user_for_token(db, request.cookies.get(settings.session_cookie_name))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
+    logs.bind(user_id=user.id)
     return user
 
 

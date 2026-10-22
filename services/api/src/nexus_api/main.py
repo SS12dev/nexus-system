@@ -1,4 +1,3 @@
-import logging
 from contextlib import asynccontextmanager
 
 from arq import create_pool
@@ -9,7 +8,7 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from nexus_api import ws
-from nexus_api.middleware import GuardMiddleware
+from nexus_api.middleware import GuardMiddleware, RequestContextMiddleware
 from nexus_api.queue import ArqJobQueue, JobQueue
 from nexus_api.routes import (
     admin,
@@ -31,10 +30,11 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.logs import configure_logging
 from nexus_common.settings import Settings, get_settings
 from nexus_common.storage import S3Storage, Storage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging("api")
 
 
 def create_app(
@@ -86,8 +86,10 @@ def create_app(
         https_only=settings.session_cookie_secure,
         max_age=600,
     )
-    # Outermost: refuses cross-site writes and over-limit callers before anything else runs.
+    # Refuses cross-site writes and over-limit callers before anything else runs.
     app.add_middleware(GuardMiddleware, settings=settings)
+    # Outside even that: every response, refusals included, carries a request id.
+    app.add_middleware(RequestContextMiddleware)
 
     app.include_router(auth.router)
     app.include_router(me.router)
