@@ -193,7 +193,7 @@ per chat and attributed to the user's id.
 | Profile | A short impression of you, in sections | Nightly, on "Rebuild now", and soon after your first memories | Every turn, at the top of the prompt |
 | Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
 | Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
-| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Memory page |
+| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Knowledge page |
 
 After each turn `nexus-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
@@ -215,8 +215,11 @@ proposes memories proposes them, so chats cost nothing extra; names resolve to a
 entity by name or alias, then by meaning within the same type. Memories you add or edit
 yourself, files, and anything from before are linked by a background job every ten minutes
 (one call per twenty items). Deleting a memory, chat or file deletes its mentions, and an
-entity nothing mentions any more goes with its relations. The Memory page's Connections view
-lists them by type with their facts; removing one keeps its memories. `GRAPH_ENABLED=false`
+entity nothing mentions any more goes with its relations. The **Knowledge** page explores them:
+search, filter by type and sort the list; pick one to see a small graph of what it's linked to
+(tap a neighbour to move to it), each link with the date it started (and ended, for ones no
+longer true), and the memories, chats and files that mention it. Removing one keeps its
+memories. `?focus=<entity id>` opens one, which is where the orb's "Open in Knowledge" goes. `GRAPH_ENABLED=false`
 (Admin › Configuration) stops adding to it.
 
 With **Recall through connections** on (`GRAPH_RECALL_ENABLED`, off by default), each turn
@@ -502,7 +505,7 @@ box docked underneath; sending a message opens the chat.
   the app. Inside is what it knows; outside, what it does.
 - **Inside it** is what Nexus knows, as a constellation: you at the centre, and around you the
   people, projects, organisations, places, topics and tools from your memories, chats and
-  files (the Connections view on the Memory page), spread loosely around you with each type
+  files (the Knowledge page), spread loosely around you with each type
   kept together and tinted by type, joined by gently curved lines. The more something is mentioned, the bigger and nearer the
   centre it sits. You are at the centre from the first minute, before anything is connected.
   Lines are relations ("Nexus uses LangGraph"), fainter once they stopped being true. Memories

@@ -75,7 +75,7 @@ deploy.
   places, topics, tools, plus one for the user), relations between them with valid_from and
   valid_to, and mentions tying each to the memories, past chats, files and chats about it.
   Extracted in the same memory-model call; `link_graph` backfills the rest every ten minutes;
-  entities nothing mentions are pruned.
+  entities nothing mentions are pruned. People browse it on the Knowledge page (/knowledge).
 - Skills: SKILL.md folders. Core skills ship in `library/core` and sync on start; learned
   skills are drafted from runs and stay off until approved.
 - Instructions: layered (global, role, user) from `library/instructions` and the database.

@@ -1110,6 +1110,9 @@ export interface GraphEntity {
   summary: string;
   /** The user's own entity, which relations about them start from. */
   is_self: boolean;
+  /** When it was first noted. */
+  created_at: string;
+  /** Last time a chat, memory or file mentioned it. */
   seen_at: string;
   memories: number;
   past_chats: number;
@@ -1117,6 +1120,8 @@ export interface GraphEntity {
   chats: number;
   memory_ids: string[];
   file_ids: string[];
+  /** Chats it came up in, live or summarised. */
+  chat_ids: string[];
 }
 
 export interface GraphRelation {

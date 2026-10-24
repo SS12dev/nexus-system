@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import select
 
-from nexus_common.models import Entity, Mention, Relation, User
+from nexus_common.models import Chat, Entity, Episode, Mention, Relation, User
 
 
 async def add(client, content, **extra):
@@ -92,6 +92,8 @@ async def test_connections_follow_their_memories(owner, sessionmaker):
     g = (await owner.get("/api/memories/graph")).json()
     by_name = {e["name"]: e for e in g["entities"]}
     assert by_name["Nexus"]["memories"] == 1 and by_name["Nexus"]["memory_ids"] == [m["id"]]
+    assert by_name["Nexus"]["chat_ids"] == []
+    assert by_name["Nexus"]["created_at"] <= by_name["Nexus"]["seen_at"]
     (rel,) = g["relations"]
     assert rel["src"] == str(nexus_id) and rel["dst"] == str(lg_id) and rel["valid_to"] is None
 
@@ -133,3 +135,27 @@ async def test_delete_entity_and_forget_everything(owner, sessionmaker, client_f
 
     assert (await owner.delete("/api/memories")).status_code == 204
     assert (await owner.get("/api/memories/graph")).json()["entities"] == []
+
+
+async def test_connections_list_the_chats_they_came_up_in(owner, sessionmaker):
+    m = await add(owner, "Builds Nexus on LangGraph")
+    nexus_id, _lg = await seed_graph(sessionmaker, "owner@example.com", m["id"])
+    async with sessionmaker() as db:
+        user = await db.scalar(select(User).where(User.email == "owner@example.com"))
+        live, past = Chat(user_id=user.id), Chat(user_id=user.id)
+        db.add_all([live, past])
+        await db.flush()
+        ep = Episode(
+            user_id=user.id, chat_id=past.id, content="Talked about Nexus", message_count=4
+        )
+        db.add(ep)
+        await db.flush()
+        db.add(Mention(user_id=user.id, entity_id=nexus_id, chat_id=live.id))
+        db.add(Mention(user_id=user.id, entity_id=nexus_id, episode_id=ep.id))
+        await db.commit()
+        ids = {str(live.id), str(past.id)}
+
+    g = (await owner.get("/api/memories/graph")).json()
+    nexus = next(e for e in g["entities"] if e["name"] == "Nexus")
+    assert set(nexus["chat_ids"]) == ids
+    assert nexus["chats"] == 1 and nexus["past_chats"] == 1
