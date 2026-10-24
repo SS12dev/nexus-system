@@ -1,5 +1,5 @@
 import { Bot, Box, Brain, ChevronDown, ChevronUp, ExternalLink, List, Maximize2, Minimize2, Orbit, Share2, X } from "lucide-react";
-import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
@@ -14,6 +14,7 @@ import {
   NODE_COLOR,
   type OrbCluster,
 } from "../orb/model";
+import { StarLabels } from "../orb/StarLabels";
 import type { Selection } from "../orb/OrbScene";
 import { hasWebGL, usePerf } from "../orb/perf";
 import { useStore } from "../store/chat";
@@ -70,6 +71,7 @@ export function OrbStage({
   const [lit, setLit] = useState<Recalled | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
+  const tags = useRef(new Map<string, HTMLElement>());
 
   // Fresh lists on open and after a reconnect, in case events were missed meanwhile.
   useEffect(() => {
@@ -193,27 +195,30 @@ export function OrbStage({
                 lit={litIds}
                 litSeq={recall?.seq ?? 0}
                 labels={chat ? 3 : perf.lite ? 5 : 8}
+                tags={tags.current}
                 perf={perf}
                 selected={selected}
                 onSelect={setSelected}
               />
             </Suspense>
           </SceneBoundary>
+          <StarLabels stars={insideData.stars} lit={litIds} tags={tags.current} />
         </div>
       )}
 
       <div className={`pointer-events-none relative z-10 flex items-start gap-3 ${chat ? "px-3 pt-2" : "px-4 pt-4"}`}>
-        <div className="min-w-0 flex-1">
+        {/* A soft backdrop keeps the greeting and status readable over the bright shell. */}
+        <div className={`min-w-0 max-w-full rounded-lg bg-ink/60 backdrop-blur-sm ${chat ? "px-2 py-0.5" : "px-3 py-1.5"}`}>
           {!chat && (
             <p className="text-lg text-slate-200">
               Hi{user.name ? ` ${user.name.split(" ")[0]}` : ""}, what can I do for you?
             </p>
           )}
-          <p className={`mt-0.5 truncate text-slate-400 ${chat ? "text-xs" : "text-sm"}`} aria-live="polite">
+          <p className={`mt-0.5 truncate text-slate-300 ${chat ? "text-xs" : "text-sm"}`} aria-live="polite">
             {status}
           </p>
         </div>
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1">
+        <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1">
           <div className="flex rounded-lg border border-edge bg-panel/80 p-0.5 text-sm backdrop-blur">
             <button
               onClick={() => changeView("orb")}
@@ -285,12 +290,15 @@ export function remembered(r: Recalled): string {
 function Legend() {
   const dot = (c: string) => <span className="inline-block size-2 rounded-full" style={{ background: c }} />;
   return (
-    <div className="mx-auto hidden flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-slate-500 sm:flex">
+    <div className="mx-auto hidden flex-wrap justify-center gap-x-4 gap-y-1 rounded-2xl border border-edge bg-ink/75 px-4 py-1.5 text-xs text-slate-300 backdrop-blur sm:flex">
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.running)} working</span>
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.working)} using a tool</span>
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.waiting)} needs approval</span>
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.idle)} idle</span>
       <span className="flex items-center gap-1.5">{dot(ENTITY_COLOR.project)} people, projects and topics inside</span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
+      </span>
       <span className="flex items-center gap-1.5">{dot(KIND_COLOR.preference)} memories</span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block size-2 rotate-45 bg-purple-400" /> newest artifacts

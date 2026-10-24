@@ -2,7 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import { AdditiveBlending, BackSide, Color } from "three";
 import type { AssistantState } from "../lib/types";
-import { ORB_R } from "./model";
+import { ORB_R, shellFade } from "./model";
 
 /** Look of each state: base colour, how much the surface churns and how fast. */
 const LOOK: Record<AssistantState, { color: string; amp: number; speed: number; pulse: number }> = {
@@ -59,6 +59,7 @@ void main(){
 const fragmentShader = /* glsl */ `
 uniform vec3 uColor;
 uniform float uGlow;
+uniform float uFade;
 varying vec3 vNormal;
 varying vec3 vView;
 varying float vNoise;
@@ -66,7 +67,7 @@ void main(){
   float fres = pow(1.0 - max(dot(vNormal, vView), 0.0), 2.4);
   float veins = smoothstep(0.35, 0.9, vNoise) * 0.35;
   vec3 col = uColor * (0.35 + fres * 1.6 * uGlow) + vec3(veins) * uColor;
-  float alpha = clamp(0.06 + fres * 0.85 + veins, 0.0, 1.0);
+  float alpha = clamp(0.06 + fres * 0.85 + veins, 0.0, 1.0) * uFade;
   gl_FragColor = vec4(col, alpha);
 }`;
 
@@ -77,18 +78,24 @@ export function CoreOrb({ state, still }: { state: AssistantState; still: boolea
       uAmp: { value: LOOK.idle.amp },
       uColor: { value: new Color(LOOK.idle.color) },
       uGlow: { value: 1 },
+      uFade: { value: 1 },
     }),
     [],
   );
   const haloUniforms = useMemo(
-    () => ({ uColor: { value: new Color(LOOK.idle.color) }, uGlow: { value: 1 } }),
+    () => ({ uColor: { value: new Color(LOOK.idle.color) }, uGlow: { value: 1 }, uFade: { value: 1 } }),
     [],
   );
   const target = useMemo(() => new Color(), []);
   const clock = useRef(0);
 
-  useFrame((_, dt) => {
+  useFrame(({ camera }, dt) => {
     const look = LOOK[state] ?? LOOK.idle;
+    // Zoomed in close, the shell and its glow would wash out the constellation inside, so
+    // they fade back as the camera nears.
+    const fade = shellFade(camera.position.length());
+    uniforms.uFade.value = fade;
+    haloUniforms.uFade.value = fade;
     const k = still ? 1 : 1 - Math.exp(-dt * 4);
     target.set(look.color);
     uniforms.uColor.value.lerp(target, k);
@@ -130,10 +137,10 @@ export function CoreOrb({ state, still }: { state: AssistantState; still: boolea
               gl_Position = projectionMatrix * mv;
             }`}
           fragmentShader={/* glsl */ `
-            uniform vec3 uColor; uniform float uGlow;
+            uniform vec3 uColor; uniform float uGlow; uniform float uFade;
             varying vec3 vNormal; varying vec3 vView;
             void main(){
-              float i = pow(max(-dot(vNormal, vView), 0.0), 2.0) * 0.45 * uGlow;
+              float i = pow(max(-dot(vNormal, vView), 0.0), 2.0) * 0.45 * uGlow * uFade;
               gl_FragColor = vec4(uColor * i, i);
             }`}
         />

@@ -1,9 +1,9 @@
-import { Html } from "@react-three/drei";
-import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Group, InstancedMesh, Mesh, Object3D } from "three";
+import { Line } from "@react-three/drei";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AdditiveBlending, Color, Group, InstancedMesh, Mesh, Object3D, Vector3 } from "three";
 import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
-import { KIND_COLOR, type Crystal, type MemoryPoint, type StarLine, type StarPoint } from "./model";
+import { KIND_COLOR, type Crystal, type MemoryPoint, type StarLine, type StarPoint, type Vec3 } from "./model";
 
 const GROW_S = 0.9;
 
@@ -168,11 +168,10 @@ export function Crystals({
   );
 }
 
-const MAX_LINES = 256;
-
 /** The knowledge graph inside the orb: you at the centre, the people, projects, places, topics
  * and tools Nexus knows as stars tinted by type, and lines for how they relate. What a reply
- * just recalled glows in the recall colour, with a pulse when it first lights up. */
+ * just recalled glows in the recall colour, with a pulse when it first lights up. Names are
+ * plain page elements in `labels` (see StarLabels), placed over the stars every frame. */
 export function Constellation({
   stars,
   lines,
@@ -183,6 +182,7 @@ export function Constellation({
   lit,
   litSeq,
   labels,
+  tags,
   onPick,
 }: {
   stars: StarPoint[];
@@ -195,19 +195,30 @@ export function Constellation({
   lit: Set<string>;
   /** Changes each time a recall lights up, to replay the pulse. */
   litSeq: number;
-  /** How many of the biggest stars get a name label; lit and selected ones always do. */
+  /** How many names show from the home view; more show as you zoom in. */
   labels: number;
+  /** Each star's name element, by star id. */
+  tags: Map<string, HTMLElement>;
   onPick: (s: StarPoint) => void;
 }) {
   const pulseFrom = useRef(0);
+  const [hovered, setHovered] = useState<string | null>(null);
   useEffect(() => {
     pulseFrom.current = performance.now();
   }, [litSeq]);
-  const named = useMemo(
-    () => new Set([...stars].filter((s) => !s.self).sort((a, b) => b.weight - a.weight).slice(0, labels).map((s) => s.id)),
-    [stars, labels],
-  );
   const heaviest = Math.max(1, ...stars.map((s) => s.weight));
+  const sizeOf = (s: StarPoint) =>
+    (s.self ? 0.05 : 0.026 + 0.026 * Math.sqrt(s.weight / heaviest)) *
+    (lite ? 1.4 : 1) *
+    (selected === s.id ? 1.5 : lit.has(s.id) ? 1.35 : 1);
+  // Names in the order they win a spot when two would overlap.
+  const order = useMemo(() => {
+    const rank = (s: StarPoint) =>
+      s.id === selected || s.id === hovered ? 4 : lit.has(s.id) ? 3 : s.self ? 2 : 1 + s.weight / (heaviest + 1);
+    return [...stars].sort((a, b) => rank(b) - rank(a));
+  }, [stars, selected, hovered, lit, heaviest]);
+  const always = (st: StarPoint) => st.self || st.id === selected || st.id === hovered || lit.has(st.id);
+  usePlaceLabels(order, tags, labels, always, sizeOf);
   return (
     <group>
       <Lines stars={stars} lines={lines} crystals={crystals} lit={lit} />
@@ -215,13 +226,13 @@ export function Constellation({
         <Star
           key={s.id}
           star={s}
-          size={s.self ? 0.05 : 0.026 + 0.026 * Math.sqrt(s.weight / heaviest)}
+          size={sizeOf(s)}
           lite={lite}
           still={still}
           selected={selected === s.id}
           lit={lit.has(s.id)}
           pulseFrom={pulseFrom}
-          label={s.self ? "You" : named.has(s.id) || lit.has(s.id) || selected === s.id ? s.name : null}
+          onHover={(on) => setHovered((h) => (on ? s.id : h === s.id ? null : h))}
           onPick={onPick}
         />
       ))}
@@ -229,15 +240,60 @@ export function Constellation({
   );
 }
 
+/** Put each name just above its star, every frame so they follow the orb as it turns. Which
+ * names show is decided a few times a second: the most important first, up to `labels` from
+ * the home view and more as you zoom in, never one that would cover another. `always` ones
+ * (you, and what is selected, hovered or just recalled) don't count towards the limit. */
+function usePlaceLabels(
+  order: StarPoint[],
+  tags: Map<string, HTMLElement>,
+  labels: number,
+  always: (s: StarPoint) => boolean,
+  sizeOf: (s: StarPoint) => number,
+) {
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  const v = useMemo(() => new Vector3(), []);
+  const tick = useRef(0);
+  useFrame(() => {
+    const decide = tick.current++ % 6 === 0;
+    const zoom = Math.min(6, Math.max(1, (4 / camera.position.length()) ** 2));
+    let room = Math.round(labels * zoom);
+    const taken: [number, number, number, number][] = [];
+    for (const s of order) {
+      const el = tags.get(s.id);
+      if (!el) continue;
+      v.set(s.pos[0], s.pos[1] + sizeOf(s) + 0.02, s.pos[2]).project(camera);
+      const x = ((v.x + 1) / 2) * size.width;
+      const y = ((1 - v.y) / 2) * size.height;
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+      if (!decide) continue;
+      const must = always(s);
+      if (v.z > 1 || (!must && room <= 0)) {
+        el.style.opacity = "0";
+        continue;
+      }
+      const w = el.offsetWidth / 2 + 2;
+      const h = el.offsetHeight;
+      const box: [number, number, number, number] = [x - w, y - h - 1, x + w, y + 1];
+      const clash = taken.some((t) => box[0] < t[2] && box[2] > t[0] && box[1] < t[3] && box[3] > t[1]);
+      el.style.opacity = clash ? "0" : "1";
+      if (clash) continue;
+      taken.push(box);
+      if (!must) room--;
+    }
+  });
+}
+
 function Star({
   star,
-  size,
+  size: s,
   lite,
   still,
   selected,
   lit,
   pulseFrom,
-  label,
+  onHover,
   onPick,
 }: {
   star: StarPoint;
@@ -247,13 +303,11 @@ function Star({
   selected: boolean;
   lit: boolean;
   pulseFrom: { current: number };
-  label: string | null;
+  onHover: (on: boolean) => void;
   onPick: (s: StarPoint) => void;
 }) {
   const halo = useRef<Mesh>(null);
   const color = star.self ? "#f8fafc" : lit ? RECALL_COLOR : (ENTITY_COLOR[star.type] ?? ENTITY_COLOR.other);
-  // Phones get a bigger target to tap.
-  const s = size * (lite ? 1.4 : 1) * (selected ? 1.5 : lit ? 1.35 : 1);
   useFrame(() => {
     const h = halo.current;
     if (!h) return;
@@ -270,8 +324,15 @@ function Star({
           e.stopPropagation();
           onPick(star);
         }}
-        onPointerOver={() => (document.body.style.cursor = "pointer")}
-        onPointerOut={() => (document.body.style.cursor = "")}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          document.body.style.cursor = "pointer";
+          onHover(true);
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = "";
+          onHover(false);
+        }}
       >
         <sphereGeometry args={[1, lite ? 12 : 20, lite ? 8 : 14]} />
         <meshBasicMaterial color={color} toneMapped={false} />
@@ -289,16 +350,14 @@ function Star({
           />
         </mesh>
       )}
-      {label && (
-        <Html center position={[0, s + 0.07, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <div className={`orb-label orb-label-star${lit ? " orb-label-lit" : ""}`}>{label}</div>
-        </Html>
-      )}
     </group>
   );
 }
 
-/** Every relation, and each artifact's line to its project, in one draw call. */
+const LINE = { open: "#cbd5e1", ended: "#64748b", artifact: "#c084fc" };
+
+/** Every relation, and each artifact's line to its project, as screen-space lines a couple of
+ * pixels wide, so they stay readable at any zoom and over the glow of the shell. */
 function Lines({
   stars,
   lines,
@@ -310,50 +369,62 @@ function Lines({
   crystals: Crystal[];
   lit: Set<string>;
 }) {
-  const geometry = useMemo(() => {
-    const g = new BufferGeometry();
-    g.setAttribute("position", new BufferAttribute(new Float32Array(MAX_LINES * 6), 3));
-    g.setAttribute("color", new BufferAttribute(new Float32Array(MAX_LINES * 6), 3));
-    return g;
-  }, []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-
-  useLayoutEffect(() => {
-    const pos = geometry.getAttribute("position") as BufferAttribute;
-    const col = geometry.getAttribute("color") as BufferAttribute;
+  const { normal, hot } = useMemo(() => {
     const at = new Map(stars.map((s) => [s.id, s.pos]));
+    const self = stars.find((s) => s.self)?.id;
+    const normal = { points: [] as Vec3[], colors: [] as Vec3[] };
+    const hot = { points: [] as Vec3[], colors: [] as Vec3[] };
     const c = new Color();
-    let n = 0;
-    const put = (a: number[], b: number[], hex: string, k: number) => {
-      if (n >= MAX_LINES) return;
+    const put = (into: typeof normal, a: Vec3, b: Vec3, hex: string, k: number) => {
       c.set(hex).multiplyScalar(k);
-      pos.setXYZ(n * 2, a[0], a[1], a[2]);
-      pos.setXYZ(n * 2 + 1, b[0], b[1], b[2]);
-      col.setXYZ(n * 2, c.r, c.g, c.b);
-      col.setXYZ(n * 2 + 1, c.r, c.g, c.b);
-      n++;
+      into.points.push(a, b);
+      into.colors.push([c.r, c.g, c.b], [c.r, c.g, c.b]);
     };
     for (const l of lines) {
       const a = at.get(l.a);
       const b = at.get(l.b);
       if (!a || !b) continue;
-      const hot = lit.has(l.a) && lit.has(l.b);
       // A recalled entity's line to you lights up too, so you can see the path.
-      const toYou = (lit.has(l.a) || lit.has(l.b)) && stars.some((s) => s.self && (s.id === l.a || s.id === l.b));
-      put(a, b, hot || toYou ? RECALL_COLOR : "#64748b", hot || toYou ? 0.9 : l.ended ? 0.25 : 0.55);
+      const lights =
+        (lit.has(l.a) && lit.has(l.b)) || ((lit.has(l.a) || lit.has(l.b)) && (l.a === self || l.b === self));
+      if (lights) put(hot, a, b, RECALL_COLOR, 1);
+      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended ? 0.6 : 1);
     }
     for (const cr of crystals) {
       const a = cr.star ? at.get(cr.star) : undefined;
-      if (a) put(a, cr.pos, "#a855f7", 0.45);
+      if (a) put(normal, a, cr.pos, LINE.artifact, 0.9);
     }
-    geometry.setDrawRange(0, n * 2);
-    pos.needsUpdate = true;
-    col.needsUpdate = true;
-  }, [geometry, stars, lines, crystals, lit]);
+    return { normal, hot };
+  }, [stars, lines, crystals, lit]);
 
   return (
-    <lineSegments geometry={geometry} raycast={() => null} frustumCulled={false}>
-      <lineBasicMaterial vertexColors transparent opacity={0.8} toneMapped={false} />
-    </lineSegments>
+    <>
+      {normal.points.length > 0 && (
+        <Line
+          segments
+          points={normal.points}
+          vertexColors={normal.colors}
+          lineWidth={1.4}
+          transparent
+          opacity={0.7}
+          depthWrite={false}
+          toneMapped={false}
+          raycast={() => null}
+        />
+      )}
+      {hot.points.length > 0 && (
+        <Line
+          segments
+          points={hot.points}
+          vertexColors={hot.colors}
+          lineWidth={2.4}
+          transparent
+          opacity={0.95}
+          depthWrite={false}
+          toneMapped={false}
+          raycast={() => null}
+        />
+      )}
+    </>
   );
 }
