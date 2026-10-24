@@ -13,6 +13,7 @@ import {
   ScrollText,
   SlidersHorizontal,
   Sparkles,
+  Target,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { ConfigPanel } from "./AdminConfig";
 import { AlertsPanel } from "./AdminAlerts";
 import { ImprovementsPanel } from "./AdminImprovements";
 import { ModelsPanel } from "./AdminModels";
+import { RecallPanel } from "./AdminRecall";
 import { Bars, PeopleFilter, Section, Tile, usd } from "./AdminParts";
 
 type Tab =
@@ -35,6 +37,7 @@ type Tab =
   | "models"
   | "usage"
   | "improvements"
+  | "recall"
   | "monitoring"
   | "audit"
   | "backups"
@@ -67,6 +70,7 @@ const GROUPS: { title: string; tabs: TabInfo[] }[] = [
         icon: Sparkles,
         hint: "Changes the assistant proposes, for you to approve",
       },
+      { key: "recall", label: "Recall", icon: Target, hint: "How well memory finds the right thing" },
     ],
   },
   {
@@ -185,6 +189,7 @@ export function AdminPage() {
             {tab === "improvements" && (
               <ImprovementsPanel onError={setError} onOpen={(t) => go(t as Tab)} onChange={refreshBadges} />
             )}
+            {tab === "recall" && <RecallPanel onError={setError} />}
             {tab === "monitoring" && <MonitoringPanel onError={setError} onOpenAlerts={() => go("alerts")} />}
             {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
             {tab === "backups" && <BackupsPanel onError={setError} />}

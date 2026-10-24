@@ -895,3 +895,36 @@ export interface Improvements {
   };
   pull_requests: { repo: string | null; ready: boolean };
 }
+
+/** One run of the recall check on the Admin page's Recall tab. */
+export interface RecallScore {
+  n: number;
+  hits: number;
+  hit_rate: number;
+  mrr: number;
+}
+
+export interface RecallMiss {
+  question: string;
+  expected: string;
+  target: "memory" | "past chat";
+  /** The other modes that did find it. */
+  found_by: string[];
+}
+
+export interface RecallCheck {
+  id: string;
+  status: "running" | "done" | "failed";
+  scores: Record<string, RecallScore>;
+  misses: RecallMiss[];
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface RecallSummary {
+  questions: number;
+  memories: number;
+  past_chats: number;
+  checks: RecallCheck[];
+}

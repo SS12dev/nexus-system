@@ -23,7 +23,7 @@ from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
-from nexus_orchestrator import deploy, improve, links, memory, notify
+from nexus_orchestrator import deploy, improve, links, memory, notify, recall_eval
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
 from nexus_orchestrator.sandbox import SandboxClient
@@ -169,6 +169,12 @@ async def proposal_pr(ctx: dict, proposal_id: str) -> None:
 
 
 @traced_job
+async def recall_check(ctx: dict, eval_id: str) -> None:
+    """A recall check the owner started on the Admin page."""
+    await recall_eval.run_eval(ctx["deps"], uuid.UUID(eval_id))
+
+
+@traced_job
 async def daily_review(ctx: dict) -> None:
     """Starts a self-review when the last one is IMPROVE_EVERY_DAYS old."""
     await improve.scheduled(ctx["deps"])
@@ -209,6 +215,7 @@ class WorkerSettings:
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
         func(proposal_pr, timeout=120, keep_result=0),
+        func(recall_check, timeout=900, keep_result=0),
     ]
     cron_jobs = [
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),

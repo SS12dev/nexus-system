@@ -400,6 +400,11 @@ them); service health, queues, API traffic and backups always cover all of Nexus
   are never read.
 - **Improvements:** what Nexus proposes to change about itself; see
   [Self-review](#self-review).
+- **Recall:** how well memory finds the right thing, on your own memories. The memory model
+  writes one question per memory and past chat (once; later checks only ask about new ones),
+  and **Run check** looks each up exactly as a chat turn does, scoring how often the right one
+  comes back and how high, side by side for each way of recalling, with the questions it
+  missed. Run one before and after changing how memory works.
 - **Monitoring:** over the last hour, 6 hours or 24 hours, every API route and every background
   job with its calls, failures, the time half of them beat and the time 95% beat (and, for
   jobs, how long they waited in the queue), and the latest 200 errors logged by the API, the

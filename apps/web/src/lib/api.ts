@@ -39,6 +39,8 @@ import type {
   LlmUsage,
   Monitoring,
   Proposal,
+  RecallCheck,
+  RecallSummary,
   Review,
   Usage,
   User,
@@ -299,6 +301,9 @@ export const api = {
   improvements: (status?: string) =>
     request<Improvements>(`/api/admin/improvements${status ? `?status=${status}` : ""}`),
   reviewNow: () => request<Review>("/api/admin/improvements/review", { method: "POST" }),
+  recall: () => request<RecallSummary>("/api/admin/recall"),
+  runRecallCheck: () => request<RecallCheck>("/api/admin/recall/run", { method: "POST" }),
+  resetRecallQuestions: () => request<void>("/api/admin/recall/questions", { method: "DELETE" }),
   approveProposal: (id: string, note?: string) =>
     request<Proposal>(`/api/admin/improvements/${id}/approve`, { method: "POST", body: json({ note: note || null }) }),
   denyProposal: (id: string, note?: string) =>

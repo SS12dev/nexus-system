@@ -134,6 +134,15 @@ long-term memory. In 2 to 6 sentences say what the user wanted, what was decided
 produced (names, numbers, files), and anything left open. Write in the third person about \
 "the user". Reply with JSON only: {"summary": str}"""
 
+RECALL_QUESTIONS = """You write test questions for a personal assistant's memory. Each \
+numbered item is something the assistant remembers about its user: a memory, or the summary of \
+a past chat. For each item write one question the user might plausibly ask later, in their own \
+voice, that the assistant can only answer well by recalling that item. Phrase it the way a \
+person would ask, not as a quiz: reuse as few of the item's distinctive words as reads \
+naturally, and never quote it. One question per item, under 25 words.
+
+Reply with JSON only: {"questions": [{"item": int, "question": str}]}"""
+
 PROFILE = """Write the assistant's profile of its user from the memories below: a compact \
 impression that is put at the top of every conversation. Use these Markdown sections, leaving \
 out any with nothing to say: **About**, **Preferences**, **How to answer**, **Current goals**. \

@@ -90,6 +90,49 @@ async def chat_files(db: AsyncSession, chat: Chat) -> list[File]:
     return list(rows.all())
 
 
+@dataclass
+class Recall:
+    memories: list[Memory] = field(default_factory=list)
+    episodes: list[Episode] = field(default_factory=list)
+
+
+async def recall(
+    db: AsyncSession,
+    settings: Settings,
+    user_id: uuid.UUID,
+    question: str,
+    vec: list[float] | None,
+    *,
+    exclude_chat_id: uuid.UUID | None = None,
+) -> Recall:
+    """The memories and past-chat summaries a turn gets for `question`. The recall check on
+    the Admin page scores this same function."""
+    found = Recall()
+    hits = await hybrid_search(db, "memories", user_id, question, vec, settings.memory_top_k)
+    if hits:
+        rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
+        by_id = {m.id: m for m in rows.all()}
+        found.memories = [by_id[h.id] for h in hits if h.id in by_id]
+    if vec is not None and settings.episode_top_k:
+        hits = await hybrid_search(
+            db,
+            "episodes",
+            user_id,
+            question,
+            vec,
+            settings.episode_top_k * 3,
+            exclude_chat_id=exclude_chat_id,
+        )
+        close = [
+            h.id for h in hits if h.distance is not None and h.distance < EPISODE_MAX_DISTANCE
+        ][: settings.episode_top_k]
+        if close:
+            rows = await db.scalars(select(Episode).where(Episode.id.in_(close)))
+            by_id = {e.id: e for e in rows.all()}
+            found.episodes = [by_id[i] for i in close if i in by_id]
+    return found
+
+
 async def assemble(
     db: AsyncSession,
     settings: Settings,
@@ -106,27 +149,8 @@ async def assemble(
 
     if profile.memory_enabled:
         ctx.profile = profile.content
-        hits = await hybrid_search(db, "memories", user_id, question, vec, settings.memory_top_k)
-        if hits:
-            rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
-            by_id = {m.id: m for m in rows.all()}
-            ctx.memories = [by_id[h.id] for h in hits if h.id in by_id]
-        if vec is not None and settings.episode_top_k:
-            hits = await hybrid_search(
-                db,
-                "episodes",
-                user_id,
-                question,
-                vec,
-                settings.episode_top_k * 3,
-                exclude_chat_id=chat.id,
-            )
-            close = [
-                h.id for h in hits if h.distance is not None and h.distance < EPISODE_MAX_DISTANCE
-            ][: settings.episode_top_k]
-            if close:
-                rows = await db.scalars(select(Episode).where(Episode.id.in_(close)))
-                ctx.episodes = list(rows.all())
+        found = await recall(db, settings, user_id, question, vec, exclude_chat_id=chat.id)
+        ctx.memories, ctx.episodes = found.memories, found.episodes
 
     if history_truncated:
         ctx.earlier = await db.scalar(select(Episode.content).where(Episode.chat_id == chat.id))

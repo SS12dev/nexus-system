@@ -55,7 +55,7 @@ DUPLICATE_DISTANCE = 0.06
 PROFILE_MEMORIES = 80
 
 
-async def _ask(
+async def ask_memory_model(
     deps: TurnDeps,
     db: AsyncSession,
     user: User,
@@ -133,7 +133,7 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
             f"{'USER' if m.role == MessageRole.user else 'ASSISTANT'}: {m.content[:3000]}"
             for m in recent
         )
-        raw = await _ask(
+        raw = await ask_memory_model(
             deps,
             db,
             user,
@@ -228,7 +228,7 @@ async def apply_candidates(
         )
         cands = "\n".join(f"{i}: {c['content']}" for i, c in enumerate(candidates)) or "(none)"
         forgets = "\n".join(f"- {f}" for f in forget) or "(none)"
-        raw = await _ask(
+        raw = await ask_memory_model(
             deps,
             db,
             user,
@@ -389,7 +389,7 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
             for m in reversed(messages)
         )
         earlier = f"Summary of earlier messages:\n{episode.content}\n\n" if episode else ""
-        raw = await _ask(
+        raw = await ask_memory_model(
             deps,
             db,
             user,
@@ -437,7 +437,7 @@ async def rebuild_profile(deps: TurnDeps, user_id: uuid.UUID) -> None:
                 f"{m.updated_at:%Y-%m-%d}] {m.content}"
                 for m in memories
             )
-            content = await _ask(
+            content = await ask_memory_model(
                 deps,
                 db,
                 user,

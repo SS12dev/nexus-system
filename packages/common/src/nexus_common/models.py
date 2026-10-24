@@ -621,6 +621,47 @@ class Episode(Base):
     )
 
 
+class RecallQuestion(Base):
+    """A question whose answer is one memory or past-chat summary, written by the memory model
+    for the recall check on the Admin page. It goes when its target goes."""
+
+    __tablename__ = "recall_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    question: Mapped[str] = mapped_column(Text)
+    # Exactly one of these is set.
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memories.id", ondelete="CASCADE")
+    )
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_recall_questions_user", "user_id"),)
+
+
+class RecallEval(Base):
+    """One run of the recall check: how often each way of recalling finds the memory or past
+    chat a question is about. `scores` maps a mode to {n, hits, hit_rate, mrr}; `misses` lists
+    the questions the standard mode missed, for the owner to read."""
+
+    __tablename__ = "recall_evals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # running, done or failed
+    status: Mapped[str] = mapped_column(String(16))
+    scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    misses: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_recall_evals_user", "user_id", "created_at"),)
+
+
 # --- Skills and instructions -------------------------------------------------------------------
 
 

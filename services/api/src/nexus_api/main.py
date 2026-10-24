@@ -26,6 +26,7 @@ from nexus_api.routes import (
     memories,
     ops,
     projects,
+    recall,
     skills,
     systems,
 )
@@ -130,6 +131,7 @@ def create_app(
     app.include_router(access_requests.router)
     app.include_router(ops.router)
     app.include_router(improvements.router)
+    app.include_router(recall.router)
     app.include_router(ws.router)
 
     @app.get("/healthz", tags=["ops"])

@@ -17,6 +17,7 @@ class RecordingQueue:
         self.access_notices: list[tuple[str, uuid.UUID]] = []
         self.reviews: list[uuid.UUID] = []
         self.proposal_prs: list[uuid.UUID] = []
+        self.recall_checks: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
@@ -51,6 +52,9 @@ class RecordingQueue:
 
     async def enqueue_proposal_pr(self, proposal_id):
         self.proposal_prs.append(proposal_id)
+
+    async def enqueue_recall_check(self, eval_id):
+        self.recall_checks.append(eval_id)
 
 
 @pytest.fixture(autouse=True)
