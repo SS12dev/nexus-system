@@ -6,10 +6,14 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.33 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib XDG_CACHE_HOME=/tmp/cache
+# CAD=false leaves out the 3D modelling libraries (build123d, trimesh: about 600 MB).
+ARG CAD=true
 # Pango for WeasyPrint (Markdown/HTML to PDF), fonts so documents and charts have real text.
+# With CAD, libGL and expat: OpenCascade links them even though nothing here draws on screen.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
       fonts-dejavu-core fonts-liberation2 fonts-noto-core fontconfig \
+      $([ "$CAD" = true ] && echo libgl1 libexpat1) \
     && rm -rf /var/lib/apt/lists/* && fc-cache -f
 WORKDIR /app
 
@@ -24,8 +28,6 @@ COPY services/deployer/pyproject.toml services/deployer/
 RUN uv sync --frozen --no-dev --package nexus-sandbox --no-install-workspace
 
 COPY services/sandbox services/sandbox
-# CAD=false leaves out the 3D modelling libraries (build123d, trimesh: about 600 MB).
-ARG CAD=true
 RUN uv sync --frozen --no-dev --package nexus-sandbox $([ "$CAD" = true ] && echo --extra cad) \
     && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas, scipy, sklearn, zoneinfo; zoneinfo.ZoneInfo('Asia/Kolkata')" \
     && if [ "$CAD" = true ]; then python -c "import build123d, trimesh, manifold3d, networkx"; fi
