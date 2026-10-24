@@ -47,7 +47,7 @@ Shelves are listed in `CATEGORIES` in `packages/common/src/nexus_common/skills.p
 
 Every agent's prompt gets, in order: the safety rules (`global.md`), the house conventions
 (`shared.md`) plus any global instructions an admin adds, its role's instructions (shipped
-plus admin additions), then the user's own instructions. the assistant's own chat gets the
+plus admin additions), then the user's own instructions. The assistant's own chat gets the
 conventions, the admin's global instructions and the user's instructions. The team designer
 picks each agent's role from the files in `roles/`.
 

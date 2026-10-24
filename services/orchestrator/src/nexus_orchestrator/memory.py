@@ -381,7 +381,7 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
             )
         ).all()
         transcript = "\n\n".join(
-            f"{'USER' if m.role == MessageRole.user else 'JARVIS'}: {m.content[:2000]}"
+            f"{'USER' if m.role == MessageRole.user else 'ASSISTANT'}: {m.content[:2000]}"
             for m in reversed(messages)
         )
         earlier = f"Summary of earlier messages:\n{episode.content}\n\n" if episode else ""

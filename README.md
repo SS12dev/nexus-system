@@ -1,7 +1,6 @@
 # Nexus
 
-Nexus (code name Nexus, which the repo and packages still use) gives each person an assistant
-they name themselves. The assistant is a supervisor agent: it answers simple asks itself and
+Nexus gives each person an assistant they name themselves (Jarvis by default). The assistant is a supervisor agent: it answers simple asks itself and
 designs, runs and tears down teams of sub-agents with their own tools and model tiers. The
 design lives in the architecture doc, "Nexus: Architecture & Research".
 
@@ -27,7 +26,7 @@ Compose.
 $EDITOR .env                   # add OPENAI_API_KEY, and Google OIDC or DEV_LOGIN_ENABLED=true
 brew install ollama            # local embeddings for memory and document search (free)
 ollama pull bge-m3             # then keep Ollama running (the menu bar app, or `ollama serve`)
-docker compose up -d --build
+./scripts/compose.sh up -d --build   # plain `docker compose` until the secrets are encrypted
 ```
 
 Before others use it, encrypt the secrets with `./scripts/secrets.sh init` and start Nexus with
@@ -153,7 +152,7 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 | Alias | Model | Used for |
 | --- | --- | --- |
 | `nexus-nano` | gpt-5.4-nano | routing, extraction, titles, summaries |
-| `nexus-mini` | gpt-5.4-mini | plain chat (phase 1 default), most sub-agents |
+| `nexus-mini` | gpt-5.4-mini | plain chat (`CHAT_MODEL`), most sub-agents |
 | `nexus-pro` | gpt-5.4 | planning and designing agent systems |
 | `nexus-max` | gpt-5.5 | escalation only |
 | `nexus-embed` | bge-m3 in Ollama on the host | memory and document search |
@@ -402,8 +401,11 @@ sign out their own signed-in devices on the Connections page.
 
 Every line from the API, orchestrator and doc-worker carries whatever is known at the time:
 `request_id`, `user_id`, `chat_id`, `run_id`, `job`, `job_id` and `trace_id`, the turn's or run's
-Langfuse trace (as `key=value` at the end of the line, or as keys with `LOG_FORMAT=json`). Every API response carries `X-Request-ID`; the jobs a request queues carry the
-same id, and so does each model call's metadata in Langfuse. An unexpected error answers
+Langfuse trace. With `LOG_FORMAT=text` they go as `key=value` at the end of the line; with
+`json` each line is one object (`ts`, `level`, `service`, `logger`, `msg`, the ids and any
+structured fields) for a log collector. Every API response carries `X-Request-ID` (kept from
+the caller when it sends a sane one); the jobs a request queues carry the same id, and so does
+each model call's metadata in Langfuse. An unexpected error answers
 `{"detail": ..., "request_id": ...}`, so one id finds every line it caused:
 
 ```sh
@@ -413,7 +415,9 @@ same id, and so does each model call's metadata in Langfuse. An unexpected error
 
 The API writes one access line per request (`nexus.access`, with the route, status and time;
 health checks left out), and each worker writes `job done` or `job failed` per job with its run
-time and how long it waited in the queue. Docker keeps 5 files of 10 MB per container, so logs
+time and how long it waited in the queue. 5xx responses and requests slower than 5 s are
+logged as `http.error` / `http.slow`, refusals (rate limit, cross-site) as `http.refused`, and
+access requests as `access.*` events. Docker keeps 5 files of 10 MB per container, so logs
 can't fill the disk. The orchestrator and doc-worker have Docker health checks on their arq
 heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
 
@@ -443,12 +447,6 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
   Postgres, LiteLLM, Langfuse and the MinIO console are bound to 127.0.0.1, and the API docs
   (`/docs`) aren't routed. Keep `DEV_LOGIN_ENABLED=false` and `SESSION_COOKIE_SECURE=true`
   on the public hostname.
-- **Logs and request ids:** every service logs to stderr; `LOG_FORMAT=json` makes that one JSON
-  object per line (`ts`, `level`, `service`, `logger`, `msg`, the ids above and any structured
-  fields) for a log collector. Each API response carries `X-Request-ID` (kept from the caller
-  when it sends a sane one); see [Logs and request ids](#logs-and-request-ids). 5xx responses
-  and requests slower than 5 s are logged as `http.error` / `http.slow`, refusals (rate limit,
-  cross-site) as `http.refused`, and access requests as `access.*` events.
 - **Cloudflare Access** (optional) can sit in front of `nexus.servhub.cc` for an extra
   Google or email check before anyone reaches the sign-in page; it needs no change here.
 
@@ -548,7 +546,7 @@ infra/egress-proxy/     the workbench's allowlist proxy (npm, PyPI, GitHub)
 packages/common/        settings, models, events, storage, embeddings, hybrid search, the agent
                         system spec, tool catalogue and skills helpers
 library/                core skills and the shipped instruction layers
-infra/                  LiteLLM config, Postgres init, Cloudflare Tunnel notes
+infra/litellm, postgres, cloudflared   model aliases, database init, tunnel notes
 secrets/                the encrypted secrets file (gitignored; README: Secrets)
 docs/containers.md      what every Docker container does and how they fit together
 compose.yaml            the whole stack
