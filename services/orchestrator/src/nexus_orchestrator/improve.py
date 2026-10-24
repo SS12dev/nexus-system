@@ -112,6 +112,9 @@ instructions, at most 500 words, general and concrete}.
 arguments, what it returns, risk level (read, write, exec, outbound, destructive), where it \
 fits in the code, and tests that prove it works, "files": paths likely touched}.
 - "code": any other change to Nexus's code. change: {"spec", "files"} as for a tool.
+For tool and code proposals, build on HOW NEXUS IS BUILT: name files from its "Where to change \
+things" table (never invented paths), say which part of the system changes and why it fits \
+there, and list the README section or docs/ page the change must update.
 
 Every proposal also has: "kind", "title" (imperative, under 80 characters), "why" (two or \
 three sentences tied to the report's figures), "evidence" (the figures, one short line each), \
@@ -443,7 +446,9 @@ async def _context(db, deps) -> str:
         if o.name not in UNTOUCHABLE and o.group != "Self-review"
     ]
     return (
-        "TOOLS:\n"
+        "HOW NEXUS IS BUILT:\n"
+        + architecture(_library(deps))
+        + "\n\nTOOLS:\n"
         + "\n".join(f"- {t.name}: {t.description}" for t in TOOLS)
         + "\n\nSHARED SKILLS:\n"
         + "\n".join(f"- {s}: {d[:160]}" for s, d in skills)
@@ -463,6 +468,21 @@ async def _context(db, deps) -> str:
 
 def _library(deps) -> Path:
     return Path(deps.settings.library_path)
+
+
+# The architecture brief that agents load for tasks about Nexus (docs/INDEX.md points to it).
+ARCHITECTURE = Path("core/nexus-system/SKILL.md")
+ARCHITECTURE_CHARS = 9000
+
+
+def architecture(library: Path) -> str:
+    """The brief's body, so proposals name real files and parts instead of guessed ones."""
+    try:
+        text = (library / ARCHITECTURE).read_text(encoding="utf-8")
+    except OSError:
+        return "(the architecture brief isn't available)"
+    body = text.split("---", 2)[-1].strip() if text.startswith("---") else text.strip()
+    return body[:ARCHITECTURE_CHARS]
 
 
 async def _store(db, review: ImprovementReview, drafts: list, roles: list[str], limit: int) -> int:
@@ -643,7 +663,11 @@ def pr_files(p: Proposal) -> tuple[str, dict[str, str]]:
         f"_Kind: {p.kind} · impact {p.impact} · effort {p.effort} · drafted by Nexus's "
         f"self-review on {p.created_at:%d %b %Y}, approved on the Admin page._\n\n"
         f"## Why\n\n{p.summary}\n\n## Evidence\n\n{evidence}\n\n"
-        f"## Spec\n\n{p.payload.get('spec', '')}\n\n## Files likely touched\n\n{files}\n"
+        f"## Spec\n\n{p.payload.get('spec', '')}\n\n## Files likely touched\n\n{files}\n\n"
+        "## Before you start\n\nRead `docs/INDEX.md` and the architecture brief in "
+        "`library/core/nexus-system/SKILL.md`, follow the README section for this area, and "
+        "update the docs this change affects (and the brief, if the architecture changes). "
+        "Check with `./scripts/check.sh`.\n"
     )
     name = f"docs/proposals/{p.created_at:%Y-%m-%d}-{slug}.md"
     return f"nexus/proposal-{slug}-{p.id.hex[:8]}", {name: spec}

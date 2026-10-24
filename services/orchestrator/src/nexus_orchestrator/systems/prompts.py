@@ -161,7 +161,9 @@ when to stop. Don't restate generic rules; agents already get safety rules and t
 makes PDF, Word, PowerPoint, Excel or chart files needs run_code and the matching core skill.
 - skills: grant matching skills from AVAILABLE SKILLS by id (e.g. core/pdf): file skills for \
 agents that make files, and method skills (e.g. core/literature-review, core/fact-check) for \
-agents whose task they cover.
+agents whose task they cover. When the task is about Nexus itself (how it works, comparing a \
+tool or framework with it, changing it), give every agent core/nexus-system so it works from \
+the facts instead of guessing.
 - If the request asks for something to be emailed or a document deleted, give the agent that \
 does it send_email or delete_document; the user approves each such step on an approval card \
 in the app, so don't leave it out or plan to ask in chat.

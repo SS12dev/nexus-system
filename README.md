@@ -437,7 +437,9 @@ turned memory off in Settings are left out. None of it holds a name, an email, a
 text, and the Improvements tab shows exactly what the review saw.
 
 One call to `IMPROVE_MODEL` (mini, a cent or two) then drafts up to `IMPROVE_MAX_PROPOSALS` (5)
-proposals from it, given what Nexus can already do and every earlier proposal with your reasons
+proposals from it, given what Nexus can already do, how it is built (the architecture brief in
+`library/core/nexus-system/SKILL.md`, which [docs/INDEX.md](docs/INDEX.md) points to, so code
+proposals name real files and the docs to update) and every earlier proposal with your reasons
 for denials, so it doesn't repeat itself. Each is checked before it is kept: a skill must parse,
 an instruction must name a real role, a setting must be a valid value (and never sign-up,
 dev login or where code goes). You get an email when SMTP is set up. Nothing changes until you
@@ -635,7 +637,7 @@ packages/common/        settings, models, events, storage, embeddings, hybrid se
 library/                core skills and the shipped instruction layers
 infra/litellm, postgres, cloudflared   model aliases, database init, tunnel notes
 secrets/                the encrypted secrets file (gitignored; README: Secrets)
-docs/                   containers, app URLs, the GitHub App
+docs/                   INDEX.md (start here), containers, app URLs, the GitHub App, proposals
 compose.yaml            the whole stack
 ```
 
