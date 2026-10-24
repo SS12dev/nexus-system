@@ -263,7 +263,10 @@ services:
   # databases or your LAN; the root filesystem is read-only and jobs run in /tmp.
   sandbox:
     logging: *logging
-    build: { context: ., dockerfile: services/sandbox/Dockerfile }
+    build:
+      context: .
+      dockerfile: services/sandbox/Dockerfile
+      args: { CAD: "${CAD:-true}" }
     environment:
       SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
       SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-1536}

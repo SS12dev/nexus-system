@@ -25,6 +25,18 @@ dependencies = [
     "tzdata>=2024.1",
 ]
 
+[project.optional-dependencies]
+# 3D modelling for the 3d-modeling skill: build123d (CAD on the OpenCascade kernel) for exact
+# parts and STEP files, trimesh and manifold3d for mesh checks and 3MF/GLB. About 600 MB, so the
+# image installs it only with CAD=true (the default).
+cad = [
+    "build123d>=0.10",
+    "trimesh>=4.5",
+    "manifold3d>=3.0",
+    # trimesh needs it to write 3MF.
+    "networkx>=3.2",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

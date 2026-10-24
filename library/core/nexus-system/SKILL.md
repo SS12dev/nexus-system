@@ -27,7 +27,7 @@ recalled). It runs with Docker Compose on one machine, reached through a Cloudfl
 | api | services/api | FastAPI: auth (Google sign-in), chats, files, memories, skills, teams, approvals, admin, WebSocket |
 | orchestrator | services/orchestrator | arq worker: the assistant's LangGraph graph, tools, agent teams, routines, memory jobs, self-review |
 | doc-worker | services/doc-worker | parses uploads (Docling), chunks and embeds them |
-| sandbox | services/sandbox | runs agent code (`run_code`) with no network and resource limits |
+| sandbox | services/sandbox | runs agent code (`run_code`) with no network and resource limits; document, data and 3D CAD libraries |
 | workbench, egress-proxy | services/workbench, infra/egress-proxy | dev teams' persistent project folders, commands and git; npm/PyPI/GitHub-only network |
 | deployer, docker-gate | services/deployer | builds finished projects as apps at `<app>.servhub.cc`, through a filtered Docker socket |
 | litellm | infra/litellm | the model gateway: aliases nexus-nano/mini/pro/max (OpenAI models), per-user and per-run budgets, spend logs |

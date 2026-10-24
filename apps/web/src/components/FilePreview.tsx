@@ -1,11 +1,12 @@
 import { Download, ExternalLink, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { formatSize } from "../lib/format";
 import { useAssistantName } from "../lib/assistant";
 import { loadHighlighter } from "../lib/highlight";
 import {
   TEXT_KINDS,
+  UNREAD_KINDS,
   codeLanguage,
   notebookCells,
   parseCsv,
@@ -18,15 +19,19 @@ import type { FileBrief } from "../lib/types";
 import { FileIcon } from "./FileChip";
 import { Markdown } from "./Markdown";
 
+// three.js loaders and the 3D view load only when a model is opened.
+const ModelView = lazy(() => import("./ModelView"));
+
 /** Text files bigger than this are cut short in the preview; Download has the rest. */
 const MAX_TEXT = 400_000;
 
-/** A side panel showing a file as itself (PDF, image, Word, code, JSON, CSV, Markdown, text…),
+/** A side panel showing a file as itself (PDF, image, Word, 3D model, code, JSON, CSV, text…),
  * plus the text the assistant read from it, with a download button either way. */
 export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () => void }) {
   const assistant = useAssistantName();
   const kind = previewKind(file.name, file.content_type);
   const hasOriginal = kind !== "extracted";
+  const hasText = !UNREAD_KINDS.includes(kind);
   const [view, setView] = useState<"original" | "text">(hasOriginal ? "original" : "text");
 
   useEffect(() => {
@@ -70,7 +75,7 @@ export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () =>
             <X size={18} />
           </button>
         </div>
-        {hasOriginal && (
+        {hasOriginal && hasText && (
           <div className="flex gap-1 border-b border-edge px-4 py-2 text-sm">
             {(["original", "text"] as const).map((v) => (
               <button
@@ -84,7 +89,16 @@ export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () =>
             ))}
           </div>
         )}
-        {view === "original" && hasOriginal ? <Original file={file} kind={kind} /> : <ReadText file={file} />}
+        {kind === "cad" ? (
+          <Note>
+            A STEP file is the exact, editable CAD model: open it in Fusion, FreeCAD, Onshape or SolidWorks.
+            The STL or 3MF made with it previews here and goes to the slicer.
+          </Note>
+        ) : view === "original" && hasOriginal ? (
+          <Original file={file} kind={kind} />
+        ) : (
+          <ReadText file={file} />
+        )}
       </div>
     </div>
   );
@@ -161,6 +175,12 @@ function Original({ file, kind }: { file: FileBrief; kind: PreviewKind }) {
       return <ImageView blob={body.blob!} name={file.name} />;
     case "docx":
       return <DocxView blob={body.blob!} />;
+    case "model3d":
+      return (
+        <Suspense fallback={<Note>Loading the 3D view…</Note>}>
+          <ModelView blob={body.blob!} name={file.name} />
+        </Suspense>
+      );
     case "markdown":
       return (
         <Scroll>

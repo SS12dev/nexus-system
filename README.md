@@ -285,8 +285,8 @@ who used Nexus before onboarding existed are marked as onboarded by the migratio
 What each answer sets up comes from **profile packs**, one YAML file per profession or interest
 in [library/profiles](library/profiles): starter memories, prompts for the home screen and the
 welcome chat, and routines. There are ten professions (student, software, research, founder,
-creative, sales, healthcare, teaching, finance/legal/consulting, freelance), eight interests
-(fitness, cooking, money, travel, learning, news, family, job hunting) and an everyday pack
+creative, sales, healthcare, teaching, finance/legal/consulting, freelance), nine interests
+(fitness, cooking, money, travel, learning, news, family, job hunting, 3D printing) and an everyday pack
 everyone gets (morning brief, Friday look back). Adding a profession is a new file; the format
 is in [library/README.md](library/README.md#profile-packs). The home screen shows four prompts
 from the person's packs under the chat box.
@@ -407,7 +407,8 @@ memory, CPU and process limits, and per-job CPU, memory, file-size and time limi
 files go in `in/`, the agent's skills in `skills/`, and whatever it writes to `out/` is saved to
 your Library as a generated file (saving the same name again makes a new version). It has
 pypdf, pdfplumber, ReportLab, WeasyPrint, python-docx, python-pptx, openpyxl, pandas and
-matplotlib.
+matplotlib, plus build123d, trimesh and manifold3d for 3D models (the image is about 600 MB
+smaller with `CAD=false` in `.env`).
 
 ### The workbench
 
@@ -468,14 +469,14 @@ Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a on
 description, plus `scripts/` and `references/`. Agents see only the names and descriptions; they
 load a skill's instructions with `skills_load` when a task needs it and read its files with
 `skills_read_file`, so prompts stay small. Core skills ship in [library/core](library/core) and
-are synced into the database when the orchestrator starts. 40 skills sit on nine shelves:
+are synced into the database when the orchestrator starts. 41 skills sit on nine shelves:
 documents (PDF, Word, PowerPoint, Excel, charts, images, conversions), research (web research,
 literature reviews, reading papers, research gaps, paper writing, citations, fact-checking),
 writing (reports, summaries, email, meeting notes), data (analysis, statistics, ML experiments,
 LLM evaluation), productivity (inbox triage, scheduling, comparing options), work (lesson
 planning, study plans, meeting prep, proposals and invoices, creative briefs, clinical evidence,
 job applications, sales outreach), life (meal planning, trip planning, training plans,
-budgeting), agents (prompt writing) and engineering (code review). Every script is tested in the sandbox; see
+budgeting), agents (prompt writing) and engineering (code review, 3D models for printing). Every script is tested in the sandbox; see
 [library/README.md](library/README.md).
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version

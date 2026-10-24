@@ -1,6 +1,6 @@
 # Build from the repository root: docker build -f services/sandbox/Dockerfile .
 # Runs agent code: no network (Compose puts it on an internal network), a read-only root,
-# resource limits per job, and the document libraries skills rely on.
+# resource limits per job, and the document and 3D modelling libraries skills rely on.
 FROM python:3.13.17-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.33 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
@@ -24,8 +24,11 @@ COPY services/deployer/pyproject.toml services/deployer/
 RUN uv sync --frozen --no-dev --package nexus-sandbox --no-install-workspace
 
 COPY services/sandbox services/sandbox
-RUN uv sync --frozen --no-dev --package nexus-sandbox \
-    && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas, scipy, sklearn, zoneinfo; zoneinfo.ZoneInfo('Asia/Kolkata')"
+# CAD=false leaves out the 3D modelling libraries (build123d, trimesh: about 600 MB).
+ARG CAD=true
+RUN uv sync --frozen --no-dev --package nexus-sandbox $([ "$CAD" = true ] && echo --extra cad) \
+    && python -c "import matplotlib.pyplot, weasyprint, docx, pptx, openpyxl, pandas, scipy, sklearn, zoneinfo; zoneinfo.ZoneInfo('Asia/Kolkata')" \
+    && if [ "$CAD" = true ]; then python -c "import build123d, trimesh, manifold3d, networkx"; fi
 
 RUN useradd --system --uid 10002 sandbox
 USER sandbox

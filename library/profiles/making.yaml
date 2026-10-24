@@ -1,0 +1,20 @@
+id: making
+label: 3D printing and making
+kind: interest
+order: 48
+blurb: Printable parts designed from a description.
+memories:
+  - {kind: fact, content: "Into 3D printing and making things."}
+prompts:
+  - "Design a wall mount for my router that I can 3D print"
+  - "Make a box with a snap-on lid for my SD cards"
+routines:
+  - id: maker-news
+    name: Maker news
+    days: [SA]
+    time: "10:00"
+    only_if_new: true
+    prompt: >
+      Look for what's new this week in 3D printing that fits my printer and what I make:
+      firmware and slicer releases, notable printers or filaments, and a couple of
+      interesting printable designs or techniques. A short list with links; skip hype.

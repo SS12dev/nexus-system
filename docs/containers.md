@@ -151,7 +151,7 @@ the `workbench` network. `ORCHESTRATOR_REPLICAS` (default 1) adds more.
 
 **sandbox** ([services/sandbox](../services/sandbox)) runs the code agents write with
 `run_code` (Python or bash, with pypdf, ReportLab, python-docx, python-pptx, openpyxl, pandas,
-matplotlib...). It is deliberately boxed in: an internal network with no internet and no route
+matplotlib..., and build123d and trimesh for 3D models unless built with `CAD=false`). It is deliberately boxed in: an internal network with no internet and no route
 to the databases or your LAN, a read-only filesystem with jobs in a 1 GB `/tmp`, all Linux
 capabilities dropped, and caps of 3 GB memory, 2 CPUs and 256 processes.
 

@@ -177,4 +177,5 @@ INTERESTS: dict[str, str] = {
     "money": "Money",
     "travel": "Travel",
     "family": "Family and home",
+    "making": "3D printing and making",
 }
