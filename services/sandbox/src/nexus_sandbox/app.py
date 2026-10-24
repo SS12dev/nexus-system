@@ -35,6 +35,8 @@ MAX_FILE_MB = int(os.environ.get("SANDBOX_MAX_FILE_MB", "50"))
 CONCURRENCY = int(os.environ.get("SANDBOX_CONCURRENCY", "4"))
 MAX_OUTPUT_CHARS = 20_000
 MAX_OUT_FILES = 20
+# After a timeout, how long a job has to print where it was stuck before it is killed.
+ABORT_GRACE_S = 2
 
 app = FastAPI(title="Nexus sandbox", version="0.1.0")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
@@ -102,7 +104,11 @@ async def execute(body: RunIn) -> RunOut:
         (job / "out").mkdir(exist_ok=True)
         script = job / ("main.py" if body.language == "python" else "main.sh")
         script.write_text(body.code, "utf-8")
-        argv = ["python", "-I", str(script)] if body.language == "python" else ["bash", str(script)]
+        argv = (
+            ["python", "-I", "-X", "faulthandler", str(script)]
+            if body.language == "python"
+            else ["bash", str(script)]
+        )
         env = {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "HOME": str(job),
@@ -112,6 +118,7 @@ async def execute(body: RunIn) -> RunOut:
             "XDG_CACHE_HOME": str(job / ".cache"),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONUNBUFFERED": "1",
+            "PYTHONFAULTHANDLER": "1",
         }
         started = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
@@ -128,11 +135,18 @@ async def execute(body: RunIn) -> RunOut:
             out, err = await asyncio.wait_for(proc.communicate(), timeout)
         except TimeoutError:
             timed_out = True
+            # SIGABRT first: Python's faulthandler (-X faulthandler for the job, the environment
+            # for Pythons a bash job starts) prints where every
+            # thread was stuck, so a timeout says why. Then SIGKILL whatever is left.
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            out, err = await proc.communicate()
+                os.killpg(proc.pid, signal.SIGABRT)
+                out, err = await asyncio.wait_for(proc.communicate(), ABORT_GRACE_S)
+            except (ProcessLookupError, TimeoutError):
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                out, err = await proc.communicate()
         duration = int((time.monotonic() - started) * 1000)
 
         files: dict[str, str] = {}
