@@ -24,13 +24,21 @@ RUN uv sync --frozen --no-dev --package nexus-doc-worker --no-install-workspace
 # from the CPU wheel index (Docker on a Mac has no GPU), and its models are baked in so parsing
 # works offline. Build with --build-arg DOCLING=false for a small image that uses MarkItDown
 # for PDFs and can't read images.
+# Only the models parse.py uses are fetched: layout, tables, and RapidOCR's torch models (the
+# image has no onnxruntime, so OCR runs on torch). Docling's default set also pulls models we
+# never run, including RapidOCR's onnxruntime ones from modelscope.cn, which often times out.
+# Each download is tried three times so a passing network blip doesn't fail the build.
 ARG DOCLING=true
 ARG DOCLING_VERSION=2.140.0
 ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
 RUN if [ "$DOCLING" = "true" ]; then \
       uv pip install --python /app/.venv/bin/python "docling==${DOCLING_VERSION}" \
         --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
-      && docling-tools models download -o "$DOCLING_ARTIFACTS_PATH"; \
+      && for attempt in 1 2 3; do \
+           docling-tools models download layout tableformer rapidocr \
+             --rapidocr-backend-lang torch:ch -o "$DOCLING_ARTIFACTS_PATH" && break; \
+           [ "$attempt" = 3 ] && exit 1; echo "Model download failed, retrying in 15 s"; sleep 15; \
+         done; \
     fi
 
 # Install only our own two packages, leaving the dependencies (and Docling's) as they are.
