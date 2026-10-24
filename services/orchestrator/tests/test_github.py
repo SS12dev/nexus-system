@@ -240,7 +240,7 @@ def scripts_for(scripts: dict, approved=True, failed=0) -> None:
 
     scripts["researcher"] = [done("submit_brief", stack="static", summary="A 2048 game.")]
     scripts["architect"] = [done("submit_plan", summary="Grid and score.")]
-    scripts["tester"] = [done("submit_tests", passed=14, failed=failed, summary="Ran.")]
+    scripts["tester"] = [done("submit_tests", passed=14, failed=failed, summary="Ran.")] * 3
     scripts["reviewer"] = [
         done("submit_review", approved=approved, fixes="1. fix", summary="A 2048 game.")
     ] * 3
@@ -454,3 +454,29 @@ async def test_projects_api_lists_only_your_own(release_deps, owner, sessionmake
         await db.commit()
         mine = await list_projects(user, db)
     assert [p.name for p in mine] == ["2048"]
+
+
+async def test_an_unmerged_follow_up_keeps_the_projects_branch(
+    release_deps, owner, scripts, fake_gh
+):
+    """Fixes to work the reviewer hasn't approved land on the same branch, not a new one per
+    run; once it is merged, the next run starts a fresh branch."""
+    user, chat_id = owner
+    scripts_for(scripts, approved=False)
+    project, first = await dev_run(release_deps, user, chat_id)
+    await runner.run_system(release_deps, first)
+    scripts_for(scripts, approved=False)
+    _, second = await dev_run(release_deps, user, chat_id, project=project)
+    await runner.run_system(release_deps, second)
+    pushes = [c[2] for c in release_deps.workbench.calls if c[0] == "push"]
+    assert pushes == [f"nexus/{first}", f"nexus/{first}"]
+    assert f"(on branch nexus/{first}, not merged" in await final_message(release_deps, chat_id)
+
+    scripts_for(scripts)
+    _, third = await dev_run(release_deps, user, chat_id, project=project)
+    await runner.run_system(release_deps, third)
+    scripts_for(scripts)
+    _, fourth = await dev_run(release_deps, user, chat_id, project=project)
+    await runner.run_system(release_deps, fourth)
+    pushes = [c[2] for c in release_deps.workbench.calls if c[0] == "push"]
+    assert pushes[2:] == [f"nexus/{first}", f"nexus/{fourth}"]

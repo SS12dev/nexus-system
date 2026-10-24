@@ -22,7 +22,7 @@ from nexus_common.apps import set_visibility
 from nexus_common.deployer import DeployerError
 from nexus_common.events import Event, publish
 from nexus_common.library import document_text
-from nexus_common.links import LinkError
+from nexus_common.links import LinkError, is_placeholder
 from nexus_common.memory import mark_profile_stale, memory_payload, record
 from nexus_common.models import (
     Episode,
@@ -305,8 +305,15 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         page that is a key source. The library keeps the address and a preview, and the link
         is shown on your reply. Saving the same address again updates its title and note. Give
         a short title and, in note, one sentence on what it is and why it matters. Save what
-        the user will want to find again, not every search result."""
+        the user will want to find again, not every search result. Only save an address you
+        saw in a tool result or the user's message, never a guess or a placeholder for
+        something not made yet: a team's repo and live app are saved on their own."""
         await note_call("save_link", url=url)
+        if is_placeholder(url):
+            return (
+                f"Not saved: {url} is a placeholder, not a real address. Save a link only once "
+                "the thing it points to exists; a team's repo and live app are saved on their own."
+            )
         try:
             link = await keep_link(
                 deps,

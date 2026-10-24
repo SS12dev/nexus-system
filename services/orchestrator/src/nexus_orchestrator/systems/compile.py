@@ -132,6 +132,16 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                         f'<output from="{x}">\n{prior[x]}\n</output>' for x in ids[:i] if x in prior
                     )
                     text = task + (f"\n\nWork so far:\n{handed}" if handed else "")
+                    if handed and i == len(ids) - 1:
+                        # Only the last stage's reply reaches the chat, so it must carry every
+                        # part the user asked for, not just its own (the packing list alone).
+                        text += (
+                            "\n\nYou are the last stage: your reply is the only thing the user "
+                            "reads. Give the complete answer: every part the user asked for, "
+                            "including the earlier stages' results above (tidied, not "
+                            "summarised away), then your own part. Don't refer to anything "
+                            '"above": the user never sees the earlier stages.'
+                        )
                     st = await run_agent(rc, graphs, me.id, [HumanMessage(text)])
                     out = final_text(st)
                     update = {"outputs": {me.id: out}}

@@ -155,7 +155,11 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
 REQUEST = re.compile(
     r"^(the user )?(asked|asks|requested|requests|agreed|approved|is asking|is looking for help|"
     r"needs help|wants (help|research|advice|assistance|a recommendation|recommendations|"
-    r"suggestions|to know|a team|an agent|jarvis|the assistant)|would like (help|to know))\b",
+    r"suggestions|to know|a team|an agent|jarvis|the assistant)|would like (help|to know))\b"
+    # "Wants the habit-tracker app fixed and deployed", "They want the assistant to deploy it".
+    r"|^(the user |they |he |she )?wants? (the|this|that|their|his|her) .{0,120}\b(fixed|built|"
+    r"deployed|done|made|created|written|finished|implemented|to (implement|fix|build|deploy|"
+    r"make|create|write|finish|do))\b",
     re.I,
 )
 

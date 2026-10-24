@@ -49,8 +49,10 @@ TIER_PRICE: dict[str, tuple[float, float]] = {
 # Assumed per model call: prompt (instructions, history, tool results) and reply.
 EST_INPUT_TOKENS = 6000
 EST_OUTPUT_TOKENS = 700
-# Fraction of an agent's max steps it is assumed to use.
+# Fraction of an agent's max steps it is assumed to use. Dev agents get a generous 40 steps
+# but use far fewer: real one-round builds cost $0.13 to $0.32 against an estimate of $0.81.
 EST_STEP_SHARE = 0.5
+EST_DEV_STEP_SHARE = 0.25
 
 AGENT_ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 # A workbench project id (the workbench's own rule).
@@ -127,7 +129,9 @@ class AgentSystemSpec(BaseModel):
             )
             if ids != list(DEV_IDS):
                 data["agents"] = dev_agents()
-            data["max_rounds"] = min(int(data.get("max_rounds") or MAX_ROUNDS), MAX_ROUNDS)
+            # Always the full review loop: a team that stops after one round to look cheaper
+            # leaves the reviewer's fixes undone, so nothing is ever approved or deployed.
+            data["max_rounds"] = MAX_ROUNDS
         return data
 
     @field_validator("project")
@@ -217,8 +221,9 @@ class AgentSystemSpec(BaseModel):
     def estimate_usd(self, default_steps: int, map_items: int) -> float:
         """A rough upper-middle estimate of what a run costs, for the budget check."""
         total = 0.0
+        share = EST_DEV_STEP_SHARE if self.topology == "dev_project" else EST_STEP_SHARE
         for i, x in enumerate(self.agents):
-            steps = max(1.0, (x.max_steps or default_steps) * EST_STEP_SHARE)
+            steps = max(1.0, (x.max_steps or default_steps) * share)
             # How many times this agent runs: once, once per item, or once per round.
             copies = 1
             if self.topology == "parallel_map_reduce" and i == 1:

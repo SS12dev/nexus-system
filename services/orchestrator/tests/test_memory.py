@@ -143,6 +143,12 @@ def test_request_filter_keeps_real_preferences():
     assert not memory.is_request("Wants concise answers with tables")
     assert not memory.is_request("Wants to publish a paper on LLM reasoning this year")
     assert not memory.is_request("Prefers British spelling")
+    # Task requests worded as wants, seen in real chats.
+    assert memory.is_request(
+        "The user wants the login-free habit-tracker web app fixed and then deployed ASAP."
+    )
+    assert memory.is_request("They want the assistant to implement the changes and deploy it.")
+    assert not memory.is_request("Wants to learn Japanese")
 
 
 async def test_repeated_preference_reinforces_instead_of_duplicating(

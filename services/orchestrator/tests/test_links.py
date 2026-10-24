@@ -128,6 +128,12 @@ async def test_save_link_tool_keeps_one_row_per_address(deps, owner, monkeypatch
     assert "Links:" in listing and "https://github.com/acme/game" in listing
     bad = await tools["save_link"].ainvoke({"url": "javascript:alert(1)"})
     assert bad.startswith("Not saved")
+    # A stand-in for something that doesn't exist yet is never saved.
+    for url in ("https://example.com", "https://habit-tracker.placeholder.app", "app.invalid"):
+        out = await tools["save_link"].ainvoke({"url": url, "title": "placeholder"})
+        assert out.startswith("Not saved") and "placeholder" in out, url
+    async with deps.sessionmaker() as db:
+        assert len((await db.scalars(select(Link).where(Link.user_id == user.id))).all()) == 1
 
 
 async def test_assistant_decides_new_version_or_separate_file(deps, owner, storage):

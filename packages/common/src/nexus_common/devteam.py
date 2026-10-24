@@ -91,7 +91,9 @@ def dev_agents() -> list[dict]:
                 "and write its output to dist/ before you stop; it is deployed from there. Call "
                 "the back end on the same host under /api (fetch('/api/...')). Commit with "
                 "ws_commit after each piece that works. When you are given review fixes, make "
-                "exactly those. Reply with what you built and how to run it."
+                "exactly those. Leave vitest.config.ts, "
+                "playwright.config.ts and preview.config.ts alone: they are Nexus's test setup. "
+                "Reply with what you built and how to run it."
             ),
         },
         {
@@ -119,14 +121,20 @@ def dev_agents() -> list[dict]:
             "tools": list(_BUILD_TOOLS),
             "max_steps": MAX_STEPS,
             "instructions": (
-                "Test the app against PLAN.md's test plan and acceptance criteria. Write unit "
-                "tests for the logic (Vitest for TypeScript, pytest for Python) and one "
-                "Playwright smoke test in tests/e2e/: add @playwright/test at the version in "
-                "$PLAYWRIGHT_VERSION, build or start the app and serve it in the same ws_run "
-                "command as the test, and check the page loads, the main interaction works and "
-                "nothing is logged to the console as an error. Run everything. Fix test code, "
-                "not app code: report app bugs instead. Write TEST_REPORT.md with what ran and "
-                "what failed, commit, then call submit_tests with the counts."
+                "Test the app against PLAN.md's test plan and acceptance criteria. The test "
+                "runners are already set up in the front-end folder (vitest.config.ts, "
+                "playwright.config.ts, preview.config.ts, npm test and npm run test:e2e) and, for "
+                "a FastAPI back end, api/pytest.ini with pytest installed: never edit, replace "
+                "or reinstall them, and don't add other test runners or Playwright versions. "
+                "Write unit tests for the logic next to it as src/**/*.test.ts(x) (Vitest) and "
+                "api/tests/test_*.py (pytest, using fastapi.testclient, importing from main), "
+                "and one Playwright smoke test in the front-end folder's tests/e2e/smoke.spec.ts "
+                "(import { test, expect } from '@playwright/test'; page.goto('/')) that checks "
+                "the page loads, the main interaction works and nothing is logged to the console "
+                "as an error; the config builds and serves the app itself. Run npm test, npm run "
+                "test:e2e and uv run pytest. Fix test code, not app code: report app bugs "
+                "instead. Write TEST_REPORT.md with what ran and what failed, commit, then call "
+                "submit_tests with the counts. Nexus runs every suite again itself afterwards."
             ),
         },
         {
@@ -138,10 +146,14 @@ def dev_agents() -> list[dict]:
             "max_steps": MAX_STEPS,
             "instructions": (
                 "Review the work: read PLAN.md and TEST_REPORT.md, and the changes with ws_diff "
-                "from the commit you are given. Approve when every acceptance criterion is met "
-                "and the tests pass. Otherwise list specific fixes, numbered, each naming the "
-                "file and who fixes it (frontend or backend); leave out style preferences. "
-                "Call submit_review."
+                "from the commit you are given. The test counts you are given were measured by "
+                "Nexus running every suite itself; trust them over TEST_REPORT.md. Approve when "
+                "every acceptance criterion is met and the tests pass. Otherwise list specific "
+                "fixes, numbered, each naming the file and who fixes it (frontend, backend or "
+                "tester for test code); leave out style preferences and nice-to-haves, and "
+                "never ask for extra summary or report files beyond README.md. The house test "
+                "configs (vitest.config.ts, playwright.config.ts, preview.config.ts, pytest.ini) "
+                "are fixed: don't ask for changes to them. Call submit_review."
             ),
         },
     ]

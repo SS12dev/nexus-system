@@ -48,6 +48,42 @@ If the task was one-off or nothing reusable was learned, reply {"skip": true}.
 Reply with JSON only: {"name": str, "description": str, "body": str} or {"skip": true}."""
 
 
+async def worth_learning(db, run: AgentRun, system: AgentSystem | None) -> bool:
+    """One draft at a time per chat, and a software run only once its work was approved: a
+    run that ends with open review points hasn't found a way worth repeating, and drafting
+    after every follow-up filled the Skills page with near-copies."""
+    if system is None:
+        return False
+    if system.topology == "dev_project":
+        ready = await db.scalar(
+            select(RunEvent)
+            .where(RunEvent.run_id == run.id, RunEvent.type == "project.ready")
+            .order_by(RunEvent.created_at.desc())
+            .limit(1)
+        )
+        if ready is None or not (ready.data or {}).get("approved"):
+            return False
+    if run.chat_id is not None:
+        others = (
+            await db.scalars(
+                select(AgentRun.id).where(AgentRun.chat_id == run.chat_id, AgentRun.id != run.id)
+            )
+        ).all()
+        if others:
+            pending = await db.scalar(
+                select(Skill.id)
+                .where(
+                    Skill.owner_id == run.user_id,
+                    Skill.status == SkillStatus.draft,
+                    Skill.source.in_([f"run:{x}" for x in others]),
+                )
+                .limit(1)
+            )
+            if pending is not None:
+                return False
+    return True
+
+
 async def draft_skill(deps, run_id: uuid.UUID) -> Skill | None:
     async with deps.sessionmaker() as db:
         run = await db.get(AgentRun, run_id)
@@ -59,6 +95,8 @@ async def draft_skill(deps, run_id: uuid.UUID) -> Skill | None:
         if await db.scalar(select(Skill.id).where(Skill.source == f"run:{run_id}")):
             return None
         system = await db.get(AgentSystem, run.system_id)
+        if not await worth_learning(db, run, system):
+            return None
         events = (
             await db.scalars(
                 select(RunEvent)

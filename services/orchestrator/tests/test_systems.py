@@ -178,6 +178,45 @@ async def test_pipeline_hands_output_forward(sdeps, owner, scripts, seen):
     run, _ = await load(sdeps, run_id)
     assert run.status == RunStatus.completed and run.output == "Report: blue sky."
     assert "Fact: the sky is blue." in human_texts(seen["writer"][0])
+    # Only the last stage reaches the chat, so it is told to carry every part.
+    assert "You are the last stage" in human_texts(seen["writer"][0])
+    assert "You are the last stage" not in human_texts(seen["researcher"][0])
+
+
+async def test_a_second_draft_waits_for_the_first_in_the_same_chat(sdeps, owner, scripts):
+    draft = json.dumps({"name": "notes", "description": "Take notes", "body": "1. Write."})
+    scripts["solo"] = ["Done.", "Done again."]
+    _, first = await make_run(sdeps, owner, "single", [agent("solo")])
+    await runner.run_system(sdeps, first)
+    scripts["nexus.draft_skill"] = [draft, draft]
+    assert await draft_skill(sdeps, first) is not None
+    _, second = await make_run(sdeps, owner, "single", [agent("solo")])
+    await runner.run_system(sdeps, second)
+    # The first draft is still waiting for review, so the follow-up doesn't add another.
+    assert await draft_skill(sdeps, second) is None
+
+
+def test_result_lists_each_file_once_and_rounds_tiny_costs():
+    from datetime import timedelta
+
+    from nexus_common.models import utcnow
+    from nexus_orchestrator.systems.runner import latest_versions, result_text
+
+    now = utcnow()
+    files = [
+        File(name="costs.md", version=1, created_at=now),
+        File(name="plan.md", version=1, created_at=now + timedelta(seconds=1)),
+        File(name="costs.md", version=2, created_at=now + timedelta(seconds=2)),
+    ]
+    kept = latest_versions(files)
+    assert [(f.name, f.version) for f in kept] == [("plan.md", 1), ("costs.md", 2)]
+    system = AgentSystem(name="t", topology="single", lifetime=SystemLifetime.persistent)
+    run = AgentRun(
+        status=RunStatus.completed, output="ok", cost_usd=Decimal("0.0021"),
+        budget_usd=Decimal("0.25"),
+    )  # fmt: skip
+    text = result_text(system, run, kept)
+    assert "Run cost under a cent" in text and "`plan.md`, `costs.md`" in text
 
 
 async def test_supervisor_delegates_then_finishes(sdeps, owner, scripts, seen):
