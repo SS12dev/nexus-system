@@ -11,6 +11,7 @@ import { LINK_KIND_LABEL, linkSource, shortUrl } from "../lib/links";
 import { hasRole, type FileItem, type LinkItem, type Project, type SearchHit } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
+import { confirmAction } from "../components/Feedback";
 
 /** Links shown before "Show all", so files stay near the top of the page. */
 const LINKS_SHOWN = 5;
@@ -96,8 +97,14 @@ export function LibraryPage() {
     if (name && name !== f.name) run(async () => upsertFile(await api.renameFile(f.id, name)));
   };
 
-  const remove = (f: FileItem) => {
-    if (!confirm(`Delete ${f.name}? ${assistant} will no longer be able to read it.`)) return;
+  const remove = async (f: FileItem) => {
+    const ok = await confirmAction({
+      title: `Delete ${f.name}?`,
+      body: `${assistant} will no longer be able to read it.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     run(async () => {
       await api.deleteFile(f.id);
       setIds((xs) => xs.filter((x) => x !== f.id));
@@ -116,8 +123,14 @@ export function LibraryPage() {
     });
   };
 
-  const removeLink = (l: LinkItem) => {
-    if (!confirm(`Remove the link to ${l.title}? What it points to stays where it is.`)) return;
+  const removeLink = async (l: LinkItem) => {
+    const ok = await confirmAction({
+      title: `Remove the link to ${l.title}?`,
+      body: "What it points to stays where it is.",
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
     run(async () => {
       await api.deleteLink(l.id);
       setLinks((xs) => xs.filter((x) => x.id !== l.id));

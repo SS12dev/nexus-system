@@ -9,6 +9,7 @@ import { formatDate } from "../lib/format";
 import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
+import { confirmAction } from "../components/Feedback";
 
 const KINDS: MemoryKind[] = ["preference", "fact", "goal", "instruction"];
 const KIND_STYLE: Record<MemoryKind, string> = {
@@ -93,8 +94,14 @@ export function MemoryPage() {
 
   const replace = (m: Memory) => setMemories((ms) => ms.map((x) => (x.id === m.id ? m : x)));
 
-  const remove = (m: Memory) => {
-    if (!confirm(`Forget "${m.content}"?`)) return;
+  const remove = async (m: Memory) => {
+    const ok = await confirmAction({
+      title: "Forget this memory?",
+      body: `"${m.content}"`,
+      confirmLabel: "Forget",
+      danger: true,
+    });
+    if (!ok) return;
     run(async () => {
       await api.deleteMemory(m.id, true);
       setMemories((ms) => ms.filter((x) => x.id !== m.id));
@@ -102,8 +109,14 @@ export function MemoryPage() {
     });
   };
 
-  const forgetAll = () => {
-    if (!confirm("Delete every memory, past-chat summary and your profile? This can't be undone.")) return;
+  const forgetAll = async () => {
+    const ok = await confirmAction({
+      title: "Forget everything?",
+      body: "Every memory, past-chat summary and your profile are deleted. This can't be undone.",
+      confirmLabel: "Forget everything",
+      danger: true,
+    });
+    if (!ok) return;
     run(async () => {
       await api.forgetEverything();
       await load();

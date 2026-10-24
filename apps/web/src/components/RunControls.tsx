@@ -2,6 +2,7 @@ import { Pause, Play, Square } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import type { Run } from "../lib/types";
+import { confirmAction } from "./Feedback";
 
 export const RUN_LABEL: Record<Run["status"], string> = {
   queued: "Starting",
@@ -35,7 +36,16 @@ export function money(v: number | null | undefined) {
 export function RunControls({ run, onError }: { run: Run; onError?: (msg: string) => void }) {
   const [busy, setBusy] = useState(false);
   const act = async (action: "pause" | "resume" | "cancel") => {
-    if (action === "cancel" && !confirm("Stop this run? Work done so far is kept.")) return;
+    if (
+      action === "cancel" &&
+      !(await confirmAction({
+        title: "Stop this run?",
+        body: "Work done so far is kept.",
+        confirmLabel: "Stop run",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     try {
       await api.controlRun(run.id, action);

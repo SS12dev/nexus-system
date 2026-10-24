@@ -32,6 +32,8 @@ EventType = Literal[
     "approval.resolved",
     "artifact.created",
     "skill.updated",
+    # Sent to owners and admins: how many access requests are waiting.
+    "access.pending",
 ]
 
 AssistantState = Literal["idle", "thinking", "speaking"]

@@ -1,14 +1,18 @@
-"""One log format for every Python service, and the ids that tie a request to its work.
+"""Logging for every Nexus service: plain text for a terminal, or one JSON object per line for a
+log collector (LOG_FORMAT=json), and the ids that tie a request to its work.
 
-Each line is a JSON object (LOG_FORMAT=text for a human-readable line instead) with the time,
-level, service, logger and message, plus whatever is bound to the current request or job:
-request_id, user_id, chat_id, run_id, job, job_id and trace_id (the Langfuse trace). The API
-gives each request an id, hands it to the jobs the request queues, and the workers bind it while
-they run them, so one id finds every line, in every container, that one click caused:
+Each line carries whatever is bound to the current request or job: request_id, user_id,
+chat_id, run_id, job, job_id and trace_id (the Langfuse trace). The API gives each request an
+id (returned to the browser in X-Request-ID), hands it to the jobs the request queues, and the
+workers bind it while they run them, so one id finds every line, in every container, that one
+click caused:
 
-    docker compose logs api orchestrator | grep 4f1c2a9e0b7d4e21
+    docker compose logs api orchestrator | grep 4f1c2a9e0b7d4e21a8c3f06e9d5b7a12
 
-The fields live in a context variable holding a dict. A request or job starts a fresh dict with
+Pass structured fields with `extra`, e.g. `log.info("access.requested", extra={"email": e})`;
+JSON output keeps them as keys and text output appends them as key=value.
+
+The ids live in a context variable holding a dict. A request or job starts a fresh dict with
 `scope()`; `bind()` adds to it in place, so a field bound deep inside a dependency is still there
 when the middleware writes the access line.
 """
@@ -17,7 +21,6 @@ import functools
 import inspect
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -29,17 +32,24 @@ from datetime import UTC, datetime
 from typing import Any
 
 from nexus_common import metrics
+from nexus_common.settings import Settings
 
 _fields: ContextVar[dict[str, Any] | None] = ContextVar("nexus_log_fields", default=None)
+# The current request's id, also kept on its own for code that only needs that.
+request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 # Ids callers may pass in X-Request-ID: short and plain, so nothing odd lands in the logs.
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
-# Attributes every LogRecord has; anything else on a record came from `extra=`.
-_RECORD_ATTRS = set(vars(logging.makeLogRecord({}))) | {"message", "asctime", "taskName"}
+# Attributes every LogRecord has; anything else on a record came from `extra`.
+_STANDARD = set(vars(logging.makeLogRecord({}))) | {"message", "asctime", "taskName"}
+
+
+def _extras(record: logging.LogRecord) -> dict:
+    return {k: v for k, v in vars(record).items() if k not in _STANDARD and not k.startswith("_")}
 
 
 def new_request_id() -> str:
-    return uuid.uuid4().hex[:16]
+    return uuid.uuid4().hex
 
 
 def clean_request_id(value: str | None) -> str | None:
@@ -48,11 +58,14 @@ def clean_request_id(value: str | None) -> str | None:
 
 def current() -> dict[str, Any]:
     """The fields bound now (a copy)."""
-    return dict(_fields.get() or {})
+    out = dict(_fields.get() or {})
+    if "request_id" not in out and (rid := request_id.get()):
+        out["request_id"] = rid
+    return out
 
 
 def get(name: str) -> Any:
-    return (_fields.get() or {}).get(name)
+    return current().get(name)
 
 
 def bind(**fields: Any) -> None:
@@ -68,10 +81,13 @@ def bind(**fields: Any) -> None:
 @contextmanager
 def scope(**fields: Any) -> Iterator[dict[str, Any]]:
     """A fresh log context for one request or job, dropped when it ends."""
-    token = _fields.set({k: str(v) for k, v in fields.items() if v is not None})
+    clean = {k: str(v) for k, v in fields.items() if v is not None}
+    token = _fields.set(clean)
+    rid_token = request_id.set(clean.get("request_id"))
     try:
-        yield _fields.get()  # type: ignore[misc]
+        yield clean
     finally:
+        request_id.reset(rid_token)
         _fields.reset(token)
 
 
@@ -83,50 +99,56 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         out: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
-            "level": record.levelname.lower(),
+            "level": record.levelname,
             "service": self.service,
             "logger": record.name,
             "msg": record.getMessage(),
         }
-        out.update(_fields.get() or {})
-        for key, value in vars(record).items():
-            if key not in _RECORD_ATTRS and not key.startswith("_"):
-                out[key] = value
+        out.update(current())
+        out.update(_extras(record))
         if record.exc_info:
             out["exc"] = self.formatException(record.exc_info)
-        return json.dumps(out, default=str, ensure_ascii=False)
+        return json.dumps(out, default=str)
 
 
 class TextFormatter(logging.Formatter):
-    """The old line, with the bound ids appended as key=value."""
+    """A plain line with the bound ids and `extra` fields appended as key=value."""
 
     def __init__(self):
         super().__init__("%(asctime)s %(levelname)s %(name)s %(message)s")
 
     def format(self, record: logging.LogRecord) -> str:
         line = super().format(record)
-        extra = {k: v for k, v in vars(record).items() if k not in _RECORD_ATTRS}
-        fields = {**(_fields.get() or {}), **extra}
+        fields = {**current(), **_extras(record)}
         if not fields:
             return line
         tail = " ".join(f"{k}={v}" for k, v in fields.items())
         first, sep, rest = line.partition("\n")
-        return f"{first} [{tail}]{sep}{rest}"
+        return f"{first} {tail}{sep}{rest}"
 
 
-def configure_logging(service: str, level: str | None = None, fmt: str | None = None) -> None:
-    """Send every logger, uvicorn's and arq's included, through one stdout handler."""
-    level = (level or os.environ.get("LOG_LEVEL") or "INFO").upper()
-    fmt = (fmt or os.environ.get("LOG_FORMAT") or "json").lower()
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter(service) if fmt == "json" else TextFormatter())
+_sinks: dict[str, logging.Handler | None] = {}
+
+
+def configure_logging(settings: Settings, service: str) -> None:
+    """Install Nexus's handlers on the root logger, replacing ones installed earlier. Other
+    handlers (pytest's, for instance) are left alone. uvicorn's and arq's loggers go through
+    them too."""
     root = logging.getLogger()
-    root.handlers[:] = [handler]
-    # Errors also go to the Admin page's recent-errors list (metrics.py).
-    if sink := metrics.error_sink(service):
+    for h in [h for h in root.handlers if getattr(h, "_nexus", False)]:
+        root.removeHandler(h)
+    handler = logging.StreamHandler(sys.stderr)
+    handler._nexus = True  # type: ignore[attr-defined]
+    json_logs = settings.log_format == "json"
+    handler.setFormatter(JsonFormatter(service) if json_logs else TextFormatter())
+    root.addHandler(handler)
+    # Errors also go to the Admin page's recent-errors list (metrics.py); one sink per process.
+    if service not in _sinks:
+        _sinks[service] = metrics.error_sink(service)
+    if sink := _sinks[service]:
+        sink._nexus = True  # type: ignore[attr-defined]
         root.addHandler(sink)
-    root.setLevel(level)
-    # uvicorn and arq install their own handlers; route them through ours instead.
+    root.setLevel(settings.log_level.upper())
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "arq"):
         lg = logging.getLogger(name)
         lg.handlers[:] = []
@@ -152,22 +174,28 @@ def _ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+RESERVED = {"request_id", "job", "job_id"}
+
+
 def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
-    """Wrap an arq job function: it takes the `request_id` its enqueuer passed (see
+    """Wrap an arq job function: it takes the `nexus_request_id` its enqueuer passed (see
     `with_request_id`) and runs in a log scope with that id, its job name and its *_id args."""
     sig = inspect.signature(fn)
 
     @functools.wraps(fn)
-    async def wrapper(ctx: dict, *args: Any, request_id: str | None = None, **kwargs: Any) -> Any:
+    async def wrapper(
+        ctx: dict, *args: Any, nexus_request_id: str | None = None, **kwargs: Any
+    ) -> Any:
         bound = sig.bind_partial(ctx, *args, **kwargs).arguments
-        ids = {k: v for k, v in bound.items() if k.endswith("_id")}
+        # A job argument named like a log field (notify_access's request_id) is not one of them.
+        ids = {k: v for k, v in bound.items() if k.endswith("_id") and k not in RESERVED}
         wait_ms = _queue_ms(ctx)
         started = time.monotonic()
         failed = True
         with scope(
             job=fn.__name__,
             job_id=ctx.get("job_id"),
-            request_id=clean_request_id(request_id),
+            request_id=clean_request_id(nexus_request_id),
             **ids,
         ):
             try:
@@ -201,9 +229,9 @@ def with_request_id(enqueue: Callable[..., Awaitable[Any]]) -> Callable[..., Awa
     function on the other end must be wrapped in `traced_job`, which accepts it."""
 
     async def wrapped(function: str, *args: Any, **kwargs: Any) -> Any:
-        request_id = get("request_id")
-        if request_id and "request_id" not in kwargs:
-            kwargs["request_id"] = request_id
+        rid = get("request_id")
+        if rid and "nexus_request_id" not in kwargs:
+            kwargs["nexus_request_id"] = rid
         return await enqueue(function, *args, **kwargs)
 
     return wrapped

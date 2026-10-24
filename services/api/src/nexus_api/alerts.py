@@ -14,18 +14,16 @@ import asyncio
 import contextlib
 import json
 import logging
-import smtplib
 import time
 from dataclasses import dataclass
 from datetime import timedelta
-from email.message import EmailMessage
 
 from fastapi import FastAPI
 from redis.exceptions import RedisError
 from sqlalchemy import select
 
 from nexus_api.ratelimit import metrics_key
-from nexus_common import metrics
+from nexus_common import mail, metrics
 from nexus_common.metrics import ALERTS_HISTORY_KEY, ALERTS_KEY
 from nexus_common.models import (
     Backup,
@@ -166,26 +164,13 @@ async def notify(app: FastAPI, raised: list[Problem], resolved: list[dict]) -> N
     lines = [f"Problem: {p.title}. {p.detail}" for p in raised]
     lines += [f"Resolved: {a['title']}." for a in resolved]
     subject = f"Nexus: {raised[0].title}" if raised else f"Nexus: resolved, {resolved[0]['title']}"
-    msg = EmailMessage()
-    msg["From"] = settings.smtp_from or settings.smtp_username
-    msg["To"] = ", ".join(to)
-    msg["Subject"] = subject
-    msg.set_content(
+    body = (
         "\n".join(lines)
         + f"\n\nDetails on the Admin page: {settings.nexus_url.rstrip('/')}/admin\n"
     )
-
-    def send() -> None:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-            if settings.smtp_starttls:
-                smtp.starttls()
-            if settings.smtp_username:
-                smtp.login(settings.smtp_username, settings.smtp_password)
-            smtp.send_message(msg)
-
     try:
-        await asyncio.to_thread(send)
-    except (smtplib.SMTPException, OSError) as exc:
+        await mail.send(settings, mail.message(settings, to, subject, body))
+    except mail.MailError as exc:
         log.error("Could not email the alert: %s", exc)
 
 

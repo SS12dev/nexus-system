@@ -36,7 +36,7 @@ async def client():
 async def test_each_response_carries_a_request_id_bound_while_it_ran(client):
     r = await client.get("/api/ok/1")
     rid = r.headers["x-request-id"]
-    assert len(rid) == 16
+    assert len(rid) == 32
     assert r.json()["request_id"] == rid
     assert (await client.get("/api/ok/1")).headers["x-request-id"] != rid
 
@@ -88,7 +88,7 @@ async def test_jobs_get_the_request_id_their_enqueuer_had():
 
     with logs.scope(request_id="req12345"):
         await logs.with_request_id(enqueue)("run_turn", "c", "m", _job_id="turn:m")
-    assert queued["request_id"] == "req12345"
+    assert queued["nexus_request_id"] == "req12345"
 
     seen = {}
 
@@ -96,9 +96,21 @@ async def test_jobs_get_the_request_id_their_enqueuer_had():
     async def run_turn(ctx, chat_id: str, assistant_message_id: str):
         seen.update(logs.current())
 
-    await run_turn({"job_id": "turn:m"}, "c", "m", request_id=queued["request_id"])
+    await run_turn({"job_id": "turn:m"}, "c", "m", nexus_request_id=queued["nexus_request_id"])
     assert seen["request_id"] == "req12345"
     assert seen["chat_id"] == "c"
     assert seen["assistant_message_id"] == "m"
     assert seen["job"] == "run_turn"
     assert run_turn.__qualname__.endswith("run_turn")
+
+
+async def test_a_job_argument_called_request_id_is_not_taken_for_the_log_id():
+    seen = {}
+
+    @logs.traced_job
+    async def notify_access(ctx, kind: str, request_id: str):
+        seen.update(logs.current(), arg=request_id)
+
+    await notify_access({}, "requested", "access-1", nexus_request_id="req12345")
+    assert seen["arg"] == "access-1"
+    assert seen["request_id"] == "req12345"

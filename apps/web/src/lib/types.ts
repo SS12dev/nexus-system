@@ -22,6 +22,50 @@ export interface User {
   budget: Budget;
   /** Set while an admin has maintenance mode on (only on /api/me). */
   notice?: string | null;
+  /** Owners and admins: access requests waiting for a decision (only on /api/me). */
+  pending_access?: number | null;
+}
+
+export interface AuthConfig {
+  oidc_enabled: boolean;
+  dev_login_enabled: boolean;
+  /** Someone refused for lack of an invite may ask for one. */
+  access_requests: boolean;
+}
+
+/** Where someone refused at sign-in stands, for the address they just verified. */
+export interface AccessState {
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  status: "can_request" | "pending" | "approved" | "denied";
+  requested_at: string | null;
+  retry_after: string | null;
+  email_on_approval: boolean;
+}
+
+export interface AccessRequest {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  note: string | null;
+  status: "pending" | "approved" | "denied";
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+  decided_by_name: string | null;
+  /** Earlier requests from the same address. */
+  previous: number;
+}
+
+export interface AccessRequestList {
+  requests: AccessRequest[];
+  pending: number;
+  email_notifications: boolean;
+  enabled: boolean;
 }
 
 export interface GoogleAccess {
@@ -478,6 +522,7 @@ export type ServerEvent =
   | { type: "link.updated"; chat_id?: null; data: { link: LinkItem } }
   | { type: "link.deleted"; chat_id?: null; data: { id: string } }
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
+  | { type: "access.pending"; chat_id?: null; data: { count: number } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };

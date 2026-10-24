@@ -128,7 +128,16 @@ sign-in, since Google does not accept private IP addresses as callbacks.
   friends as members, or admins if they should help manage people.
 - **Invites:** with `SIGNUP_POLICY=invite_only` (the default), an admin invites an email on the
   People page and that person joins the first time they sign in with it. `open` lets anyone join
-  as a member.
+  as a member. Unused invites can be removed from the People page.
+- **Access requests:** someone without an invite who signs in with Google is offered "Request
+  access" instead of a dead end, with an optional note. The address is always the one Google
+  just verified for that browser (the page never takes a typed one), so nobody can ask on
+  someone else's behalf. Owners and admins see requests at the top of the People page and as a
+  live badge on People in the sidebar; with SMTP set up they're also emailed (all active owners
+  and admins, or `ACCESS_REQUEST_NOTIFY`). Approving picks the role and sends the person an
+  email saying they're in; denying is silent, and the same address can ask again after
+  `ACCESS_REQUEST_COOLDOWN_DAYS`. Everything is in the audit log (`access.requested`,
+  `access.approved`, `access.denied`). `ACCESS_REQUESTS_ENABLED=false` turns it off.
 - **Private data:** every chat belongs to one user. Other users, admins included, get a 404.
 - **Budgets:** each user gets their own LiteLLM virtual key the first time they chat, capped at
   `DEFAULT_BUDGET_USD` (owner: `OWNER_BUDGET_USD`) per 30 days. Admins change budgets on the
@@ -382,8 +391,8 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   upgrading Nexus.
 - **Usage:** turns, tokens, agent runs and their cost, and files per person and per day, over 7,
   30 or 90 days.
-- **Audit log:** sign-ins (with IP), invites, role, budget and grant changes, approvals,
-  sign-outs, backups and maintenance, filterable by kind.
+- **Audit log:** sign-ins (with IP), invites, access requests and their decisions, role, budget
+  and grant changes, approvals, sign-outs, backups and maintenance, filterable by kind.
 - **Backups:** the list, and **Back up now**.
 
 On the People page an admin can also **sign someone out** on every device. Everyone can see and
@@ -391,16 +400,15 @@ sign out their own signed-in devices on the Connections page.
 
 ### Logs and request ids
 
-The API, orchestrator and doc-worker write one JSON object per line (`LOG_FORMAT=text` for the
-old plain line) with `service`, `level`, `logger`, `msg` and whatever is known at the time:
+Every line from the API, orchestrator and doc-worker carries whatever is known at the time:
 `request_id`, `user_id`, `chat_id`, `run_id`, `job`, `job_id` and `trace_id`, the turn's or run's
-Langfuse trace. Every API response carries `X-Request-ID`; the jobs a request queues carry the
+Langfuse trace (as `key=value` at the end of the line, or as keys with `LOG_FORMAT=json`). Every API response carries `X-Request-ID`; the jobs a request queues carry the
 same id, and so does each model call's metadata in Langfuse. An unexpected error answers
 `{"detail": ..., "request_id": ...}`, so one id finds every line it caused:
 
 ```sh
-./scripts/compose.sh logs api orchestrator doc-worker | grep 4f1c2a9e0b7d4e21
-./scripts/compose.sh logs orchestrator | grep '"level": "error"'
+./scripts/compose.sh logs api orchestrator doc-worker | grep 4f1c2a9e0b7d4e21a8c3f06e9d5b7a12
+./scripts/compose.sh logs orchestrator | grep ' ERROR '
 ```
 
 The API writes one access line per request (`nexus.access`, with the route, status and time;
@@ -414,7 +422,7 @@ heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
 | Limit | Default | Setting |
 | --- | --- | --- |
 | API requests per IP | 600 a minute | `RATE_LIMIT_API_PER_MINUTE` |
-| Sign-in attempts per IP | 20 a minute | `RATE_LIMIT_AUTH_PER_MINUTE` |
+| Sign-in attempts and access requests per IP | 20 a minute | `RATE_LIMIT_AUTH_PER_MINUTE` |
 | Chat messages per person | 20 a minute | `RATE_LIMIT_MESSAGES_PER_MINUTE` |
 | Uploads per person | 30 a minute | `RATE_LIMIT_UPLOADS_PER_MINUTE` |
 | Agent runs started from the Agents page per person | 30 an hour | `RATE_LIMIT_RUNS_PER_HOUR` |
@@ -435,6 +443,12 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
   Postgres, LiteLLM, Langfuse and the MinIO console are bound to 127.0.0.1, and the API docs
   (`/docs`) aren't routed. Keep `DEV_LOGIN_ENABLED=false` and `SESSION_COOKIE_SECURE=true`
   on the public hostname.
+- **Logs and request ids:** every service logs to stderr; `LOG_FORMAT=json` makes that one JSON
+  object per line (`ts`, `level`, `service`, `logger`, `msg`, the ids above and any structured
+  fields) for a log collector. Each API response carries `X-Request-ID` (kept from the caller
+  when it sends a sane one); see [Logs and request ids](#logs-and-request-ids). 5xx responses
+  and requests slower than 5 s are logged as `http.error` / `http.slow`, refusals (rate limit,
+  cross-site) as `http.refused`, and access requests as `access.*` events.
 - **Cloudflare Access** (optional) can sit in front of `nexus.servhub.cc` for an extra
   Google or email check before anyone reaches the sign-in page; it needs no change here.
 

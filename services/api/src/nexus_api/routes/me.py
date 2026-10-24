@@ -18,8 +18,9 @@ from nexus_api.schemas import (
 )
 from nexus_api.sessions import hash_token, revoke_all
 from nexus_common import google
+from nexus_common.access import pending_count
 from nexus_common.litellm import active_key, get_budget
-from nexus_common.models import AuditLog, Session, utcnow
+from nexus_common.models import AuditLog, RoleName, Session, utcnow
 
 router = APIRouter(prefix="/api", tags=["me"])
 web_log = logging.getLogger("nexus.web")
@@ -38,6 +39,7 @@ async def me(
         assistant_name=user.assistant_name,
         budget=BudgetOut(max_usd=budget.max_usd, duration=budget.duration, spend_usd=spend),
         notice=await maintenance_notice(db),
+        pending_access=await pending_count(db) if user.has_role(RoleName.admin) else None,
     )
 
 

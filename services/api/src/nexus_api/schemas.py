@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 from nexus_common.models import (
     ASSISTANT_NAME_MAX,
+    AccessRequestStatus,
     FileStatus,
     MemoryKind,
     MessageRole,
@@ -45,6 +46,8 @@ class MeOut(UserOut):
     budget: BudgetOut
     # Set while an admin has maintenance mode on.
     notice: str | None = None
+    # Owners and admins: access requests waiting for a decision. None for everyone else.
+    pending_access: int | None = None
 
 
 def _assistant_name(value: str) -> str:
@@ -108,6 +111,78 @@ class GoogleAccessOut(BaseModel):
 class AuthConfigOut(BaseModel):
     oidc_enabled: bool
     dev_login_enabled: bool
+    # Someone refused for lack of an invite may ask for one.
+    access_requests: bool
+
+
+def _note(value: str | None) -> str | None:
+    # Keep line breaks; drop other control characters, which have no business in a note.
+    if value is None:
+        return None
+    cleaned = "".join(c for c in value if c in "\n\t" or c.isprintable()).strip()
+    return cleaned or None
+
+
+Note = Annotated[str | None, Field(default=None, max_length=500), AfterValidator(_note)]
+
+
+class AccessRequestIn(BaseModel):
+    note: Note = None
+
+
+class AccessStateOut(BaseModel):
+    """Where the person on the login page stands, for the address they just proved they own.
+
+    can_request: no invite and nothing pending. pending: waiting for an admin. approved: they
+    have an invite now, so signing in works. denied: refused recently; may ask again after
+    retry_after."""
+
+    email: str
+    name: str | None
+    avatar_url: str | None
+    status: Literal["can_request", "pending", "approved", "denied"]
+    requested_at: datetime | None = None
+    retry_after: datetime | None = None
+    # Whether they'll be emailed when approved (SMTP is set up).
+    email_on_approval: bool = False
+
+
+class AccessRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    name: str | None
+    avatar_url: str | None
+    note: str | None
+    status: AccessRequestStatus
+    ip: str | None
+    user_agent: str | None
+    created_at: datetime
+    updated_at: datetime
+    decided_at: datetime | None
+    decided_by_name: str | None = None
+    # Earlier requests from the same address, e.g. after a denial.
+    previous: int = 0
+
+
+class AccessRequestListOut(BaseModel):
+    requests: list[AccessRequestOut]
+    pending: int
+    # Whether new requests are also emailed (SMTP is set up); otherwise only shown here.
+    email_notifications: bool
+    # Whether the login page offers requests at all.
+    enabled: bool
+
+
+class ApproveIn(BaseModel):
+    role: RoleName = RoleName.member
+    budget_usd: Usd | None = None
+
+
+class ApproveOut(BaseModel):
+    request: AccessRequestOut
+    user: AdminUserOut
 
 
 class DevLoginIn(BaseModel):

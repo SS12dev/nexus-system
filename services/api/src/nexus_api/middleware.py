@@ -3,6 +3,7 @@ line, and turns an unhandled error into a 500 that names that id. GuardMiddlewar
 cross-site request checks, the per-IP and sign-in rate limits, security headers, and per-minute
 request counters for the Admin page.
 
+
 A plain ASGI middleware rather than BaseHTTPMiddleware, so streamed downloads pass straight
 through. WebSockets check their own Origin (see ws.py).
 """
@@ -24,7 +25,13 @@ log = logging.getLogger(__name__)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # Sign-in endpoints get their own, much lower, per-IP limit.
-AUTH_PATHS = ("/auth/login", "/auth/callback", "/auth/dev-login", "/auth/google/connect")
+AUTH_PATHS = (
+    "/auth/login",
+    "/auth/callback",
+    "/auth/dev-login",
+    "/auth/google/connect",
+    "/auth/access-request",
+)
 SECURITY_HEADERS = [
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
@@ -34,6 +41,8 @@ SECURITY_HEADERS = [
 HSTS = (b"strict-transport-security", b"max-age=31536000")
 HEALTH_PATHS = ("/healthz", "/readyz")
 access_log = logging.getLogger("nexus.access")
+# Requests slower than this are logged, to spot what needs work.
+SLOW_MS = 5000
 
 
 def same_origin(origin: str, host: str | None, settings: Settings) -> bool:
@@ -58,12 +67,16 @@ class GuardMiddleware:
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
         started = time.monotonic()
         redis = getattr(scope["app"].state, "redis", None)
-
+        # The request id and its X-Request-ID header come from RequestContextMiddleware, outside.
         refusal = self._cross_site(scope["method"], headers)
         if refusal is None and redis is not None and self.settings.rate_limit_enabled:
             refusal = await self._limited(redis, path, headers, scope.get("client"))
         if refusal is not None:
             code, detail, extra = refusal
+            log.warning(
+                "http.refused",
+                extra={"status": code, "method": scope["method"], "path": path, "why": detail},
+            )
             await self._reject(send, code, detail, extra)
             await self._count(redis, code, started)
             return
@@ -88,6 +101,10 @@ class GuardMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
+            ms = int((time.monotonic() - started) * 1000)
+            if status_code >= 500 or ms >= SLOW_MS:
+                fields = {"status": status_code, "method": scope["method"], "path": path, "ms": ms}
+                log.warning("http.error" if status_code >= 500 else "http.slow", extra=fields)
             await self._count(redis, status_code, started)
 
     def _cross_site(self, method: str, headers: dict[str, str]):

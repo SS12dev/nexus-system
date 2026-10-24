@@ -1,11 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
-import { Brain, Lock, Network, ShieldCheck, Users } from "lucide-react";
-import { api } from "../lib/api";
+import { Brain, CheckCircle2, Clock, Lock, Network, Send, ShieldCheck, Users, XCircle } from "lucide-react";
+import { api, ApiError } from "../lib/api";
 import { APP_NAME } from "../lib/assistant";
+import { formatAgo, formatDate } from "../lib/format";
+import type { AccessState, AuthConfig } from "../lib/types";
+
+const NOTE_MAX = 500;
 
 const ERRORS: Record<string, string> = {
   not_invited: "That Google account hasn't been invited yet. Ask the person who runs this Nexus for an invite, then sign in with the same address.",
+  // Requests are on, but the proof of the address expired (it lasts 30 minutes).
+  not_invited_retry: "That Google account hasn't been invited yet. Sign in with it again to ask for access.",
   disabled: "This account has been disabled.",
   identity_mismatch: "That email is linked to a different sign-in identity.",
   email_unverified: "Your identity provider didn't confirm that email address.",
@@ -32,13 +38,34 @@ const FEATURES = [
 
 export function LoginPage() {
   const [params] = useSearchParams();
-  const [config, setConfig] = useState<{ oidc_enabled: boolean; dev_login_enabled: boolean }>();
+  const [config, setConfig] = useState<AuthConfig>();
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
   const [error, setError] = useState(ERRORS[params.get("error") ?? ""] ?? "");
+  // After a refused sign-in: where this person stands on asking for access.
+  const [access, setAccess] = useState<AccessState | null>(null);
+
+  // Refused for lack of an invite: offer to ask for one, if this Nexus takes requests.
+  const checkAccess = async (cfg: AuthConfig) => {
+    if (!cfg.access_requests) return;
+    try {
+      setAccess(await api.accessState());
+      setError("");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setError(ERRORS.not_invited_retry);
+    }
+  };
 
   useEffect(() => {
-    api.authConfig().then(setConfig).catch(() => setError(`${APP_NAME}'s API is not reachable. Try again in a moment.`));
+    api
+      .authConfig()
+      .then((cfg) => {
+        setConfig(cfg);
+        if (params.get("error") === "not_invited") checkAccess(cfg);
+      })
+      .catch(() => setError(`${APP_NAME}'s API is not reachable. Try again in a moment.`));
+    // Read once on arrival; the query string doesn't change while this page is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const devLogin = async (e: FormEvent) => {
@@ -47,7 +74,9 @@ export function LoginPage() {
       await api.devLogin(email, token);
       location.href = "/";
     } catch (err) {
-      setError(ERRORS[(err as Error).message] ?? (err as Error).message);
+      const reason = (err as Error).message;
+      setError(ERRORS[reason] ?? reason);
+      if (reason === "not_invited" && config) checkAccess(config);
     }
   };
 
@@ -86,55 +115,63 @@ export function LoginPage() {
 
           <section className="order-2 w-full lg:justify-self-end">
             <div className="w-full rounded-2xl border border-edge bg-panel/80 p-6 shadow-2xl shadow-sky-950/40 backdrop-blur sm:p-8 lg:w-[400px]">
-              <h2 className="text-xl font-semibold">Sign in</h2>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
-                Use the Google account your invite was sent to.
-              </p>
-
-              {error && (
-                <p role="alert" className="mt-5 rounded-lg border border-rose-900/60 bg-rose-950/50 px-3 py-2.5 text-sm text-rose-200">
-                  {error}
-                </p>
-              )}
-
-              <div className="mt-6">
-                {!config && !error && <div className="h-10 animate-pulse rounded-full bg-edge/60" aria-label="Loading sign-in options" />}
-                {config?.oidc_enabled && <GoogleButton />}
-                {config?.dev_login_enabled && (
-                  <form onSubmit={devLogin} className={`space-y-2 ${config.oidc_enabled ? "mt-6 border-t border-edge pt-5" : ""}`}>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Development sign-in</p>
-                    <input
-                      type="email"
-                      required
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full rounded-md border border-edge bg-ink px-3 py-2"
-                    />
-                    <input
-                      type="password"
-                      required
-                      placeholder="Dev sign-in token"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      className="w-full rounded-md border border-edge bg-ink px-3 py-2"
-                    />
-                    <button className="w-full rounded-md border border-edge px-3 py-2 hover:bg-edge/60">Sign in</button>
-                  </form>
-                )}
-                {config && !config.oidc_enabled && !config.dev_login_enabled && (
-                  <p className="text-sm text-slate-400">
-                    No sign-in method is configured. Set the OIDC_* variables in .env.
+              {access ? (
+                <AccessPanel state={access} onChange={setAccess} oidc={!!config?.oidc_enabled} />
+              ) : (
+                <>
+                  <h2 className="text-xl font-semibold">Sign in</h2>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+                    Use the Google account your invite was sent to.
                   </p>
-                )}
-              </div>
+
+                  {error && (
+                    <p role="alert" className="mt-5 rounded-lg border border-rose-900/60 bg-rose-950/50 px-3 py-2.5 text-sm text-rose-200">
+                      {error}
+                    </p>
+                  )}
+
+                  <div className="mt-6">
+                    {!config && !error && <div className="h-10 animate-pulse rounded-full bg-edge/60" aria-label="Loading sign-in options" />}
+                    {config?.oidc_enabled && <GoogleButton />}
+                    {config?.dev_login_enabled && (
+                      <form onSubmit={devLogin} className={`space-y-2 ${config.oidc_enabled ? "mt-6 border-t border-edge pt-5" : ""}`}>
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Development sign-in</p>
+                        <input
+                          type="email"
+                          required
+                          placeholder="you@example.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full rounded-md border border-edge bg-ink px-3 py-2"
+                        />
+                        <input
+                          type="password"
+                          required
+                          placeholder="Dev sign-in token"
+                          value={token}
+                          onChange={(e) => setToken(e.target.value)}
+                          className="w-full rounded-md border border-edge bg-ink px-3 py-2"
+                        />
+                        <button className="w-full rounded-md border border-edge px-3 py-2 hover:bg-edge/60">Sign in</button>
+                      </form>
+                    )}
+                    {config && !config.oidc_enabled && !config.dev_login_enabled && (
+                      <p className="text-sm text-slate-400">
+                        No sign-in method is configured. Set the OIDC_* variables in .env.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="mt-6 space-y-3 border-t border-edge pt-5 text-sm leading-relaxed text-slate-400">
                 <p className="flex gap-2.5">
                   <Users className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" aria-hidden />
                   <span>
-                    <span className="text-slate-200">{APP_NAME} is invite-only.</span> Only Google accounts
-                    that have been invited can sign in. No invite yet? Ask the person who runs it.
+                    <span className="text-slate-200">{APP_NAME} is invite-only.</span>{" "}
+                    {config?.access_requests
+                      ? "No invite yet? Sign in with Google anyway and you can ask for one; an admin approves it."
+                      : "Only Google accounts that have been invited can sign in. No invite yet? Ask the person who runs it."}
                   </span>
                 </p>
                 <p className="flex gap-2.5">
@@ -163,6 +200,148 @@ export function LoginPage() {
         </footer>
       </div>
     </div>
+  );
+}
+
+/** Shown instead of the sign-in form after Google confirmed an address that has no invite. */
+function AccessPanel({
+  state,
+  onChange,
+  oidc,
+}: {
+  state: AccessState;
+  onChange: (s: AccessState) => void;
+  oidc: boolean;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      onChange(await api.requestAccess(note));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const who = (
+    <div className="mt-4 flex items-center gap-3 rounded-lg border border-edge bg-ink/60 px-3 py-2.5">
+      {state.avatar_url ? (
+        <img src={state.avatar_url} alt="" referrerPolicy="no-referrer" className="h-9 w-9 rounded-full bg-edge" />
+      ) : (
+        <span className="grid h-9 w-9 place-items-center rounded-full bg-edge text-sm text-slate-300" aria-hidden>
+          {(state.name || state.email)[0]!.toUpperCase()}
+        </span>
+      )}
+      <div className="min-w-0">
+        {state.name && <div className="truncate text-sm text-slate-100">{state.name}</div>}
+        <div className="truncate text-sm text-slate-400">{state.email}</div>
+      </div>
+    </div>
+  );
+  const switchAccount = oidc && (
+    <a href="/auth/login?account=choose" className="mt-4 block text-center text-sm text-sky-400 hover:text-sky-300">
+      Use a different Google account
+    </a>
+  );
+
+  if (state.status === "can_request")
+    return (
+      <form onSubmit={submit}>
+        <h2 className="text-xl font-semibold">Request access</h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+          This account isn't invited yet. Ask for access and an admin will review it.
+        </p>
+        {who}
+        <label className="mt-4 block text-sm text-slate-300">
+          Anything they should know? <span className="text-slate-500">(optional)</span>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value.slice(0, NOTE_MAX))}
+            rows={3}
+            maxLength={NOTE_MAX}
+            placeholder="Who you are, or who told you about it"
+            className="mt-1.5 block w-full resize-none rounded-md border border-edge bg-ink px-3 py-2 text-base text-slate-100 sm:text-sm"
+          />
+          <span className="mt-1 block text-right text-xs text-slate-500" aria-live="polite">
+            {note.length}/{NOTE_MAX}
+          </span>
+        </label>
+        {error && (
+          <p role="alert" className="mt-2 rounded-lg border border-rose-900/60 bg-rose-950/50 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </p>
+        )}
+        <button
+          disabled={busy}
+          className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-full bg-sky-500 font-medium text-ink transition-colors hover:bg-sky-400 disabled:opacity-60"
+        >
+          <Send className="h-4 w-4" aria-hidden /> {busy ? "Sending…" : "Request access"}
+        </button>
+        {switchAccount}
+      </form>
+    );
+
+  if (state.status === "pending")
+    return (
+      <div>
+        <StatusIcon icon={Clock} tone="text-amber-300 bg-amber-500/10" />
+        <h2 className="mt-4 text-xl font-semibold">Request sent</h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+          {state.requested_at ? `You asked ${formatAgo(state.requested_at)}. ` : ""}
+          An admin has been told and will approve or decline it.{" "}
+          {state.email_on_approval
+            ? "You'll get an email when you're in."
+            : "Come back and sign in again later to check."}
+        </p>
+        {who}
+        {oidc && (
+          <a href="/auth/login" className="mt-5 flex h-10 items-center justify-center rounded-full border border-edge text-sm hover:bg-edge/60">
+            Check again
+          </a>
+        )}
+        {switchAccount}
+      </div>
+    );
+
+  if (state.status === "approved")
+    return (
+      <div>
+        <StatusIcon icon={CheckCircle2} tone="text-emerald-300 bg-emerald-500/10" />
+        <h2 className="mt-4 text-xl font-semibold">You're in</h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+          Your access was approved. Sign in to get started.
+        </p>
+        {who}
+        <div className="mt-5">{oidc ? <GoogleButton /> : <a href="/login" className="text-sky-400">Sign in</a>}</div>
+      </div>
+    );
+
+  return (
+    <div>
+      <StatusIcon icon={XCircle} tone="text-rose-300 bg-rose-500/10" />
+      <h2 className="mt-4 text-xl font-semibold">Request not approved</h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+        An admin didn't approve access for this account.
+        {state.retry_after ? ` You can ask again after ${formatDate(state.retry_after)}.` : ""}
+      </p>
+      {who}
+      {switchAccount}
+    </div>
+  );
+}
+
+function StatusIcon({ icon: Icon, tone }: { icon: typeof Clock; tone: string }) {
+  return (
+    <span className={`grid h-11 w-11 place-items-center rounded-full ${tone}`}>
+      <Icon className="h-6 w-6" aria-hidden />
+    </span>
   );
 }
 

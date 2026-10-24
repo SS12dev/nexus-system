@@ -16,8 +16,8 @@ from nexus_common.storage import S3Storage
 from nexus_doc_worker.ingest import DocDeps, embed_missing, ingest_file
 from nexus_doc_worker.parse import docling_available
 
-configure_logging("doc-worker")
 settings = get_settings()
+configure_logging(settings, "doc-worker")
 
 
 async def startup(ctx: dict) -> None:

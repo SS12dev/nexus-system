@@ -11,6 +11,7 @@ from nexus_api import alerts, ws
 from nexus_api.middleware import GuardMiddleware, RequestContextMiddleware
 from nexus_api.queue import ArqJobQueue, JobQueue
 from nexus_api.routes import (
+    access_requests,
     admin,
     app_access,
     apps,
@@ -34,8 +35,6 @@ from nexus_common.logs import configure_logging
 from nexus_common.settings import Settings, get_settings
 from nexus_common.storage import S3Storage, Storage
 
-configure_logging("api")
-
 
 def create_app(
     settings: Settings | None = None,
@@ -44,6 +43,7 @@ def create_app(
     embedder: Embedder | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    configure_logging(settings, "api")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -105,6 +105,7 @@ def create_app(
     app.include_router(instructions.router)
     app.include_router(systems.router)
     app.include_router(admin.router)
+    app.include_router(access_requests.router)
     app.include_router(ops.router)
     app.include_router(ws.router)
 

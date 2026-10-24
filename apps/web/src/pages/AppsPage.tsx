@@ -7,6 +7,7 @@ import { formatDateTime } from "../lib/format";
 import { isOwner, type AppItem } from "../lib/types";
 import { useAssistantName } from "../lib/assistant";
 import { useStore } from "../store/chat";
+import { confirmAction } from "../components/Feedback";
 
 /** The apps software teams built and run: the owner sees everyone's, members their own. */
 export function AppsPage() {
@@ -45,8 +46,14 @@ export function AppsPage() {
     }
   };
 
-  const remove = (a: AppItem) => {
-    if (!confirm(`Delete the running ${a.name}? Its container and image go; the project and its repo stay.`)) return;
+  const remove = async (a: AppItem) => {
+    const ok = await confirmAction({
+      title: `Delete ${a.name}?`,
+      body: "Its container and image go; the project and its repo stay.",
+      confirmLabel: "Delete app",
+      danger: true,
+    });
+    if (!ok) return;
     act(a, () => api.deleteApp(a.id));
   };
 
