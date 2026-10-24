@@ -429,6 +429,10 @@ class GrantsIn(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
 
 
+class ProposalDecisionIn(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class MaintenanceIn(BaseModel):
     enabled: bool
     message: str | None = Field(default=None, max_length=300)

@@ -19,6 +19,7 @@ from nexus_api.routes import (
     auth,
     chats,
     files,
+    improvements,
     instructions,
     links,
     me,
@@ -36,6 +37,7 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.llmstats import SpendLogs
 from nexus_common.logs import configure_logging
 from nexus_common.settings import Settings, get_settings
 from nexus_common.storage import S3Storage, Storage
@@ -70,6 +72,7 @@ def create_app(
         inner = embedder or LiteLLMEmbedder(settings)
         app.state.embedder = CachedEmbedder(inner, settings.embedding_batch_size)
         app.state.deployer = DeployerClient(settings)
+        app.state.spend_logs = SpendLogs(settings.spend_logs_url)
         pool = None
         if queue is None:
             pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
@@ -87,6 +90,7 @@ def create_app(
         await app.state.gateway.aclose()
         await app.state.redis.aclose()
         await app.state.deployer.aclose()
+        await app.state.spend_logs.aclose()
         await engine.dispose()
 
     app = FastAPI(title="Nexus API", version="0.1.0", lifespan=lifespan)
@@ -125,6 +129,7 @@ def create_app(
     app.include_router(config_routes.router)
     app.include_router(access_requests.router)
     app.include_router(ops.router)
+    app.include_router(improvements.router)
     app.include_router(ws.router)
 
     @app.get("/healthz", tags=["ops"])

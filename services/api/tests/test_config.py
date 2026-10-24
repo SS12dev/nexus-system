@@ -58,6 +58,8 @@ def test_values_are_checked():
         ("google_services", "photos"),
         ("langfuse_url", "localhost:3000"),
         ("rate_limit_enabled", "maybe"),
+        ("improve_repo", "nexus-system"),
+        ("improve_base_branch", "main branch"),
     ]:
         with pytest.raises(config.ConfigError):
             config.validate(opt[name], bad)

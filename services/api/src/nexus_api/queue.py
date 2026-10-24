@@ -15,6 +15,8 @@ class JobQueue(Protocol):
     async def enqueue_deploy(self, project_id: uuid.UUID) -> None: ...
     async def enqueue_link_preview(self, link_id: uuid.UUID) -> None: ...
     async def enqueue_access_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
+    async def enqueue_review(self, review_id: uuid.UUID) -> None: ...
+    async def enqueue_proposal_pr(self, proposal_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -58,4 +60,14 @@ class ArqJobQueue:
         """Email about an access request: "requested" to the deciders, "approved" to the person."""
         await self.enqueue_job(
             "notify_access", kind, str(request_id), _job_id=f"access:{kind}:{request_id}"
+        )
+
+    async def enqueue_review(self, review_id: uuid.UUID) -> None:
+        """A self-review the owner asked for on the Improvements tab."""
+        await self.enqueue_job("self_review", str(review_id), _job_id=f"review:{review_id}")
+
+    async def enqueue_proposal_pr(self, proposal_id: uuid.UUID) -> None:
+        """Open the pull request for an approved code or tool proposal."""
+        await self.enqueue_job(
+            "proposal_pr", str(proposal_id), _job_id=f"proposal-pr:{proposal_id}"
         )

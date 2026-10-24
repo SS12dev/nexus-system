@@ -85,6 +85,7 @@ GROUPS = (
     "Sign-in and access",
     "Rate limits",
     "Alerts and backups",
+    "Self-review",
     "Email",
     "Apps and links",
 )
@@ -554,6 +555,39 @@ OPTIONS: tuple[Option, ...] = (
         unit="in 15 minutes",
     ),
     Option(
+        "alert_llm_failures_15m",
+        "Alerts and backups",
+        "Alert on failed model calls",
+        "Raise an alert when this many model calls fail within 15 minutes (from LiteLLM's spend "
+        "logs: provider errors, timeouts, rate limits). 0 turns this check off.",
+        "int",
+        min=0,
+        max=10000,
+        unit="in 15 minutes",
+    ),
+    Option(
+        "alert_daily_spend_usd",
+        "Alerts and backups",
+        "Alert on daily model spend",
+        "Raise an alert when model calls since midnight UTC cost more than this, across "
+        "everyone. 0 turns this check off.",
+        "float",
+        min=0,
+        max=10000,
+        unit="dollars",
+    ),
+    Option(
+        "alert_budget_percent",
+        "Alerts and backups",
+        "Alert when a budget is nearly spent",
+        "Raise an alert when someone has spent this share of their budget for the period. 0 "
+        "turns this check off.",
+        "int",
+        min=0,
+        max=100,
+        unit="%",
+    ),
+    Option(
         "alert_email",
         "Alerts and backups",
         "Email alerts to owners",
@@ -570,6 +604,82 @@ OPTIONS: tuple[Option, ...] = (
         min=1,
         max=720,
         unit="hours",
+    ),
+    # Self-review
+    Option(
+        "improve_every_days",
+        "Self-review",
+        "Review how it is used every",
+        "How often the assistant looks over recent use (counts, failures and anonymous topics, "
+        "never chats or names) and drafts improvements for you to approve. 0 stops the "
+        "schedule; Review now on the Improvements tab still works.",
+        "int",
+        min=0,
+        max=90,
+        unit="days",
+    ),
+    Option(
+        "improve_model",
+        "Self-review",
+        "Proposal model",
+        "Drafts the proposals from what the review found. One call per review, so mini costs "
+        "a cent or two.",
+        "choice",
+        choices=MODEL_TIERS,
+    ),
+    Option(
+        "improve_topic_model",
+        "Self-review",
+        "Topic model",
+        'Turns each request into a short anonymous topic, such as "trip planning", in batches. '
+        "Runs over every request in the window, so the cheapest tier is right.",
+        "choice",
+        choices=MODEL_TIERS,
+    ),
+    Option(
+        "improve_read_requests",
+        "Self-review",
+        "Learn from request topics",
+        "Off, the review uses only counts: tools, failures, teams and skills. On, a model also "
+        "reads each request once to name its topic; only the topic counts are kept.",
+        "bool",
+    ),
+    Option(
+        "improve_min_count",
+        "Self-review",
+        "A topic counts from",
+        "Topics asked fewer times than this are left out, so one person's one-off request "
+        "never shapes a proposal.",
+        "int",
+        min=1,
+        max=100,
+        unit="requests",
+    ),
+    Option(
+        "improve_max_proposals",
+        "Self-review",
+        "Proposals per review",
+        "At most this many new proposals each time.",
+        "int",
+        min=1,
+        max=20,
+    ),
+    Option(
+        "improve_repo",
+        "Self-review",
+        "Repository for code proposals",
+        "owner/name of the Nexus repository. An approved code or tool proposal becomes a pull "
+        "request there, opened by the Nexus GitHub App (installed on it with contents and pull "
+        "requests write). Empty keeps approved code proposals as a spec only.",
+        "text",
+    ),
+    Option(
+        "improve_base_branch",
+        "Self-review",
+        "Base branch",
+        "The branch those pull requests are opened against.",
+        "text",
+        allow_empty=False,
     ),
     # Email
     Option(
@@ -672,6 +782,8 @@ _DURATION = re.compile(r"^[1-9]\d{0,3}[smhd]$")
 _EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 _HOSTNAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 _HOST = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
+_REPO = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+_BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
 TEXT_MAX = 500
 
 
@@ -693,6 +805,10 @@ def _text_checks(opt: Option, value: str) -> str:
         if bad:
             raise ConfigError(f"Not a single host name: {bad[0]}")
         return ",".join(names)
+    if opt.name == "improve_repo" and value and not _REPO.match(value):
+        raise ConfigError("Use owner/name, such as SS12dev/nexus-system.")
+    if opt.name == "improve_base_branch" and not _BRANCH.match(value):
+        raise ConfigError("Not a branch name.")
     if opt.name == "smtp_host" and value and not _HOST.match(value):
         raise ConfigError("Use a host name such as smtp.gmail.com.")
     if opt.name in ("smtp_from", "smtp_username") and value and len(value) > 254:

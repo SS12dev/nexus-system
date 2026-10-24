@@ -11,6 +11,7 @@ from nexus_common import logs
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder
 from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.llmstats import SpendLogs
 from nexus_common.models import RoleName, User
 from nexus_common.settings import Settings
 from nexus_common.storage import Storage
@@ -49,6 +50,10 @@ def get_deployer(request: Request) -> DeployerClient:
     return request.app.state.deployer
 
 
+def get_spend_logs(request: Request) -> SpendLogs:
+    return request.app.state.spend_logs
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
@@ -56,6 +61,7 @@ StorageDep = Annotated[Storage, Depends(get_storage)]
 EmbedderDep = Annotated[CachedEmbedder, Depends(get_embedder)]
 GatewayDep = Annotated[LiteLLMAdmin, Depends(get_gateway)]
 DeployerDep = Annotated[DeployerClient, Depends(get_deployer)]
+SpendLogsDep = Annotated[SpendLogs, Depends(get_spend_logs)]
 
 
 async def current_user(request: Request, db: DbDep, settings: SettingsDep) -> User:

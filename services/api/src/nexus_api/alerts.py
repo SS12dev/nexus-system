@@ -7,7 +7,9 @@ the last 50 changes live in Valkey and show on the Admin page; with SMTP set up
 (SMTP_HOST, SMTP_FROM) and ALERT_EMAIL=true, every owner also gets an email.
 
 What is checked: each service on the Status tab (Postgres, Valkey, LiteLLM, MinIO, both
-workers), a stale backup, API errors (5xx) in the last 5 minutes, and failed jobs in the last 15.
+workers), a stale backup, API errors (5xx) in the last 5 minutes, failed jobs in the last 15,
+and, from LiteLLM's spend logs, failed model calls in the last 15 minutes and model spend since
+midnight UTC; then anyone who has spent most of their budget. RULES lists them for the page.
 """
 
 import asyncio
@@ -22,10 +24,13 @@ from fastapi import FastAPI
 from redis.exceptions import RedisError
 from sqlalchemy import select
 
+from nexus_api.cache import cached_spend
 from nexus_api.ratelimit import metrics_key
 from nexus_common import mail, metrics
+from nexus_common.litellm import PROVIDER, get_budget
 from nexus_common.metrics import ALERTS_HISTORY_KEY, ALERTS_KEY
 from nexus_common.models import (
+    ApiKey,
     Backup,
     BackupStatus,
     Role,
@@ -86,6 +91,8 @@ async def find_problems(app: FastAPI) -> list[Problem]:
             )
         )
 
+    problems += await model_problems(app)
+
     jobs = (await metrics.summary(state.redis, 15))["jobs"]
     failed = {j["name"]: j["failed"] for j in jobs if j["failed"]}
     if settings.alert_job_failures_15m and sum(failed.values()) >= settings.alert_job_failures_15m:
@@ -94,6 +101,100 @@ async def find_problems(app: FastAPI) -> list[Problem]:
             Problem("job-failures", "Background jobs are failing", f"In 15 minutes: {names}.")
         )
     return problems
+
+
+async def model_problems(app: FastAPI) -> list[Problem]:
+    state = app.state
+    settings: Settings = state.settings
+    problems: list[Problem] = []
+    now = utcnow()
+    if settings.alert_llm_failures_15m:
+        recent = await state.spend_logs.quick(now - timedelta(minutes=15), now)
+        if recent and recent["failed"] >= settings.alert_llm_failures_15m:
+            problems.append(
+                Problem(
+                    "llm-failures",
+                    "Model calls are failing",
+                    f"{recent['failed']} of {recent['calls']} calls failed in 15 minutes.",
+                )
+            )
+    if settings.alert_daily_spend_usd:
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today = await state.spend_logs.quick(midnight, now)
+        if today and today["spend_usd"] > settings.alert_daily_spend_usd:
+            problems.append(
+                Problem(
+                    "daily-spend",
+                    "Model spend is high today",
+                    f"${today['spend_usd']:.2f} since midnight UTC, over the "
+                    f"${settings.alert_daily_spend_usd:.2f} limit.",
+                )
+            )
+    if settings.alert_budget_percent:
+        async with state.sessionmaker() as db:
+            rows = (
+                await db.execute(
+                    select(User, ApiKey.secret)
+                    .join(ApiKey, ApiKey.user_id == User.id)
+                    .where(
+                        User.status == UserStatus.active,
+                        ApiKey.provider == PROVIDER,
+                        ApiKey.revoked_at.is_(None),
+                    )
+                )
+            ).all()
+            budgets = {u.id: await get_budget(db, settings, u) for u, _ in rows}
+            await db.commit()
+        for user, secret in rows:
+            spent = await cached_spend(state.redis, state.gateway, secret)
+            cap = float(budgets[user.id].max_usd)
+            if spent is None or cap <= 0:
+                continue
+            share = spent / cap * 100
+            if share >= settings.alert_budget_percent:
+                problems.append(
+                    Problem(
+                        f"budget:{user.id}",
+                        f"{user.name or user.email} has used {min(share, 999):.0f}% of "
+                        "their budget",
+                        f"${spent:.2f} of ${cap:.2f} this period. Raise it on the People page "
+                        "if that is expected.",
+                    )
+                )
+    return problems
+
+
+RULES = (
+    ("Services", "Any service on the Status tab stops answering.", None),
+    ("Backups", "The last good backup is older than the limit.", "backup_stale_hours"),
+    (
+        "API errors",
+        "Requests fail with a server error (5xx) within 5 minutes.",
+        "alert_api_errors_5m",
+    ),
+    ("Background jobs", "Jobs fail within 15 minutes.", "alert_job_failures_15m"),
+    ("Model calls", "Calls to models fail within 15 minutes.", "alert_llm_failures_15m"),
+    (
+        "Daily spend",
+        "Model calls since midnight UTC cost more than the limit.",
+        "alert_daily_spend_usd",
+    ),
+    ("Budgets", "Someone has spent this share of their budget.", "alert_budget_percent"),
+)
+
+
+def rules(settings: Settings) -> list[dict]:
+    """What is checked and its threshold now, for the Alerts tab."""
+    return [
+        {
+            "name": name,
+            "what": what,
+            "setting": setting,
+            "threshold": getattr(settings, setting) if setting else None,
+            "on": bool(getattr(settings, setting)) if setting else True,
+        }
+        for name, what, setting in RULES
+    ]
 
 
 async def check_once(app: FastAPI) -> tuple[list[Problem], list[dict]]:

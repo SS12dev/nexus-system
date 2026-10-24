@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from redis.exceptions import RedisError
 from sqlalchemy import Date, cast, func, or_, select, text
@@ -20,10 +20,18 @@ from sqlalchemy.orm import aliased
 from nexus_api import alerts
 from nexus_api.appsettings import MAINTENANCE, get_setting, maintenance_notice, put_setting
 from nexus_api.cache import cached_spend
-from nexus_api.deps import DbDep, GatewayDep, OwnerUser, RedisDep, SettingsDep, StorageDep
+from nexus_api.deps import (
+    DbDep,
+    GatewayDep,
+    OwnerUser,
+    RedisDep,
+    SettingsDep,
+    SpendLogsDep,
+    StorageDep,
+)
 from nexus_api.ratelimit import metrics_key
 from nexus_api.schemas import MaintenanceIn
-from nexus_common import metrics
+from nexus_common import llmstats, metrics
 from nexus_common.litellm import PROVIDER
 from nexus_common.models import (
     AgentRun,
@@ -554,6 +562,90 @@ async def monitoring(
         "routes": figures["routes"],
         "jobs": figures["jobs"],
         "errors": await metrics.recent_errors(redis),
+    }
+
+
+@router.get("/alerts")
+async def alert_list(actor: OwnerUser, redis: RedisDep, settings: SettingsDep):
+    """Active alerts, the last changes, and what is checked with today's thresholds."""
+    return {
+        **(await alerts.active_and_recent(redis)),
+        "rules": alerts.rules(settings),
+        "interval_s": settings.alert_interval_s,
+        "email": settings.alert_email and settings.smtp_enabled,
+    }
+
+
+MAX_LLM_RANGE = timedelta(days=400)
+
+
+@router.get("/llm")
+async def llm_usage(
+    actor: OwnerUser,
+    db: DbDep,
+    redis: RedisDep,
+    spend_logs: SpendLogsDep,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    user_ids: list[uuid.UUID] = UsersFilter,
+    models: list[str] = Query(default=[], alias="model", max_length=50),
+    purposes: list[str] = Query(default=[], alias="purpose", max_length=20),
+):
+    """Model calls from LiteLLM's spend logs between `since` and `until` (default the last 7
+    days): totals, then by model, person, purpose and hour or day, and the latest failures.
+    Narrowed by people, models (nexus-* aliases) and purposes. Counts, costs and timings
+    only; LiteLLM keeps no prompts or replies for Nexus. Also Valkey's own cache figures."""
+    until = until or utcnow()
+    since = since or until - timedelta(days=7)
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+    if since >= until:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "since must be before until")
+    if until - since > MAX_LLM_RANGE:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pick at most 400 days")
+    report = await spend_logs.report(
+        llmstats.Filters(since, until, users=user_ids, models=models, purposes=purposes)
+    )
+    report |= {"since": since, "until": until, "valkey": await _valkey_cache(redis)}
+    if not report["available"]:
+        return report
+    ids = {r["key"] for r in report["by_user"] if r["key"]}
+    ids |= {f["user_id"] for f in report["failures"] if f["user_id"]}
+    people = {}
+    valid = [uuid.UUID(i) for i in ids if _is_uuid(i)]
+    if valid:
+        rows = await db.execute(select(User.id, User.email, User.name).where(User.id.in_(valid)))
+        people = {str(i): {"email": e, "name": n} for i, e, n in rows.all()}
+    for r in report["by_user"]:
+        r |= people.get(r["key"] or "", {"email": None, "name": None})
+    for f in report["failures"]:
+        f["user"] = (people.get(f["user_id"] or "") or {}).get("email")
+    report["purpose_labels"] = llmstats.PURPOSES
+    return report
+
+
+async def _valkey_cache(redis) -> dict | None:
+    """Valkey's hit rate across everything that reads it: LiteLLM's response cache, Nexus's own
+    short caches, sessions and rate limits. Since Valkey last started."""
+    try:
+        stats, memory = await asyncio.gather(redis.info("stats"), redis.info("memory"))
+        cached = 0
+        async for _ in redis.scan_iter("litellm.cache*", count=1000):
+            cached += 1
+            if cached >= 10_000:
+                break
+    except RedisError:
+        return None
+    hits, misses = stats.get("keyspace_hits", 0), stats.get("keyspace_misses", 0)
+    return {
+        "hits": hits,
+        "misses": misses,
+        "hit_rate": round(hits / (hits + misses), 4) if hits + misses else None,
+        "evicted": stats.get("evicted_keys", 0),
+        "memory": memory.get("used_memory_human"),
+        "llm_cached_responses": cached,
     }
 
 
