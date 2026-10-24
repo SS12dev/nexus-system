@@ -449,6 +449,13 @@ export function inside(
   return { stars, lines, memories: points, crystals: placed };
 }
 
+/** How much of the shell to draw at a camera distance: all of it from the home view out,
+ * fading to a faint outline when zoomed right in. */
+export function shellFade(distance: number): number {
+  const t = Math.min(1, Math.max(0, (distance - 2.2) / 1.6));
+  return 0.18 + 0.82 * t * t * (3 - 2 * t);
+}
+
 /** How far back the camera sits so the orb and every team fit the view, with a margin for
  * teams on the near side, which perspective makes look bigger. */
 export function cameraDistance(

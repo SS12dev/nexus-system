@@ -40,6 +40,7 @@ export default function OrbScene({
   lit,
   litSeq,
   labels,
+  tags,
   perf,
   selected,
   onSelect,
@@ -55,6 +56,8 @@ export default function OrbScene({
   litSeq: number;
   /** How many star names to show; fewer in the small chat-side orb. */
   labels: number;
+  /** The star name elements (StarLabels, drawn over the canvas), for the scene to place. */
+  tags: Map<string, HTMLElement>;
   perf: Perf;
   selected: Selection | null;
   onSelect: (s: Selection | null) => void;
@@ -92,6 +95,7 @@ export default function OrbScene({
         lit={lit}
         litSeq={litSeq}
         labels={labels}
+        tags={tags}
         onPick={(star) => onSelect({ type: "entity", star })}
       />
       <MemoryCloud

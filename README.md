@@ -389,6 +389,9 @@ box docked underneath; sending a message opens the chat.
   newest artifacts (12, or 6 on a phone) are crystals beside their project, with a line to it;
   the rest are in the Library. Before anything is connected, memories cluster by kind and
   artifacts sit on a ring.
+  Names show for the most mentioned first, more as you zoom in, and never on top of each
+  other; hovering a star shows its name. Zoomed in close, the orb's shell fades back so the
+  lines and names stay readable.
 - **Recall lights up.** When Nexus answers, what it remembered (the `memory.recalled` event)
   glows yellow in the orb for 15 seconds with a short pulse, its line to you lights, and the
   status line says it in words ("Remembered Nexus, LangGraph and 2 memories"). The reply keeps

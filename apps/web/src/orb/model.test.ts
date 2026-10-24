@@ -10,6 +10,7 @@ import {
   liveSystems,
   memoryPoints,
   ORB_R,
+  shellFade,
 } from "./model";
 
 const sys = (over: Partial<AgentSystem> = {}): AgentSystem => ({
@@ -293,5 +294,13 @@ describe("cameraDistance", () => {
     expect(cameraDistance(4, 0.5)).toBeGreaterThan(cameraDistance(4, 1.6));
     // A tighter band on portrait screens keeps the phone camera closer.
     expect(cameraDistance(4, 0.5, true)).toBeLessThan(cameraDistance(4, 0.5));
+  });
+});
+
+describe("shellFade", () => {
+  it("draws the whole shell from the home view and only a faint outline zoomed right in", () => {
+    expect(shellFade(cameraDistance(0, 1.6))).toBe(1);
+    expect(shellFade(1.8)).toBeCloseTo(0.18);
+    expect(shellFade(3)).toBeGreaterThan(shellFade(2.5));
   });
 });
