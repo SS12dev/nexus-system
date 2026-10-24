@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSystem, Approval, FileItem, GraphEntity, KnowledgeGraph, Memory } from "../lib/types";
+import type {
+  AgentSystem,
+  Approval,
+  FileItem,
+  GraphEntity,
+  KnowledgeGraph,
+  Memory,
+  Project,
+  Routine,
+} from "../lib/types";
 import {
   agentTargets,
+  bandRadius,
   buildClusters,
   cameraDistance,
   clusterAnchor,
@@ -10,6 +20,9 @@ import {
   liveSystems,
   memoryPoints,
   ORB_R,
+  SAT_R,
+  SATELLITE_COLOR,
+  satellites,
   shellFade,
 } from "./model";
 
@@ -242,7 +255,10 @@ describe("the constellation", () => {
 
   it("falls back to memories by kind and an artifact ring before anything is connected", () => {
     const out = inside(null, [mem("m1")], [file("f1")], limits);
-    expect(out.stars).toEqual([]);
+    // You are at the centre from the very start.
+    expect(out.stars).toEqual([
+      { id: "you", name: "You", type: "person", summary: "", self: true, weight: 0, pos: [0, 0, 0] },
+    ]);
     expect(out.memories).toEqual(memoryPoints([mem("m1")], 600));
     expect(out.crystals).toEqual(crystals([file("f1")], 12));
   });
@@ -302,5 +318,48 @@ describe("shellFade", () => {
     expect(shellFade(cameraDistance(0, 1.6))).toBe(1);
     expect(shellFade(1.8)).toBeCloseTo(0.18);
     expect(shellFade(3)).toBeGreaterThan(shellFade(2.5));
+  });
+});
+
+
+describe("satellites outside the orb", () => {
+  const routine = (id: string, extra: Partial<Routine> = {}): Routine => ({
+    id,
+    name: id,
+    prompt: "",
+    schedule: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0",
+    schedule_text: "Every day at 08:00",
+    timezone: "UTC",
+    delivery: [],
+    only_if_new: false,
+    enabled: true,
+    source: "user",
+    chat_id: null,
+    next_run_at: null,
+    last_run_at: null,
+    failures: 0,
+    created_at: `2026-10-0${id.slice(1)}T00:00:00Z`,
+    last_status: null,
+    ...extra,
+  });
+  const project = (id: string, app_state: string | null = null) =>
+    ({ id, name: id, stack: "static", app_state, updated_at: "2026-10-01T00:00:00Z" }) as Project;
+
+  it("puts routines and projects on a ring outside the shell, inside the teams' band", () => {
+    const out = satellites([routine("r1"), routine("r2", { enabled: false })], [project("p1", "running")]);
+    expect(out.map((s) => s.id)).toEqual(["r1", "r2", "p1"]);
+    for (const s of out) {
+      expect(dist(s.pos)).toBeCloseTo(SAT_R, 5);
+      expect(dist(s.pos)).toBeGreaterThan(ORB_R);
+      expect(dist(s.pos)).toBeLessThan(bandRadius(1));
+    }
+    expect(out[1].color).toBe(SATELLITE_COLOR.paused);
+    expect(out[2]).toMatchObject({ kind: "project", active: true, color: SATELLITE_COLOR.project });
+    expect(satellites([routine("r1")], [])).toEqual(satellites([routine("r1")], []));
+  });
+
+  it("keeps to the limit", () => {
+    const many = Array.from({ length: 9 }, (_, i) => routine(`r${i}`));
+    expect(satellites(many, [project("p1")], 6)).toHaveLength(6);
   });
 });

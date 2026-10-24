@@ -63,8 +63,20 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
     assert "Work: Teaches year 7 science" in texts
     assert "Works as a teacher." in texts
     assert "Prefers short, to-the-point answers." in texts
-    assert any(t.startswith("Wants help with: Cooking, Travel") for t in texts)
+    assert {"Wants help with cooking.", "Wants help with travel."} <= texts
     assert all(m.source == "onboarding" for m in memories)
+    # Professions and interests are topics around the user straight away, with the memories
+    # about them attached; the free-text answer waits for the graph job.
+    graph = (await owner.get("/api/memories/graph")).json()
+    names = {e["name"]: e for e in graph["entities"]}
+    assert {"Teaching", "Cooking", "Travel"} <= set(names)
+    assert names["Cooking"]["type"] == "topic" and names["Cooking"]["memories"] == 1
+    me = next(e for e in graph["entities"] if e["is_self"])
+    predicates = {(r["src"], r["predicate"], r["dst"]) for r in graph["relations"]}
+    assert (me["id"], "works in", names["Teaching"]["id"]) in predicates
+    assert (me["id"], "wants help with", names["Travel"]["id"]) in predicates
+    about = next(m for m in memories if m.content.startswith("Lives in Pune"))
+    assert about.graph_at is None
     by_name = {r.name: r for r in routines}
     assert by_name["Morning brief"].schedule == "FREQ=DAILY;BYHOUR=7;BYMINUTE=30"
     assert by_name["Sunday week ahead"].schedule == "FREQ=WEEKLY;BYDAY=SU;BYHOUR=19;BYMINUTE=15"

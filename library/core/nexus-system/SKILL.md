@@ -105,6 +105,9 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | feedback | `api/routes/feedback.py`, `orchestrator/notify.py`, `web/src/components/FeedbackDialog.tsx`, `pages/AdminFeedback.tsx` |
 | terms and privacy pages | `web/public/terms.html`, `privacy.html`, `TERMS_VERSION` in `nexus_common/models.py` |
 | light theme, tour | `web/src/index.css`, `lib/theme.ts`, `components/Tour.tsx` |
+| the orb's layout (stars, memories, satellites) | `web/src/orb/model.ts`; drawing in `orb/Inside.tsx`, `Network.tsx`, `Satellites.tsx` |
+| the logo | `web/src/components/Orb.tsx` (`NexusMark`), `web/public/icon.svg` |
+| checking one account | `api/inspect_user.py`, `scripts/inspect-user.sh` |
 | what Langfuse stores | `orchestrator/llm.py` (`private`), `nexus_common/embeddings.py` |
 | self-review | `orchestrator/improve.py`, `nexus_common/improve.py` |
 | an API route | `services/api/src/nexus_api/routes/` |

@@ -10,6 +10,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_api.schemas import OnboardingIn
+from nexus_common import graph
+from nexus_common.embeddings import CachedEmbedder
+from nexus_common.graph import SELF, Extracted
 from nexus_common.memory import mark_profile_stale, record
 from nexus_common.models import (
     AuditLog,
@@ -53,28 +56,61 @@ TONE = {
 }
 
 
-def memories_from(body: OnboardingIn, packs: list[Pack]) -> list[tuple[MemoryKind, str, bool]]:
-    """(kind, content, pinned) for each thing the answers say. Direct answers are pinned."""
-    out: list[tuple[MemoryKind, str, bool]] = []
+# (kind, content, pinned, names of the graph entities it is about)
+Seed = tuple[MemoryKind, str, bool, list[str]]
+
+
+def memories_from(body: OnboardingIn, packs: list[Pack]) -> list[Seed]:
+    """What the answers say, one memory each. Direct answers are pinned, and each names the
+    profession or interest it is about, so it hangs off that topic in the orb."""
+    roles = [p for p in packs if p.kind == "role" and p.id in body.roles]
+    role_names = [p.label for p in roles]
+    out: list[Seed] = []
     if body.role_note.strip():
-        out.append((MemoryKind.fact, f"Work: {' '.join(body.role_note.split())}", True))
-    for p in packs:
-        if p.kind == "role" and p.id in body.roles:
-            out += [(kind, text, True) for kind, text in p.memories]
-    wanted = [INTERESTS[i] for i in body.interests if i in INTERESTS]
-    if wanted:
-        out.append((MemoryKind.goal, f"Wants help with: {', '.join(wanted)}.", True))
+        out.append((MemoryKind.fact, f"Work: {' '.join(body.role_note.split())}", True, role_names))
+    for p in roles:
+        out += [(kind, text, True, [p.label]) for kind, text in p.memories]
+    for i in body.interests:
+        if label := INTERESTS.get(i):
+            out.append((MemoryKind.preference, f"Wants help with {label.lower()}.", True, [label]))
     if body.about.strip():
-        out.append((MemoryKind.fact, " ".join(body.about.split()), True))
+        out.append((MemoryKind.fact, " ".join(body.about.split()), True, []))
     if body.day_start:
-        out.append((MemoryKind.fact, f"Usually starts the day around {body.day_start}.", False))
+        out.append((MemoryKind.fact, f"Usually starts the day around {body.day_start}.", False, []))
     if body.style:
         if text := LENGTH.get(body.style.length):
-            out.append((MemoryKind.preference, text, True))
-        out.append((MemoryKind.preference, TONE[body.style.tone], True))
+            out.append((MemoryKind.preference, text, True, []))
+        out.append((MemoryKind.preference, TONE[body.style.tone], True, []))
         if body.style.language.strip():
-            out.append((MemoryKind.instruction, f"Reply in {body.style.language.strip()}.", True))
+            out.append(
+                (MemoryKind.instruction, f"Reply in {body.style.language.strip()}.", True, [])
+            )
     return out
+
+
+def graph_from(body: OnboardingIn, packs: list[Pack]) -> Extracted:
+    """The professions and interests as topics around the user, so the orb shows them from the
+    first minute rather than after the graph job has read the memories."""
+    found = Extracted()
+    for p in packs:
+        if p.kind == "role" and p.id in body.roles:
+            found.entities.append({"name": p.label, "type": "topic", "summary": p.blurb})
+            found.relations.append(
+                {"from": SELF, "to": p.label, "predicate": "works in", "fact": "", "ended": False}
+            )
+    for i in body.interests:
+        if label := INTERESTS.get(i):
+            found.entities.append({"name": label, "type": "topic", "summary": ""})
+            found.relations.append(
+                {
+                    "from": SELF,
+                    "to": label,
+                    "predicate": "wants help with",
+                    "fact": "",
+                    "ended": False,
+                }
+            )
+    return found
 
 
 def welcome_text(user: User, routines: list[Routine], prompts: list[str]) -> str:
@@ -98,7 +134,12 @@ def welcome_text(user: User, routines: list[Routine], prompts: list[str]) -> str
 
 
 async def apply(
-    db: AsyncSession, settings: Settings, user: User, body: OnboardingIn, packs: list[Pack]
+    db: AsyncSession,
+    settings: Settings,
+    user: User,
+    body: OnboardingIn,
+    packs: list[Pack],
+    embedder: CachedEmbedder | None = None,
 ) -> tuple[uuid.UUID, int]:
     """Store the answers. Returns the welcome chat's id and how many routines were added."""
     now = utcnow()
@@ -127,7 +168,8 @@ async def apply(
 
     # Earlier onboarding memories go; ones the person edited have source "user" and stay.
     await db.execute(delete(Memory).where(Memory.user_id == user.id, Memory.source == SOURCE))
-    for kind, content, pinned in memories_from(body, mine):
+    links: list[tuple[dict, list[str]]] = []
+    for kind, content, pinned, about in memories_from(body, mine):
         m = Memory(
             id=uuid.uuid4(),
             user_id=user.id,
@@ -136,11 +178,18 @@ async def apply(
             confidence=1.0,
             pinned=pinned,
             source=SOURCE,
+            # Memories tied to a topic here are linked now; the rest (the free-text answer,
+            # say) go to the graph job, which can find a city or a tool in them.
+            graph_at=now if about else None,
         )
         db.add(m)
         await db.flush()
         record(db, m, "add", "user", content)
+        if about:
+            links.append(({"memory_id": m.id}, about))
     await mark_profile_stale(db, user.id)
+    if settings.graph_enabled and embedder is not None:
+        await graph.ingest(db, embedder, user, graph_from(body, mine), links=links)
 
     added: list[Routine] = []
     if user.has_role(RoleName.member) and settings.routines_enabled:

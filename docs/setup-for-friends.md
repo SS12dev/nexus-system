@@ -245,6 +245,11 @@ and `./scripts/secrets.sh set SMTP_PASSWORD`.
   with tokens and cost still there.
 - **Admin → Models:** routine runs show as ordinary chat turns on nexus-mini.
 - **Routines:** each friend's routines have run (history on the Routines page).
+- **One account in detail:** `./scripts/inspect-user.sh friend@example.com` prints what Nexus
+  holds for them, read-only: setup answers, terms, memories (and whether each is in the graph
+  yet), the graph's topics and relations, routines with their next runs and last three runs,
+  push devices and feedback. It is their own data, so use it to help them and share the output
+  only with them.
 
 ## 8. Changing the terms later
 
