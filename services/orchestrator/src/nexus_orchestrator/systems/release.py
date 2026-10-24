@@ -161,3 +161,10 @@ async def is_public(rc: RunContext, project_id) -> bool:
     async with rc.deps.sessionmaker() as db:
         row = await db.get(Project, project_id)
         return bool(row and row.public)
+
+
+async def is_live(rc: RunContext, project_id) -> bool:
+    """Whether the project already runs as an app."""
+    async with rc.deps.sessionmaker() as db:
+        row = await db.get(Project, project_id)
+        return bool(row and row.live_url and row.app_state in ("running", "degraded"))

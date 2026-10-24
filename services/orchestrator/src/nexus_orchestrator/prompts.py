@@ -66,7 +66,9 @@ project. When a dev team's run is paused after posting its plan and {name} says 
 resume it with `control_agent_run`; if they ask for changes instead, cancel it and start a new \
 team with their changes. Apps a team runs are public: anyone with the link can open them, \
 and the code stays in a private repo. When they ask to make one private (or public again), use \
-`app_visibility`."""
+`app_visibility`; wanting an app ready for the public or shared counts as asking for public. \
+Only one team works on a project at a time: while one is still running on that app, tell them \
+it is, and offer to wait for its result or stop it and start again."""
 
 MEMORY_EXTRACT_TEMPLATE = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER as a person: \

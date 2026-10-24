@@ -102,7 +102,10 @@ def live_line(release: dict) -> str:
         note = " (with the open points below still to fix)" if release.get("preview") else ""
         if release.get("public"):
             return release["live_url"] + note
-        return f"{release['live_url']} (private: only you can open it, after signing in){note}"
+        return (
+            f"{release['live_url']} (private: only you can open it, signed in to Nexus; say "
+            f'"make it public" to share it){note}'
+        )
     if release.get("live_note"):
         return release["live_note"]
     return "added here once deploys are switched on"
@@ -141,6 +144,36 @@ def answer(name: str, dev: dict) -> str:
     return "\n".join(x for x in lines if x)
 
 
+# What stays at the project root when a front end moves into its own folder.
+ROOT_KEEP = ".git .gitignore .nexus BRIEF.md PLAN.md README.md TEST_REPORT.md web api server"
+
+
+async def relayout(wb, user: str, project: str, stack: str) -> bool:
+    """A static app that gains a back end has its front end at the root, where the new stack's
+    builders, test setup and deploy template don't look. Move it into the stack's front-end
+    folder first, so every step finds it. True when it moved."""
+    front = FOLDERS[stack][0].rstrip("/")
+    if front in (".", ""):
+        return False
+    keep = "|".join(ROOT_KEEP.split())
+    move = (
+        f"test -f package.json && ! test -e {front}/package.json && mkdir -p {front} && "
+        'ls -A | while IFS= read -r f; do case "$f" in '
+        f"{keep}) ;; "
+        '*) if git ls-files --error-unmatch "$f" >/dev/null 2>&1; '
+        f'then git mv "$f" {front}/; else mv "$f" {front}/; fi ;; esac; done && echo NEXUS_MOVED'
+    )
+    try:
+        out = await wb.run(user, project, move)
+        if "NEXUS_MOVED" not in out.stdout:
+            return False
+        await wb.commit(user, project, f"Move the front end into {front}/ for the back end")
+    except WorkbenchError as exc:
+        log.warning("Couldn't move the front end of %s into %s/: %s", project, front, exc)
+        return False
+    return True
+
+
 def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> None:
     spec = rc.spec
     user, project = str(rc.user.id), rc.project
@@ -149,6 +182,18 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         "researcher": build_agent(
             rc,
             spec.agent("researcher"),
+            [terminal("submit_brief", "Hand over the brief once BRIEF.md is written.", _Brief)],
+            final_hint="Call submit_brief.",
+        ),
+        # A change to an existing project: BRIEF.md already says what the app is, so no web
+        # research, only the brief brought up to date.
+        "researcher_change": build_agent(
+            rc,
+            spec.agent("researcher").model_copy(
+                update={
+                    "tools": [t for t in spec.agent("researcher").tools if not t.startswith("web_")]
+                }
+            ),
             [terminal("submit_brief", "Hand over the brief once BRIEF.md is written.", _Brief)],
             final_hint="Call submit_brief.",
         ),
@@ -184,12 +229,21 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         await releasing.set_identity(rc)
         # Where the run started, so the reviewer sees only this run's changes.
         head = await wb.run(user, project, "git rev-parse --short HEAD")
-        st = await run_agent(
-            rc, graphs, "researcher", stage(1, "Brief", "Write BRIEF.md and pick the stack.")
+        found = await wb.run(user, project, "test -f BRIEF.md && echo NEXUS_CHANGE")
+        change = "NEXUS_CHANGE" in found.stdout
+        todo = (
+            "This app exists already: bring BRIEF.md up to date for this change only, and keep "
+            "the stack unless the change needs a back end. No web research."
+            if change
+            else "Write BRIEF.md and pick the stack."
         )
+        researcher = {"researcher": graphs["researcher_change" if change else "researcher"]}
+        st = await run_agent(rc, researcher, "researcher", stage(1, "Brief", todo))
         args = _args(st)
         stack = args.get("stack") if args.get("stack") in STACKS else "static"
         summary = str(args.get("summary") or final_text(st))
+        if await relayout(wb, user, project, stack):
+            summary += f"\n(Nexus moved the existing front end into {FOLDERS[stack][0]}.)"
         return {
             "outputs": {"researcher": summary},
             "dev": {"stack": stack, "brief": summary, "base": head.stdout.strip() or "HEAD"},
@@ -311,6 +365,7 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             tests.update(
                 passed=measured.passed,
                 failed=measured.failed,
+                missing=[x.name for x in measured.suites if not x.ran],
                 line=measured.line(),
                 summary=f"{measured.report()}\n\nThe tester said: {tests['summary']}",
             )
@@ -387,17 +442,28 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
     async def deploy(state: SystemState) -> dict:
         dev = dict(state.get("dev") or {})
         facts = dict(dev.get("release") or {})
-        # Green tests are what put the app up. Work the reviewer hasn't approved only gets here
-        # after the last round, and is deployed too so the user can try it while the open
-        # points wait; main still moves only on approval (release.py).
+        # Green tests put the app up: every suite Nexus expects ran and passed. Work the reviewer
+        # hasn't approved only gets here after the last round; it goes up so the user can try
+        # it, but never over an app that's already live, which keeps the last good version.
+        # main still moves only on approval (release.py).
+        tests = dev.get("tests") or {}
+        missing = list(tests.get("missing") or [])
         if rc.deps.deployer is None:
             pass  # Deploys are off here; the answer says the link comes later.
         elif not releasing.passed(dev):
-            tests = dev.get("tests") or {}
             facts["live_note"] = (
                 "not deployed, as not every test passed"
                 if int(tests.get("failed") or 0)
                 else "not deployed, as no tests ran"
+            )
+        elif missing:
+            facts["live_note"] = f"not deployed, as these tests didn't run: {', '.join(missing)}"
+        elif not dev.get("approved") and await releasing.is_live(
+            rc, uuid.UUID(facts["project_id"])
+        ):
+            facts["live_note"] = (
+                "not updated: the live app keeps the last version, since this one still has "
+                "open points"
             )
         else:
             result = await deploy_project(
