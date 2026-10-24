@@ -1,7 +1,6 @@
-import { Brain, History, List, Network, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Brain, History, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router";
-import { Connections } from "../components/Connections";
+import { Link, Navigate, useSearchParams } from "react-router";
 import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
 import { Select } from "../components/Select";
@@ -50,10 +49,9 @@ export function MemoryPage() {
   const [kind, setKind] = useState<MemoryKind>("preference");
   const [error, setError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
-  // Tapping a memory in the orb opens it here; ?view=connections opens the graph.
-  const [params, setParams] = useSearchParams();
+  // Tapping a memory in the orb or on the Knowledge page opens it here.
+  const [params] = useSearchParams();
   const focus = params.get("focus");
-  const view = params.get("view") === "connections" ? "connections" : "memories";
 
   const load = useCallback(async (q?: string) => {
     const [p, list] = await Promise.all([api.profile(), api.memories(q)]);
@@ -126,10 +124,22 @@ export function MemoryPage() {
     });
   };
 
+  // The old Connections tab is the Knowledge page now; keep its links working.
+  if (params.get("view") === "connections") return <Navigate to="/knowledge" replace />;
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-4 py-6">
-        <h1 className="mb-1 text-xl font-semibold">Memory</h1>
+        <div className="mb-1 flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-semibold">Memory</h1>
+          <Link
+            to="/knowledge"
+            className="ml-auto flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge/60"
+            title="The people, projects, places and topics in your memories, and how they link"
+          >
+            <Share2 size={14} /> Knowledge
+          </Link>
+        </div>
         <p className="mb-3 text-sm text-slate-400">
           What {assistant} has learned about you from your chats, and the profile it builds from it. Edit, pin
           or delete anything; deleting is permanent. Only you can see this.
@@ -230,33 +240,6 @@ export function MemoryPage() {
           </form>
         )}
 
-        <div className="mb-4 inline-flex rounded-md border border-edge bg-panel p-0.5 text-sm" role="tablist">
-          {(
-            [
-              ["memories", "Memories", List],
-              ["connections", "Connections", Network],
-            ] as const
-          ).map(([key, label, Icon]) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={view === key}
-              onClick={() => setParams(key === "memories" ? {} : { view: key }, { replace: true })}
-              className={`flex items-center gap-1.5 rounded px-3 py-1 ${view === key ? "bg-edge text-white" : "text-slate-400 hover:text-slate-200"}`}
-            >
-              <Icon size={14} /> {label}
-            </button>
-          ))}
-        </div>
-
-        {view === "connections" ? (
-          <Connections
-            canEdit={canEdit}
-            memories={memories}
-            onOpenMemory={(id) => setParams({ focus: id }, { replace: true })}
-          />
-        ) : (
-          <>
         <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -293,9 +276,6 @@ export function MemoryPage() {
               />
             ))}
           </div>
-  
-          </>
-        )}
 
         {canEdit && (profile?.memory_count ?? 0) > 0 && (
           <button onClick={forgetAll} className="mt-10 text-sm text-rose-400 hover:text-rose-300">
@@ -507,9 +487,8 @@ function HowItWorks({ assistant }: { assistant: string }) {
             Unpinned memories fade if nothing confirms them for 60 days; near duplicates are merged overnight.
           </li>
           <li>
-            <b>Connections</b> shows who and what your memories are about (people, projects, places, topics,
-            tools) and how they relate, noted from the same chats. When a fact stops being true it's kept with
-            the date it ended. Removing one keeps its memories.
+            <b>Knowledge</b> (its own page) shows who and what your memories are about, people, projects,
+            places, topics and tools, and how they relate, noted from the same chats.
           </li>
           <li>
             The clock icon shows a memory's history. <b>Forget everything</b> at the bottom wipes memories,

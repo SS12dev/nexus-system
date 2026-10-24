@@ -18,7 +18,7 @@ import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type R
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
-import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
+import { ENTITY_COLOR, ENTITY_TYPES, RECALL_COLOR, relationText } from "../lib/entities";
 import { formatInZone } from "../lib/schedule";
 import type { KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
 import {
@@ -39,7 +39,6 @@ import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
-import { ENTITY_TYPES, relationText } from "./Connections";
 
 const OrbScene = lazy(() => import("../orb/OrbScene"));
 
@@ -437,10 +436,10 @@ function SelectionCard({
           </p>
         )}
         <Link
-          to="/memory?view=connections"
+          to={`/knowledge?focus=${st.id}`}
           className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200"
         >
-          Open in Connections <ExternalLink size={13} />
+          Open in Knowledge <ExternalLink size={13} />
         </Link>
       </>
     );
@@ -614,10 +613,10 @@ function ListView({
           </Link>
           {known > 0 && (
             <Link
-              to="/memory?view=connections"
+              to="/knowledge"
               className="mt-2 block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40"
             >
-              {known} connection{known === 1 ? "" : "s"}: the people, projects, places and topics in your memories
+              {known} thing{known === 1 ? "" : "s"} known: the people, projects, places and topics, and how they link
             </Link>
           )}
         </section>

@@ -232,6 +232,7 @@ describe("the constellation", () => {
     aliases: [],
     summary: "",
     is_self: false,
+    created_at: "2026-10-20T00:00:00Z",
     seen_at: "2026-10-20T00:00:00Z",
     memories: 1,
     past_chats: 0,
@@ -239,6 +240,7 @@ describe("the constellation", () => {
     chats: 0,
     memory_ids: [],
     file_ids: [],
+    chat_ids: [],
     ...over,
   });
   const file = (id: string, created_at = "2026-10-20T00:00:00Z") =>

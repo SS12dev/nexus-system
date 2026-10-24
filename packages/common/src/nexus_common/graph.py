@@ -347,18 +347,22 @@ async def walk(
 
 
 async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
-    """Every entity with what mentions it, and every relation, for the Memory page and orb."""
+    """Every entity with what mentions it, and every relation, for the Knowledge page and orb."""
     counts = await db.execute(
         text(
             """
-            select e.id, e.type, e.name, e.aliases, e.summary, e.is_self, e.seen_at,
+            select e.id, e.type, e.name, e.aliases, e.summary, e.is_self, e.created_at, e.seen_at,
                    count(m.memory_id) as memories, count(m.episode_id) as past_chats,
                    count(m.file_id) as files, count(m.chat_id) as chats,
                    coalesce(array_agg(m.memory_id) filter (where m.memory_id is not null),
                             '{}') as memory_ids,
                    coalesce(array_agg(m.file_id) filter (where m.file_id is not null),
-                            '{}') as file_ids
+                            '{}') as file_ids,
+                   coalesce(array_agg(distinct coalesce(m.chat_id, ep.chat_id))
+                            filter (where coalesce(m.chat_id, ep.chat_id) is not null),
+                            '{}') as chat_ids
             from entities e left join mentions m on m.entity_id = e.id
+                 left join episodes ep on ep.id = m.episode_id
             where e.user_id = :user_id
             group by e.id
             order by e.is_self desc, count(m.id) desc, e.seen_at desc"""
@@ -373,6 +377,7 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "aliases": r.aliases or [],
             "summary": r.summary,
             "is_self": r.is_self,
+            "created_at": r.created_at.isoformat(),
             "seen_at": r.seen_at.isoformat(),
             "memories": r.memories,
             "past_chats": r.past_chats,
@@ -380,6 +385,8 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "chats": r.chats,
             "memory_ids": [str(i) for i in r.memory_ids],
             "file_ids": [str(i) for i in r.file_ids],
+            # The chats it came up in, live or summarised, for the Knowledge page to link.
+            "chat_ids": [str(i) for i in r.chat_ids],
         }
         for r in counts
     ]

@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Share2,
   Sparkles,
   Trash2,
   Users,
@@ -204,6 +205,9 @@ export function Shell() {
           </NavLink>
           <NavLink to="/memory" className={navClass} title={tip("Memory")} data-tour="memory">
             <Brain size={16} className="shrink-0" /> <span className={label}>Memory</span>
+          </NavLink>
+          <NavLink to="/knowledge" className={navClass} title={tip("Knowledge")}>
+            <Share2 size={16} className="shrink-0" /> <span className={label}>Knowledge</span>
           </NavLink>
           <NavLink to="/agents" className={(p) => `relative ${navClass(p)}`} title={tip("Agents")}>
             <Bot size={16} className="shrink-0" /> <span className={label}>Agents</span>
