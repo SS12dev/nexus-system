@@ -384,6 +384,9 @@ class Message(Base):
     error: Mapped[str | None] = mapped_column(Text)
     # Tools Nexus used for an assistant reply: id, name, args, status, ms, summary.
     steps: Mapped[list | None] = mapped_column(JSON)
+    # What Nexus remembered for an assistant reply: memory ids, and the entities as
+    # {id, name, type}. Shown as chips under the reply and lit up in the orb.
+    recalled: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_messages_chat_created", "chat_id", "created_at"),)

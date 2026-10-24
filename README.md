@@ -13,7 +13,8 @@ the Library page and ask Nexus about them. Phase 3 lets Nexus build teams of sub
 bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
 shared skills library, per-run budgets, and your approval before anything risky. Phase 4 makes
 the home screen a 3D orb: Nexus in the middle, its live agent teams growing out of it and
-pulling back in, and your memories and artifacts inside it. Phase 5 makes it safe to invite
+pulling back in, and inside it what it knows about you as a constellation of people, projects
+and topics, with memories and artifacts attached and what it recalls lighting up. Phase 5 makes it safe to invite
 people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
 the audit log, backups and a maintenance switch. Since then it has gained structured logs with
@@ -379,18 +380,31 @@ box docked underneath; sending a message opens the chat.
   runs down the edge to a busy agent. A new team grows out of the orb, agent by agent; when a
   team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
   springs, so nothing jumps.
-- **Inside it**, memories are particles clustered by kind (preferences, facts, goals,
-  instructions), pinned ones brighter; artifacts (files Nexus or a team made) are small
-  crystals. A new one grows in with a flash.
-- **Tap** an agent, memory or crystal for a card that opens the team, the memory on the Memory
-  page, or the file. Drag to turn, pinch or scroll to zoom.
+- **Inside it** is what Nexus knows, as a constellation: you at the centre, and around you the
+  people, projects, organisations, places, topics and tools from your memories, chats and
+  files (the Connections view on the Memory page), each type in its own part of the orb and
+  tinted by type. The more something is mentioned, the bigger and nearer the centre it sits.
+  Lines are relations ("Nexus uses LangGraph"), fainter once they stopped being true. Memories
+  are small dots circling what they're about; memories only about you circle the centre. The
+  newest artifacts (12, or 6 on a phone) are crystals beside their project, with a line to it;
+  the rest are in the Library. Before anything is connected, memories cluster by kind and
+  artifacts sit on a ring.
+- **Recall lights up.** When Nexus answers, what it remembered (the `memory.recalled` event)
+  glows yellow in the orb for 15 seconds with a short pulse, its line to you lights, and the
+  status line says it in words ("Remembered Nexus, LangGraph and 2 memories"). The reply keeps
+  a **Remembered** row of chips (stored on the message as `recalled`); tapping it lights them
+  again.
+- **Tap** an agent, star, memory or crystal for a card: a team opens on the Agents page, a
+  star shows what it is, how it relates to the rest and how often it comes up, a memory opens
+  on the Memory page, and an artifact opens or downloads. Drag to turn, pinch or scroll to zoom.
 - **Phones** get fewer particles, no bloom, a lower pixel ratio and a 30 fps cap, and teams sit
   on a tighter band on portrait screens. **List** (top right) shows the same teams, memories and
   artifacts as plain lists; it is also what shows when the device has no WebGL. With
   reduced motion turned on in the OS, nothing spins or pulses and objects snap into place.
 
 Everything is driven by the existing WebSocket events (`assistant.state`, `system.*`, `run.updated`,
-`agent.status`, `approval.*`, `memory.updated`, `artifact.created`, `file.*`), with a fresh fetch
+`agent.status`, `approval.*`, `memory.updated`, `memory.recalled`, `artifact.created`, `file.*`), with
+the knowledge graph from `GET /api/memories/graph`, and a fresh fetch
 on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
 
 ## Running it for other people

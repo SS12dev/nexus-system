@@ -1,7 +1,9 @@
+import { Html } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Color, Group, InstancedMesh, Object3D } from "three";
-import { KIND_COLOR, type Crystal, type MemoryPoint } from "./model";
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Group, InstancedMesh, Mesh, Object3D } from "three";
+import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
+import { KIND_COLOR, type Crystal, type MemoryPoint, type StarLine, type StarPoint } from "./model";
 
 const GROW_S = 0.9;
 
@@ -12,6 +14,7 @@ export function MemoryCloud({
   still,
   lite,
   selected,
+  lit,
   onPick,
 }: {
   points: MemoryPoint[];
@@ -19,6 +22,8 @@ export function MemoryCloud({
   /** Phones draw fewer, larger particles, which are also easier to tap. */
   lite: boolean;
   selected: string | null;
+  /** Memories the latest reply recalled, drawn larger in the recall colour. */
+  lit: Set<string>;
   onPick: (p: MemoryPoint) => void;
 }) {
   const mesh = useRef<InstancedMesh>(null);
@@ -40,11 +45,12 @@ export function MemoryCloud({
     if (!m) return;
     points.forEach((p, i) => {
       color.set(KIND_COLOR[p.kind] ?? "#cbd5e1").multiplyScalar(p.pinned ? 1.6 : 1);
+      if (lit.has(p.id)) color.set(RECALL_COLOR).multiplyScalar(2);
       if (p.id === selected) color.set("#ffffff").multiplyScalar(2);
       m.setColorAt(i, color);
     });
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
-  }, [points, selected, color]);
+  }, [points, selected, lit, color]);
 
   useFrame(({ clock }) => {
     const m = mesh.current;
@@ -56,7 +62,8 @@ export function MemoryCloud({
       const grow = still ? 1 : Math.min(1, age / GROW_S);
       // Overshoot slightly while growing so new memories read as a spark.
       const spark = grow < 1 ? 1 + Math.sin(grow * Math.PI) * 1.8 : 1;
-      const base = (p.pinned ? 0.032 : 0.022) * (lite ? 1.5 : 1) * (p.id === selected ? 1.8 : 1);
+      const base =
+        (p.pinned ? 0.032 : 0.022) * (lite ? 1.5 : 1) * (p.id === selected ? 1.8 : lit.has(p.id) ? 1.6 : 1);
       const drift = still ? 0 : 0.012;
       dummy.position.set(
         p.pos[0] + Math.sin(t * 0.6 + i) * drift,
@@ -158,5 +165,195 @@ export function Crystals({
         </mesh>
       ))}
     </group>
+  );
+}
+
+const MAX_LINES = 256;
+
+/** The knowledge graph inside the orb: you at the centre, the people, projects, places, topics
+ * and tools Nexus knows as stars tinted by type, and lines for how they relate. What a reply
+ * just recalled glows in the recall colour, with a pulse when it first lights up. */
+export function Constellation({
+  stars,
+  lines,
+  crystals,
+  still,
+  lite,
+  selected,
+  lit,
+  litSeq,
+  labels,
+  onPick,
+}: {
+  stars: StarPoint[];
+  lines: StarLine[];
+  /** Artifacts with a project get a line to it. */
+  crystals: Crystal[];
+  still: boolean;
+  lite: boolean;
+  selected: string | null;
+  lit: Set<string>;
+  /** Changes each time a recall lights up, to replay the pulse. */
+  litSeq: number;
+  /** How many of the biggest stars get a name label; lit and selected ones always do. */
+  labels: number;
+  onPick: (s: StarPoint) => void;
+}) {
+  const pulseFrom = useRef(0);
+  useEffect(() => {
+    pulseFrom.current = performance.now();
+  }, [litSeq]);
+  const named = useMemo(
+    () => new Set([...stars].filter((s) => !s.self).sort((a, b) => b.weight - a.weight).slice(0, labels).map((s) => s.id)),
+    [stars, labels],
+  );
+  const heaviest = Math.max(1, ...stars.map((s) => s.weight));
+  return (
+    <group>
+      <Lines stars={stars} lines={lines} crystals={crystals} lit={lit} />
+      {stars.map((s) => (
+        <Star
+          key={s.id}
+          star={s}
+          size={s.self ? 0.05 : 0.026 + 0.026 * Math.sqrt(s.weight / heaviest)}
+          lite={lite}
+          still={still}
+          selected={selected === s.id}
+          lit={lit.has(s.id)}
+          pulseFrom={pulseFrom}
+          label={s.self ? "You" : named.has(s.id) || lit.has(s.id) || selected === s.id ? s.name : null}
+          onPick={onPick}
+        />
+      ))}
+    </group>
+  );
+}
+
+function Star({
+  star,
+  size,
+  lite,
+  still,
+  selected,
+  lit,
+  pulseFrom,
+  label,
+  onPick,
+}: {
+  star: StarPoint;
+  size: number;
+  lite: boolean;
+  still: boolean;
+  selected: boolean;
+  lit: boolean;
+  pulseFrom: { current: number };
+  label: string | null;
+  onPick: (s: StarPoint) => void;
+}) {
+  const halo = useRef<Mesh>(null);
+  const color = star.self ? "#f8fafc" : lit ? RECALL_COLOR : (ENTITY_COLOR[star.type] ?? ENTITY_COLOR.other);
+  // Phones get a bigger target to tap.
+  const s = size * (lite ? 1.4 : 1) * (selected ? 1.5 : lit ? 1.35 : 1);
+  useFrame(() => {
+    const h = halo.current;
+    if (!h) return;
+    const t = (performance.now() - pulseFrom.current) / 1000;
+    // Three quick beats when a recall lights it, then a steady glow.
+    const beat = still || t > 1.8 ? 0 : Math.sin((t / 0.6) * Math.PI) ** 2;
+    h.scale.setScalar(s * (1.7 + beat * 1.3));
+  });
+  return (
+    <group position={star.pos}>
+      <mesh
+        scale={s}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPick(star);
+        }}
+        onPointerOver={() => (document.body.style.cursor = "pointer")}
+        onPointerOut={() => (document.body.style.cursor = "")}
+      >
+        <sphereGeometry args={[1, lite ? 12 : 20, lite ? 8 : 14]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
+      {(lit || selected || star.self) && (
+        <mesh ref={halo} raycast={() => null} scale={s * 1.7}>
+          <sphereGeometry args={[1, 12, 8]} />
+          <meshBasicMaterial
+            color={selected ? "#ffffff" : color}
+            transparent
+            opacity={star.self ? 0.1 : 0.16}
+            blending={AdditiveBlending}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+      {label && (
+        <Html center position={[0, s + 0.07, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+          <div className={`orb-label orb-label-star${lit ? " orb-label-lit" : ""}`}>{label}</div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+/** Every relation, and each artifact's line to its project, in one draw call. */
+function Lines({
+  stars,
+  lines,
+  crystals,
+  lit,
+}: {
+  stars: StarPoint[];
+  lines: StarLine[];
+  crystals: Crystal[];
+  lit: Set<string>;
+}) {
+  const geometry = useMemo(() => {
+    const g = new BufferGeometry();
+    g.setAttribute("position", new BufferAttribute(new Float32Array(MAX_LINES * 6), 3));
+    g.setAttribute("color", new BufferAttribute(new Float32Array(MAX_LINES * 6), 3));
+    return g;
+  }, []);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useLayoutEffect(() => {
+    const pos = geometry.getAttribute("position") as BufferAttribute;
+    const col = geometry.getAttribute("color") as BufferAttribute;
+    const at = new Map(stars.map((s) => [s.id, s.pos]));
+    const c = new Color();
+    let n = 0;
+    const put = (a: number[], b: number[], hex: string, k: number) => {
+      if (n >= MAX_LINES) return;
+      c.set(hex).multiplyScalar(k);
+      pos.setXYZ(n * 2, a[0], a[1], a[2]);
+      pos.setXYZ(n * 2 + 1, b[0], b[1], b[2]);
+      col.setXYZ(n * 2, c.r, c.g, c.b);
+      col.setXYZ(n * 2 + 1, c.r, c.g, c.b);
+      n++;
+    };
+    for (const l of lines) {
+      const a = at.get(l.a);
+      const b = at.get(l.b);
+      if (!a || !b) continue;
+      const hot = lit.has(l.a) && lit.has(l.b);
+      // A recalled entity's line to you lights up too, so you can see the path.
+      const toYou = (lit.has(l.a) || lit.has(l.b)) && stars.some((s) => s.self && (s.id === l.a || s.id === l.b));
+      put(a, b, hot || toYou ? RECALL_COLOR : "#64748b", hot || toYou ? 0.9 : l.ended ? 0.25 : 0.55);
+    }
+    for (const cr of crystals) {
+      const a = cr.star ? at.get(cr.star) : undefined;
+      if (a) put(a, cr.pos, "#a855f7", 0.45);
+    }
+    geometry.setDrawRange(0, n * 2);
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+  }, [geometry, stars, lines, crystals, lit]);
+
+  return (
+    <lineSegments geometry={geometry} raycast={() => null} frustumCulled={false}>
+      <lineBasicMaterial vertexColors transparent opacity={0.8} toneMapped={false} />
+    </lineSegments>
   );
 }

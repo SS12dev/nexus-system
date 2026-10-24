@@ -112,6 +112,23 @@ describe("phase 2 events", () => {
     });
     expect(s.memoryVersion).toBe(1);
   });
+
+  it("puts what a reply remembered on it and lights it in the orb, through to the stored reply", () => {
+    const recalled = { memories: ["m1"], entities: [{ id: "e1", name: "Nexus", type: "project" as const }] };
+    let s = addMessages(initialState, "c1", [msg()]);
+    s = applyEvent(s, { type: "memory.recalled", chat_id: "c1", data: recalled });
+    expect(s.messages.c1[0].recalled).toEqual(recalled);
+    expect(s.recall).toEqual({ ...recalled, seq: 1 });
+    s = applyEvent(s, {
+      type: "message.completed",
+      chat_id: "c1",
+      data: { message: msg({ content: "Done", status: "complete" }) },
+    });
+    expect(s.messages.c1[0].recalled).toEqual(recalled);
+    // Lighting it again replays it.
+    s = applyEvent(s, { type: "memory.recalled", chat_id: "c2", data: recalled });
+    expect(s.recall?.seq).toBe(2);
+  });
 });
 
 describe("agent systems", () => {

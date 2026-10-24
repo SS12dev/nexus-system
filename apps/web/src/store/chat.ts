@@ -6,6 +6,7 @@ import type {
   FeedItem,
   FileItem,
   Message,
+  Recalled,
   ServerEvent,
   User,
 } from "../lib/types";
@@ -44,6 +45,8 @@ interface Store extends ChatState {
   syncLiveSystems: (systems: AgentSystem[]) => void;
   upsertApprovals: (approvals: Approval[]) => void;
   seedRunFeed: (runId: string, items: FeedItem[]) => void;
+  /** Light up a reply's recall in the orb again (its chips were tapped). */
+  showRecall: (recalled: Recalled) => void;
 }
 
 export const useStore = create<Store>((set) => ({
@@ -71,4 +74,5 @@ export const useStore = create<Store>((set) => ({
   syncLiveSystems: (systems) => set((s) => syncLiveSystems(s, systems)),
   upsertApprovals: (approvals) => set((s) => upsertApprovals(s, approvals)),
   seedRunFeed: (runId, items) => set((s) => seedRunFeed(s, runId, items)),
+  showRecall: (recalled) => set((s) => ({ recall: { ...recalled, seq: (s.recall?.seq ?? 0) + 1 } })),
 }));

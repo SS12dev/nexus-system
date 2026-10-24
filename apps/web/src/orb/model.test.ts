@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSystem, Approval, FileItem, Memory } from "../lib/types";
+import type { AgentSystem, Approval, FileItem, GraphEntity, KnowledgeGraph, Memory } from "../lib/types";
 import {
   agentTargets,
   buildClusters,
   cameraDistance,
   clusterAnchor,
   crystals,
+  inside,
   liveSystems,
   memoryPoints,
   ORB_R,
@@ -202,6 +203,87 @@ describe("inside the orb", () => {
     const out = crystals([f("a", {}), f("b", { origin: "upload" }), f("c", { status: "processing" })], 10);
     expect(out.map((c) => c.id)).toEqual(["a"]);
     expect(dist(out[0].pos)).toBeLessThan(ORB_R);
+  });
+});
+
+describe("the constellation", () => {
+  const ent = (id: string, over: Partial<GraphEntity> = {}): GraphEntity => ({
+    id,
+    type: "project",
+    name: id,
+    aliases: [],
+    summary: "",
+    is_self: false,
+    seen_at: "2026-10-20T00:00:00Z",
+    memories: 1,
+    past_chats: 0,
+    files: 0,
+    chats: 0,
+    memory_ids: [],
+    file_ids: [],
+    ...over,
+  });
+  const file = (id: string, created_at = "2026-10-20T00:00:00Z") =>
+    ({ id, name: id, content_type: "x", status: "ready", origin: "generated", created_at }) as FileItem;
+  const limits = { stars: 40, memories: 600, crystals: 12 };
+  const graph: KnowledgeGraph = {
+    entities: [
+      ent("me", { type: "person", name: "Shivam", is_self: true }),
+      ent("nexus", { memories: 5, memory_ids: ["m1"], file_ids: ["f1"] }),
+      ent("ana", { type: "person", memories: 1, memory_ids: ["m1", "m2"] }),
+      ent("kyoto", { type: "place", memories: 0, chats: 1 }),
+    ],
+    relations: [
+      { id: "r1", src: "me", dst: "nexus", predicate: "builds", fact: "", confidence: 1, valid_from: "", valid_to: null, source_chat_id: null },
+      { id: "r2", src: "ana", dst: "nexus", predicate: "works on", fact: "", confidence: 1, valid_from: "", valid_to: "2026-10-21", source_chat_id: null },
+    ],
+  };
+
+  it("falls back to memories by kind and an artifact ring before anything is connected", () => {
+    const out = inside(null, [mem("m1")], [file("f1")], limits);
+    expect(out.stars).toEqual([]);
+    expect(out.memories).toEqual(memoryPoints([mem("m1")], 600));
+    expect(out.crystals).toEqual(crystals([file("f1")], 12));
+  });
+
+  it("puts you at the centre with the most mentioned stars nearest, inside the orb", () => {
+    const out = inside(graph, [], [], limits);
+    expect(out.stars[0]).toMatchObject({ id: "me", self: true, pos: [0, 0, 0] });
+    const at = Object.fromEntries(out.stars.map((s) => [s.id, dist(s.pos)]));
+    expect(at.nexus).toBeLessThan(at.kyoto);
+    for (const s of out.stars) expect(dist(s.pos)).toBeLessThan(0.8 * ORB_R);
+    expect(inside(graph, [], [], limits)).toEqual(out);
+  });
+
+  it("draws relations as lines, fainter once they ended", () => {
+    const out = inside(graph, [], [], limits);
+    expect(out.lines).toEqual([
+      { a: "me", b: "nexus", ended: false },
+      { a: "ana", b: "nexus", ended: true },
+    ]);
+  });
+
+  it("hangs a memory off the most mentioned thing it is about, and the rest round the centre", () => {
+    const out = inside(graph, [mem("m1"), mem("m2"), mem("m3")], [], limits);
+    const star = Object.fromEntries(out.memories.map((m) => [m.id, m.star]));
+    expect(star).toEqual({ m1: "nexus", m2: "ana", m3: undefined });
+    const nexus = out.stars.find((s) => s.id === "nexus")!;
+    const m1 = out.memories.find((m) => m.id === "m1")!;
+    expect(dist(m1.pos.map((v, i) => v - nexus.pos[i]))).toBeLessThan(0.13);
+  });
+
+  it("shows only the newest artifacts, each beside its project", () => {
+    const files = [file("f1", "2026-10-22T00:00:00Z"), file("f2", "2026-10-21T00:00:00Z"), file("old", "2026-01-01T00:00:00Z")];
+    const out = inside(graph, [], files, { ...limits, crystals: 2 });
+    expect(out.crystals.map((c) => [c.id, c.star])).toEqual([
+      ["f1", "nexus"],
+      ["f2", undefined],
+    ]);
+  });
+
+  it("always draws what a reply just recalled, even past the star limit", () => {
+    const out = inside(graph, [], [], { ...limits, stars: 1 }, new Set(["kyoto"]));
+    expect(out.stars.map((s) => s.id)).toEqual(["me", "kyoto"]);
   });
 });
 

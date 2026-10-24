@@ -250,6 +250,10 @@ async def test_turn_uses_memories_and_documents_then_queues_learning(
     assert 'name="sales.xlsx"' in system and "| North | 1200 |" in system
     assert set(model.tools) >= {"search_documents", "read_document", "remember"}
     assert enqueued.jobs[-1] == ("extract_memories", str(chat_id), str(reply.id))
+    # The reply keeps what it remembered, for the chips under it after a reload.
+    async with sessionmaker() as db:
+        stored = await db.get(Message, reply.id)
+    assert stored.recalled and len(stored.recalled["memories"]) == 1
 
 
 async def test_tool_calls_read_documents_and_count_every_call(

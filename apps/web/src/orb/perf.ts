@@ -8,7 +8,10 @@ export interface Perf {
   /** Taller than wide: teams sit on a tighter band. */
   portrait: boolean;
   maxMemories: number;
+  /** Only the newest artifacts show in the orb; the rest are in the Library. */
   maxCrystals: number;
+  /** People, projects and topics drawn in the orb, most mentioned first. */
+  maxStars: number;
   stars: number;
 }
 
@@ -25,7 +28,8 @@ function detect(): Perf {
     reducedMotion: mq("(prefers-reduced-motion: reduce)"),
     portrait: mq("(orientation: portrait)"),
     maxMemories: lite ? 150 : 600,
-    maxCrystals: lite ? 12 : 30,
+    maxCrystals: lite ? 6 : 12,
+    maxStars: lite ? 20 : 40,
     stars: lite ? 600 : 2500,
   };
 }

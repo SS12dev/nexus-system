@@ -15,8 +15,9 @@ cover the question, say so rather than assuming. The repository is SS12dev/nexus
 
 A personal supervisor assistant. Each person names their own assistant. It answers quick
 things itself and gives all real work to agent teams, which it designs, runs and removes.
-Web app for laptop and phone, with a 3D orb home page. It runs with Docker Compose on one
-machine, reached through a Cloudflare tunnel at nexus.servhub.cc.
+Web app for laptop and phone, with a 3D orb home page (teams around it; inside, a
+constellation of the people, projects and topics it knows, lighting up what each reply
+recalled). It runs with Docker Compose on one machine, reached through a Cloudflare tunnel at nexus.servhub.cc.
 
 ## Services (compose.yaml)
 

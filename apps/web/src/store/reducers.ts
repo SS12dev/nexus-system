@@ -7,6 +7,7 @@ import type {
   FileItem,
   AssistantState,
   Message,
+  Recalled,
   ServerEvent,
   ToolStep,
 } from "../lib/types";
@@ -35,6 +36,9 @@ export interface ChatState {
   runFeed: Record<string, FeedItem[]>;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;
+  /** What the orb lights up: the latest reply's recall, or one whose chips were tapped.
+   * seq changes each time, so lighting the same recall again replays it. */
+  recall: (Recalled & { seq: number }) | null;
 }
 
 export const initialState: ChatState = {
@@ -51,6 +55,7 @@ export const initialState: ChatState = {
   linksVersion: 0,
   runFeed: {},
   pendingAccess: null,
+  recall: null,
 };
 
 /** Most feed lines kept per run; older ones drop off the top. */
@@ -301,8 +306,25 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         attachments: event.data.message.attachments ?? prev?.attachments ?? [],
         links: event.data.message.links ?? prev?.links ?? [],
         steps: event.data.message.steps ?? prev?.steps ?? null,
+        recalled: event.data.message.recalled ?? prev?.recalled ?? null,
       };
       return addMessages(next, event.chat_id, [message]);
+    }
+    case "memory.recalled": {
+      const recall = { ...event.data, seq: (state.recall?.seq ?? 0) + 1 };
+      const list = state.messages[event.chat_id];
+      if (!list) return { ...state, recall };
+      // The chips show under the reply as it streams, not only once it's stored.
+      let i = -1;
+      for (let j = list.length - 1; j >= 0; j--)
+        if (list[j].role === "assistant" && list[j].status === "streaming") {
+          i = j;
+          break;
+        }
+      if (i === -1) return { ...state, recall };
+      const next = list.slice();
+      next[i] = { ...next[i], recalled: event.data };
+      return { ...state, recall, messages: { ...state.messages, [event.chat_id]: next } };
     }
     case "memory.updated":
     case "profile.updated":

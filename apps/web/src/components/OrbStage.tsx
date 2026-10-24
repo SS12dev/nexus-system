@@ -1,16 +1,16 @@
-import { Bot, Box, Brain, ChevronDown, ChevronUp, ExternalLink, List, Maximize2, Minimize2, Orbit, X } from "lucide-react";
+import { Bot, Box, Brain, ChevronDown, ChevronUp, ExternalLink, List, Maximize2, Minimize2, Orbit, Share2, X } from "lucide-react";
 import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
-import type { Memory, Run } from "../lib/types";
+import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
+import type { KnowledgeGraph, Memory, Recalled, Run } from "../lib/types";
 import {
   buildClusters,
-  crystals as toCrystals,
+  inside as layoutInside,
   isArtifact,
   KIND_COLOR,
   liveSystems,
-  memoryPoints,
   NODE_COLOR,
   type OrbCluster,
 } from "../orb/model";
@@ -20,10 +20,13 @@ import { useStore } from "../store/chat";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
+import { ENTITY_TYPES, relationText } from "./Connections";
 
 const OrbScene = lazy(() => import("../orb/OrbScene"));
 
 const VIEW_KEY = "nexus.home.view";
+/** How long what a reply recalled stays lit in the orb. */
+const LIT_MS = 15000;
 
 function savedView(): "orb" | "list" {
   if (!hasWebGL()) return "list";
@@ -34,8 +37,9 @@ function savedView(): "orb" | "list" {
   }
 }
 
-/** Nexus as a 3D orb with the live agent network around it and memories and artifacts inside
- * it, or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
+/** Nexus as a 3D orb with the live agent network around it and, inside it, what it knows:
+ * you at the centre, the people, projects and topics you've mentioned around you, memories as
+ * their satellites and the newest artifacts by their project. Or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
  * phones) so you can watch Nexus and its teams work while you talk. */
 export function OrbStage({
   mode,
@@ -61,6 +65,9 @@ export function OrbStage({
   const perf = usePerf();
   const [view, setView] = useState(savedView);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
+  const recall = useStore((s) => s.recall);
+  const [lit, setLit] = useState<Recalled | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
 
@@ -74,21 +81,43 @@ export function OrbStage({
 
   // Memories change in bursts after a chat; wait for the burst to settle.
   useEffect(() => {
-    const t = window.setTimeout(() => api.memories().then(setMemories).catch(() => {}), 300);
+    const t = window.setTimeout(() => {
+      api.memories().then(setMemories).catch(() => {});
+      api.knowledgeGraph().then(setGraph).catch(() => {});
+    }, 300);
     return () => window.clearTimeout(t);
   }, [memoryVersion, connected]);
+
+  // Light up what a reply recalled for a while, then let it fade back.
+  useEffect(() => {
+    if (!recall) return;
+    setLit(recall);
+    const t = window.setTimeout(() => setLit(null), LIT_MS);
+    return () => window.clearTimeout(t);
+  }, [recall]);
+  const litIds = useMemo(
+    () => new Set(lit ? [...lit.memories, ...lit.entities.map((e) => e.id)] : []),
+    [lit],
+  );
 
   const live = useMemo(() => liveSystems(systems), [systems]);
   const clusters = useMemo(
     () => buildClusters(live, Object.values(approvals), perf.portrait),
     [live, approvals, perf.portrait],
   );
-  const points = useMemo(() => memoryPoints(memories, perf.maxMemories), [memories, perf.maxMemories]);
   const artifactList = useMemo(() => Object.values(files).filter(isArtifact), [files]);
-  const crystalList = useMemo(
-    () => toCrystals(artifactList, perf.maxCrystals),
-    [artifactList, perf.maxCrystals],
+  const insideData = useMemo(
+    () =>
+      layoutInside(
+        graph,
+        memories,
+        artifactList,
+        { stars: perf.maxStars, memories: perf.maxMemories, crystals: perf.maxCrystals },
+        litIds,
+      ),
+    [graph, memories, artifactList, perf.maxStars, perf.maxMemories, perf.maxCrystals, litIds],
   );
+  const known = graph?.entities.filter((e) => !e.is_self).length ?? 0;
 
   // Drop a selection whose object went away.
   useEffect(() => {
@@ -113,7 +142,9 @@ export function OrbStage({
   const status =
     state !== "idle"
       ? (activity ?? (state === "thinking" ? "Thinking…" : "Answering…"))
-      : summary(clusters.length, agentCount, working, memories.length, artifactList.length);
+      : lit
+        ? remembered(lit)
+        : summary(clusters.length, agentCount, working, memories.length, known, artifactList.length);
 
   if (chat && collapsed) {
     return (
@@ -158,8 +189,10 @@ export function OrbStage({
                 assistantState={state}
                 activity={state !== "idle" ? activity : null}
                 clusters={clusters}
-                memories={points}
-                artifacts={crystalList}
+                inside={insideData}
+                lit={litIds}
+                litSeq={recall?.seq ?? 0}
+                labels={chat ? 3 : perf.lite ? 5 : 8}
                 perf={perf}
                 selected={selected}
                 onSelect={setSelected}
@@ -217,25 +250,36 @@ export function OrbStage({
           {!chat && <Legend />}
         </div>
       ) : (
-        <ListView clusters={clusters} memories={memories} artifacts={artifactList} />
+        <ListView clusters={clusters} memories={memories} known={known} artifacts={artifactList} />
       )}
 
       {selected && (
         <div className={chat ? "absolute inset-x-2 bottom-2 z-20" : "relative z-10 px-3 pb-2"}>
-          <SelectionCard selection={selected} clusters={clusters} onClose={() => setSelected(null)} />
+          <SelectionCard selection={selected} clusters={clusters} graph={graph} onClose={() => setSelected(null)} />
         </div>
       )}
     </div>
   );
 }
 
-function summary(teams: number, agents: number, working: number, memories: number, artifacts: number) {
+function summary(teams: number, agents: number, working: number, memories: number, known: number, artifacts: number) {
   const parts = [
     teams ? `${teams} team${teams > 1 ? "s" : ""} (${agents} agents${working ? `, ${working} working` : ""})` : "No teams right now",
     `${memories} memor${memories === 1 ? "y" : "ies"}`,
+    ...(known ? [`${known} connection${known === 1 ? "" : "s"}`] : []),
     `${artifacts} artifact${artifacts === 1 ? "" : "s"}`,
   ];
   return parts.join(" · ");
+}
+
+/** The status line while a recall is lit: what the reply drew on, in plain words. */
+export function remembered(r: Recalled): string {
+  const names = r.entities.slice(0, 3).map((e) => e.name);
+  if (r.entities.length > 3) names.push(`${r.entities.length - 3} more`);
+  if (r.memories.length) names.push(`${r.memories.length} memor${r.memories.length === 1 ? "y" : "ies"}`);
+  if (names.length === 0) return "Remembered nothing for this reply";
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `Remembered ${list}`;
 }
 
 function Legend() {
@@ -246,8 +290,12 @@ function Legend() {
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.working)} using a tool</span>
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.waiting)} needs approval</span>
       <span className="flex items-center gap-1.5">{dot(NODE_COLOR.idle)} idle</span>
-      <span className="flex items-center gap-1.5">{dot(KIND_COLOR.preference)} memories inside</span>
-      <span className="flex items-center gap-1.5">{dot("#c084fc")} artifacts inside</span>
+      <span className="flex items-center gap-1.5">{dot(ENTITY_COLOR.project)} people, projects and topics inside</span>
+      <span className="flex items-center gap-1.5">{dot(KIND_COLOR.preference)} memories</span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block size-2 rotate-45 bg-purple-400" /> newest artifacts
+      </span>
+      <span className="flex items-center gap-1.5">{dot(RECALL_COLOR)} just remembered</span>
     </div>
   );
 }
@@ -255,14 +303,51 @@ function Legend() {
 function SelectionCard({
   selection,
   clusters,
+  graph,
   onClose,
 }: {
   selection: Selection;
   clusters: OrbCluster[];
+  graph: KnowledgeGraph | null;
   onClose: () => void;
 }) {
   let body: ReactNode;
-  if (selection.type === "agent") {
+  if (selection.type === "entity") {
+    const st = selection.star;
+    const e = graph?.entities.find((x) => x.id === st.id);
+    const names = new Map(graph?.entities.map((x) => [x.id, x.is_self ? "You" : x.name]) ?? []);
+    const facts = (graph?.relations ?? []).filter((r) => !r.valid_to && (r.src === st.id || r.dst === st.id));
+    const t = ENTITY_TYPES[st.type] ?? ENTITY_TYPES.other;
+    body = (
+      <>
+        <div className="flex items-center gap-2 text-xs" style={{ color: st.self ? "#f8fafc" : ENTITY_COLOR[st.type] }}>
+          <Share2 size={14} /> {st.self ? "You" : t.label}
+        </div>
+        <div className="mt-1 font-medium">{st.name}</div>
+        {st.summary && <p className="mt-0.5 text-sm text-slate-400">{st.summary}</p>}
+        {facts.length > 0 && (
+          <ul className="mt-1.5 space-y-0.5 text-sm text-slate-300">
+            {facts.slice(0, 3).map((r) => (
+              <li key={r.id}>{relationText(r, names)}</li>
+            ))}
+            {facts.length > 3 && <li className="text-xs text-slate-500">and {facts.length - 3} more</li>}
+          </ul>
+        )}
+        {e && !st.self && (
+          <p className="mt-1.5 text-xs text-slate-500">
+            In {e.memories} memor{e.memories === 1 ? "y" : "ies"}, {e.chats + e.past_chats} chat
+            {e.chats + e.past_chats === 1 ? "" : "s"} and {e.files} file{e.files === 1 ? "" : "s"}
+          </p>
+        )}
+        <Link
+          to="/memory?view=connections"
+          className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200"
+        >
+          Open in Connections <ExternalLink size={13} />
+        </Link>
+      </>
+    );
+  } else if (selection.type === "agent") {
     const n = selection.node;
     const team = clusters.find((c) => c.id === n.systemId);
     body = (
@@ -337,10 +422,12 @@ function SelectionCard({
 function ListView({
   clusters,
   memories,
+  known,
   artifacts,
 }: {
   clusters: OrbCluster[];
   memories: Memory[];
+  known: number;
   artifacts: { id: string; name: string; created_at: string }[];
 }) {
   const assistant = useAssistantName();
@@ -388,6 +475,14 @@ function ListView({
               ? `Nothing yet. ${assistant} learns as you chat.`
               : kinds.map(([k, n]) => `${n} ${k}${n > 1 ? "s" : ""}`).join(" · ")}
           </Link>
+          {known > 0 && (
+            <Link
+              to="/memory?view=connections"
+              className="mt-2 block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40"
+            >
+              {known} connection{known === 1 ? "" : "s"}: the people, projects, places and topics in your memories
+            </Link>
+          )}
         </section>
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">

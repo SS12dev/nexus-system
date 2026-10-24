@@ -4,7 +4,16 @@
  * these targets, which is what makes agents grow out of the orb and fall back into it.
  */
 import { TEAM_W, teamLayout } from "../lib/teamLayout";
-import type { AgentNode, AgentSystem, Approval, FileItem, Memory, MemoryKind } from "../lib/types";
+import type {
+  AgentNode,
+  AgentSystem,
+  Approval,
+  EntityType,
+  FileItem,
+  KnowledgeGraph,
+  Memory,
+  MemoryKind,
+} from "../lib/types";
 
 export type Vec3 = [number, number, number];
 
@@ -68,6 +77,8 @@ export interface MemoryPoint {
   content: string;
   pinned: boolean;
   pos: Vec3;
+  /** The star it orbits, when it is about someone or something. */
+  star?: string;
 }
 
 export interface Crystal {
@@ -75,6 +86,36 @@ export interface Crystal {
   name: string;
   contentType: string;
   pos: Vec3;
+  /** The project (or other star) it belongs to, drawn as a line to it. */
+  star?: string;
+}
+
+/** A person, project, place, topic or tool Nexus knows about, or the user at the centre. */
+export interface StarPoint {
+  id: string;
+  name: string;
+  type: EntityType;
+  summary: string;
+  self: boolean;
+  /** How much mentions it: memories, chats and files. Bigger stars are mentioned more. */
+  weight: number;
+  pos: Vec3;
+}
+
+export interface StarLine {
+  a: string;
+  b: string;
+  /** The relation stopped being true; drawn fainter. */
+  ended: boolean;
+}
+
+/** Everything inside the orb. Without a knowledge graph yet, memories cluster by kind and
+ * artifacts sit on a ring, as before. */
+export interface Inside {
+  stars: StarPoint[];
+  lines: StarLine[];
+  memories: MemoryPoint[];
+  crystals: Crystal[];
 }
 
 // --- Deterministic randomness -----------------------------------------------------------------
@@ -287,6 +328,127 @@ export function crystals(files: FileItem[], max: number): Crystal[] {
   });
 }
 
+// --- The constellation: the knowledge graph inside the orb -----------------------------------
+
+/** Where each entity type gathers: spread-out directions from the centre, so people,
+ * projects and topics each have their own part of the orb. */
+const TYPE_DIR: Record<EntityType, Vec3> = {
+  person: norm([0, 1, 0.35]),
+  project: norm([1, 0.1, 0.3]),
+  organisation: norm([0.55, -0.75, 0.4]),
+  place: norm([-0.45, -0.8, 0.25]),
+  topic: norm([-1, 0.25, 0.1]),
+  tool: norm([0.1, 0.25, -1]),
+  other: norm([-0.3, -0.2, -0.9]),
+};
+
+/** Stars sit between these distances from the centre; the most mentioned ones closest. */
+const STAR_NEAR = 0.38;
+const STAR_FAR = 0.72;
+
+const weightOf = (e: KnowledgeGraph["entities"][number]) => e.memories + e.files + e.chats + e.past_chats;
+
+/** Lay out the knowledge graph: the user at the centre, the most mentioned entities around
+ * them grouped by type, memories as satellites of what they're about, and the newest
+ * artifacts beside their project. `focus` ids (what a reply just recalled) are always drawn. */
+export function inside(
+  graph: KnowledgeGraph | null,
+  memories: Memory[],
+  files: FileItem[],
+  limits: { stars: number; memories: number; crystals: number },
+  focus: Set<string> = new Set(),
+): Inside {
+  const others = (graph?.entities ?? []).filter((e) => !e.is_self);
+  if (!graph || others.length === 0)
+    return {
+      stars: [],
+      lines: [],
+      memories: memoryPoints(memories, limits.memories),
+      crystals: crystals(files, limits.crystals),
+    };
+
+  const self = graph.entities.find((e) => e.is_self);
+  const ranked = [...others].sort(
+    (a, b) =>
+      Number(focus.has(b.id)) - Number(focus.has(a.id)) ||
+      weightOf(b) - weightOf(a) ||
+      (a.seen_at < b.seen_at ? 1 : -1),
+  );
+  const chosen = ranked.slice(0, limits.stars);
+  const heaviest = Math.max(1, ...chosen.map(weightOf));
+  const stars: StarPoint[] = chosen.map((e) => {
+    const r = rng(hash(e.id));
+    const j = () => (r() - 0.5) * 1.3;
+    const dir = norm(add(TYPE_DIR[e.type] ?? TYPE_DIR.other, [j(), j(), j()]));
+    const near = Math.sqrt(weightOf(e) / heaviest);
+    const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.08;
+    return {
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      summary: e.summary,
+      self: false,
+      weight: weightOf(e),
+      pos: scale(dir, dist),
+    };
+  });
+  if (self)
+    stars.unshift({
+      id: self.id,
+      name: self.name,
+      type: self.type,
+      summary: self.summary,
+      self: true,
+      weight: weightOf(self),
+      pos: [0, 0, 0],
+    });
+  const byId = new Map(stars.map((s) => [s.id, s]));
+
+  const lines: StarLine[] = graph.relations
+    .filter((rel) => rel.src !== rel.dst && byId.has(rel.src) && byId.has(rel.dst))
+    .map((rel) => ({ a: rel.src, b: rel.dst, ended: !!rel.valid_to }));
+
+  // Each memory orbits the most mentioned drawn star it is about.
+  const home = new Map<string, string>();
+  for (const e of chosen) for (const id of e.memory_ids) if (!home.has(id)) home.set(id, e.id);
+  const rankedMemories = [...memories].sort(
+    (a, b) =>
+      Number(focus.has(b.id)) - Number(focus.has(a.id)) ||
+      Number(b.pinned) - Number(a.pinned) ||
+      (a.reinforced_at < b.reinforced_at ? 1 : -1),
+  );
+  const points = rankedMemories.slice(0, limits.memories).map((m): MemoryPoint => {
+    const star = home.get(m.id);
+    const r = rng(hash(m.id));
+    const offset = norm([r() - 0.5, r() - 0.5, r() - 0.5]);
+    const base = { id: m.id, kind: m.kind, content: m.content, pinned: m.pinned };
+    if (star) return { ...base, star, pos: add(byId.get(star)!.pos, scale(offset, 0.06 + r() * 0.06)) };
+    // Memories only about you circle the centre, still grouped by kind.
+    const centre = scale(KIND_CENTER[m.kind] ?? KIND_CENTER.fact, 0.45);
+    return { ...base, pos: add(centre, scale(offset, 0.05 + r() * 0.1)) };
+  });
+
+  // The newest artifacts, each beside the project it belongs to (or what else it is about).
+  const project = new Map<string, string>();
+  for (const pass of [true, false])
+    for (const e of chosen)
+      if ((e.type === "project") === pass) for (const id of e.file_ids) if (!project.has(id)) project.set(id, e.id);
+  const ring = crystals(files, limits.crystals);
+  const placed = ring.map((c, i): Crystal => {
+    const star = project.get(c.id);
+    if (!star) return c;
+    const at = byId.get(star)!.pos;
+    // Fan a project's artifacts out just beyond it, away from the centre.
+    const a = (hash(c.id) % 360) * (Math.PI / 180) + i;
+    const out = norm(at);
+    const side = norm(cross(out, Math.abs(out[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0]));
+    const pos = add(add(at, scale(out, 0.12)), scale(side, Math.sin(a) * 0.07));
+    return { ...c, star, pos: len(pos) > 0.9 * ORB_R ? scale(pos, (0.9 * ORB_R) / len(pos)) : pos };
+  });
+
+  return { stars, lines, memories: points, crystals: placed };
+}
+
 /** How far back the camera sits so the orb and every team fit the view, with a margin for
  * teams on the near side, which perspective makes look bigger. */
 export function cameraDistance(
@@ -298,6 +460,7 @@ export function cameraDistance(
   const extent = clusterCount === 0 ? ORB_R * 1.6 : bandRadius(clusterCount, compact) + 0.75;
   const tanV = Math.tan((fovDeg * Math.PI) / 360);
   const tanH = tanV * aspect;
-  const margin = clusterCount === 0 ? 1.6 : 1.08;
+  // With no teams out, sit closer so the constellation inside the orb is readable.
+  const margin = clusterCount === 0 ? 1.15 : 1.08;
   return (extent / Math.min(tanV, tanH)) * margin;
 }

@@ -270,6 +270,14 @@ export interface Message {
   links?: LinkItem[];
   /** Tools Nexus used for this reply, in order. */
   steps?: ToolStep[] | null;
+  /** What Nexus remembered for this reply. */
+  recalled?: Recalled | null;
+}
+
+/** The memories and entities a reply drew on, as the memory.recalled event sends them. */
+export interface Recalled {
+  memories: string[];
+  entities: { id: string; name: string; type: EntityType }[];
 }
 
 export interface ToolStep {
@@ -513,7 +521,7 @@ export type ServerEvent =
   | {
       type: "memory.recalled";
       chat_id: string;
-      data: { memories: string[]; entities: { id: string; name: string; type: EntityType }[] };
+      data: Recalled;
     }
   | { type: "profile.updated"; chat_id?: null; data: { content: string } }
   | { type: "system.created" | "system.updated"; chat_id?: string | null; data: { system: AgentSystem } }
