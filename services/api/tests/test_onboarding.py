@@ -149,3 +149,14 @@ async def test_delete_account(owner, client_for, invite, sessionmaker):
         assert not (await db.scalars(select(Routine))).all()
     resp = await owner.post("/api/me/delete", json={"confirm": "owner@example.com"})
     assert resp.status_code == 403
+
+
+def test_every_shipped_pack_loads(settings):
+    from pathlib import Path
+
+    from nexus_common.profiles import load_packs
+
+    files = list((Path(settings.library_path) / "profiles").glob("*.yaml"))
+    packs = load_packs(settings.library_path)
+    assert len(packs) == len(files) > 0
+    assert sum(p.kind == "base" for p in packs) == 1

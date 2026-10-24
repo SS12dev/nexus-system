@@ -132,8 +132,12 @@ class PackRoutineOut(BaseModel):
     key: str
     name: str
     prompt: str
+    # The RRULE at the person's day start, and in words.
+    schedule: str
     schedule_text: str
     time: str
+    # As the pack wrote it: "HH:MM", "day_start" or "day_start+30" (minutes after day start).
+    at: str
     needs: list[str]
     only_if_new: bool
     default_on: bool
@@ -150,6 +154,8 @@ class PackOut(BaseModel):
     label: str
     kind: str
     blurb: str
+    # Role or interest ids that select it besides its own id.
+    match: list[str]
     prompts: list[str]
     routines: list[PackRoutineOut]
 

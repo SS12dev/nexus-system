@@ -23,9 +23,9 @@ recalled). It runs with Docker Compose on one machine, reached through a Cloudfl
 
 | Service | Code | Job |
 | --- | --- | --- |
-| web | apps/web | React + Vite PWA: orb, chat, Library, Memory, Agents, Skills, People, Admin |
+| web | apps/web | React + Vite PWA: setup interview, orb, chat, Library, Routines, Memory, Agents, Skills, People, Admin |
 | api | services/api | FastAPI: auth (Google sign-in), chats, files, memories, skills, teams, approvals, admin, WebSocket |
-| orchestrator | services/orchestrator | arq worker: the assistant's LangGraph graph, tools, agent teams, memory jobs, self-review |
+| orchestrator | services/orchestrator | arq worker: the assistant's LangGraph graph, tools, agent teams, routines, memory jobs, self-review |
 | doc-worker | services/doc-worker | parses uploads (Docling), chunks and embeds them |
 | sandbox | services/sandbox | runs agent code (`run_code`) with no network and resource limits |
 | workbench, egress-proxy | services/workbench, infra/egress-proxy | dev teams' persistent project folders, commands and git; npm/PyPI/GitHub-only network |
@@ -98,6 +98,10 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | team design or running | `orchestrator/systems/` |
 | the dev team | `nexus_common/devteam.py`, `systems/dev.py`, `suites.py`, `release.py` |
 | memory | `orchestrator/memory.py`, `nexus_common/graph.py`, recall in `orchestrator/context.py` |
+| onboarding and profile packs | `api/onboarding.py`, `nexus_common/profiles.py`, `library/profiles/*.yaml`, `web/src/pages/OnboardingPage.tsx` |
+| routines | `nexus_common/routines.py` (schedules, storing), `orchestrator/routines.py` (running, delivery), `orchestrator/routine_tools.py`, `api/routes/routines.py` |
+| WhatsApp notices | `nexus_common/whatsapp.py` |
+| what Langfuse stores | `orchestrator/llm.py` (`private`), `nexus_common/embeddings.py` |
 | self-review | `orchestrator/improve.py`, `nexus_common/improve.py` |
 | an API route | `services/api/src/nexus_api/routes/` |
 | a page | `apps/web/src/pages/` |

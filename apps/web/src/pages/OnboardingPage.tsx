@@ -1,0 +1,528 @@
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router";
+import { Orb } from "../components/Orb";
+import { Select } from "../components/Select";
+import { api } from "../lib/api";
+import {
+  ASSISTANT_NAME_MAX,
+  cleanAssistantName,
+  DEFAULT_ASSISTANT_NAME,
+  SUGGESTED_NAMES,
+} from "../lib/assistant";
+import { packsFor, routineTime, scheduleText } from "../lib/onboarding";
+import { browserTimezone, timezones } from "../lib/schedule";
+import type {
+  AnswerStyle,
+  Channel,
+  GoogleAccess,
+  OnboardingAnswers,
+  Profiles,
+  User,
+} from "../lib/types";
+import { useStore } from "../store/chat";
+
+const STEPS = ["Name", "Work", "Day", "Help", "Style", "Routines"] as const;
+const SERVICE_LABEL: Record<string, string> = {
+  gmail: "Gmail",
+  calendar: "Calendar",
+  tasks: "Tasks",
+  contacts: "Contacts",
+};
+
+/** The setup interview after first sign-in, and again from Settings › Re-run setup. Every
+ * step can be skipped; the answers become memories (editable on the Memory page), routines
+ * from the matching profile packs, and a welcome chat. */
+export function OnboardingPage({ onDone }: { onDone?: () => void }) {
+  const user = useStore((s) => s.user)!;
+  const setUser = useStore((s) => s.setUser);
+  const navigate = useNavigate();
+  const first = user.name?.split(" ")[0];
+  const prior = user.profile ?? {};
+
+  const [step, setStep] = useState(0);
+  const [profiles, setProfiles] = useState<Profiles | null>(null);
+  const [google, setGoogle] = useState<GoogleAccess | null>(null);
+  const [name, setName] = useState(user.assistant_name ?? DEFAULT_ASSISTANT_NAME);
+  const [roles, setRoles] = useState<string[]>(prior.roles ?? []);
+  const [roleNote, setRoleNote] = useState(prior.role_note ?? "");
+  const [timezone, setTimezone] = useState(user.timezone || browserTimezone());
+  const [dayStart, setDayStart] = useState(prior.day_start || "08:00");
+  const [interests, setInterests] = useState<string[]>(prior.interests ?? []);
+  const [about, setAbout] = useState("");
+  const [style, setStyle] = useState<AnswerStyle>(
+    prior.style ?? { length: "balanced", tone: "casual", language: "" },
+  );
+  // Routine key -> chosen time ("HH:MM"), for the ones ticked.
+  const [picked, setPicked] = useState<Record<string, string> | null>(null);
+  const [delivery, setDelivery] = useState<Channel[]>([]);
+  const [phone, setPhone] = useState(user.phone ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState<{ me: User; chat_id: string | null; routines: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    api.profiles().then(setProfiles).catch((e) => setError(e.message));
+    api.googleAccess().then(setGoogle).catch(() => setGoogle(null));
+  }, []);
+
+  const cleanName = cleanAssistantName(name);
+  const packs = useMemo(
+    () => (profiles ? packsFor(profiles.packs, roles, interests) : []),
+    [profiles, roles, interests],
+  );
+  const offered = packs.flatMap((p) => p.routines.map((r) => ({ pack: p, routine: r })));
+  const canMember = user.role !== "viewer";
+  const channels = user.channels ?? [];
+
+  // Tick each offered routine's default the first time the routines step is shown.
+  const openRoutines = () => {
+    if (picked === null) {
+      const start: Record<string, string> = {};
+      for (const { routine } of offered) {
+        if (routine.default_on) start[routine.key] = routineTime(routine, dayStart);
+      }
+      setPicked(start);
+    }
+    setStep(5);
+  };
+
+  const finish = async (skip = false) => {
+    if (!cleanName) {
+      setStep(0);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const answers: Partial<OnboardingAnswers> = skip
+      ? { assistant_name: cleanName, timezone }
+      : {
+          assistant_name: cleanName,
+          roles,
+          role_note: roleNote,
+          interests,
+          about,
+          timezone,
+          day_start: dayStart,
+          style,
+          routines: Object.entries(picked ?? {}).map(([key, time]) => ({ key, time })),
+          delivery,
+          ...(delivery.includes("whatsapp") && phone.trim() ? { phone: phone.trim() } : {}),
+        };
+    try {
+      setDone(await api.onboard(answers));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const enter = () => {
+    if (!done) return;
+    if (done.chat_id) navigate(`/c/${done.chat_id}`);
+    setUser(done.me);
+    onDone?.();
+  };
+
+  if (done) {
+    const missing = google?.available
+      ? google.requested.filter((s) => !google.granted.includes(s) && SERVICE_LABEL[s])
+      : [];
+    return (
+      <Frame>
+        <div className="mb-6 flex justify-center">
+          <Orb state="speaking" size={96} />
+        </div>
+        <h1 className="mb-2 text-center text-2xl font-semibold">You're all set.</h1>
+        <p className="mb-6 text-center text-sm text-slate-400">
+          {cleanName} knows a little about you now
+          {done.routines > 0
+            ? ` and will run ${done.routines} routine${done.routines === 1 ? "" : "s"} for you`
+            : ""}
+          . Change any of it later on the Memory and Routines pages.
+        </p>
+        {missing.length > 0 && (
+          <div className="mb-4 rounded-lg border border-edge bg-panel p-4 text-sm">
+            <p className="mb-2 text-slate-300">
+              Let {cleanName} use your {missing.map((s) => SERVICE_LABEL[s]).join(", ")} so routines
+              like the morning brief can read your day. Google will say the app isn't verified;
+              choose <em>Advanced → Go to Nexus</em>.
+            </p>
+            <a
+              href="/auth/google/connect"
+              className="inline-block rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60"
+            >
+              Connect Google
+            </a>
+          </div>
+        )}
+        <button
+          onClick={enter}
+          className="w-full rounded-md bg-sky-500 px-4 py-2 font-medium text-ink hover:bg-sky-400"
+        >
+          Say hello to {cleanName}
+        </button>
+      </Frame>
+    );
+  }
+
+  const next = () => (step === 4 ? openRoutines() : setStep(step + 1));
+  const last = step === STEPS.length - 1;
+
+  return (
+    <Frame>
+      <div className="mb-5 flex items-center justify-center gap-3">
+        <Orb state={saving ? "thinking" : "idle"} size={56} />
+      </div>
+      <ol className="mb-6 flex justify-center gap-1.5" aria-label="Setup steps">
+        {STEPS.map((s, i) => (
+          <li
+            key={s}
+            aria-current={i === step ? "step" : undefined}
+            title={s}
+            className={`h-1.5 w-8 rounded-full ${i <= step ? "bg-sky-400" : "bg-edge"}`}
+          />
+        ))}
+      </ol>
+
+      {step === 0 && (
+        <Step
+          title={`${first ? `Welcome, ${first}. ` : "Welcome. "}What should your assistant be called?`}
+          hint="Pick one or type your own. It's yours alone, and you can change it later."
+        >
+          <Chips
+            options={SUGGESTED_NAMES.map((n) => ({ id: n, label: n }))}
+            selected={[name]}
+            onToggle={(id) => setName(id)}
+          />
+          <input
+            aria-label="Assistant name"
+            value={name}
+            maxLength={ASSISTANT_NAME_MAX}
+            onChange={(e) => setName(e.target.value)}
+            className="mt-3 w-full rounded-md border border-edge bg-panel px-3 py-2"
+          />
+          {name.trim() && !cleanName && (
+            <p className="mt-1 text-xs text-rose-400">
+              Use up to {ASSISTANT_NAME_MAX} letters, numbers, spaces, dots, hyphens or
+              apostrophes.
+            </p>
+          )}
+        </Step>
+      )}
+
+      {step === 1 && (
+        <Step
+          title="What do you do?"
+          hint={`Pick up to three. It helps ${cleanName} suggest the right things.`}
+        >
+          <Chips
+            options={[...(profiles?.roles ?? []), { id: "other", label: "Something else" }]}
+            selected={roles}
+            onToggle={(id) =>
+              setRoles(
+                roles.includes(id)
+                  ? roles.filter((r) => r !== id)
+                  : roles.length < 3
+                    ? [...roles, id]
+                    : roles,
+              )
+            }
+          />
+          <input
+            aria-label="Your work in your own words"
+            placeholder="In your own words (optional), e.g. “PhD student in marine biology”"
+            value={roleNote}
+            maxLength={300}
+            onChange={(e) => setRoleNote(e.target.value)}
+            className="mt-3 w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
+          />
+        </Step>
+      )}
+
+      {step === 2 && (
+        <Step title="When does your day start?" hint="Routines like a morning brief run around then.">
+          <label className="mb-3 block text-sm">
+            <span className="mb-1 block text-slate-400">Time zone</span>
+            <Select
+              size="md"
+              className="w-full"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+            >
+              {timezones(timezone).map((z) => (
+                <option key={z} value={z}>
+                  {z.replace(/_/g, " ")}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-400">My day usually starts at</span>
+            <input
+              type="time"
+              value={dayStart}
+              onChange={(e) => e.target.value && setDayStart(e.target.value)}
+              className="rounded-md border border-edge bg-panel px-3 py-2 text-base [color-scheme:dark]"
+            />
+          </label>
+        </Step>
+      )}
+
+      {step === 3 && (
+        <Step title={`What should ${cleanName} help with?`} hint="Pick as many as you like.">
+          <Chips
+            options={profiles?.interests ?? []}
+            selected={interests}
+            onToggle={(id) =>
+              setInterests(
+                interests.includes(id) ? interests.filter((x) => x !== id) : [...interests, id],
+              )
+            }
+          />
+          <textarea
+            aria-label="Anything else"
+            placeholder="Anything else worth knowing? Topics you follow, your city, tools you use… (optional)"
+            value={about}
+            rows={3}
+            maxLength={1000}
+            onChange={(e) => setAbout(e.target.value)}
+            className="mt-3 w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
+          />
+        </Step>
+      )}
+
+      {step === 4 && (
+        <Step title="How should it answer?" hint="You can always ask for more or less in a chat.">
+          <Field label="Length">
+            <Chips
+              options={[
+                { id: "short", label: "Short and to the point" },
+                { id: "balanced", label: "Balanced" },
+                { id: "detailed", label: "Detailed" },
+              ]}
+              selected={[style.length]}
+              onToggle={(id) => setStyle({ ...style, length: id as AnswerStyle["length"] })}
+            />
+          </Field>
+          <Field label="Tone">
+            <Chips
+              options={[
+                { id: "casual", label: "Casual" },
+                { id: "professional", label: "Professional" },
+              ]}
+              selected={[style.tone]}
+              onToggle={(id) => setStyle({ ...style, tone: id as AnswerStyle["tone"] })}
+            />
+          </Field>
+          <Field label="Language (optional)">
+            <input
+              aria-label="Reply language"
+              placeholder="e.g. Hindi, Spanish — leave empty to match how you write"
+              value={style.language}
+              maxLength={40}
+              onChange={(e) => setStyle({ ...style, language: e.target.value })}
+              className="w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
+            />
+          </Field>
+        </Step>
+      )}
+
+      {step === 5 && (
+        <Step
+          title="Want a few routines?"
+          hint={`${cleanName} runs these on a schedule and posts each in its own chat. Untick any you don't want; you can change them anytime.`}
+        >
+          {!canMember && (
+            <p className="text-sm text-slate-400">Viewers can't have routines.</p>
+          )}
+          {canMember && (
+            <ul className="space-y-2 sm:max-h-72 sm:overflow-y-auto sm:pr-1">
+              {offered.map(({ pack, routine }) => {
+                const on = picked?.[routine.key] !== undefined;
+                const time = picked?.[routine.key] ?? routineTime(routine, dayStart);
+                return (
+                  <li
+                    key={routine.key}
+                    className={`rounded-lg border p-3 text-sm ${on ? "border-sky-500/50 bg-sky-500/5" : "border-edge"}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        aria-label={routine.name}
+                        checked={on}
+                        onChange={() => {
+                          const nextPicked = { ...(picked ?? {}) };
+                          if (on) delete nextPicked[routine.key];
+                          else nextPicked[routine.key] = time;
+                          setPicked(nextPicked);
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{routine.name}</span>
+                          <span className="text-xs text-slate-500">{pack.label}</span>
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {scheduleText(routine, time)}
+                          {routine.needs.length > 0 &&
+                            ` · uses ${routine.needs.map((n) => SERVICE_LABEL[n] ?? n).join(", ")}`}
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs text-slate-500">{routine.prompt}</p>
+                      </div>
+                      {on && (
+                        <input
+                          type="time"
+                          aria-label={`${routine.name} time`}
+                          value={time}
+                          onChange={(e) =>
+                            e.target.value &&
+                            setPicked({ ...(picked ?? {}), [routine.key]: e.target.value })
+                          }
+                          className="rounded-md border border-edge bg-panel px-2 py-1 text-base [color-scheme:dark] sm:text-xs"
+                        />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {canMember && channels.length > 0 && (
+            <div className="mt-4 space-y-2 border-t border-edge pt-3 text-sm">
+              <p className="text-slate-400">Also tell me when one has something for me, by</p>
+              <div className="flex flex-wrap gap-4">
+                {channels.map((c) => (
+                  <label key={c} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={delivery.includes(c)}
+                      onChange={(e) =>
+                        setDelivery(
+                          e.target.checked ? [...delivery, c] : delivery.filter((x) => x !== c),
+                        )
+                      }
+                    />
+                    {c === "email" ? `Email (${user.email})` : "WhatsApp"}
+                  </label>
+                ))}
+              </div>
+              {delivery.includes("whatsapp") && (
+                <input
+                  aria-label="WhatsApp number"
+                  placeholder="WhatsApp number with country code, e.g. +919812345678"
+                  value={phone}
+                  inputMode="tel"
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full rounded-md border border-edge bg-panel px-3 py-2"
+                />
+              )}
+            </div>
+          )}
+        </Step>
+      )}
+
+      {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
+
+      <div className="mt-6 flex items-center gap-2">
+        {step > 0 && (
+          <button
+            onClick={() => setStep(step - 1)}
+            className="flex items-center gap-1 rounded-md px-3 py-2 text-sm text-slate-400 hover:text-slate-200"
+          >
+            <ArrowLeft size={15} /> Back
+          </button>
+        )}
+        {step > 0 && (
+          <button
+            onClick={() => finish(true)}
+            disabled={saving}
+            className="ml-auto rounded-md px-3 py-2 text-sm text-slate-500 hover:text-slate-300"
+          >
+            Skip setup
+          </button>
+        )}
+        <button
+          onClick={() => (last ? finish() : next())}
+          disabled={saving || (step === 0 && !cleanName) || !profiles}
+          className={`flex items-center gap-1.5 rounded-md bg-sky-500 px-4 py-2 font-medium text-ink hover:bg-sky-400 disabled:opacity-50 ${step === 0 ? "ml-auto" : ""}`}
+        >
+          {last ? (
+            <>
+              <Check size={16} /> {saving ? "Setting up…" : "Finish"}
+            </>
+          ) : (
+            <>
+              Continue <ArrowRight size={16} />
+            </>
+          )}
+        </button>
+      </div>
+    </Frame>
+  );
+}
+
+function Frame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full items-start justify-center overflow-y-auto px-4 py-10 sm:items-center">
+      <div className="w-full max-w-lg">{children}</div>
+    </div>
+  );
+}
+
+function Step({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <section>
+      <h1 className="mb-1 text-center text-2xl font-semibold">{title}</h1>
+      <p className="mb-5 text-center text-sm text-slate-400">{hint}</p>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mb-4">
+      <div className="mb-1.5 text-sm text-slate-400">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Chips({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: { id: string; label: string; blurb?: string }[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => {
+        const on = selected.includes(o.id);
+        return (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={on}
+            title={o.blurb || undefined}
+            onClick={() => onToggle(o.id)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition ${
+              on
+                ? "border-sky-400 bg-sky-500/15 text-sky-200"
+                : "border-edge text-slate-300 hover:bg-edge/60"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

@@ -41,7 +41,10 @@ def approved_email(settings: Settings, req: AccessRequest) -> EmailMessage:
         f"Hi{' ' + req.name.split()[0] if req.name else ''},\n\n"
         f"Your request to join {APP} was approved. Sign in with Google as {req.email}:\n"
         f"{settings.nexus_url.rstrip('/')}/login\n\n"
-        f"The first time you sign in you'll name your assistant, and you're ready to go."
+        f"The first time you sign in you'll name your assistant and answer a few quick "
+        f"questions (two minutes, all skippable) so it can set itself up for you.\n\n"
+        f"Google will say the app isn't verified, because it's a private app: choose "
+        f"Advanced, then Go to {APP}."
     )
     return mail.message(settings, [req.email], f"You're in: your {APP} access was approved", body)
 

@@ -15,8 +15,10 @@ import { AppsPage } from "./pages/AppsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
-import { NameAssistantPage } from "./pages/NameAssistantPage";
+import { OnboardingPage } from "./pages/OnboardingPage";
 import { PeoplePage } from "./pages/PeoplePage";
+import { PrivacyPage } from "./pages/PrivacyPage";
+import { RoutinesPage } from "./pages/RoutinesPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { useStore } from "./store/chat";
 
@@ -55,10 +57,12 @@ export function App() {
     );
   }
 
-  if (!user.assistant_name) return <NameAssistantPage />;
+  // The setup interview, once, after first sign-in (it names the assistant too).
+  if (!user.onboarded_at) return <OnboardingPage />;
 
   return (
     <Routes>
+      <Route path="setup" element={<OnboardingPage />} />
       <Route element={<Shell />}>
         <Route element={<OrbLayout />}>
           <Route index element={<HomePage />} />
@@ -67,6 +71,8 @@ export function App() {
         <Route path="library" element={<LibraryPage />} />
         <Route path="apps" element={<AppsPage />} />
         <Route path="memory" element={<MemoryPage />} />
+        <Route path="routines" element={<RoutinesPage />} />
+        <Route path="privacy" element={<PrivacyPage />} />
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />
         <Route path="skills" element={<SkillsPage />} />

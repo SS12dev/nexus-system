@@ -34,6 +34,8 @@ export interface ChatState {
   linksVersion: number;
   /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
   runFeed: Record<string, FeedItem[]>;
+  /** Bumped when a routine is added, changed or runs, so the Routines page and chat list reload. */
+  routinesVersion: number;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;
   /** What the orb lights up: the latest reply's recall, or one whose chips were tapped.
@@ -54,6 +56,7 @@ export const initialState: ChatState = {
   skillsVersion: 0,
   linksVersion: 0,
   runFeed: {},
+  routinesVersion: 0,
   pendingAccess: null,
   recall: null,
 };
@@ -331,6 +334,8 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       return { ...state, memoryVersion: state.memoryVersion + 1 };
     case "chat.updated":
       return { ...state, chats: upsertChat(state.chats, event.data.chat) };
+    case "routine.updated":
+      return { ...state, routinesVersion: state.routinesVersion + 1 };
     default:
       return state;
   }

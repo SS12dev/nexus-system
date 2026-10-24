@@ -195,7 +195,7 @@ async def test_routine_tools_in_chat(deps, routine, sessionmaker):
             "only_if_new": True,
         }
     )
-    assert out.startswith("Saved routine Weekly papers") and "every monday at 09:00" in out
+    assert out.startswith("Saved routine Weekly papers") and "every Monday at 09:00" in out
     bad = await tools["create_routine"].ainvoke(
         {"name": "x", "prompt": "y", "schedule": "FREQ=MINUTELY"}
     )

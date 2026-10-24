@@ -4,6 +4,7 @@ import {
   AppWindow,
   Bot,
   Brain,
+  CalendarClock,
   FolderOpen,
   LogOut,
   Menu,
@@ -56,9 +57,11 @@ export function Shell() {
   const { chatId } = useParams();
   const { pathname } = useLocation();
 
+  // Routines post into chats of their own, made on the server: reload the list when one runs.
+  const routinesVersion = useStore((s) => s.routinesVersion);
   useEffect(() => {
     api.chats().then(setChats).catch(console.error);
-  }, [setChats]);
+  }, [setChats, routinesVersion]);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -191,6 +194,9 @@ export function Shell() {
           </NavLink>
           <NavLink to="/apps" className={navClass} title={tip("Apps")}>
             <AppWindow size={16} className="shrink-0" /> <span className={label}>Apps</span>
+          </NavLink>
+          <NavLink to="/routines" className={navClass} title={tip("Routines")}>
+            <CalendarClock size={16} className="shrink-0" /> <span className={label}>Routines</span>
           </NavLink>
           <NavLink to="/memory" className={navClass} title={tip("Memory")}>
             <Brain size={16} className="shrink-0" /> <span className={label}>Memory</span>

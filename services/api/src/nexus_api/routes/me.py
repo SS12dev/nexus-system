@@ -137,8 +137,10 @@ def pack_out(p: Pack, day_start: str | None) -> PackOut:
                 key=f"{p.id}/{r.id}",
                 name=r.name,
                 prompt=r.prompt,
+                schedule=schedule,
                 schedule_text=describe(schedule),
                 time=time,
+                at=r.time,
                 needs=list(r.needs),
                 only_if_new=r.only_if_new,
                 default_on=r.default_on,
@@ -149,6 +151,7 @@ def pack_out(p: Pack, day_start: str | None) -> PackOut:
         label=p.label,
         kind=p.kind,
         blurb=p.blurb,
+        match=list(p.match),
         prompts=list(p.prompts),
         routines=routines,
     )

@@ -1,7 +1,9 @@
 # Ready for friends: onboarding, profiles and routines
 
-Status: proposal, not built yet. What has to change for Nexus to work for people who aren't its
-owner (other jobs, other hobbies, not developers), and the order to build it in.
+Status: phases A to E built, F partly (email and WhatsApp, no web push), G partly (privacy,
+masking, export, delete account). What has to change for Nexus to work for people who aren't
+its owner (other jobs, other hobbies, not developers), and the order to build it in. The
+**Where it stands** section at the end lists what changed from this plan and what is left.
 
 ## Where Nexus stands today
 
@@ -272,3 +274,36 @@ A and C are the critical path; B can ship with chips only before E fills in the 
 - Default trace masking for members: on (more private) or off (easier for you to debug)?
 - Which channel for notifications matters most to them: phone push, email, or later WhatsApp or
   Telegram (a bot would be a natural next channel for routines)?
+
+## Where it stands
+
+Built (README: Onboarding and routines, Privacy):
+
+- Phase A: `users.timezone`, `onboarded_at`, `profile`, `phone`, `share_usage`; existing users
+  marked onboarded.
+- Phase B: the stepper (six steps, skippable), answers to memories, the welcome chat, Run setup
+  again. The free text is stored as memories as written rather than mapped by a `nexus-nano`
+  call: memory extraction refines it in the first chats anyway, and it keeps the API free of
+  model calls.
+- Phases C and D: routines with RRULE schedules, the minute scheduler, quiet runs, budget skips,
+  auto-pause, the Routines page with ideas, and the chat tools. Two decisions beyond the plan:
+  routine runs skip the team router (a team per run would cost about $0.50 each), and don't
+  feed memory extraction.
+- Phase E: 19 packs (10 professions, 8 interests, everyday) and home-screen prompts. No new
+  skills were written for them yet; their routines use the assistant's own tools.
+- Phase F: email and WhatsApp (Cloud API template) notices per routine.
+- Phase G: Privacy page, Langfuse masking for everyone but owners, "Help improve Nexus" opt-out
+  for the self-review, data export, account deletion.
+
+Decided with the owner: friends get every feature except admin; email and WhatsApp for notices.
+
+Left:
+
+- Web push and an in-app bell for routine results and approvals.
+- Progressive navigation and plainer names (Agents → Teams), a three-stop tour, a first-week
+  checklist, a light theme.
+- The skills the packs name for non-technical work (lesson planning, meal planning, outreach
+  email, meeting prep).
+- An in-app feedback form that lands in Admin.
+- WhatsApp replies (a webhook to talk to the assistant from WhatsApp), which needs a public
+  webhook route and Meta's verification.

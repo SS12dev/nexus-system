@@ -37,6 +37,7 @@ from nexus_common.routines import (
     add_routine,
     check_timezone,
     describe,
+    lower_first,
     rule_for,
 )
 from nexus_common.settings import Settings
@@ -81,7 +82,7 @@ def welcome_text(user: User, routines: list[Routine], prompts: list[str]) -> str
     lines = [f"Hi{' ' + first if first else ''}, I'm {user.assistant}. You're all set."]
     if routines:
         lines += ["", "I'll run these for you:"]
-        lines += [f"- **{r.name}**: {describe(r.schedule).lower()}" for r in routines]
+        lines += [f"- **{r.name}**: {lower_first(describe(r.schedule))}" for r in routines]
         lines += [
             "",
             "Each one posts in a chat of its own. Change, pause or add routines on the "

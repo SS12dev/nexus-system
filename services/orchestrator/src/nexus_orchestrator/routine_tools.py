@@ -18,6 +18,7 @@ from nexus_common.routines import (
     add_routine,
     clean_delivery,
     describe,
+    lower_first,
     reschedule,
     routine_payload,
     upcoming,
@@ -82,7 +83,7 @@ def build_routine_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         zone = ZoneInfo(r.timezone)
         listed = ", ".join(f"{t.astimezone(zone):%a %d %b %H:%M}" for t in times)
         return (
-            f"Saved routine {r.name} (id {r.id}): {describe(r.schedule).lower()} in "
+            f"Saved routine {r.name} (id {r.id}): {lower_first(describe(r.schedule))} in "
             f"{r.timezone}. Next runs: {listed}. Its results post in a chat called "
             f"{r.name}; the user can change or pause it on the Routines page."
         )

@@ -9,6 +9,7 @@ import type {
   AuditEntry,
   Backup,
   Chat,
+  Channel,
   ConfigValue,
   ConfigView,
   FileItem,
@@ -20,11 +21,17 @@ import type {
   MemoryEvent,
   MemoryKind,
   Message,
+  OnboardingAnswers,
   OpsStatus,
   Profile,
+  Profiles,
   Project,
   Role,
+  Routine,
+  RoutineInput,
+  RoutineRun,
   Run,
+  SchedulePreview,
   RunDetail,
   SearchHit,
   SessionInfo,
@@ -124,6 +131,34 @@ export const api = {
   sessions: () => request<SessionInfo[]>("/api/me/sessions"),
   signOutSession: (id: string) => request<void>(`/api/me/sessions/${id}`, { method: "DELETE" }),
   signOutOthers: () => request<void>("/api/me/sessions/sign-out-others", { method: "POST" }),
+  updateMe: (changes: { timezone?: string; phone?: string; share_usage?: boolean }) =>
+    request<User>("/api/me", { method: "PATCH", body: json(changes) }),
+  profiles: () => request<Profiles>("/api/profiles"),
+  onboard: (answers: Partial<OnboardingAnswers>) =>
+    request<{ me: User; chat_id: string | null; routines: number }>("/api/me/onboarding", {
+      method: "POST",
+      body: json(answers),
+    }),
+  suggestions: () => request<string[]>("/api/me/suggestions"),
+  deleteAccount: (confirm: string) =>
+    request<void>("/api/me/delete", { method: "POST", body: json({ confirm }) }),
+
+  routines: () => request<Routine[]>("/api/routines"),
+  createRoutine: (body: RoutineInput) =>
+    request<Routine>("/api/routines", { method: "POST", body: json(body) }),
+  updateRoutine: (id: string, changes: Partial<RoutineInput> & { delivery?: Channel[] }) =>
+    request<Routine>(`/api/routines/${id}`, { method: "PATCH", body: json(changes) }),
+  deleteRoutine: (id: string) => request<void>(`/api/routines/${id}`, { method: "DELETE" }),
+  runRoutine: (id: string) =>
+    request<{ queued: boolean; chat_id: string | null }>(`/api/routines/${id}/run`, {
+      method: "POST",
+    }),
+  routineRuns: (id: string) => request<RoutineRun[]>(`/api/routines/${id}/runs`),
+  previewSchedule: (schedule: string, timezone?: string) =>
+    request<SchedulePreview>("/api/routines/preview", {
+      method: "POST",
+      body: json({ schedule, timezone }),
+    }),
 
   chats: () => request<Chat[]>("/api/chats"),
   createChat: () => request<Chat>("/api/chats", { method: "POST", body: json({}) }),

@@ -165,6 +165,11 @@ def _parts(schedule: str) -> _Parts:
     )
 
 
+def lower_first(text: str) -> str:
+    """For a description mid-sentence: "every Sunday at 18:00", keeping the day's capital."""
+    return text[:1].lower() + text[1:]
+
+
 def describe(schedule: str) -> str:
     """The schedule in words ("Weekdays at 08:00"), falling back to the rule itself."""
     try:
