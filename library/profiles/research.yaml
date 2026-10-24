@@ -1,0 +1,23 @@
+id: research
+label: Research / academia
+kind: role
+order: 12
+blurb: New papers on your topics and help reading them.
+memories:
+  - {kind: fact, content: "Works in research or academia."}
+prompts:
+  - "Find recent papers on my topic and summarise the main findings"
+  - "Read this paper and explain its method and limitations"
+  - "Help me write the related-work section"
+  - "What are the open questions in this field?"
+routines:
+  - id: new-papers
+    name: New papers on my topics
+    days: [MO, TH]
+    time: "08:30"
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Search arXiv, Semantic Scholar and Google Scholar for papers from the last few days on
+      the research topics I care about (from what you know about me). Pick the five most
+      relevant, and for each give the title, authors, link and two sentences on what is new.

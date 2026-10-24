@@ -1,0 +1,17 @@
+id: fitness
+label: Health and fitness
+kind: interest
+order: 40
+blurb: Training plans and meal ideas.
+prompts:
+  - "Make me a 4-week training plan"
+  - "Suggest a healthy dinner I can make in 20 minutes"
+routines:
+  - id: training-week
+    name: Weekly training plan
+    days: [SU]
+    time: "19:00"
+    needs: [calendar]
+    prompt: >
+      Plan my workouts for the coming week around my calendar, based on my goals and what you
+      know about my fitness. Say which day, what to do and for how long. Keep rest days.

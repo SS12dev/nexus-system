@@ -1,0 +1,17 @@
+id: money
+label: Money
+kind: interest
+order: 42
+blurb: Budget check-ins and market news, no advice.
+prompts:
+  - "Help me make a monthly budget"
+  - "Explain how index funds work"
+routines:
+  - id: budget-check
+    name: Monthly money check-in
+    days: "monthly:1"
+    time: "10:00"
+    prompt: >
+      It's the start of the month. Ask me three short questions to review last month's
+      spending and savings against my goals, and remind me of bills and renewals you know
+      about. Information only, no investment advice.

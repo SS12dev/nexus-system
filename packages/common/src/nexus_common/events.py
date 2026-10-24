@@ -36,6 +36,8 @@ EventType = Literal[
     "skill.updated",
     # Sent to owners and admins: how many access requests are waiting.
     "access.pending",
+    # A routine was added, changed or ran (data: routine, and status after a run).
+    "routine.updated",
 ]
 
 AssistantState = Literal["idle", "thinking", "speaking"]

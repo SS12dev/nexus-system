@@ -1,0 +1,22 @@
+id: creative
+label: Design / creative
+kind: role
+order: 14
+blurb: Inspiration, briefs and client follow-ups.
+memories:
+  - {kind: fact, content: "Works in design or a creative field."}
+prompts:
+  - "Write a creative brief for this project"
+  - "Give me ten concept directions for a brand"
+  - "Draft a friendly follow-up to a client who hasn't replied"
+  - "Critique this copy and make it sharper"
+routines:
+  - id: inspiration
+    name: Weekly inspiration
+    days: [MO]
+    time: "09:00"
+    default_on: true
+    prompt: >
+      Find five recent pieces of work, articles or trends in my creative field (from what you
+      know about me) that are worth a look this week, with a link and one line on why each is
+      interesting.

@@ -1,0 +1,33 @@
+id: sales
+label: Sales / marketing
+kind: role
+order: 15
+blurb: Call prep, follow-ups and industry news.
+memories:
+  - {kind: fact, content: "Works in sales or marketing."}
+prompts:
+  - "Research this company before my call"
+  - "Write a short outreach email to a new prospect"
+  - "Give me five campaign ideas for this product"
+  - "Turn these call notes into a follow-up email"
+routines:
+  - id: follow-ups
+    name: Follow-ups due
+    days: weekdays
+    time: day_start+30
+    needs: [gmail]
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Look at email threads from the last two weeks where I wrote last and nobody has replied
+      in three or more days, or where someone asked me something I haven't answered. List them
+      with who, what it was about and a suggested one-line nudge. If there are none, answer
+      NOTHING_NEW.
+  - id: industry-news
+    name: Industry news
+    days: [MO]
+    time: "08:00"
+    only_if_new: true
+    prompt: >
+      Find news from the last week about my industry and the accounts I work with (from what
+      you know about me). One line each with a link, most useful for conversations first.

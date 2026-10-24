@@ -1,0 +1,17 @@
+id: cooking
+label: Cooking
+kind: interest
+order: 41
+blurb: Meal plans and shopping lists.
+prompts:
+  - "Plan five dinners for this week and give me a shopping list"
+  - "What can I cook with what's in my fridge?"
+routines:
+  - id: meal-plan
+    name: Sunday meal plan
+    days: [SU]
+    time: "10:00"
+    default_on: true
+    prompt: >
+      Plan five dinners for the coming week that fit what you know about my tastes and diet,
+      with short recipes, then one combined shopping list grouped by aisle.

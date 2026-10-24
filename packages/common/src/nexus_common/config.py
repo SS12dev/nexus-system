@@ -88,6 +88,7 @@ GROUPS = (
     "Self-review",
     "Email",
     "Apps and links",
+    "Routines and privacy",
 )
 
 OPTIONS: tuple[Option, ...] = (
@@ -806,6 +807,68 @@ OPTIONS: tuple[Option, ...] = (
         "Apps and links",
         "Langfuse address",
         "Where the Admin page links to for per-call traces and cost. Must match LANGFUSE_PORT.",
+        "text",
+        allow_empty=False,
+    ),
+    # Routines and privacy
+    Option(
+        "routines_enabled",
+        "Routines and privacy",
+        "Run routines",
+        "Off, no scheduled routine runs for anyone (they stay saved, and Run now still works).",
+        "bool",
+    ),
+    Option(
+        "routines_max_per_user",
+        "Routines and privacy",
+        "Routines per person",
+        "How many routines one person may have, on or paused.",
+        "int",
+        min=0,
+        max=100,
+    ),
+    Option(
+        "routine_min_interval_minutes",
+        "Routines and privacy",
+        "Shortest routine interval",
+        "The most often a routine may run. Each run is a chat turn on the person's budget.",
+        "int",
+        min=15,
+        max=10080,
+        unit="minutes",
+    ),
+    Option(
+        "routine_min_budget_usd",
+        "Routines and privacy",
+        "Skip routines below",
+        "A routine is skipped when its owner has less than this left of their budget.",
+        "float",
+        min=0,
+        max=100,
+        unit="USD",
+    ),
+    Option(
+        "trace_masking",
+        "Routines and privacy",
+        "Hide people's chats in Langfuse",
+        "On, Langfuse keeps tokens, cost and timing for everyone but stores the prompts and "
+        "replies only for owners. The self-review doesn't read Langfuse, so it keeps working.",
+        "bool",
+    ),
+    Option(
+        "whatsapp_template",
+        "Routines and privacy",
+        "WhatsApp template",
+        "The approved WhatsApp message template for routine notices, with two body parameters: "
+        "the routine's name and a preview.",
+        "text",
+        allow_empty=False,
+    ),
+    Option(
+        "whatsapp_template_language",
+        "Routines and privacy",
+        "WhatsApp template language",
+        "The language code the template was approved in, e.g. en or en_US.",
         "text",
         allow_empty=False,
     ),

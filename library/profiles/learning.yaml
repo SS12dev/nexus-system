@@ -1,0 +1,18 @@
+id: learning
+label: Reading and learning
+kind: interest
+order: 44
+match: [reading]
+blurb: A weekly lesson and book ideas.
+prompts:
+  - "Teach me something new about a subject I like"
+  - "Recommend three books based on what I've enjoyed"
+routines:
+  - id: weekly-lesson
+    name: Weekly lesson
+    days: [SA]
+    time: "09:00"
+    default_on: true
+    prompt: >
+      Teach me one thing in a subject I'm interested in (from what you know about me), in
+      about 300 words with an example, then ask me two questions to check I understood.

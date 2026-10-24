@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -48,6 +49,14 @@ class MeOut(UserOut):
     notice: str | None = None
     # Owners and admins: access requests waiting for a decision. None for everyone else.
     pending_access: int | None = None
+    # None until they finish or skip the setup interview, which the app shows until then.
+    onboarded_at: datetime | None = None
+    timezone: str | None = None
+    profile: dict = {}
+    phone: str | None = None
+    share_usage: bool = True
+    # Which routine notice channels this Nexus can send on.
+    channels: list[str] = []
 
 
 def _assistant_name(value: str) -> str:
@@ -57,10 +66,170 @@ def _assistant_name(value: str) -> str:
     return name
 
 
+AssistantName = Annotated[
+    str, Field(min_length=1, max_length=ASSISTANT_NAME_MAX), AfterValidator(_assistant_name)
+]
+
+
+def _phone(value: str) -> str:
+    digits = "".join(c for c in value if c.isdigit() or c == "+")
+    if digits and not re.fullmatch(r"\+[1-9]\d{7,14}", digits):
+        raise ValueError("Use the international format with the country code, like +919812345678")
+    return digits
+
+
+Phone = Annotated[str, Field(max_length=32), AfterValidator(_phone)]
+Time = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
 class MeIn(BaseModel):
-    assistant_name: Annotated[
-        str, Field(min_length=1, max_length=ASSISTANT_NAME_MAX), AfterValidator(_assistant_name)
-    ]
+    """Any of these; fields left out stay as they are. An empty phone removes it."""
+
+    assistant_name: AssistantName | None = None
+    timezone: str | None = Field(default=None, max_length=64)
+    phone: Phone | None = None
+    share_usage: bool | None = None
+
+
+class StyleIn(BaseModel):
+    length: Literal["short", "balanced", "detailed"] = "balanced"
+    tone: Literal["casual", "professional"] = "casual"
+    language: str = Field(default="", max_length=40)
+
+
+class OnboardingRoutineIn(BaseModel):
+    # "<pack id>/<routine id>"
+    key: str = Field(max_length=100)
+    time: Time | None = None
+
+
+class OnboardingIn(BaseModel):
+    """The setup interview. Every step can be skipped, so everything is optional."""
+
+    assistant_name: AssistantName | None = None
+    roles: list[str] = Field(default=[], max_length=5)
+    # Their work in their own words, e.g. "PhD student in marine biology".
+    role_note: str = Field(default="", max_length=300)
+    interests: list[str] = Field(default=[], max_length=20)
+    # Anything else: topics they follow, their city, their stack.
+    about: str = Field(default="", max_length=1000)
+    timezone: str | None = Field(default=None, max_length=64)
+    day_start: Time | None = None
+    style: StyleIn | None = None
+    routines: list[OnboardingRoutineIn] = Field(default=[], max_length=20)
+    delivery: list[Literal["email", "whatsapp"]] = []
+    phone: Phone | None = None
+
+
+class OnboardingOut(BaseModel):
+    me: "MeOut"
+    # The welcome chat that opens when they're done.
+    chat_id: uuid.UUID | None = None
+    routines: int = 0
+
+
+class PackRoutineOut(BaseModel):
+    key: str
+    name: str
+    prompt: str
+    schedule_text: str
+    time: str
+    needs: list[str]
+    only_if_new: bool
+    default_on: bool
+
+
+class ChoiceOut(BaseModel):
+    id: str
+    label: str
+    blurb: str = ""
+
+
+class PackOut(BaseModel):
+    id: str
+    label: str
+    kind: str
+    blurb: str
+    prompts: list[str]
+    routines: list[PackRoutineOut]
+
+
+class ProfilesOut(BaseModel):
+    roles: list[ChoiceOut]
+    interests: list[ChoiceOut]
+    packs: list[PackOut]
+
+
+class RoutineIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    prompt: str = Field(min_length=1, max_length=4000)
+    schedule: str = Field(min_length=1, max_length=300)
+    timezone: str | None = Field(default=None, max_length=64)
+    delivery: list[Literal["email", "whatsapp"]] = []
+    only_if_new: bool = False
+    enabled: bool = True
+
+
+class RoutineUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    schedule: str | None = Field(default=None, min_length=1, max_length=300)
+    timezone: str | None = Field(default=None, max_length=64)
+    delivery: list[Literal["email", "whatsapp"]] | None = None
+    only_if_new: bool | None = None
+    enabled: bool | None = None
+
+
+class RoutineOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    prompt: str
+    schedule: str
+    schedule_text: str
+    timezone: str
+    delivery: list[str]
+    only_if_new: bool
+    enabled: bool
+    source: str
+    chat_id: uuid.UUID | None
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    failures: int
+    created_at: datetime | None
+    # The latest run's status, if it has run.
+    last_status: str | None = None
+
+
+class RoutineRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    scheduled_for: datetime
+    status: str
+    message_id: uuid.UUID | None
+    input_tokens: int | None
+    output_tokens: int | None
+    delivered: list[str]
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class SchedulePreviewIn(BaseModel):
+    schedule: str = Field(min_length=1, max_length=300)
+    timezone: str | None = Field(default=None, max_length=64)
+
+
+class SchedulePreviewOut(BaseModel):
+    ok: bool
+    text: str = ""
+    next: list[datetime] = []
+    error: str | None = None
+
+
+class DeleteAccountIn(BaseModel):
+    # Their own email address, typed again, so it can't happen by accident.
+    confirm: str = Field(max_length=320)
 
 
 class ClientErrorIn(BaseModel):

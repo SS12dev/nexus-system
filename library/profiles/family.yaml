@@ -1,0 +1,17 @@
+id: family
+label: Family and home
+kind: interest
+order: 46
+blurb: The family week and bills to pay.
+prompts:
+  - "Plan a weekend for the family"
+  - "Make a chore chart for the house"
+routines:
+  - id: family-week
+    name: Family week ahead
+    days: [SU]
+    time: "17:00"
+    needs: [calendar, gmail]
+    prompt: >
+      Look at the coming week's calendar and recent emails about school, appointments, bills
+      and renewals. List what is happening by day and what needs paying or booking.

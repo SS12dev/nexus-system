@@ -1,0 +1,31 @@
+id: student
+label: Student
+kind: role
+order: 10
+blurb: Study plans, deadlines and revision.
+memories:
+  - {kind: fact, content: "Is a student."}
+prompts:
+  - "Make me a study plan for my exams"
+  - "Explain this topic like I'm new to it, then quiz me"
+  - "Turn my lecture notes into flashcards"
+  - "Help me structure my essay"
+routines:
+  - id: deadlines
+    name: Deadlines this week
+    days: [SU]
+    time: "18:00"
+    needs: [calendar, tasks]
+    default_on: true
+    prompt: >
+      Look at my calendar and tasks for the coming week and list every deadline, exam and
+      class assignment by day. Suggest when to work on each so nothing piles up the night
+      before.
+  - id: daily-review
+    name: Daily review quiz
+    days: weekdays
+    time: "19:00"
+    prompt: >
+      Give me a five-question quiz on something I've been studying recently (use what you
+      know about my subjects and recent chats). Mix recall and understanding questions, and
+      put the answers at the end under a "Answers" heading.

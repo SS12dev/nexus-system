@@ -5,6 +5,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from nexus_common import logs
+from nexus_common.models import RoleName, User
 from nexus_common.settings import Settings
 
 
@@ -24,6 +25,15 @@ def chat_model(settings: Settings, *, model: str, api_key: str, metadata: dict) 
         timeout=120,
         extra_body={"metadata": metadata},
     )
+
+
+def private(settings: Settings, user: User) -> dict:
+    """Metadata keys that make LiteLLM's Langfuse callback store "redacted-by-litellm" in place
+    of the prompt and reply, for everyone but owners while TRACE_MASKING is on. Tokens, cost,
+    timing and the trace's user id are kept, so usage and the self-review still work."""
+    if settings.trace_masking and user.role != RoleName.owner:
+        return {"mask_input": True, "mask_output": True}
+    return {}
 
 
 def parse_json(raw: str) -> dict:

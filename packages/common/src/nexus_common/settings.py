@@ -192,6 +192,28 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_starttls: bool = True
 
+    # WhatsApp notices for routines, through Meta's WhatsApp Business Cloud API. A message
+    # Nexus starts must use a template Meta approved (whatsapp_template, with two body
+    # parameters: the routine's name and a short preview). Empty token turns WhatsApp off.
+    whatsapp_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_template: str = "nexus_routine"
+    whatsapp_template_language: str = "en"
+    whatsapp_api_url: str = "https://graph.facebook.com/v23.0"
+
+    # Routines: prompts that run on a schedule as their owner (nexus_common/routines.py).
+    routines_enabled: bool = True
+    routines_max_per_user: int = 10
+    # The shortest gap a routine's schedule may have.
+    routine_min_interval_minutes: int = 60
+    # A routine is skipped when its owner has less than this left of their budget.
+    routine_min_budget_usd: float = 0.05
+
+    # Privacy: Langfuse keeps token counts, cost and timing for everyone, but replaces the
+    # prompts and replies of everyone except owners with "redacted-by-litellm". The
+    # self-review never reads Langfuse, so it keeps working (see improve.py).
+    trace_masking: bool = True
+
     # Rate limits, counted in Redis so they hold across API replicas. Per user where signed in,
     # otherwise per client IP. 0 turns a limit off.
     rate_limit_enabled: bool = True
@@ -265,6 +287,10 @@ class Settings(BaseSettings):
     @property
     def smtp_enabled(self) -> bool:
         return bool(self.smtp_host and (self.smtp_from or self.smtp_username))
+
+    @property
+    def whatsapp_enabled(self) -> bool:
+        return bool(self.whatsapp_token and self.whatsapp_phone_number_id)
 
     @property
     def access_requests_open(self) -> bool:

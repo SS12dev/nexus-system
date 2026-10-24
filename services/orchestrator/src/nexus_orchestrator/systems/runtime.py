@@ -46,6 +46,7 @@ from nexus_common.models import (
 from nexus_common.spec import TIER_MODEL, AgentSpec, AgentSystemSpec, tier_down, tier_up
 from nexus_common.systems import approval_payload, money
 from nexus_common.toolinfo import BY_NAME, needs_approval
+from nexus_orchestrator.llm import private
 from nexus_orchestrator.tools import ToolContext, build_tools
 
 log = logging.getLogger(__name__)
@@ -252,6 +253,7 @@ class RunContext:
                 "generation_name": f"agent.{agent.id}",
                 "session_id": str(self.chat_id) if self.chat_id else None,
                 "trace_user_id": str(self.user.id),
+                **private(self.deps.settings, self.user),
                 "tags": ["nexus", "system", self.deps.settings.env],
                 "trace_metadata": {
                     "system_id": str(self.system_id),

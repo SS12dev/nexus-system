@@ -29,7 +29,7 @@ from nexus_common.models import (
 )
 from nexus_common.skills import SkillError, add_version, content_hash, parse_skill, skill_payload
 from nexus_common.skills import slug as skill_slug
-from nexus_orchestrator.llm import parse_json
+from nexus_orchestrator.llm import parse_json, private
 from nexus_orchestrator.turn import message_payload
 
 log = logging.getLogger(__name__)
@@ -126,6 +126,7 @@ async def draft_skill(deps, run_id: uuid.UUID) -> Skill | None:
             "trace_name": "nexus.system",
             "generation_name": "nexus.draft_skill",
             "trace_user_id": str(user.id),
+            **private(deps.settings, user),
             "tags": ["nexus", "skills", deps.settings.env],
         },
     ).bind(response_format={"type": "json_object"})

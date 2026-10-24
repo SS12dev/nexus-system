@@ -46,6 +46,7 @@ from nexus_common.toolinfo import TOOLS, allowed_tools, connected_only
 from nexus_orchestrator.context import assemble
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.graph import RECURSION_LIMIT, build_graph
+from nexus_orchestrator.llm import private
 from nexus_orchestrator.prompts import system_prompt
 from nexus_orchestrator.route import Route, route
 from nexus_orchestrator.sandbox import SandboxClient
@@ -61,6 +62,9 @@ ModelFactory = Callable[..., BaseChatModel]
 # message in full, plus every skill's name by shelf, so a big library doesn't cost every turn.
 CATALOGUE_LIMIT = 12
 RELEVANT_SKILLS = 6
+
+# How a routine run's message starts (routines.turn_prompt); such turns skip the team router.
+ROUTINE_PREFIX = '[Routine "'
 
 # Puts a job on the orchestrator queue: enqueue(function_name, *args, **arq_options).
 Enqueue = Callable[..., Awaitable[object]]
@@ -205,8 +209,11 @@ def friendly_error(exc: Exception) -> str:
     return "Something went wrong while answering. Try again."
 
 
-async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uuid.UUID) -> None:
-    """Run one Nexus turn: stream the reply to the user's channel and store it."""
+async def run_turn(
+    deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uuid.UUID, *, learn: bool = True
+) -> None:
+    """Run one Nexus turn: stream the reply to the user's channel and store it. learn=False
+    skips memory extraction (routines: a news digest says nothing new about the person)."""
     async with deps.sessionmaker() as db:
         msg = await db.get(Message, assistant_message_id)
         if msg is None or msg.chat_id != chat_id or msg.status != MessageStatus.streaming:
@@ -229,7 +236,9 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
 
         try:
             await emit("assistant.state", state="thinking")
-            content, usage, learn, saved, links = await _generate(deps, db, chat, user, msg, emit)
+            content, usage, memory_on, saved, links = await _generate(
+                deps, db, chat, user, msg, emit
+            )
         except Exception as exc:
             if not isinstance(exc, TurnFailed):
                 log.exception("Turn %s failed", assistant_message_id)
@@ -266,7 +275,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         await emit("message.completed", message=payload)
         await emit("assistant.state", state="idle")
 
-    if learn and deps.enqueue is not None:
+    if learn and memory_on and deps.enqueue is not None:
         try:
             await deps.enqueue(
                 "extract_memories",
@@ -323,7 +332,8 @@ async def route_to_team(
     if not deps.settings.route_model or not history or history[-1].role != MessageRole.user:
         return Route()
     question = history[-1].content.strip()
-    if len(question) < deps.settings.route_min_chars:
+    # A routine run is answered directly: a team every morning would eat the person's budget.
+    if len(question) < deps.settings.route_min_chars or question.startswith(ROUTINE_PREFIX):
         return Route()
     previous = next(
         (m.content for m in reversed(history[:-1]) if m.role == MessageRole.assistant), ""
@@ -337,6 +347,7 @@ async def route_to_team(
             "generation_name": "nexus.route",
             "session_id": str(chat.id),
             "trace_user_id": str(user.id),
+            **private(deps.settings, user),
             "tags": ["nexus", "route", deps.settings.env],
         },
     )
@@ -376,6 +387,7 @@ async def _generate(
             "generation_name": "nexus.respond",
             "session_id": str(chat.id),
             "trace_user_id": str(user.id),
+            **private(deps.settings, user),
             "tags": ["nexus", "chat", deps.settings.env],
         },
     )

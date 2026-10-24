@@ -11,7 +11,8 @@ What it looks at, for the time since the last review:
 - with IMPROVE_READ_REQUESTS on, request topics: the topic model reads each request once (and
   the start of its reply) and names its topic in a few generic words, plus what the assistant
   lacked when it couldn't help. Only the counts of topics are kept, and only topics asked at
-  least IMPROVE_MIN_COUNT times. People who turned memory off in Settings are left out.
+  least IMPROVE_MIN_COUNT times. People who turned memory off, or "Help improve Nexus" off, in
+  Settings are left out, and so are routine runs (the same prompt every time).
 
 None of it carries a name, an email, a user id or chat text: `findings` is shown to the owner
 as is. The proposal model gets the findings, what Nexus can already do (tools, shared skills,
@@ -69,6 +70,7 @@ from nexus_common.skills import role_names
 from nexus_common.toolinfo import TOOLS
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.llm import parse_json
+from nexus_orchestrator.turn import ROUTINE_PREFIX
 
 log = logging.getLogger(__name__)
 
@@ -382,6 +384,7 @@ async def topics(db, deps, model, start, end) -> tuple[list[dict], list[dict], i
         await db.execute(
             select(func.left(Message.content, REQUEST_CHARS), next_reply)
             .join(Chat, Chat.id == Message.chat_id)
+            .join(User, User.id == Chat.user_id)
             .outerjoin(Profile, Profile.user_id == Chat.user_id)
             .where(
                 Message.role == MessageRole.user,
@@ -389,6 +392,9 @@ async def topics(db, deps, model, start, end) -> tuple[list[dict], list[dict], i
                 Message.created_at < end,
                 func.length(Message.content) >= MIN_REQUEST_CHARS,
                 or_(Profile.user_id.is_(None), Profile.memory_enabled.is_(True)),
+                User.share_usage.is_(True),
+                # A routine sends the same prompt every run; counting each would drown the rest.
+                ~Message.content.startswith(ROUTINE_PREFIX),
             )
             .order_by(Message.created_at.desc())
             .limit(deps.settings.improve_max_requests)

@@ -43,7 +43,7 @@ from nexus_common.models import (
     utcnow,
 )
 from nexus_common.search import hybrid_search
-from nexus_orchestrator.llm import parse_json
+from nexus_orchestrator.llm import parse_json, private
 from nexus_orchestrator.prompts import (
     EPISODE,
     GRAPH_EXTRACT,
@@ -88,6 +88,7 @@ async def ask_memory_model(
             "generation_name": f"nexus.{name}",
             "session_id": session_id,
             "trace_user_id": str(user.id),
+            **private(deps.settings, user),
             "tags": ["nexus", "memory", deps.settings.env],
         },
     )
