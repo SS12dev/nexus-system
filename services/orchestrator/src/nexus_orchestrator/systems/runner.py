@@ -287,9 +287,13 @@ async def finish(
         archived = system.lifetime == SystemLifetime.ephemeral
         system.status = SystemStatus.archived if archived else SystemStatus.idle
         system.updated_at = utcnow()
-        files = (
-            await db.scalars(select(File).where(File.run_id == run_id).order_by(File.created_at))
-        ).all()
+        files = latest_versions(
+            (
+                await db.scalars(
+                    select(File).where(File.run_id == run_id).order_by(File.created_at)
+                )
+            ).all()
+        )
         # Links the run saved: its repo and live app, and any its agents kept (save_link).
         links = (
             await db.scalars(select(Link).where(Link.run_id == run_id).order_by(Link.created_at))
@@ -373,8 +377,20 @@ async def answer_from_files(deps, output: str, files: list[File]) -> str:
     return text
 
 
+def latest_versions(files: list[File]) -> list[File]:
+    """One entry per file name, its newest version: a run that saved kyoto-costs.md three
+    times attaches it once."""
+    newest: dict[str, File] = {}
+    for f in files:
+        kept = newest.get(f.name)
+        if kept is None or (f.version, f.created_at) >= (kept.version, kept.created_at):
+            newest[f.name] = f
+    return sorted(newest.values(), key=lambda f: f.created_at)
+
+
 def result_text(system: AgentSystem, run: AgentRun, files: list[File]) -> str:
-    cost = f"${float(run.cost_usd or 0):.2f}" if run.cost_usd else "under a cent"
+    spent = float(run.cost_usd or 0)
+    cost = f"${spent:.2f}" if spent >= 0.005 else "under a cent"
     if run.status == RunStatus.completed:
         parts = [f"**{system.name}** finished.", (run.output or "").strip()]
     elif run.status == RunStatus.cancelled:

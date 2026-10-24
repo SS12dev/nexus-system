@@ -104,6 +104,22 @@ class LinkTarget:
         return (self.host + unquote(tail))[:TITLE_MAX] or self.url[:TITLE_MAX]
 
 
+# Names reserved for examples and tests (RFC 2606, RFC 6761), and made-up stand-ins.
+PLACEHOLDER_TLDS = (".example", ".invalid", ".test", ".localhost")
+PLACEHOLDER_HOSTS = ("example.com", "example.org", "example.net")
+PLACEHOLDER_WORDS = re.compile(r"(^|[.-])(placeholder|your-?app|your-?domain|tbd|todo)([.-]|$)")
+
+
+def is_placeholder(url: str) -> bool:
+    """An address made up to stand in for something that doesn't exist yet."""
+    host = (urlsplit(url if "://" in url else "https://" + url).hostname or "").lower()
+    return (
+        host.endswith(PLACEHOLDER_TLDS)
+        or any(host == h or host.endswith("." + h) for h in PLACEHOLDER_HOSTS)
+        or bool(PLACEHOLDER_WORDS.search(host))
+    )
+
+
 def parse_link(url: str) -> LinkTarget:
     """Check an address and say what it points to. Only plain http(s) addresses without a
     password in them are accepted, so a link can never run script when it is opened."""

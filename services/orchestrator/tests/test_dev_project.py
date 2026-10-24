@@ -127,7 +127,7 @@ def test_spec_gets_the_house_team_with_stages():
     kinds = {(e["from"], e["to"]): e["kind"] for e in spec.edges()}
     assert kinds[("tester", "reviewer")] == "review"
     assert kinds[("reviewer", "frontend")] == kinds[("reviewer", "backend")] == "feedback"
-    # Fits the $2 default for this template.
+    # Fits the $3 default for this template.
     assert spec.estimate_usd(12, 8) <= 2
     # Other topologies don't get stages, and bad project ids are dropped.
     assert (
@@ -153,7 +153,7 @@ async def test_static_app_end_to_end(sdeps, owner, scripts, seen, wb):
 
     run, messages, events = await load(sdeps, run_id)
     assert run.status == RunStatus.completed, run.error
-    assert run.budget_usd == Decimal("2.0000")
+    assert run.budget_usd == Decimal("3.0000")
     # The plan went to the chat before the result, and the run carried on.
     assert "**Plan for 2048**" in messages[0] and PLAN in messages[0]
     assert "Building it now" in messages[0]
@@ -311,7 +311,7 @@ async def test_software_requests_get_the_dev_team(sdeps, owner, scripts, seen, e
     spec = AgentSystemSpec.model_validate(system.spec)
     assert system.topology == "dev_project" and [a.id for a in spec.agents] == list(DEV_IDS)
     assert spec.project == str(system.id)
-    assert run.budget_usd == Decimal("2.0000")
+    assert run.budget_usd == Decimal("3.0000")
     assert ("run_system", str(run.id)) in enqueued.jobs
 
 
@@ -394,3 +394,107 @@ async def test_run_against_the_real_workbench(
     assert [line.split(" ", 1)[1] for line in log] == ["Add the page", "Start project"]
     ready = next(e for e in events if e.type == "project.ready")
     assert ready.data["commit"] == log[0].split(" ")[0]
+
+
+def test_a_dev_team_always_gets_three_review_rounds():
+    """Lowering the rounds to make the estimate look cheaper left every fix undone."""
+    spec = AgentSystemSpec.model_validate(
+        {"name": "x", "goal": "g", "topology": "dev_project", "agents": [], "max_rounds": 1}
+    )
+    assert spec.max_rounds == 3
+
+
+class SuiteWorkbench(FakeWorkbench):
+    """A project with a Vite front end and a FastAPI back end whose suites report counts."""
+
+    def __init__(self):
+        super().__init__()
+        self.files: dict[str, str] = {}
+
+    async def write(self, user, project, path, content):
+        self.calls.append(("write", user, project, path))
+        self.files[path] = content
+        return {"path": path}
+
+    async def run(self, user, project, command, timeout_s=None):
+        self.calls.append(("run", user, project, command))
+        if "NEXUS_YES" in command:
+            out = "vite.config.ts\nNEXUS_YES\n" if "vite.config" in command else "NEXUS_YES\n"
+            return CommandResult(0, out, "", False, 3)
+        if "--outputFile.json" in command:
+            return CommandResult(0, " Tests  5 passed (5)\nNEXUS_COUNTS 5 0\n", "", False, 3)
+        if "playwright test --reporter" in command:
+            return CommandResult(0, "  1 passed\nNEXUS_COUNTS 1 0\n", "", False, 3)
+        if "uv run pytest" in command:
+            out = "E   assert 404 == 200\n1 failed, 3 passed\nNEXUS_COUNTS 3 1\n"
+            return CommandResult(1, out, "", False, 3)
+        return CommandResult(0, "abc1234\n", "", False, 3)
+
+
+async def test_nexus_wires_and_runs_the_tests_itself(sdeps, owner, scripts, seen):
+    """The house test setup goes in before the tester, and the measured counts (not the
+    tester's) reach the reviewer and the answer."""
+    wb = sdeps.workbench = SuiteWorkbench()
+    happy(scripts, stack="web_fastapi", approved=False)
+    scripts["tester"] = [done("submit_tests", passed=14, failed=0, summary="All green.")] * 3
+    scripts["reviewer"] = [
+        done("submit_review", approved=False, fixes="1. api/main.py: SPA fallback (backend)",
+             summary="Almost.")
+    ] * 3  # fmt: skip
+    _, run_id = await make_dev_run(sdeps, owner)
+    await runner.run_system(sdeps, run_id)
+
+    run, messages, _ = await load(sdeps, run_id)
+    assert run.status == RunStatus.completed, run.error
+    assert "import viteConfig from './vite.config.ts'" in wb.files["web/vitest.config.ts"]
+    assert "tests/e2e/**" in wb.files["web/vitest.config.ts"]
+    assert "uvicorn main:app" in wb.files["web/playwright.config.ts"]
+    assert "pythonpath = ." in wb.files["api/pytest.ini"]
+    setup = [c[3] for c in wb.calls if c[0] == "run" and "npm pkg set" in c[3]]
+    assert setup and "@playwright/test@$PLAYWRIGHT_VERSION" in setup[0]
+    assert "The test runners are set up" in seen["tester"][0][-1].content
+    # Later rounds hand the reviewer's fixes to the tester too.
+    assert "SPA fallback" in seen["tester"][1][-1].content
+    review = seen["reviewer"][0][-1].content
+    assert "Test report: 9 passed, 1 failed" in review and "assert 404 == 200" in review
+    # The builders see the failing output with the fixes.
+    assert "assert 404 == 200" in seen["backend"][1][-1].content
+    final = messages[-1]
+    assert "9 passing, 1 failing (unit 5 passed; smoke 1 passed; backend 3 passed, 1 failed)" in (
+        final
+    )
+    assert "not approved after 3 rounds" in final
+
+
+@pytest.mark.parametrize(
+    "asked,budget,expected",
+    [
+        ("go ahead", 0.81, "3.0000"),  # Nexus's own figure: the default stands
+        ("Build me a 2048 game, keep it cheap", 0.25, "3.0000"),
+        ("Build me a 2048 game for $1.50", 1.5, "1.5000"),  # the user's sum
+        ("yes, go up to 4 dollars", 4.0, "4.0000"),
+    ],
+)
+async def test_a_software_budget_is_the_users_sum_or_the_default(
+    sdeps, owner, scripts, asked, budget, expected
+):
+    scripts["nexus.design_system"] = [dev_spec()]
+    out = await build_tool(sdeps, owner, asked=asked).ainvoke(
+        {"request": "Build me a 2048 game", "budget_usd": budget}
+    )
+    assert "Started 2048" in out, out
+    async with sdeps.sessionmaker() as db:
+        run = await db.scalar(select(AgentRun))
+    assert run.budget_usd == Decimal(expected)
+
+
+async def test_skills_are_drafted_only_from_approved_software(sdeps, owner, scripts, wb):
+    from nexus_orchestrator.systems.learn import draft_skill
+
+    happy(scripts, approved=False)
+    scripts["reviewer"] = [done("submit_review", approved=False, fixes="1. x", summary="s")] * 3
+    _, run_id = await make_dev_run(sdeps, owner)
+    await runner.run_system(sdeps, run_id)
+    # An unapproved run is never learned from; the drafting model isn't even asked.
+    assert await draft_skill(sdeps, run_id) is None
+    assert "nexus.draft_skill" not in scripts

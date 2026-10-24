@@ -49,6 +49,17 @@ def asked_to_keep(words: str) -> bool:
     return bool(KEEP_WORDS.search(words or ""))
 
 
+# A sum of money in the user's own words ("$1", "1.50 dollars", "₹100").
+MONEY = re.compile(
+    r"([$£€₹]|\b(usd|inr|rs\.?|dollars?)\s*)\s*\d|\d+(\.\d+)?\s*([$£€₹]|\b(usd|dollars?|bucks|cents?)\b)",
+    re.I,
+)
+
+
+def named_a_sum(words: str) -> bool:
+    return bool(MONEY.search(words or ""))
+
+
 def _uuid(value: str | None) -> uuid.UUID | None:
     try:
         return uuid.UUID(str(value))
@@ -115,6 +126,15 @@ def system_tools(
         db, system: AgentSystem, request: str, file_ids: list[uuid.UUID], budget: float | None
     ) -> str:
         """Add the run, commit, announce and queue it. Returns what Nexus tells the user."""
+        if (
+            budget is not None
+            and system.topology == "dev_project"
+            and budget < deps.settings.dev_run_budget_usd
+            and not named_a_sum(asked)
+        ):
+            # A software team works in review rounds; a small budget Nexus picked itself (the
+            # user named no sum) only stops it before the fixes are made. The default stands.
+            budget = None
         live = await active_run(db, system.id)
         if live is not None:
             return f"{system.name} is already running (run {live.id}); wait for it or stop it."
@@ -177,8 +197,9 @@ def system_tools(
         asked for, including sending or deleting, since the user approves those in the app.
         deliverables: files wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's
         files to work from
-        (default: this chat's files). budget_usd: the user's budget in USD; when they ask to
-        keep it cheap without a figure, pass 0.25; otherwise leave it out. best_model:
+        (default: this chat's files). budget_usd: the user's budget in USD, only when they
+        named a sum or agreed to one you offered; when they ask to keep a non-software task
+        cheap without a figure, pass 0.25; otherwise (always for software) leave it out. best_model:
         only when the user asked for the best model. keep: true only when the user said to keep
         or reuse this team; otherwise leave it out: the team is removed after the run and the
         user is asked whether to keep it."""

@@ -3,7 +3,8 @@ its GitHub repo.
 
 Each project gets a private repo in GITHUB_APPS_ORG named after the app ("2048"), with the
 user's name in front for everyone but the owner ("priya-2048"). The run's work is pushed to
-nexus/<run id>, and main moves to it only when the reviewer approved and every test passed.
+nexus/<run id>, or to the project's branch that isn't merged yet when a follow-up continues it,
+and main moves to it only when the reviewer approved and every test passed.
 """
 
 import logging
@@ -119,7 +120,9 @@ async def publish(rc: RunContext, dev: dict) -> dict:
     repo = await gh.get_repo(row.repo_name) if row.repo_name else None
     if repo is None:
         repo = await gh.create_repo(await _repo_name(rc, row), rc.spec.goal)
-    branch = f"nexus/{rc.run_id}"
+    # A follow-up keeps working on the branch that isn't merged yet, so the fixes land on the
+    # same branch (and the user sees one line of work) instead of a new branch per run.
+    branch = row.branch if row.branch and not row.merged else f"nexus/{rc.run_id}"
     token = await gh.push_token(repo.name)
     pushed = await wb.push(str(rc.user.id), rc.project, repo.clone_url, branch, token)
     merged, note = False, ""

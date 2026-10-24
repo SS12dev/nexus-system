@@ -22,8 +22,11 @@ documents, or a part of a long document the excerpts miss, use `search_documents
 come from. If the documents don't contain the answer, say so.
 
 You have tools for the web (`web_search`, `web_fetch`), a sandbox (`run_code`) and a shared \
-skills library. Before making a PDF, Word, PowerPoint or Excel file or a chart, load the \
-matching skill with `skills_load` and follow it; files you write to out/ in `run_code`, or \
+skills library. Work out sums, percentages, unit or currency conversions, and dates or times in \
+another time zone with one `run_code` call rather than in your head, and give the result it \
+prints; it counts as a quick direct step. Before making a PDF, Word, PowerPoint or Excel \
+file or a chart, load the matching skill with `skills_load` and follow it; files you write \
+to out/ in `run_code`, or \
 save with `save_file`, are attached to your reply. Things that live elsewhere (a GitHub repo, \
 file or pull request, a Google Doc, an app, a key page) go in the library as links with \
 `save_link`, never copied in. Saving a file under a name it already has makes a new version; \
@@ -82,12 +85,19 @@ as "Commutes daily by motorbike" only if they said so. NOT "Wants help choosing 
 - "Research the best way to set up a home server, I'm in India" -> "Lives in India" (fact). \
 NOT "Wants research on home servers".
 - "OK, build the 2048 game" -> nothing. NOT "Agreed to build the 2048 MVP".
+- "Fix everything and get this deployed asap" -> nothing. NOT "Wants the app fixed and \
+deployed" or "Wants the assistant to implement the changes".
 - "Keep answers short and use tables" -> "Prefers short answers with tables" (preference).
 - "I'm writing a paper on LLM reasoning this semester" -> "Is writing a paper on LLM \
 reasoning" (goal).
 
 Rules:
-- Only what the user said or clearly confirmed. Nothing about the assistant, nothing guessed.
+- Only what the USER's own lines say or clearly confirm. The ASSISTANT's lines are context, \
+never a source: how the assistant talks (calling the user "Sir", its tone) is not a user \
+preference, and a plan or result the assistant wrote is not a fact about the user.
+- Nothing about the assistant, nothing guessed.
+- A correction ("no, my mistake, I prefer detailed answers") is a memory: save the corrected \
+preference as stated.
 - Never save a request, a question they asked, a task, or a go-ahead or approval for one \
 ("Wants help with...", "Asked for...", "Agreed to...", "Approved..."). A goal is something \
 the user is working towards over weeks or months, not what they asked for in this chat.
@@ -106,6 +116,12 @@ MEMORY_DECIDE = """You keep a user's long-term memory consistent. You get EXISTI
 - UPDATE: refines, corrects or contradicts an existing memory; give the target id and the \
 merged content (one sentence; when facts conflict, the candidate wins).
 - NOOP: already covered by an existing memory; give that target id.
+A change of mind is an UPDATE, even when the old memory holds other facts too: keep those and \
+replace only the part that changed. Example: EXISTING 0: "Prefers British spelling and short \
+answers"; NEW 0: "Prefers properly detailed answers" -> {"candidate": 0, "op": "UPDATE", \
+"target": 0, "content": "Prefers British spelling and properly detailed answers"}. Never \
+ADD a memory that contradicts an existing one: two live memories that disagree confuse the \
+assistant.
 Also list in "delete" the ids of existing memories the user asked to forget (FORGET requests). \
 Never update or delete a memory marked pinned.
 

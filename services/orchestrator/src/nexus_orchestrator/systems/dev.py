@@ -29,6 +29,7 @@ from nexus_common.devteam import FOLDERS, STACKS
 from nexus_orchestrator.deploy import deploy_project
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.systems import release as releasing
+from nexus_orchestrator.systems import suites
 from nexus_orchestrator.systems.compile import SystemState, run_agent, terminal
 from nexus_orchestrator.systems.runtime import RunContext, build_agent, final_text
 from nexus_orchestrator.workbench import WorkbenchError
@@ -114,6 +115,8 @@ def answer(name: str, dev: dict) -> str:
     passed, failed = int(tests.get("passed") or 0), int(tests.get("failed") or 0)
     if passed or failed:
         result = f"{passed} passing" + (f", {failed} failing" if failed else "")
+        if tests.get("line"):
+            result += f" ({tests['line']})"
     else:
         result = "none reported"
     rounds = dev.get("rounds", 1)
@@ -255,6 +258,9 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 if fixes
                 else "Build your part of PLAN.md."
             )
+            tests = dev.get("tests") or {}
+            if fixes and int(tests.get("failed") or 0):
+                todo += f"\n\nThe last test run:\n{tests.get('summary', '')[:3000]}"
             st = await run_agent(
                 rc,
                 graphs,
@@ -273,11 +279,24 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             for a in ("frontend", "backend")
             if (state.get("outputs") or {}).get(a)
         )
+        # The house test setup first, so the tester writes tests rather than fixing runners.
+        wired = await suites.wire(wb, user, project, dev["stack"])
+        setup = (
+            "The test runners are set up and installed (don't change their configs or "
+            "versions):\n" + "\n".join(f"- {x}" for x in wired) + "\n"
+            if wired
+            else ""
+        )
+        if dev.get("rounds", 1) > 1 and dev.get("fixes"):
+            setup += (
+                "The reviewer's fixes from the last round; make the ones for the tester or about "
+                f"test code:\n{dev['fixes']}\n"
+            )
         st = await run_agent(
             rc,
             graphs,
             "tester",
-            stage(4, "Test", f"What the builders said:\n{built}\nTest it."),
+            stage(4, "Test", f"What the builders said:\n{built}\n{setup}Test it."),
             item=f"round {dev.get('rounds', 1)}",
         )
         args = _args(st)
@@ -286,6 +305,16 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             "failed": int(args.get("failed") or 0),
             "summary": str(args.get("summary") or final_text(st)),
         }
+        # Then Nexus runs every suite itself: these counts are what the reviewer, the deploy
+        # gate and the answer go by. The tester's own counts stand only when nothing ran.
+        measured = await suites.run_suites(wb, user, project, dev["stack"])
+        if measured.ran:
+            tests.update(
+                passed=measured.passed,
+                failed=measured.failed,
+                line=measured.line(),
+                summary=f"{measured.report()}\n\nThe tester said: {tests['summary']}",
+            )
         return {"outputs": {"tester": tests["summary"]}, "dev": {"tests": tests}}
 
     async def review(state: SystemState) -> dict:
