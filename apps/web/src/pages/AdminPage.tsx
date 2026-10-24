@@ -14,17 +14,20 @@ import { api } from "../lib/api";
 import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/format";
 import type { AuditEntry, Backup, LoggedError, Monitoring, MonitorRow, OpsStatus, Usage, User } from "../lib/types";
 import { APP_NAME } from "../lib/assistant";
+import { ConfigPanel } from "./AdminConfig";
 
-type Tab = "status" | "monitoring" | "usage" | "audit" | "backups";
+type Tab = "status" | "monitoring" | "usage" | "audit" | "backups" | "config";
 const TABS: { key: Tab; label: string }[] = [
   { key: "status", label: "Status" },
   { key: "monitoring", label: "Monitoring" },
   { key: "usage", label: "Usage" },
   { key: "audit", label: "Audit log" },
   { key: "backups", label: "Backups" },
+  { key: "config", label: "Configuration" },
 ];
 
-/** Health, monitoring, usage, the audit log, backups and maintenance mode. Owners only. */
+/** Health, monitoring, usage, the audit log, backups, maintenance mode and runtime settings.
+ * Owners only. */
 export function AdminPage() {
   const [tab, setTab] = useState<Tab>("status");
   const [error, setError] = useState("");
@@ -41,7 +44,7 @@ export function AdminPage() {
       <div className="mx-auto max-w-5xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Admin</h1>
         <p className="mb-4 text-sm text-slate-400">
-          How {APP_NAME} is running, who uses it and what it costs. You see counts, costs and errors
+          How {APP_NAME} is running, who uses it, what it costs and how it is set up. You see counts, costs and errors
           here, never anyone's chats.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -57,7 +60,7 @@ export function AdminPage() {
               {t.label}
             </button>
           ))}
-          {tab !== "backups" && tab !== "monitoring" && (
+          {(tab === "status" || tab === "usage" || tab === "audit") && (
             <div className="ml-auto">
               <PeopleFilter people={people} picked={picked} onChange={setPicked} />
             </div>
@@ -69,6 +72,7 @@ export function AdminPage() {
         {tab === "usage" && <UsagePanel onError={setError} userIds={picked} />}
         {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
         {tab === "backups" && <BackupsPanel onError={setError} />}
+        {tab === "config" && <ConfigPanel onError={setError} />}
       </div>
     </div>
   );
@@ -609,6 +613,12 @@ function UsagePanel({ onError, userIds }: FilteredProps) {
 }
 
 function describe(e: AuditEntry): string {
+  if (e.action === "config.changed" && e.data.changes && typeof e.data.changes === "object") {
+    const changes = e.data.changes as Record<string, { from: unknown; to: unknown }>;
+    return Object.entries(changes)
+      .map(([name, c]) => `${name}: ${String(c.from) || "empty"} → ${String(c.to) || "empty"}`)
+      .join(", ");
+  }
   const who = e.target_user ?? (e.data.email as string | undefined);
   const details = Object.entries(e.data)
     .filter(([k]) => k !== "email")

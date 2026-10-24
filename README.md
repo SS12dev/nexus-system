@@ -16,8 +16,9 @@ the home screen a 3D orb: Nexus in the middle, its live agent teams growing out 
 pulling back in, and your memories and artifacts inside it. Phase 5 makes it safe to invite
 people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
-the audit log, backups and a maintenance switch. All of it runs on one machine with Docker
-Compose.
+the audit log, backups and a maintenance switch. Since then it has gained structured logs with
+request ids, a Monitoring tab with alerts, and a Configuration tab where the owner changes
+runtime settings without a redeploy. All of it runs on one machine with Docker Compose.
 
 ## Quick start
 
@@ -41,7 +42,7 @@ models (a few GB). `DOCLING=false` in `.env` builds a small one instead, without
 | Langfuse (traces, cost) | http://localhost:3000 (`LANGFUSE_PORT`), login from `LANGFUSE_ADMIN_EMAIL` / `LANGFUSE_ADMIN_PASSWORD` |
 | LiteLLM admin API | http://localhost:4000, `LITELLM_MASTER_KEY` |
 | MinIO console | http://localhost:9001 |
-| Admin page (health, usage, audit log, backups) | http://localhost:8080/admin |
+| Admin page (health, monitoring, usage, audit log, backups, configuration) | http://localhost:8080/admin |
 
 What each of the containers Compose starts is for, and how they connect, is in
 [docs/containers.md](docs/containers.md).
@@ -385,6 +386,10 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   problem seen in two checks in a row is raised; with SMTP set up every owner gets an email, and
   another when it clears (`ALERT_EMAIL=false` keeps them on the page only). If the API itself is
   down nothing can send, so a dead Mac or Docker stays silent.
+- **Configuration:** about sixty runtime settings in ten groups (logging, models, budgets, agent
+  teams, memory and context, sign-in and access, rate limits, alerts and backups, email, apps),
+  each with what it does, its `.env` name and its `.env` value. See
+  [Changing settings without a redeploy](#changing-settings-without-a-redeploy).
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or
   upgrading Nexus.
@@ -396,6 +401,34 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
 
 On the People page an admin can also **sign someone out** on every device. Everyone can see and
 sign out their own signed-in devices on the Connections page.
+
+### Changing settings without a redeploy
+
+`.env` (through [compose.yaml](compose.yaml)) gives every setting its value at start-up. On the
+Admin page's **Configuration** tab the owner can override the plain ones: the log format and
+level, which model tier chats, routes, designs teams and writes memories, budgets, agent-team
+limits, how much memory and document context each turn gets, sign-up and access requests,
+rate limits, alert thresholds, the SMTP server (not its password), web search and app limits.
+Each comes with a description, its `.env` name and its `.env` value, and **Reset** goes back
+to that.
+
+A save is stored in the `app_settings` table (key `config`), applied at once by the API replica
+that took it and announced through Valkey; every other API replica, orchestrator and
+doc-worker checks every 5 seconds (and re-reads the table every minute regardless) and applies
+it, so the next request, turn or job uses it. Code always reads settings when it needs them,
+which is what makes this work ([packages/common/src/nexus_common/config.py](packages/common/src/nexus_common/config.py)).
+
+A few settings are read only when a service starts: job timeouts and the nightly memory time
+(orchestrator), the Google services asked for at sign-in, the alert interval (API) and the
+deploy time limit (both). They're marked *after restart*; once saved, the tab lists the ones
+waiting and the command that applies them, such as `./scripts/compose.sh restart api`. A
+restarted service starts with the stored values, so nothing is lost on a redeploy. Each save
+is in the audit log as `config.changed` with every old and new value.
+
+Never on this tab: secrets (API keys, passwords, tokens, the Google client secret), which stay
+in `secrets/nexus.sops.env` ([Secrets](#secrets)), and addresses and wiring (database, Valkey and
+service URLs, domains, ports, replicas, `DEV_LOGIN_*`), which need `.env` and a redeploy. The
+API refuses any name not on its list, so a secret can't be set through it.
 
 ### Logs and request ids
 
@@ -548,7 +581,7 @@ packages/common/        settings, models, events, storage, embeddings, hybrid se
 library/                core skills and the shipped instruction layers
 infra/litellm, postgres, cloudflared   model aliases, database init, tunnel notes
 secrets/                the encrypted secrets file (gitignored; README: Secrets)
-docs/containers.md      what every Docker container does and how they fit together
+docs/                   containers, app URLs, the GitHub App
 compose.yaml            the whole stack
 ```
 
@@ -579,10 +612,16 @@ Run the API and worker on the host against the Compose services with the matchin
 `uv run arq nexus_doc_worker.worker.WorkerSettings`. Without Docling installed the doc-worker
 falls back to MarkItDown for PDFs.
 
+Adding a setting to the Configuration tab: add an `Option` to `OPTIONS` in
+`packages/common/src/nexus_common/config.py` (group, label, description, type, limits, and
+`restart` if a service reads it only at start-up). Code must read it from the live `Settings`
+object when it's used, not copy it at start-up.
+
 Schema changes: edit `packages/common/src/nexus_common/models.py`, then
 `uv run alembic revision --autogenerate -m "..."` in `services/api`.
 
 ## Roadmap
 
 1. Foundation · 2. Memory and documents · 3. Agent systems, tools and the skills library ·
-4. The 3D orb · 5. **Production hardening** (this) · 6. Move to a server, voice
+4. The 3D orb · 5. **Production hardening** (this: logs, monitoring, alerts, runtime
+configuration) · 6. Move to a server, voice

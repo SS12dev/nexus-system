@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from arq import create_pool
@@ -27,6 +28,10 @@ from nexus_api.routes import (
     skills,
     systems,
 )
+from nexus_api.routes import (
+    config as config_routes,
+)
+from nexus_common import config
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, Embedder, LiteLLMEmbedder
@@ -51,6 +56,15 @@ def create_app(
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
         app.state.redis = Redis.from_url(settings.redis_url)
+        watcher = None
+        if settings.env != "test":
+            # The owner's changes from the Configuration tab, before anything below reads them;
+            # then kept in step with changes saved on other replicas.
+            await config.load_and_apply(settings, app.state.sessionmaker, "api", starting=True)
+            app.state.oauth = auth.make_oauth(settings)
+            watcher = asyncio.create_task(
+                config.watch(settings, app.state.sessionmaker, app.state.redis, "api")
+            )
         app.state.gateway = LiteLLMAdmin(settings)
         app.state.storage = storage or S3Storage(settings)
         inner = embedder or LiteLLMEmbedder(settings)
@@ -64,6 +78,8 @@ def create_app(
             app.state.queue = queue
         async with alerts.running(app):
             yield
+        if watcher is not None:
+            watcher.cancel()
         if pool is not None:
             await pool.aclose()
         await inner.aclose()
@@ -75,6 +91,7 @@ def create_app(
 
     app = FastAPI(title="Nexus API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.service = "api"
     app.state.oauth = auth.make_oauth(settings)
     # Client for Google's token endpoints; None makes a short-lived one per call. Tests swap it.
     app.state.google_http = None
@@ -105,6 +122,7 @@ def create_app(
     app.include_router(instructions.router)
     app.include_router(systems.router)
     app.include_router(admin.router)
+    app.include_router(config_routes.router)
     app.include_router(access_requests.router)
     app.include_router(ops.router)
     app.include_router(ws.router)

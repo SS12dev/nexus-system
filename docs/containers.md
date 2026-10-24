@@ -315,8 +315,11 @@ maintenance mode on the Admin page before restarting `postgres`, `redis` or `lit
 ## Where each container gets its settings
 
 All settings come from `.env` through [compose.yaml](../compose.yaml); once encrypted, the
-secrets below come from `secrets/nexus.sops.env` instead, loaded by `./scripts/compose.sh`. The
-ones that matter most per container:
+secrets below come from `secrets/nexus.sops.env` instead, loaded by `./scripts/compose.sh`. On
+top of that, `api`, `orchestrator` and `doc-worker` apply the owner's overrides from the Admin
+page's Configuration tab (stored in Postgres) at start-up and within seconds of each change, so
+those settings need no redeploy (README: Changing settings without a redeploy). The ones that
+matter most per container:
 
 | Container | Secrets / key settings |
 | --- | --- |
