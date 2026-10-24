@@ -250,6 +250,9 @@ async def test_a_review_counts_patterns_and_keeps_valid_proposals(
         assert private_bit not in blob
     # Proposals see what exists and what came before.
     propose_prompt = next(p for n, p in prompts if n == "propose")
+    # The proposal model works from the architecture brief, not guesses about the code.
+    assert "HOW NEXUS IS BUILT:\n# Nexus: how it is built" in propose_prompt
+    assert "AsyncPostgresSaver" in propose_prompt
     assert "web_search" in propose_prompt and "EARLIER" in propose_prompt
     assert "signup_policy" not in propose_prompt
 
@@ -403,6 +406,7 @@ async def test_an_approved_code_proposal_becomes_a_draft_pull_request(ideps, ses
     put = next(b for m, path, b in host.calls if m == "PUT")
     spec = base64.b64decode(put["content"]).decode()
     assert spec.startswith("# Add a calendar invite reader") and "A read-only tool." in spec
+    assert "Read `docs/INDEX.md`" in spec
 
 
 async def test_a_pull_request_that_cant_be_opened_says_why(ideps, sessionmaker):
