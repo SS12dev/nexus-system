@@ -1,0 +1,33 @@
+id: founder
+label: Founder / manager
+kind: role
+order: 13
+blurb: Market news, meeting prep and weekly summaries.
+memories:
+  - {kind: fact, content: "Runs a company or manages a team."}
+prompts:
+  - "Draft a one-page update for my team"
+  - "Research my competitors and compare them in a table"
+  - "Prepare me for tomorrow's meetings"
+  - "Write a job description for this role"
+routines:
+  - id: market-news
+    name: Market and competitor news
+    days: [MO]
+    time: "08:00"
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Find news from the last week about my company's market, competitors and customers (from
+      what you know about me). Group it by theme, one line each with a link, and end with what
+      it might mean for us.
+  - id: meeting-prep
+    name: Tomorrow's meetings
+    days: [SU, MO, TU, WE, TH]
+    time: "18:30"
+    needs: [calendar, gmail]
+    only_if_new: true
+    prompt: >
+      Look at tomorrow's meetings. For each one with other people, say who is coming, what it
+      is probably about from recent emails with them, and what I should prepare. If tomorrow has
+      no meetings with others, answer NOTHING_NEW.

@@ -27,6 +27,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 from sqlalchemy import select
 
+from nexus_common import push
 from nexus_common.events import Event, publish
 from nexus_common.models import (
     AgentRun,
@@ -46,6 +47,7 @@ from nexus_common.models import (
 from nexus_common.spec import TIER_MODEL, AgentSpec, AgentSystemSpec, tier_down, tier_up
 from nexus_common.systems import approval_payload, money
 from nexus_common.toolinfo import BY_NAME, needs_approval
+from nexus_orchestrator.llm import private
 from nexus_orchestrator.tools import ToolContext, build_tools
 
 log = logging.getLogger(__name__)
@@ -252,6 +254,7 @@ class RunContext:
                 "generation_name": f"agent.{agent.id}",
                 "session_id": str(self.chat_id) if self.chat_id else None,
                 "trace_user_id": str(self.user.id),
+                **private(self.deps.settings, self.user),
                 "tags": ["nexus", "system", self.deps.settings.env],
                 "trace_metadata": {
                     "system_id": str(self.system_id),
@@ -315,8 +318,24 @@ class RunContext:
             await db.commit()
         await self.publish("approval.requested", approval=approval_payload(a))
         await self.record("approval.requested", agent, tool=a.tool, approval_id=str(a.id))
+        await self.push_approval(agent, a)
         await self.agent_status(agent, "waiting", tool=a.tool)
         return a
+
+    async def push_approval(self, agent: str, a: Approval) -> None:
+        """Tell the person's phone a step is waiting for them; the run is parked until then."""
+        info = BY_NAME.get(a.tool)
+        notice = push.Notice(
+            title="Waiting for your approval",
+            body=f"{agent} wants to {(info.title if info else a.tool).lower()}. Tap to review.",
+            url=f"/agents/{self.system_id}",
+            tag=f"approval:{a.id}",
+        )
+        try:
+            async with self.deps.sessionmaker() as db:
+                await push.send(db, self.deps.settings, self.user.id, notice)
+        except Exception:
+            log.warning("Could not push an approval request", exc_info=True)
 
     async def reload_approval(self, approval_id: uuid.UUID) -> Approval:
         async with self.deps.sessionmaker() as db:

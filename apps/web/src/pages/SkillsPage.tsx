@@ -24,7 +24,18 @@ const SCOPE_LABEL: Record<SkillScope, string> = {
 };
 
 // Shelves in the order the library uses (nexus_common.skills.CATEGORIES).
-const SHELVES = ["documents", "research", "writing", "data", "productivity", "agents", "engineering", "other"];
+const SHELVES = [
+  "documents",
+  "research",
+  "writing",
+  "data",
+  "productivity",
+  "work",
+  "life",
+  "agents",
+  "engineering",
+  "other",
+];
 
 const STATUS_STYLE: Record<Skill["status"], string> = {
   active: "bg-emerald-500/15 text-emerald-300",

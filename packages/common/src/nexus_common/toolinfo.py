@@ -58,6 +58,20 @@ TOOLS: list[ToolInfo] = [
         "a page) with a preview, without copying what it points to.",
     ),
     ToolInfo(
+        "create_routine",
+        "Schedule a routine",
+        "write",
+        "Save a prompt that runs on a schedule as the user (a morning brief, a weekly digest), "
+        "posting into a chat of its own.",
+    ),
+    ToolInfo("list_routines", "List routines", "read", "List the user's scheduled routines."),
+    ToolInfo(
+        "update_routine",
+        "Change a routine",
+        "write",
+        "Pause, resume, delete or change one of the user's routines.",
+    ),
+    ToolInfo(
         "run_code",
         "Run code",
         "exec",

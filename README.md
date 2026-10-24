@@ -19,7 +19,12 @@ people: rate limits, security headers and cross-site checks, two API replicas be
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
 the audit log, backups and a maintenance switch. Since then it has gained structured logs with
 request ids, a Monitoring tab with alerts, and a Configuration tab where the owner changes
-runtime settings without a redeploy. All of it runs on one machine with Docker Compose.
+runtime settings without a redeploy. To make it ready for friends, new people now get a short
+setup interview that tailors Nexus to their work and interests, a short tour, a light theme,
+**routines** (prompts that run on a schedule, like a morning brief, and can notify their phone,
+email or WhatsApp), in-app feedback, and public Terms and Privacy pages they agree to at
+sign-up. Owner checklist: [docs/setup-for-friends.md](docs/setup-for-friends.md).
+All of it runs on one machine with Docker Compose.
 
 ## Quick start
 
@@ -243,6 +248,107 @@ text hash, and every stored vector records its model, so swapping the embedder (
 OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 [infra/litellm/config.yaml](infra/litellm/config.yaml)) re-embeds everything in the background.
 
+## Onboarding and routines
+
+### The setup interview
+
+The first time someone signs in they get a short interview before the home screen (and again
+from Settings › Run setup again). Every step after the first can be skipped:
+
+1. **Name** their assistant.
+2. **Work**: up to three professions, plus a line in their own words.
+3. **Day**: time zone (from the browser) and when their day starts.
+4. **Help with**: interests such as cooking, travel or news, plus anything else worth knowing.
+5. **Style**: short, balanced or detailed; casual or professional; a reply language.
+6. **Routines** suggested for those answers, each with a time, and whether to also be told by
+   email or WhatsApp.
+
+The answers become memories with source `onboarding` (pinned where they were direct answers),
+so they show on the Memory page and can be edited or deleted like any other. The profile is
+rebuilt straight away, the picked routines are added, and a **Welcome** chat lists what was set
+up with a few prompts to try. Running setup again replaces the earlier onboarding memories
+(ones the person edited are theirs and stay) and adds only routines they don't have yet. People
+who used Nexus before onboarding existed are marked as onboarded by the migration.
+
+What each answer sets up comes from **profile packs**, one YAML file per profession or interest
+in [library/profiles](library/profiles): starter memories, prompts for the home screen and the
+welcome chat, and routines. There are ten professions (student, software, research, founder,
+creative, sales, healthcare, teaching, finance/legal/consulting, freelance), eight interests
+(fitness, cooking, money, travel, learning, news, family, job hunting) and an everyday pack
+everyone gets (morning brief, Friday look back). Adding a profession is a new file; the format
+is in [library/README.md](library/README.md#profile-packs). The home screen shows four prompts
+from the person's packs under the chat box.
+
+### Routines
+
+A routine is a saved prompt with a schedule (an RFC 5545 RRULE such as
+`FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=9;BYMINUTE=0`), run in the person's time zone, so 08:00 stays
+08:00 across daylight-saving changes. People make them at onboarding, on the **Routines** page
+(a picker for daily, weekdays, days of the week and monthly, or a custom rule, with the next
+three runs shown), from the **Ideas** there, or by asking ("every weekday at 8, brief me"): the
+assistant has `create_routine`, `list_routines` and `update_routine`.
+
+- **Running.** Every minute the orchestrator claims the routines that are due (`FOR UPDATE SKIP
+  LOCKED`), moves each to its next time and queues `run_routine` once per routine and slot
+  (`routine_runs` has a unique row per slot, so a retry never runs it twice). A run is an
+  ordinary chat turn in the routine's own chat, with the person's memory, tools and Google
+  services, and the local date and time in the prompt. Routine runs skip the team router and
+  don't feed memory extraction: a team every morning would eat a $5 budget in days, and a news
+  digest says nothing new about the person. A run more than an hour late (the worker was down)
+  is skipped to the next time.
+- **Quiet runs.** With "Only tell me when there's something new", a reply of `NOTHING_NEW` is
+  stored as a quiet run: its messages are removed and nobody is told.
+- **Budget and failures.** A routine is skipped when its owner has less than
+  `ROUTINE_MIN_BUDGET_USD` left. Three failed runs in a row pause it, with a note in its chat.
+- **Telling people.** Each run posts in its chat (the chat list and Routines page update live).
+  Per routine, people can also be told by **push** to their phone or browser (below), by
+  **email** (needs `SMTP_*`) with the result and a link,
+  or **WhatsApp** (needs the `WHATSAPP_*` settings and their number in Settings) with the
+  routine's name and a one-line preview.
+- **Limits.** `ROUTINES_MAX_PER_USER` (10) each, at most every `ROUTINE_MIN_INTERVAL_MINUTES`
+  (60). `ROUTINES_ENABLED=false` stops scheduled runs for everyone. All are on Admin ›
+  Configuration under *Routines and privacy*.
+
+#### Push notifications
+
+Phones and browsers get a notification when a routine with **Push** ticked has something new,
+and when a team is waiting for an approval. It is standard Web Push from the installed PWA:
+the service worker shows the notification (`apps/web/public/push-sw.js`, loaded with
+`importScripts`), each device's subscription is a row in `push_subscriptions`, and the
+orchestrator signs and sends with the VAPID key pair (`nexus_common/push.py`, `pywebpush`); a
+subscription the push service reports gone is deleted. People turn it on per device in
+Settings › Notifications (iPhone and iPad need the app added to the Home Screen first) or by
+ticking Push on a routine. Without `VAPID_*` keys push is off and hidden.
+
+#### Setting up the channels
+
+Step-by-step instructions for push keys, WhatsApp (Meta app, template, permanent token) and
+SMTP are in [docs/setup-for-friends.md](docs/setup-for-friends.md). WhatsApp notices use an
+approved template with two parameters (the routine's name and a one-line preview); nobody can
+message Nexus back on WhatsApp.
+
+### The first week
+
+- **Tour.** After setup, a five-stop tour points at the chat box, Routines, Memory, Settings
+  and Send feedback (on a phone, at the menu). Skipping or finishing sets `profile.tour_done`,
+  so it shows once per person, on any device.
+- **Light theme.** Settings › Appearance: match the device, dark or light, saved per device.
+  The light theme swaps the colour tokens and the slate scale in `index.css`; the 3D orb's
+  stage stays dark (`data-theme="dark"` on it).
+- **Send feedback** (in the menu) sends a problem, an idea or praise, with the page it came
+  from, to the owners: by email and on **Admin › Feedback**, where it can be marked handled.
+  The self-review reads it too (kind, page and text, never who sent it).
+
+### Terms and privacy
+
+The **Privacy Policy** and **Terms of Service** are static pages at `/privacy` and `/terms`
+(`apps/web/public/privacy.html`, `terms.html`), served by nginx without signing in, so Google's
+consent screen can link them. The sign-in page links both; the first screen of the setup
+interview has a required "I agree" box; the version agreed to is stored on the user
+(`terms_version`, `terms_accepted_at`, audited as `user.terms_accepted`). Changing
+`TERMS_VERSION` (and the date on both pages, which a test checks) asks everyone but owners to
+agree again before they continue.
+
 ## Agent systems
 
 For a big ask ("research EV battery suppliers and give me a report and a spreadsheet"), Nexus
@@ -350,12 +456,14 @@ Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a on
 description, plus `scripts/` and `references/`. Agents see only the names and descriptions; they
 load a skill's instructions with `skills_load` when a task needs it and read its files with
 `skills_read_file`, so prompts stay small. Core skills ship in [library/core](library/core) and
-are synced into the database when the orchestrator starts. 27 skills sit on seven shelves:
+are synced into the database when the orchestrator starts. 40 skills sit on nine shelves:
 documents (PDF, Word, PowerPoint, Excel, charts, images, conversions), research (web research,
 literature reviews, reading papers, research gaps, paper writing, citations, fact-checking),
 writing (reports, summaries, email, meeting notes), data (analysis, statistics, ML experiments,
-LLM evaluation), productivity (inbox triage, scheduling, comparing options), agents (prompt
-writing) and engineering (code review). Every script is tested in the sandbox; see
+LLM evaluation), productivity (inbox triage, scheduling, comparing options), work (lesson
+planning, study plans, meeting prep, proposals and invoices, creative briefs, clinical evidence,
+job applications, sales outreach), life (meal planning, trip planning, training plans,
+budgeting), agents (prompt writing) and engineering (code review). Every script is tested in the sandbox; see
 [library/README.md](library/README.md).
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version
@@ -562,6 +670,23 @@ logged as `http.error` / `http.slow`, refusals (rate limit, cross-site) as `http
 access requests as `access.*` events. Docker keeps 5 files of 10 MB per container, so logs
 can't fill the disk. The orchestrator and doc-worker have Docker health checks on their arq
 heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
+
+### Privacy
+
+Friends should know what you can see; the public Privacy Policy at `/privacy` tells them in
+plain words. In short:
+
+- **Langfuse** keeps tokens, cost and timing for everyone, but with `TRACE_MASKING` on (the
+  default) it stores `redacted-by-litellm` in place of the prompts and replies of everyone but
+  owners, and of every embedding call. It works through LiteLLM's `mask_input` and
+  `mask_output` metadata, added in `orchestrator/llm.py:private`.
+- **The self-review** never reads Langfuse: it uses counts from the database and LiteLLM's spend
+  logs, and anonymous topic labels. People who untick *Help improve Nexus* in Settings (or turn
+  memory off) are left out of the topics, and so are routine runs.
+- **Their data**: Settings › Download my data gives a zip of their account, setup answers,
+  chats, memories, routines and file list. *Delete my account* (not for owners) removes their
+  files from storage, revokes Google and their model key, and deletes the user, which takes
+  everything else with it. Running apps must be deleted on the Apps page first.
 
 ### Limits and security
 

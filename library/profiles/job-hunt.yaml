@@ -1,0 +1,18 @@
+id: job_hunt
+label: Job hunting
+kind: interest
+order: 47
+blurb: New openings and application follow-ups.
+prompts:
+  - "Improve my CV for this job description"
+  - "Prepare me for an interview for this role"
+routines:
+  - id: job-openings
+    name: New job openings
+    days: [MO, TH]
+    time: "09:00"
+    only_if_new: true
+    prompt: >
+      Search for job openings posted in the last few days that match the role, level and
+      location I'm looking for (from what you know about me). Up to eight, each with company,
+      title, location and link.

@@ -43,7 +43,8 @@ MAX_FILES = 40
 # Shelves of the library, in the order the Skills page and prompts list them. A skill names
 # its shelf in frontmatter (metadata: category: research); anything else goes under "other".
 CATEGORIES = (
-    "documents", "research", "writing", "data", "productivity", "agents", "engineering", "other",
+    "documents", "research", "writing", "data", "productivity", "work", "life", "agents",
+    "engineering", "other",
 )  # fmt: skip
 TEXT_SUFFIXES = {
     ".md", ".txt", ".py", ".sh", ".json", ".yaml", ".yml", ".csv", ".html", ".css", ".js",

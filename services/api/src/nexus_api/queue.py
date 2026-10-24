@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from arq import ArqRedis
@@ -18,6 +19,8 @@ class JobQueue(Protocol):
     async def enqueue_review(self, review_id: uuid.UUID) -> None: ...
     async def enqueue_proposal_pr(self, proposal_id: uuid.UUID) -> None: ...
     async def enqueue_recall_check(self, eval_id: uuid.UUID) -> None: ...
+    async def enqueue_routine(self, routine_id: uuid.UUID, scheduled_for: datetime) -> None: ...
+    async def enqueue_feedback_notice(self, feedback_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -76,3 +79,16 @@ class ArqJobQueue:
     async def enqueue_recall_check(self, eval_id: uuid.UUID) -> None:
         """A recall check the owner started on the Admin page."""
         await self.enqueue_job("recall_check", str(eval_id), _job_id=f"recall:{eval_id}")
+
+    async def enqueue_routine(self, routine_id: uuid.UUID, scheduled_for: datetime) -> None:
+        """Run a routine now ("Run now" on the Routines page)."""
+        when = scheduled_for.isoformat()
+        await self.enqueue_job(
+            "run_routine", str(routine_id), when, _job_id=f"routine:{routine_id}:{when}"
+        )
+
+    async def enqueue_feedback_notice(self, feedback_id: uuid.UUID) -> None:
+        """Email the owners about feedback someone sent from the app."""
+        await self.enqueue_job(
+            "notify_feedback", str(feedback_id), _job_id=f"feedback:{feedback_id}"
+        )

@@ -21,7 +21,7 @@ from nexus_common.models import AgentSystem, SystemLifetime, SystemStatus, User
 from nexus_common.skills import role_names, usable_skills
 from nexus_common.spec import AgentSystemSpec, check_spec
 from nexus_common.toolinfo import TOOLS
-from nexus_orchestrator.llm import parse_json
+from nexus_orchestrator.llm import parse_json, private
 from nexus_orchestrator.systems.prompts import DESIGN, design_request
 
 log = logging.getLogger(__name__)
@@ -151,6 +151,7 @@ async def design(
             "generation_name": "nexus.design_system",
             "session_id": str(chat_id) if chat_id else None,
             "trace_user_id": str(user.id),
+            **private(settings, user),
             "tags": ["nexus", "design", settings.env],
         },
     ).bind(response_format={"type": "json_object"})

@@ -10,6 +10,8 @@ a change that adds a doc, a service or a major module adds a line here too.
 | [docs/containers.md](containers.md) | Every container in compose.yaml and what it does |
 | [docs/app-urls.md](app-urls.md) | How built apps get their `<app>.servhub.cc` address and who can open them |
 | [docs/github-app.md](github-app.md) | Setting up the GitHub App that dev teams and the self-review push with |
+| [docs/setup-for-friends.md](setup-for-friends.md) | Owner checklist for inviting friends: deploy, Google Cloud branding, push keys, WhatsApp, SMTP, invites, changing the terms |
+| [docs/plans/ready-for-friends.md](plans/ready-for-friends.md) | Plan for opening Nexus to friends (onboarding, profile packs, routines, privacy), with what is built and what is left |
 | [docs/proposals/](proposals/) | Specs of approved self-review proposals, one per pull request |
 | [library/README.md](../library/README.md) | The shared skills and instruction layers |
 | [.env.example](../.env.example) | Start-up settings; runtime settings can live in Admin › Configuration instead |
@@ -24,4 +26,6 @@ a change that adds a doc, a service or a major module adds a line here too.
 | Shared models and settings | `packages/common/src/nexus_common` (`models.py`, `settings.py`, `config.py`, `spec.py`) |
 | Sandbox, workbench, deployer, doc-worker | `services/<name>` |
 | Skills and instructions | `library/core`, `library/instructions` |
+| Onboarding and profile packs | `services/api/src/nexus_api/onboarding.py`, `library/profiles`, `nexus_common/profiles.py` |
+| Routines | `nexus_common/routines.py`, `services/orchestrator/src/nexus_orchestrator/routines.py` |
 | Infrastructure | `compose.yaml`, `infra/`, `scripts/` |

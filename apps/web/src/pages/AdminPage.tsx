@@ -9,6 +9,7 @@ import {
   Cpu,
   ExternalLink,
   Gauge,
+  MessageSquareHeart,
   RefreshCw,
   ScrollText,
   SlidersHorizontal,
@@ -25,6 +26,7 @@ import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/form
 import type { AuditEntry, Backup, LoggedError, Monitoring, MonitorRow, OpsStatus, Usage, User } from "../lib/types";
 import { APP_NAME } from "../lib/assistant";
 import { ConfigPanel } from "./AdminConfig";
+import { FeedbackPanel } from "./AdminFeedback";
 import { AlertsPanel } from "./AdminAlerts";
 import { ImprovementsPanel } from "./AdminImprovements";
 import { ModelsPanel } from "./AdminModels";
@@ -37,6 +39,7 @@ type Tab =
   | "models"
   | "usage"
   | "improvements"
+  | "feedback"
   | "recall"
   | "monitoring"
   | "audit"
@@ -70,6 +73,7 @@ const GROUPS: { title: string; tabs: TabInfo[] }[] = [
         icon: Sparkles,
         hint: "Changes the assistant proposes, for you to approve",
       },
+      { key: "feedback", label: "Feedback", icon: MessageSquareHeart, hint: "What people sent you from the app" },
       { key: "recall", label: "Recall", icon: Target, hint: "How well memory finds the right thing" },
     ],
   },
@@ -189,6 +193,7 @@ export function AdminPage() {
             {tab === "improvements" && (
               <ImprovementsPanel onError={setError} onOpen={(t) => go(t as Tab)} onChange={refreshBadges} />
             )}
+            {tab === "feedback" && <FeedbackPanel onError={setError} />}
             {tab === "recall" && <RecallPanel onError={setError} onOpenConfig={() => go("config")} />}
             {tab === "monitoring" && <MonitoringPanel onError={setError} onOpenAlerts={() => go("alerts")} />}
             {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}

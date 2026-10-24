@@ -1,0 +1,31 @@
+# Offered to everyone. Field reference: library/README.md, "Profile packs".
+id: essentials
+label: Everyday
+kind: base
+order: 1
+blurb: A morning brief and a look back at your week.
+prompts:
+  - "What can you do for me?"
+  - "Help me plan my week"
+routines:
+  - id: morning-brief
+    name: Morning brief
+    days: daily
+    time: day_start
+    needs: [calendar, gmail, tasks]
+    default_on: true
+    prompt: >
+      Give me my morning brief for today. List today's calendar events with times, unread
+      emails from the last day that look important or need a reply (sender and one line each,
+      skip newsletters and notifications), and tasks due today or overdue. End with the one
+      thing I should do first. Keep it short and skimmable. Skip any part you have no access
+      to without apologising.
+  - id: weekly-review
+    name: Friday look back
+    days: [FR]
+    time: "17:00"
+    needs: [calendar, tasks]
+    prompt: >
+      Look back at my week: the meetings and events I had, tasks I finished and the ones still
+      open. Then look at next week's calendar and tell me what to prepare for, and anything
+      that clashes or looks overbooked. Five to ten bullet points.

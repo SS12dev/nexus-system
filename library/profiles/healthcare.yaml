@@ -1,0 +1,24 @@
+id: healthcare
+label: Healthcare
+kind: role
+order: 16
+blurb: Guideline and journal updates, shift planning.
+memories:
+  - {kind: fact, content: "Works in healthcare."}
+  - {kind: instruction, content: "For clinical topics, cite guidelines and journals and never give a diagnosis or treatment decision; present evidence for a professional to judge."}
+prompts:
+  - "Summarise the latest guideline on this condition with sources"
+  - "Explain this study's results in plain words"
+  - "Write a patient-friendly explanation of this procedure"
+  - "Plan my week around my shifts"
+routines:
+  - id: journal-watch
+    name: Journal and guideline watch
+    days: [SA]
+    time: "10:00"
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Search for new guidelines, major studies and safety notices from the last week in my
+      clinical area (from what you know about me). For each, one line on what changed and a
+      link to the source. Evidence only, no clinical advice.

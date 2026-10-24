@@ -1,0 +1,23 @@
+id: finance
+label: Finance / legal / consulting
+kind: role
+order: 18
+blurb: Market or regulation news and meeting prep.
+memories:
+  - {kind: fact, content: "Works in finance, law or consulting."}
+prompts:
+  - "Summarise this report in five bullet points"
+  - "Compare these options in a table with pros and cons"
+  - "Draft a client email explaining this change"
+  - "What changed in this regulation recently?"
+routines:
+  - id: sector-news
+    name: Sector and regulation news
+    days: weekdays
+    time: day_start
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Find news from the last day about the markets, sectors or regulations I follow (from what
+      you know about me). Five items at most, one line each with a link. Information only, no
+      investment or legal advice.

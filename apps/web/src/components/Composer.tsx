@@ -95,6 +95,7 @@ export function Composer({
       onDrop={onDrop}
     >
       <div
+        data-tour="composer"
         className={`mx-auto max-w-3xl rounded-2xl border bg-panel px-3 py-2 ${
           dragging ? "border-sky-400" : "border-edge"
         }`}

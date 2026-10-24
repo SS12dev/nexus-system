@@ -1,0 +1,17 @@
+id: news
+label: News on my topics
+kind: interest
+order: 45
+blurb: A digest of the topics you follow.
+prompts:
+  - "What's new this week on the topics I follow?"
+routines:
+  - id: news-digest
+    name: News digest
+    days: daily
+    time: day_start+15
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Find the most important news from the last day on the topics I follow (from what you
+      know about me). Five items at most, one line each with a link and why it matters.

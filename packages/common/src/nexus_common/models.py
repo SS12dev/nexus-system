@@ -25,7 +25,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Width of every embedding column. It matches bge-m3, the default local embedder; another model
@@ -35,6 +35,9 @@ EMBEDDING_DIM = 1024
 # What a user's assistant is called until they pick a name of their own.
 DEFAULT_ASSISTANT_NAME = "Jarvis"
 ASSISTANT_NAME_MAX = 24
+# The version of the Terms of Service and Privacy Policy (apps/web/public/terms.html and
+# privacy.html, which show the same date). Changing it asks everyone but owners to agree again.
+TERMS_VERSION = "2026-10-24"
 
 
 def utcnow() -> datetime:
@@ -200,6 +203,20 @@ class User(Base):
     invited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # IANA time zone ("Asia/Kolkata"), from the browser at onboarding; routines run on it.
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    # Set when the person finishes (or skips) the setup interview after first sign-in.
+    onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Their setup answers: roles, interests, day_start, work_days, style, packs.
+    # JSONB, not JSON: queries that de-duplicate users need a column type with equality.
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'"))
+    # WhatsApp number in E.164 ("+919812345678"), for routine notices they opted into.
+    phone: Mapped[str | None] = mapped_column(String(20))
+    # May the self-review count the anonymous topics of their requests? (improve.py)
+    share_usage: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # The Terms of Service and Privacy Policy version they agreed to (TERMS_VERSION), and when.
+    terms_version: Mapped[str | None] = mapped_column(String(20))
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     roles: Mapped[list["Role"]] = relationship(secondary="user_roles", lazy="selectin")
 
@@ -1303,3 +1320,116 @@ class Proposal(Base):
         Index("ix_improvement_proposals_status_created", "status", "created_at"),
         Index("ix_improvement_proposals_fingerprint", "fingerprint"),
     )
+
+
+class RoutineRunStatus(enum.StrEnum):
+    running = "running"
+    ok = "ok"
+    # Ran, found nothing new, and told nobody (routine.only_if_new).
+    quiet = "quiet"
+    failed = "failed"
+    # Not run: the person's budget couldn't cover it.
+    skipped = "skipped"
+
+
+class Routine(Base):
+    """A saved prompt that runs on a schedule as its owner, posting into a chat of its own
+    (nexus_common/routines.py has the schedule rules, the orchestrator's routines.py runs them)."""
+
+    __tablename__ = "routines"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(80))
+    prompt: Mapped[str] = mapped_column(Text)
+    # An RFC 5545 RRULE without DTSTART, e.g. "FREQ=WEEKLY;BYDAY=SU;BYHOUR=18;BYMINUTE=0".
+    schedule: Mapped[str] = mapped_column(String(300))
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    # Where a finished run is announced besides its chat: any of "email", "whatsapp".
+    delivery: Mapped[list] = mapped_column(JSON, default=list)
+    # When true, a run with nothing new to say is stored as quiet and announced nowhere.
+    only_if_new: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # onboarding, pack:<id>, chat or user.
+    source: Mapped[str] = mapped_column(String(40), default="user")
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Failed runs in a row; at ROUTINE_MAX_FAILURES the routine pauses itself.
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_routines_due", "enabled", "next_run_at"),
+        Index("ix_routines_user", "user_id"),
+    )
+
+
+class RoutineRun(Base):
+    __tablename__ = "routine_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    routine_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("routines.id", ondelete="CASCADE"))
+    # The time it was due, which with the routine id makes each run unique.
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[RoutineRunStatus] = mapped_column(_enum(RoutineRunStatus, "routine_run_status"))
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL")
+    )
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    # Channels it was announced on, e.g. ["email"].
+    delivered: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("routine_id", "scheduled_for", name="uq_routine_runs_slot"),
+        Index("ix_routine_runs_routine_started", "routine_id", "started_at"),
+    )
+
+
+class PushSubscription(Base):
+    """One browser or phone that allowed notifications (nexus_common/push.py)."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(100))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_push_subscriptions_user", "user_id"),)
+
+
+class FeedbackKind(enum.StrEnum):
+    problem = "problem"
+    idea = "idea"
+    praise = "praise"
+
+
+class Feedback(Base):
+    """What someone told the owner from the app's Send feedback form. Listed on the Admin page,
+    emailed to owners, and read by the self-review (without the sender) as evidence."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    kind: Mapped[FeedbackKind] = mapped_column(_enum(FeedbackKind, "feedback_kind"))
+    message: Mapped[str] = mapped_column(Text)
+    # The page they were on, e.g. /routines.
+    page: Mapped[str | None] = mapped_column(String(300))
+    # Set when the owner marks it handled.
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_feedback_created", "created_at"),)

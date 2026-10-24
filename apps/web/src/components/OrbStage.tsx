@@ -176,7 +176,11 @@ export function OrbStage({
   }
 
   return (
-    <div className={`relative flex min-h-0 flex-col overflow-hidden ${className}`}>
+    <div
+      // The 3D scene is a night sky in both themes, so what floats over it stays dark.
+      data-theme={showOrb ? "dark" : undefined}
+      className={`relative flex min-h-0 flex-col overflow-hidden ${className}`}
+    >
       {showOrb && (
         <div className="absolute inset-0">
           <SceneBoundary onError={() => setWebglFailed(true)}>

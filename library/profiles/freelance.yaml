@@ -1,0 +1,23 @@
+id: freelance
+label: Freelance
+kind: role
+order: 19
+blurb: Proposals, invoices and your pipeline.
+memories:
+  - {kind: fact, content: "Works freelance."}
+prompts:
+  - "Write a proposal for this project"
+  - "Draft a polite reminder for an unpaid invoice"
+  - "Help me price this job"
+  - "Make a simple invoice template"
+routines:
+  - id: pipeline
+    name: Weekly pipeline check
+    days: [MO]
+    time: day_start+60
+    needs: [gmail, calendar]
+    default_on: true
+    prompt: >
+      From my email and calendar of the last two weeks, list my open client conversations,
+      proposals waiting for an answer, invoices that may be unpaid and deadlines this week.
+      Suggest the three most important follow-ups.

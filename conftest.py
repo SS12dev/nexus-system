@@ -28,6 +28,7 @@ TEST_DATABASE_URL = os.environ.get(
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 DEV_TOKEN = "test-dev-token"
 TABLES = (
+    "feedback, push_subscriptions, routine_runs, routines, "
     "improvement_proposals, improvement_reviews, "
     "message_links, links, projects, approvals, run_events, agent_runs, agent_systems, "
     "skill_usages, skill_versions, "

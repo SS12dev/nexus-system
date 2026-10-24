@@ -46,6 +46,7 @@ from nexus_orchestrator.context import recall
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.google_tools import build_google_tools
 from nexus_orchestrator.links import keep_link
+from nexus_orchestrator.routine_tools import build_routine_tools
 from nexus_orchestrator.sandbox import SandboxError
 from nexus_orchestrator.web import WebError
 from nexus_orchestrator.workbench import WorkbenchError
@@ -806,6 +807,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "github_transfer": github_transfer,
         "app_visibility": app_visibility,
         **build_google_tools(ctx, note),
+        **build_routine_tools(ctx, note),
     }
     chosen = [impls[n] for n in impls if n in set(names)]
     chosen += [skills_load, skills_read_file, skills_search]

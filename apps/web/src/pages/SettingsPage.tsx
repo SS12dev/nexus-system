@@ -1,12 +1,17 @@
 import { CalendarDays, CheckSquare, HardDrive, Mail, Monitor, Users } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { AssistantNameForm } from "../components/AssistantNameForm";
+import { PushSettings } from "../components/PushSettings";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDate } from "../lib/format";
+import { browserTimezone, timezones } from "../lib/schedule";
+import { useTheme, type ThemeChoice } from "../lib/theme";
 import type { GoogleAccess, SessionInfo } from "../lib/types";
-import { confirmAction } from "../components/Feedback";
+import { confirmAction, toast } from "../components/Feedback";
+import { useStore } from "../store/chat";
 
 const SERVICES: Record<string, { label: string; what: string; icon: ReactNode }> = {
   gmail: { label: "Gmail", what: "Read, label, draft and send mail", icon: <Mail size={16} /> },
@@ -57,8 +62,9 @@ export function SettingsPage() {
       <div className="mx-auto max-w-2xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Settings</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Your assistant's name, the Google services you let {assistant} and its agents use, and
-          the devices you're signed in on. Only you can see this.
+          Your assistant's name, your time zone and setup, the Google services you let{" "}
+          {assistant} and its agents use, the devices you're signed in on, and your data. Only you can see
+          this.
         </p>
         <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
           <h2 className="mb-1 font-medium">Your assistant</h2>
@@ -67,6 +73,9 @@ export function SettingsPage() {
           </p>
           <AssistantNameForm />
         </section>
+        <AboutYou onError={setError} />
+        <PushSettings onError={setError} />
+        <Appearance />
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {access && !access.available && (
           <p className="text-sm text-slate-400">
@@ -121,6 +130,7 @@ export function SettingsPage() {
           </section>
         )}
         <Devices onError={setError} />
+        <Privacy onError={setError} />
       </div>
     </div>
   );
@@ -179,6 +189,228 @@ function Devices({ onError }: { onError: (msg: string) => void }) {
           Sign out all other devices
         </button>
       )}
+    </section>
+  );
+}
+
+/** Time zone (routines run on it), the WhatsApp number for routine notices, and the setup
+ * interview again. */
+function AboutYou({ onError }: { onError: (msg: string) => void }) {
+  const user = useStore((s) => s.user)!;
+  const setUser = useStore((s) => s.setUser);
+  const [phone, setPhone] = useState(user.phone ?? "");
+  const whatsapp = (user.channels ?? []).includes("whatsapp");
+  const zone = user.timezone || browserTimezone();
+
+  const save = async (changes: { timezone?: string; phone?: string }, done: string) => {
+    try {
+      setUser(await api.updateMe(changes));
+      toast(done);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
+      <h2 className="mb-1 font-medium">About you</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        New routines run in your time zone. Your setup answers shape what's suggested to you.
+      </p>
+      <div className="space-y-3 text-sm">
+        <label className="flex flex-wrap items-center gap-3">
+          <span className="w-28 text-slate-400">Time zone</span>
+          <Select
+            className="min-w-0 flex-1"
+            value={zone}
+            onChange={(e) => save({ timezone: e.target.value }, "Time zone saved")}
+          >
+            {timezones(zone).map((z) => (
+              <option key={z} value={z}>
+                {z.replace(/_/g, " ")}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {whatsapp && (
+          <form
+            className="flex flex-wrap items-center gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              save({ phone: phone.trim() }, phone.trim() ? "Number saved" : "Number removed");
+            }}
+          >
+            <span className="w-28 text-slate-400">WhatsApp</span>
+            <input
+              aria-label="WhatsApp number"
+              placeholder="+919812345678"
+              inputMode="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-3 py-1.5"
+            />
+            <button
+              disabled={phone.trim() === (user.phone ?? "")}
+              className="rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60 disabled:opacity-50"
+            >
+              Save
+            </button>
+          </form>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="w-28 text-slate-400">Setup</span>
+          <Link
+            to="/setup"
+            className="rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60"
+          >
+            Run setup again
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Usage sharing for the self-review, a copy of everything, and leaving. */
+function Privacy({ onError }: { onError: (msg: string) => void }) {
+  const user = useStore((s) => s.user)!;
+  const setUser = useStore((s) => s.setUser);
+  const assistant = useAssistantName();
+
+  const toggleShare = async () => {
+    try {
+      setUser(await api.updateMe({ share_usage: !user.share_usage }));
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const remove = async () => {
+    const ok = await confirmAction({
+      title: "Delete your account?",
+      body: "Your chats, files, memories and routines go for good. There's no undo.",
+      confirmLabel: "Delete everything",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.deleteAccount(typed);
+      window.location.href = "/login";
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mt-6 rounded-lg border border-edge bg-panel p-4">
+      <h2 className="mb-1 font-medium">Privacy and your data</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        What's kept and who can see it is in the{" "}
+        <a href="/privacy" target="_blank" rel="noopener" className="text-sky-300 hover:underline">
+          Privacy Policy
+        </a>
+        ; the rules are in the{" "}
+        <a href="/terms" target="_blank" rel="noopener" className="text-sky-300 hover:underline">
+          Terms of Service
+        </a>
+        .
+      </p>
+      <label className="mb-4 flex cursor-pointer items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={user.share_usage ?? true}
+          onChange={toggleShare}
+          className="mt-1"
+        />
+        <span>
+          Help improve Nexus
+          <span className="block text-xs text-slate-500">
+            Count the anonymous topics of your requests (like "trip planning") in the weekly
+            self-review. Never your words, your name or your chats.
+          </span>
+        </span>
+      </label>
+      <div className="flex flex-wrap gap-2 border-t border-edge pt-3 text-sm">
+        <a
+          href="/api/me/export"
+          download
+          className="rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60"
+        >
+          Download my data
+        </a>
+        {user.role !== "owner" && !confirming && (
+          <button
+            onClick={() => setConfirming(true)}
+            className="rounded-md border border-rose-500/40 px-3 py-1.5 text-rose-300 hover:bg-rose-500/10"
+          >
+            Delete my account
+          </button>
+        )}
+      </div>
+      {confirming && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <input
+            aria-label="Type your email to confirm"
+            placeholder={`Type ${user.email} to confirm`}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-rose-500/40 bg-ink px-3 py-1.5"
+          />
+          <button
+            onClick={remove}
+            disabled={typed.trim().toLowerCase() !== user.email.toLowerCase()}
+            className="rounded-md bg-rose-500 px-3 py-1.5 font-medium text-ink hover:bg-rose-400 disabled:opacity-50"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => {
+              setConfirming(false);
+              setTyped("");
+            }}
+            className="rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-slate-500">
+        Deleting removes everything {assistant} keeps for you. Delete any running apps on the Apps
+        page first.
+      </p>
+    </section>
+  );
+}
+
+/** Light or dark, on this device. */
+function Appearance() {
+  const [theme, setTheme] = useTheme();
+  const options: { id: ThemeChoice; label: string }[] = [
+    { id: "system", label: "Match my device" },
+    { id: "dark", label: "Dark" },
+    { id: "light", label: "Light" },
+  ];
+  return (
+    <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
+      <h2 className="mb-1 font-medium">Appearance</h2>
+      <p className="mb-3 text-xs text-slate-500">Saved on this device only.</p>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Theme">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            role="radio"
+            aria-checked={theme === o.id}
+            onClick={() => setTheme(o.id)}
+            className={`rounded-full border px-3 py-1 text-sm ${
+              theme === o.id ? "border-sky-400 bg-sky-500/15 text-sky-200" : "border-edge hover:bg-edge/60"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

@@ -50,7 +50,17 @@ class LiteLLMEmbedder:
         try:
             resp = await self._client.post(
                 "/v1/embeddings",
-                json={"model": self.settings.embedding_model, "input": texts},
+                # Embedded text is everyone's memories and documents, under the master key
+                # rather than theirs, so it never goes to Langfuse while TRACE_MASKING is on.
+                json={
+                    "model": self.settings.embedding_model,
+                    "input": texts,
+                    "metadata": (
+                        {"mask_input": True, "mask_output": True}
+                        if self.settings.trace_masking
+                        else {}
+                    ),
+                },
             )
         except httpx.HTTPError as exc:
             raise EmbeddingError(f"Embedding gateway unreachable: {exc}") from exc

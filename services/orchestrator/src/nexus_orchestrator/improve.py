@@ -8,10 +8,12 @@ What it looks at, for the time since the last review:
   weren't; model calls and cost by purpose (from LiteLLM's spend logs);
 - failure messages, with anything that looks like data (numbers, ids, quoted text, addresses)
   taken out, grouped and counted;
+- what people wrote in the app's Send feedback form (kind, page and text, never who);
 - with IMPROVE_READ_REQUESTS on, request topics: the topic model reads each request once (and
   the start of its reply) and names its topic in a few generic words, plus what the assistant
   lacked when it couldn't help. Only the counts of topics are kept, and only topics asked at
-  least IMPROVE_MIN_COUNT times. People who turned memory off in Settings are left out.
+  least IMPROVE_MIN_COUNT times. People who turned memory off, or "Help improve Nexus" off, in
+  Settings are left out, and so are routine runs (the same prompt every time).
 
 None of it carries a name, an email, a user id or chat text: `findings` is shown to the owner
 as is. The proposal model gets the findings, what Nexus can already do (tools, shared skills,
@@ -44,6 +46,7 @@ from nexus_common.models import (
     AgentRun,
     AgentSystem,
     Chat,
+    Feedback,
     ImprovementReview,
     Message,
     MessageRole,
@@ -69,6 +72,7 @@ from nexus_common.skills import role_names
 from nexus_common.toolinfo import TOOLS
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.llm import parse_json
+from nexus_orchestrator.turn import ROUTINE_PREFIX
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +81,8 @@ TOPIC_BATCH = 25
 REQUEST_CHARS = 400
 REPLY_CHARS = 200
 MIN_REQUEST_CHARS = 15
+FEEDBACK_MAX = 40
+FEEDBACK_CHARS = 500
 # Earlier proposals the reviewer sees, so it doesn't suggest them again.
 HISTORY = timedelta(days=180)
 
@@ -95,8 +101,9 @@ used. Nexus is a supervisor assistant that answers simple requests itself and bu
 sub-agents with tools, shared skills (SKILL.md playbooks), standing instructions per role, and \
 model tiers (nexus-nano < mini < pro < max) behind LiteLLM.
 
-Propose the few changes that would help most, based only on evidence in the report: frequent \
-topics with no fitting skill, capability gaps, tools that fail or are slow, teams that keep \
+Propose the few changes that would help most, based only on evidence in the report: \
+feedback people sent (problems first), frequent topics with no fitting skill, capability \
+gaps, tools that fail or are slow, teams that keep \
 being built the same way, failures that recur, spend that a cheaper tier could cut. Skip \
 anything the report doesn't support, anything Nexus already has, and anything proposed before \
 (see EARLIER; respect the owner's reasons for denials). Fewer, better proposals beat many.
@@ -331,6 +338,18 @@ async def gather(db, deps, start, end) -> dict:
         },
     }
     findings["models"] = await _model_costs(deps, start, end)
+    # What people wrote in Send feedback, addressed to the owner anyway; never who wrote it.
+    notes = (
+        await db.scalars(
+            select(Feedback)
+            .where(Feedback.created_at >= start, Feedback.created_at < end)
+            .order_by(Feedback.created_at.desc())
+            .limit(FEEDBACK_MAX)
+        )
+    ).all()
+    findings["feedback"] = [
+        {"kind": f.kind, "page": f.page, "message": f.message[:FEEDBACK_CHARS]} for f in notes
+    ]
     return findings
 
 
@@ -382,6 +401,7 @@ async def topics(db, deps, model, start, end) -> tuple[list[dict], list[dict], i
         await db.execute(
             select(func.left(Message.content, REQUEST_CHARS), next_reply)
             .join(Chat, Chat.id == Message.chat_id)
+            .join(User, User.id == Chat.user_id)
             .outerjoin(Profile, Profile.user_id == Chat.user_id)
             .where(
                 Message.role == MessageRole.user,
@@ -389,6 +409,9 @@ async def topics(db, deps, model, start, end) -> tuple[list[dict], list[dict], i
                 Message.created_at < end,
                 func.length(Message.content) >= MIN_REQUEST_CHARS,
                 or_(Profile.user_id.is_(None), Profile.memory_enabled.is_(True)),
+                User.share_usage.is_(True),
+                # A routine sends the same prompt every run; counting each would drown the rest.
+                ~Message.content.startswith(ROUTINE_PREFIX),
             )
             .order_by(Message.created_at.desc())
             .limit(deps.settings.improve_max_requests)

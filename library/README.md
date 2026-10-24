@@ -27,6 +27,8 @@ library/
 | writing | `report-writing`, `summarize`, `email-writing`, `meeting-notes` |
 | data | `data-analysis`, `statistics`, `ml-experiments`, `llm-evaluation` |
 | productivity | `inbox-triage`, `scheduling`, `compare-options` |
+| work | `lesson-planning`, `study-plan`, `meeting-prep`, `proposal-writing`, `creative-brief`, `clinical-evidence`, `job-application`, `sales-outreach` |
+| life | `meal-planning`, `trip-planning`, `training-plan`, `budgeting` |
 | agents | `prompt-writing` |
 | engineering | `code-review` |
 
@@ -81,3 +83,37 @@ scikit-learn, matplotlib, pillow and the document libraries), and add a test in
 `services/sandbox/tests/test_skills.py` or `test_library.py` for every script.
 `test_library.py` also checks that every skill parses, has a shelf, and only points at
 scripts and references that exist.
+
+## Profile packs
+
+`profiles/<id>.yaml` holds what the setup interview sets up for one profession (`kind: role`),
+one interest (`kind: interest`) or everyone (`kind: base`): starter memories, prompts shown on
+the home screen and in the welcome chat, and routines it offers. The API and orchestrator read
+them from disk (`nexus_common/profiles.py`); a file that doesn't parse is logged and skipped.
+
+```yaml
+id: teaching              # also the role or interest id the interview sends
+label: Teaching
+kind: role                # role | interest | base
+order: 17                 # where it sits in the interview's lists
+blurb: Lesson plans, quizzes and the week ahead.
+match: [tutoring]         # other role or interest ids that pick this pack (optional)
+memories:                 # role packs only; added, pinned, for people who pick it
+  - {kind: fact, content: "Works as a teacher."}
+prompts:
+  - "Plan a 45-minute lesson on this topic"
+routines:
+  - id: week-ahead
+    name: Sunday week ahead
+    days: [SU]            # daily | weekdays | [MO, TH] | "monthly:1"
+    time: "18:00"         # "HH:MM", day_start, or day_start+30 (minutes after the day starts)
+    needs: [calendar, tasks]   # Google services it reads; shown to the person
+    only_if_new: false    # stay silent when there's nothing new (answer NOTHING_NEW)
+    default_on: true      # ticked in the interview
+    prompt: >
+      Look at my calendar and tasks for the coming week...
+```
+
+Write routine prompts as the person would ask, self-contained (they run with no chat around
+them), and lean on "from what you know about me" for topics rather than naming any.
+`services/api/tests/test_onboarding.py` loads the shipped packs.

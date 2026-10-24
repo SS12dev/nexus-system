@@ -11,7 +11,7 @@ from arq import Retry
 
 from nexus_common import mail
 from nexus_common.access import deciders
-from nexus_common.models import AccessRequest, AccessRequestStatus
+from nexus_common.models import AccessRequest, AccessRequestStatus, Feedback, RoleName, User
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,10 @@ def approved_email(settings: Settings, req: AccessRequest) -> EmailMessage:
         f"Hi{' ' + req.name.split()[0] if req.name else ''},\n\n"
         f"Your request to join {APP} was approved. Sign in with Google as {req.email}:\n"
         f"{settings.nexus_url.rstrip('/')}/login\n\n"
-        f"The first time you sign in you'll name your assistant, and you're ready to go."
+        f"The first time you sign in you'll name your assistant and answer a few quick "
+        f"questions (two minutes, all skippable) so it can set itself up for you.\n\n"
+        f"Google will say the app isn't verified, because it's a private app: choose "
+        f"Advanced, then Go to {APP}."
     )
     return mail.message(settings, [req.email], f"You're in: your {APP} access was approved", body)
 
@@ -78,3 +81,43 @@ async def access(deps, kind: str, request_id: uuid.UUID, *, attempt: int = 1) ->
         log.error("access.notify_failed: %s", exc, extra=fields)
         return
     log.info("access.notified", extra={**fields, "recipients": len(msg["To"].split(","))})
+
+
+FEEDBACK_KIND = {"problem": "a problem", "idea": "an idea", "praise": "some praise"}
+
+
+async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
+    """Email active owners about feedback someone sent from the app."""
+    settings: Settings = deps.settings
+    fields = {"feedback_id": str(feedback_id), "attempt": attempt}
+    if not settings.smtp_enabled:
+        log.info("feedback.notify_skipped: SMTP is not configured", extra=fields)
+        return
+    async with deps.sessionmaker() as db:
+        f = await db.get(Feedback, feedback_id)
+        if f is None:
+            return
+        sender = await db.get(User, f.user_id) if f.user_id else None
+        to = sorted(u.email for u in await deciders(db) if u.role == RoleName.owner)
+    if not to:
+        return
+    who = (
+        f"{sender.name} <{sender.email}>"
+        if sender and sender.name
+        else (sender.email if sender else "Someone")
+    )
+    body = (
+        f"{who} sent {FEEDBACK_KIND.get(f.kind, 'feedback')}"
+        f"{f' from {f.page}' if f.page else ''}:\n\n{f.message}\n\n"
+        f"All feedback: {settings.nexus_url.rstrip('/')}/admin?tab=feedback"
+    )
+    first = (f.message.splitlines() or [""])[0][:60]
+    msg = mail.message(settings, to, f"Nexus feedback: {first}", body)
+    try:
+        await mail.send(settings, msg)
+    except mail.MailError as exc:
+        if exc.transient and attempt < MAX_TRIES:
+            raise Retry(defer=30 * 2 ** (attempt - 1)) from exc
+        log.error("feedback.notify_failed: %s", exc, extra=fields)
+        return
+    log.info("feedback.notified", extra=fields)

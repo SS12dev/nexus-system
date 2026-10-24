@@ -1,0 +1,19 @@
+id: travel
+label: Travel
+kind: interest
+order: 43
+blurb: Trip countdowns and packing lists.
+prompts:
+  - "Plan a 5-day trip itinerary for me"
+  - "Make a packing list for this trip"
+routines:
+  - id: trip-watch
+    name: Upcoming trips
+    days: [SA]
+    time: "10:00"
+    needs: [calendar, gmail]
+    only_if_new: true
+    prompt: >
+      Look for trips in the next three weeks in my calendar and booking emails (flights,
+      hotels, trains). For each, give dates, bookings found, and a short checklist (documents,
+      check-in, packing). If there are none, answer NOTHING_NEW.

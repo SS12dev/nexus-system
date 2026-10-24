@@ -1,0 +1,25 @@
+id: software
+label: Software / IT
+kind: role
+order: 11
+blurb: Release news for your stack, code help and builds.
+match: [coding]
+memories:
+  - {kind: fact, content: "Works in software or IT."}
+prompts:
+  - "Review this code and suggest improvements"
+  - "Build me a small web app that tracks my habits"
+  - "Explain the trade-offs between these two libraries"
+  - "Write a design doc outline for this feature"
+routines:
+  - id: stack-news
+    name: Stack release digest
+    days: [MO]
+    time: "09:00"
+    only_if_new: true
+    default_on: true
+    prompt: >
+      Check for notable releases, security advisories and breaking changes from the last week
+      in the languages, frameworks and tools I use (from what you know about me; if you don't
+      know my stack, cover Python, TypeScript and their main frameworks). Give a short list
+      with links, most important first.

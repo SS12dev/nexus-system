@@ -23,7 +23,7 @@ from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
-from nexus_orchestrator import deploy, improve, links, memory, notify, recall_eval
+from nexus_orchestrator import deploy, improve, links, memory, notify, recall_eval, routines
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
 from nexus_orchestrator.retry import TRIES, retry_transient
@@ -161,6 +161,12 @@ async def notify_access(ctx: dict, kind: str, request_id: str) -> None:
 
 
 @traced_job
+async def notify_feedback(ctx: dict, feedback_id: str) -> None:
+    """Email the owners about feedback someone sent from the app."""
+    await notify.feedback(ctx["deps"], uuid.UUID(feedback_id), attempt=ctx.get("job_try", 1))
+
+
+@traced_job
 async def self_review(ctx: dict, review_id: str) -> None:
     """A self-review the owner asked for on the Admin page."""
     await improve.run_review(ctx["deps"], uuid.UUID(review_id))
@@ -176,6 +182,22 @@ async def proposal_pr(ctx: dict, proposal_id: str) -> None:
 async def recall_check(ctx: dict, eval_id: str) -> None:
     """A recall check the owner started on the Admin page."""
     await recall_eval.run_eval(ctx["deps"], uuid.UUID(eval_id))
+
+
+@traced_job
+async def run_routine(ctx: dict, routine_id: str, scheduled_for: str) -> None:
+    """One run of a routine, for the slot it was due (or "Run now")."""
+    await routines.run_routine(
+        ctx["deps"], uuid.UUID(routine_id), routines.parse_slot(scheduled_for)
+    )
+
+
+async def routines_due(ctx: dict) -> None:
+    """Every minute: queue the routines whose time has come."""
+    if not settings.routines_enabled:
+        return
+    if queued := await routines.due(ctx["deps"]):
+        log.info("Queued %d routines", queued)
 
 
 @traced_job
@@ -224,11 +246,15 @@ class WorkerSettings:
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
         # Emails are safe to retry: the job checks the request is still in the state it's about.
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
+        func(notify_feedback, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
         func(proposal_pr, timeout=120, keep_result=0),
         func(recall_check, timeout=900, keep_result=0),
+        # A routine's turn is a chat turn; a team it starts runs as its own job.
+        func(run_routine, timeout=600, keep_result=0),
     ]
     cron_jobs = [
+        cron(routines_due, second=5, unique=True, timeout=60),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
         cron(
             nightly,

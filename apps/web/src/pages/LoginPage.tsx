@@ -133,6 +133,19 @@ export function LoginPage() {
                   <div className="mt-6">
                     {!config && !error && <div className="h-10 animate-pulse rounded-full bg-edge/60" aria-label="Loading sign-in options" />}
                     {config?.oidc_enabled && <GoogleButton />}
+                    {config?.oidc_enabled && (
+                      <p className="mt-3 text-center text-xs leading-relaxed text-slate-500">
+                        By continuing you agree to the{" "}
+                        <a href="/terms" target="_blank" rel="noopener" className="text-slate-300 underline hover:text-white">
+                          Terms of Service
+                        </a>{" "}
+                        and{" "}
+                        <a href="/privacy" target="_blank" rel="noopener" className="text-slate-300 underline hover:text-white">
+                          Privacy Policy
+                        </a>
+                        .
+                      </p>
+                    )}
                     {config?.dev_login_enabled && (
                       <form onSubmit={devLogin} className={`space-y-2 ${config.oidc_enabled ? "mt-6 border-t border-edge pt-5" : ""}`}>
                         <p className="text-xs uppercase tracking-wide text-slate-500">Development sign-in</p>
@@ -178,7 +191,7 @@ export function LoginPage() {
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" aria-hidden />
                   <span>
                     Google will also ask whether your assistant may use Gmail, Calendar, Contacts and
-                    Tasks. Each is optional, and you can disconnect any of them later on the Connections page.
+                    Tasks. Each is optional, and you can disconnect any of them later in Settings.
                   </span>
                 </p>
               </div>
@@ -195,7 +208,10 @@ export function LoginPage() {
         <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-edge/60 py-5 text-xs text-slate-500">
           <span>ServHub {APP_NAME}, a private assistant for invited people</span>
           <a href="/privacy" className="hover:text-slate-300">
-            Privacy
+            Privacy Policy
+          </a>
+          <a href="/terms" className="hover:text-slate-300">
+            Terms of Service
           </a>
         </footer>
       </div>

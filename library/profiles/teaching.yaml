@@ -1,0 +1,23 @@
+id: teaching
+label: Teaching
+kind: role
+order: 17
+blurb: Lesson plans, quizzes and the week ahead.
+memories:
+  - {kind: fact, content: "Works as a teacher."}
+prompts:
+  - "Plan a 45-minute lesson on this topic"
+  - "Write a rubric for this assignment"
+  - "Turn this article into a 10-question quiz"
+  - "Draft a note to parents about the upcoming trip"
+routines:
+  - id: week-ahead
+    name: Sunday week ahead
+    days: [SU]
+    time: "18:00"
+    needs: [calendar, tasks]
+    default_on: true
+    prompt: >
+      Look at my calendar and tasks for the coming week. Give me a short plan: classes and
+      meetings by day, deadlines (reports, marking, events), and anything I should prepare
+      tonight.

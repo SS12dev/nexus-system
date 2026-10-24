@@ -24,6 +24,161 @@ export interface User {
   notice?: string | null;
   /** Owners and admins: access requests waiting for a decision (only on /api/me). */
   pending_access?: number | null;
+  /** Null until they finish or skip the setup interview (only on /api/me). */
+  onboarded_at?: string | null;
+  timezone?: string | null;
+  profile?: UserProfile;
+  /** WhatsApp number for routine notices, in +<country><number> form. */
+  phone?: string | null;
+  /** May the self-review count the anonymous topics of their requests? */
+  share_usage?: boolean;
+  /** Routine notice channels this Nexus can send on: "push", "email", "whatsapp". */
+  channels?: Channel[];
+  /** The Terms and Privacy Policy version they agreed to, the current one, and whether the app
+   * must ask (never for owners). */
+  terms_version?: string | null;
+  terms_current?: string;
+  terms_needed?: boolean;
+}
+
+export type Channel = "push" | "email" | "whatsapp";
+
+export type FeedbackKind = "problem" | "idea" | "praise";
+
+export interface FeedbackItem {
+  id: string;
+  kind: FeedbackKind;
+  message: string;
+  page: string | null;
+  done_at: string | null;
+  created_at: string;
+  email?: string | null;
+  name?: string | null;
+}
+
+export interface UserProfile {
+  roles?: string[];
+  role_note?: string;
+  interests?: string[];
+  day_start?: string | null;
+  style?: AnswerStyle | null;
+  packs?: string[];
+  /** The first-run tour was finished or skipped. */
+  tour_done?: boolean;
+}
+
+export interface AnswerStyle {
+  length: "short" | "balanced" | "detailed";
+  tone: "casual" | "professional";
+  language: string;
+}
+
+export interface Choice {
+  id: string;
+  label: string;
+  blurb?: string;
+}
+
+export interface PackRoutine {
+  /** "<pack id>/<routine id>" */
+  key: string;
+  name: string;
+  prompt: string;
+  /** The RRULE at the person's day start. */
+  schedule: string;
+  schedule_text: string;
+  /** "HH:MM", worked out from the person's day start. */
+  time: string;
+  /** As the pack wrote it: "HH:MM", "day_start" or "day_start+30". */
+  at: string;
+  needs: string[];
+  only_if_new: boolean;
+  default_on: boolean;
+}
+
+export interface Pack {
+  id: string;
+  label: string;
+  kind: "role" | "interest" | "base";
+  blurb: string;
+  /** Role or interest ids that select it besides its own id. */
+  match: string[];
+  prompts: string[];
+  routines: PackRoutine[];
+}
+
+export interface Profiles {
+  roles: Choice[];
+  interests: Choice[];
+  packs: Pack[];
+}
+
+export interface OnboardingAnswers {
+  assistant_name?: string;
+  /** The terms version agreed to on the first screen. */
+  accept_terms?: string;
+  roles: string[];
+  role_note: string;
+  interests: string[];
+  about: string;
+  timezone: string;
+  day_start: string;
+  style: AnswerStyle;
+  routines: { key: string; time?: string }[];
+  delivery: Channel[];
+  phone?: string;
+}
+
+export interface Routine {
+  id: string;
+  name: string;
+  prompt: string;
+  /** RFC 5545 RRULE without DTSTART. */
+  schedule: string;
+  schedule_text: string;
+  timezone: string;
+  delivery: Channel[];
+  only_if_new: boolean;
+  enabled: boolean;
+  source: string;
+  chat_id: string | null;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  failures: number;
+  created_at: string | null;
+  last_status: RoutineRunStatus | null;
+}
+
+export type RoutineRunStatus = "running" | "ok" | "quiet" | "failed" | "skipped";
+
+export interface RoutineRun {
+  id: string;
+  scheduled_for: string;
+  status: RoutineRunStatus;
+  message_id: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  delivered: Channel[];
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface RoutineInput {
+  name: string;
+  prompt: string;
+  schedule: string;
+  timezone?: string;
+  delivery: Channel[];
+  only_if_new: boolean;
+  enabled?: boolean;
+}
+
+export interface SchedulePreview {
+  ok: boolean;
+  text: string;
+  next: string[];
+  error: string | null;
 }
 
 export interface AuthConfig {
@@ -536,6 +691,7 @@ export type ServerEvent =
   | { type: "link.deleted"; chat_id?: null; data: { id: string } }
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
   | { type: "access.pending"; chat_id?: null; data: { count: number } }
+  | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };
