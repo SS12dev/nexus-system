@@ -2,6 +2,7 @@ import type { Message } from "../lib/types";
 import { FileChip } from "./FileChip";
 import { LinkChip } from "./LinkChip";
 import { Markdown } from "./Markdown";
+import { RecallChips } from "./RecallChips";
 import { ToolSteps } from "./ToolSteps";
 import { useAssistantName } from "../lib/assistant";
 
@@ -56,6 +57,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
           ))}
         </div>
       )}
+      {message.recalled && <RecallChips recalled={message.recalled} />}
       {message.status === "failed" && (
         <p className="mt-1 text-sm text-rose-400">{message.error ?? `${assistant} couldn't answer.`}</p>
       )}

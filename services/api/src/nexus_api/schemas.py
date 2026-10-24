@@ -314,6 +314,7 @@ class MessageOut(BaseModel):
     trace_id: str | None
     error: str | None
     steps: list[dict] | None = None
+    recalled: dict | None = None
     created_at: datetime
     attachments: list[FileBrief] = []
     # Links Nexus or a team saved while writing it (a repo, an app, a Google Doc).

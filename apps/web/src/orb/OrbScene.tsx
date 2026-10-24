@@ -4,13 +4,15 @@ import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useRef } from "react";
 import type { AssistantState } from "../lib/types";
 import { CoreOrb } from "./CoreOrb";
-import { Crystals, MemoryCloud } from "./Inside";
+import { Constellation, Crystals, MemoryCloud } from "./Inside";
 import {
   cameraDistance,
   type Crystal,
+  type Inside,
   type MemoryPoint,
   type OrbCluster,
   type OrbNode,
+  type StarPoint,
 } from "./model";
 import { Network } from "./Network";
 import type { Perf } from "./perf";
@@ -18,11 +20,15 @@ import type { Perf } from "./perf";
 export type Selection =
   | { type: "agent"; node: OrbNode }
   | { type: "memory"; point: MemoryPoint }
-  | { type: "artifact"; crystal: Crystal };
+  | { type: "artifact"; crystal: Crystal }
+  | { type: "entity"; star: StarPoint };
 
 export function selectionId(s: Selection | null): string | null {
   if (!s) return null;
-  return s.type === "agent" ? s.node.key : s.type === "memory" ? s.point.id : s.crystal.id;
+  if (s.type === "agent") return s.node.key;
+  if (s.type === "memory") return s.point.id;
+  if (s.type === "entity") return s.star.id;
+  return s.crystal.id;
 }
 
 /** The whole 3D home scene. Lazy-loaded, so three.js only downloads on the orb page. */
@@ -30,8 +36,10 @@ export default function OrbScene({
   assistantState,
   activity = null,
   clusters,
-  memories,
-  artifacts,
+  inside,
+  lit,
+  litSeq,
+  labels,
   perf,
   selected,
   onSelect,
@@ -40,8 +48,13 @@ export default function OrbScene({
   /** What Nexus is doing right now, shown under the orb while it works. */
   activity?: string | null;
   clusters: OrbCluster[];
-  memories: MemoryPoint[];
-  artifacts: Crystal[];
+  /** The constellation, memories and artifacts inside the orb. */
+  inside: Inside;
+  /** What the latest reply recalled; seq changes each time it lights up. */
+  lit: Set<string>;
+  litSeq: number;
+  /** How many star names to show; fewer in the small chat-side orb. */
+  labels: number;
   perf: Perf;
   selected: Selection | null;
   onSelect: (s: Selection | null) => void;
@@ -69,15 +82,28 @@ export default function OrbScene({
           <div className="orb-label orb-label-activity">{activity}</div>
         </Html>
       )}
-      <MemoryCloud
-        points={memories}
+      <Constellation
+        stars={inside.stars}
+        lines={inside.lines}
+        crystals={inside.crystals}
         still={still}
         lite={perf.lite}
         selected={selId}
+        lit={lit}
+        litSeq={litSeq}
+        labels={labels}
+        onPick={(star) => onSelect({ type: "entity", star })}
+      />
+      <MemoryCloud
+        points={inside.memories}
+        still={still}
+        lite={perf.lite}
+        selected={selId}
+        lit={lit}
         onPick={(point) => onSelect({ type: "memory", point })}
       />
       <Crystals
-        items={artifacts}
+        items={inside.crystals}
         still={still}
         selected={selId}
         onPick={(crystal) => onSelect({ type: "artifact", crystal })}

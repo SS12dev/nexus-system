@@ -134,6 +134,7 @@ def message_payload(msg: Message) -> dict:
         "trace_id": msg.trace_id,
         "error": msg.error,
         "steps": msg.steps,
+        "recalled": msg.recalled,
         "created_at": msg.created_at.isoformat(),
     }
 
@@ -217,9 +218,13 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         logs.bind(user_id=user_id, chat_id=chat_id, trace_id=msg.trace_id)
 
         steps: list[dict] = []
+        recalled: dict | None = None
 
         async def emit(type_: str, **data) -> None:
+            nonlocal recalled
             track_step(steps, type_, data)
+            if type_ == "memory.recalled":
+                recalled = data
             await publish(deps.redis, user_id, Event(type=type_, chat_id=chat_id, data=data))
 
         try:
@@ -233,6 +238,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
             msg.status = MessageStatus.failed
             msg.error = str(exc) if isinstance(exc, TurnFailed) else friendly_error(exc)
             msg.steps = finished(steps) or None
+            msg.recalled = recalled
             await db.commit()
             await emit("message.failed", message=message_payload(msg))
             await emit("assistant.state", state="idle")
@@ -243,6 +249,7 @@ async def run_turn(deps: TurnDeps, chat_id: uuid.UUID, assistant_message_id: uui
         msg.input_tokens = usage.get("input_tokens")
         msg.output_tokens = usage.get("output_tokens")
         msg.steps = finished(steps) or None
+        msg.recalled = recalled
         chat.updated_at = utcnow()
         # Files Nexus made in this turn (save_file, run_code) are attached to its reply.
         for f in saved:
