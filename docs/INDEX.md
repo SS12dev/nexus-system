@@ -10,6 +10,7 @@ a change that adds a doc, a service or a major module adds a line here too.
 | [docs/containers.md](containers.md) | Every container in compose.yaml and what it does |
 | [docs/app-urls.md](app-urls.md) | How built apps get their `<app>.servhub.cc` address and who can open them |
 | [docs/github-app.md](github-app.md) | Setting up the GitHub App that dev teams and the self-review push with |
+| [docs/plans/ready-for-friends.md](plans/ready-for-friends.md) | Plan for opening Nexus to friends: onboarding interview, profile packs, scheduled routines, UX polish, privacy |
 | [docs/proposals/](proposals/) | Specs of approved self-review proposals, one per pull request |
 | [library/README.md](../library/README.md) | The shared skills and instruction layers |
 | [.env.example](../.env.example) | Start-up settings; runtime settings can live in Admin › Configuration instead |
