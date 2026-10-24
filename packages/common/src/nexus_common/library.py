@@ -20,6 +20,9 @@ MARKITDOWN_EXTENSIONS = {
     ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv", ".html", ".htm", ".epub", ".ipynb",
 }  # fmt: skip
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCLING_EXTENSIONS | MARKITDOWN_EXTENSIONS
+# 3D models: accepted and kept as they are (nothing to search), for agents to open in the
+# sandbox and for the web viewer.
+MODEL_EXTENSIONS = {".stl", ".step", ".stp", ".3mf", ".obj", ".glb", ".ply"}
 # Python's mimetypes doesn't know these on every platform.
 OFFICE_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -28,6 +31,13 @@ OFFICE_TYPES = {
     ".xls": "application/vnd.ms-excel",
     ".csv": "text/csv",
     ".md": "text/markdown",
+    ".stl": "model/stl",
+    ".step": "model/step",
+    ".stp": "model/step",
+    ".3mf": "model/3mf",
+    ".obj": "model/obj",
+    ".glb": "model/gltf-binary",
+    ".ply": "application/octet-stream",
 }
 
 

@@ -30,7 +30,7 @@ library/
 | work | `lesson-planning`, `study-plan`, `meeting-prep`, `proposal-writing`, `creative-brief`, `clinical-evidence`, `job-application`, `sales-outreach` |
 | life | `meal-planning`, `trip-planning`, `training-plan`, `budgeting` |
 | agents | `prompt-writing` |
-| engineering | `code-review` |
+| engineering | `code-review`, `3d-modeling` |
 
 A skill names its shelf in frontmatter:
 
@@ -79,7 +79,8 @@ picks each agent's role from the files in `roles/`.
 
 Each script prints `--help`; the SKILL.md says when to use it. Keep scripts dependency-free
 beyond the libraries in `services/sandbox/pyproject.toml` (pandas, numpy, scipy,
-scikit-learn, matplotlib, pillow and the document libraries), and add a test in
+scikit-learn, matplotlib, pillow and the document libraries; build123d, trimesh and
+manifold3d from its `cad` extra, which `test_cad.py` skips without), and add a test in
 `services/sandbox/tests/test_skills.py` or `test_library.py` for every script.
 `test_library.py` also checks that every skill parses, has a shelf, and only points at
 scripts and references that exist.

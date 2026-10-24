@@ -19,6 +19,7 @@ import {
   Palette,
   PenLine,
   Plane,
+  Printer,
   Rocket,
   Scale,
   School,
@@ -79,6 +80,7 @@ const ICONS: Record<string, LucideIcon> = {
   money: Wallet,
   travel: Plane,
   family: House,
+  making: Printer,
 };
 const INTEREST_ICONS: Record<string, LucideIcon> = { research: Search };
 // More than this many routines and the step warns about budget.

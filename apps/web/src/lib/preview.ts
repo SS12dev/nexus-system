@@ -10,6 +10,10 @@ export type PreviewKind =
   | "html"
   | "code"
   | "text"
+  /** A mesh (STL, 3MF, OBJ, PLY, GLB) shown in an orbitable 3D view. */
+  | "model3d"
+  /** A STEP file: exact CAD for CAD apps, no browser view. */
+  | "cad"
   /** No browser view of the file itself: show the text Nexus extracted from it. */
   | "extracted";
 
@@ -31,10 +35,19 @@ const CODE_LANGUAGES: Record<string, string> = {
   css: "css",
 };
 
+export type ModelFormat = "stl" | "3mf" | "obj" | "ply" | "glb";
+const MODEL_FORMATS: ModelFormat[] = ["stl", "3mf", "obj", "ply", "glb"];
+
+/** The mesh format the 3D view loads for this file, or null. */
+export const modelFormat = (name: string): ModelFormat | null =>
+  MODEL_FORMATS.find((f) => f === extension(name)) ?? null;
+
 export const extension = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 
 export function previewKind(name: string, contentType = ""): PreviewKind {
   const ext = extension(name);
+  if (modelFormat(name)) return "model3d";
+  if (ext === "step" || ext === "stp") return "cad";
   if (["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) return "image";
   if (ext === "pdf" || contentType === "application/pdf") return "pdf";
   if (ext === "docx") return "docx";
@@ -52,6 +65,9 @@ export const codeLanguage = (name: string) => CODE_LANGUAGES[extension(name)] ??
 
 /** Kinds read as text in the browser (the others are binary or shown as extracted text). */
 export const TEXT_KINDS: PreviewKind[] = ["markdown", "json", "notebook", "csv", "html", "code", "text"];
+
+/** Kinds with no text for the assistant to read (kept as they are, not parsed). */
+export const UNREAD_KINDS: PreviewKind[] = ["model3d", "cad"];
 
 /** A small CSV parser: quoted fields, escaped quotes and newlines inside quotes. */
 export function parseCsv(text: string, maxRows = 500): string[][] {

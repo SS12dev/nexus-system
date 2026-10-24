@@ -24,7 +24,12 @@ from nexus_api.deps import (
 from nexus_api.ratelimit import uploads_limit
 from nexus_api.routes.chats import own_chat
 from nexus_api.schemas import FileBrief, FileOut, FileTextOut, FileUpdateIn, SearchHitOut
-from nexus_common.library import SUPPORTED_EXTENSIONS, content_type_for, document_text
+from nexus_common.library import (
+    MODEL_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    content_type_for,
+    document_text,
+)
 from nexus_common.models import File, FileChunk, FileStatus, User
 from nexus_common.search import hybrid_search
 from nexus_common.storage import file_key
@@ -63,7 +68,8 @@ async def upload(
 ):
     name = clean_name(file.filename)
     ext = PurePath(name).suffix.lower()
-    if ext not in SUPPORTED_EXTENSIONS:
+    readable = ext in SUPPORTED_EXTENSIONS
+    if not readable and ext not in MODEL_EXTENSIONS:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             f"Your assistant can't read {ext or 'files without an extension'} files yet.",
@@ -96,12 +102,14 @@ async def upload(
         content_type=content_type,
         size=size,
         sha256=digest.hexdigest(),
-        status=FileStatus.processing,
+        status=FileStatus.processing if readable else FileStatus.ready,
     )
     f.storage_key = file_key(user.id, f.id)
     await storage.put(f.storage_key, b"".join(parts), content_type)
     db.add(f)
     await db.commit()
+    if not readable:
+        return f
     try:
         await queue.enqueue_parse(f.id)
     except Exception:

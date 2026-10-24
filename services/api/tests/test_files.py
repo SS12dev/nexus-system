@@ -49,6 +49,13 @@ async def test_upload_rules(owner, settings, monkeypatch):
     assert (await upload(owner)).status_code == 413
 
 
+async def test_3d_models_are_kept_without_parsing(owner, queue):
+    resp = await upload(owner, name="bracket.STL", data=b"solid bracket\nendsolid bracket\n")
+    body = resp.json()
+    assert resp.status_code == 201 and body["status"] == "ready"
+    assert body["content_type"] == "model/stl" and queue.parses == []
+
+
 async def test_queue_outage_marks_the_file_failed(owner, queue):
     queue.fail = True
     resp = await upload(owner)

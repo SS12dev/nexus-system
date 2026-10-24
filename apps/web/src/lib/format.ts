@@ -65,9 +65,11 @@ export function describeAgent(ua: string | null): string {
   return os ? `${browser} on ${os}` : browser;
 }
 
-/** Accept list for the file pickers; matches what the doc-worker can read. */
+/** Accept list for the file pickers: what the doc-worker can read, plus 3D models (kept as
+ * they are for the viewer and for agents to open). */
 export const ACCEPT = [
   ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv", ".txt", ".md", ".json", ".html", ".htm",
   ".epub", ".ipynb", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".yaml",
   ".yml", ".toml", ".log", ".py", ".js", ".ts", ".tsx", ".sql", ".sh", ".xml", ".markdown",
+  ".stl", ".step", ".stp", ".3mf", ".obj", ".glb", ".ply",
 ].join(",");

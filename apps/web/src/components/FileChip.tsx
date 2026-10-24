@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Box,
   Download,
   FileImage,
   FileSpreadsheet,
@@ -18,6 +19,7 @@ export function FileIcon({ name, size = 16 }: { name: string; size?: number }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   if (["xlsx", "xls", "csv"].includes(ext)) return <FileSpreadsheet size={size} />;
   if (ext === "pptx") return <Presentation size={size} />;
+  if (["stl", "step", "stp", "3mf", "obj", "glb", "ply"].includes(ext)) return <Box size={size} />;
   if (["png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"].includes(ext))
     return <FileImage size={size} />;
   return <FileText size={size} />;
