@@ -190,7 +190,7 @@ Restart (`./scripts/compose.sh up -d`). Check it from the host before trying it 
 (replace the values; `to` is a number you added in 4.2, digits only):
 
 ```sh
-curl -s -X POST "https://graph.facebook.com/v23.0/$WHATSAPP_PHONE_NUMBER_ID/messages" \
+curl -s -X POST "https://graph.facebook.com/v25.0/$WHATSAPP_PHONE_NUMBER_ID/messages" \
   -H "Authorization: Bearer $WHATSAPP_TOKEN" -H "Content-Type: application/json" \
   -d '{"messaging_product":"whatsapp","to":"919812345678","type":"template",
        "template":{"name":"nexus_routine","language":{"code":"en"},

@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: str = ""
     whatsapp_template: str = "nexus_routine"
     whatsapp_template_language: str = "en"
-    whatsapp_api_url: str = "https://graph.facebook.com/v23.0"
+    whatsapp_api_url: str = "https://graph.facebook.com/v25.0"
 
     # Web push to phones and browsers (nexus_common/push.py). Make the pair once with
     # `uv run python -m nexus_common.push`; the subject is a mailto: or https: contact the push
