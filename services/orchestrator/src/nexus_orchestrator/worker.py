@@ -23,7 +23,7 @@ from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
-from nexus_orchestrator import deploy, links, memory, notify
+from nexus_orchestrator import deploy, improve, links, memory, notify
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
 from nexus_orchestrator.sandbox import SandboxClient
@@ -157,6 +157,24 @@ async def notify_access(ctx: dict, kind: str, request_id: str) -> None:
 
 
 @traced_job
+async def self_review(ctx: dict, review_id: str) -> None:
+    """A self-review the owner asked for on the Admin page."""
+    await improve.run_review(ctx["deps"], uuid.UUID(review_id))
+
+
+@traced_job
+async def proposal_pr(ctx: dict, proposal_id: str) -> None:
+    """The pull request for an approved code or tool proposal."""
+    await improve.open_pr(ctx["deps"], uuid.UUID(proposal_id))
+
+
+@traced_job
+async def daily_review(ctx: dict) -> None:
+    """Starts a self-review when the last one is IMPROVE_EVERY_DAYS old."""
+    await improve.scheduled(ctx["deps"])
+
+
+@traced_job
 async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
@@ -168,6 +186,10 @@ async def every_ten_minutes(ctx: dict) -> None:
 @traced_job
 async def nightly(ctx: dict) -> None:
     await memory.nightly(ctx["deps"])
+
+
+# A review reads up to IMPROVE_MAX_REQUESTS requests in batches, then drafts its proposals.
+REVIEW_TIMEOUT_S = 900
 
 
 class WorkerSettings:
@@ -185,6 +207,8 @@ class WorkerSettings:
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
         # Emails are safe to retry: the job checks the request is still in the state it's about.
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
+        func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
+        func(proposal_pr, timeout=120, keep_result=0),
     ]
     cron_jobs = [
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
@@ -194,6 +218,14 @@ class WorkerSettings:
             minute=settings.memory_nightly_minute_utc,
             unique=True,
             timeout=1800,
+        ),
+        # An hour after the nightly memory jobs; it does nothing unless a review is due.
+        cron(
+            daily_review,
+            hour=(settings.memory_nightly_hour_utc + 1) % 24,
+            minute=settings.memory_nightly_minute_utc,
+            unique=True,
+            timeout=REVIEW_TIMEOUT_S,
         ),
     ]
     on_startup = startup

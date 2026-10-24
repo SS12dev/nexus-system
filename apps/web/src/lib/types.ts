@@ -709,3 +709,189 @@ export interface ConfigView {
   updated_by: string | null;
   services: ConfigService[];
 }
+
+/** Model-call figures for one group (or the whole window) on the Admin Models tab. */
+export interface LlmFigures {
+  calls: number;
+  failed: number;
+  cache_hits: number;
+  cache_hit_rate: number | null;
+  spend_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  cached_share: number | null;
+  avg_ms: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  p50_first_token_ms: number | null;
+  saved_usd: number;
+}
+
+export interface LlmGroup extends LlmFigures {
+  key: string | null;
+  email?: string | null;
+  name?: string | null;
+}
+
+export interface ValkeyCache {
+  hits: number;
+  misses: number;
+  hit_rate: number | null;
+  evicted: number;
+  memory: string | null;
+  llm_cached_responses: number;
+}
+
+export interface LlmUsage {
+  available: boolean;
+  reason: string | null;
+  since: string;
+  until: string;
+  valkey: ValkeyCache | null;
+  failures_tracked?: boolean;
+  unit?: "hour" | "day";
+  totals?: LlmFigures;
+  by_model?: LlmGroup[];
+  by_user?: LlmGroup[];
+  by_purpose?: LlmGroup[];
+  series?: {
+    at: string;
+    calls: number;
+    failed: number;
+    cache_hits: number;
+    spend_usd: number;
+    tokens: number;
+    p95_ms: number | null;
+  }[];
+  failures?: {
+    at: string;
+    model: string;
+    user_id: string | null;
+    user: string | null;
+    purpose: string;
+    error: string;
+  }[];
+  models?: string[];
+  purposes?: string[];
+  purpose_labels?: Record<string, string>;
+}
+
+export interface LlmQuery {
+  since?: string;
+  until?: string;
+  userIds: string[];
+  models: string[];
+  purposes: string[];
+}
+
+export interface AlertRule {
+  name: string;
+  what: string;
+  setting: string | null;
+  threshold: number | null;
+  on: boolean;
+}
+
+export interface Alerts {
+  active: AlertItem[];
+  recent: AlertItem[];
+  rules: AlertRule[];
+  interval_s: number;
+  email: boolean;
+}
+
+export type ProposalKind = "skill" | "instruction" | "setting" | "tool" | "code";
+export type ProposalStatus = "pending" | "applying" | "applied" | "denied" | "failed" | "reverted";
+
+export interface Proposal {
+  id: string;
+  review_id: string | null;
+  kind: ProposalKind;
+  status: ProposalStatus;
+  title: string;
+  summary: string;
+  evidence: string[];
+  impact: "low" | "medium" | "high";
+  effort: "low" | "medium" | "high";
+  payload: {
+    name?: string;
+    description?: string;
+    content?: string;
+    layer?: "global" | "role";
+    role?: string;
+    text?: string;
+    label?: string;
+    value?: string | number | boolean;
+    spec?: string;
+    files?: string[];
+  };
+  note: string | null;
+  result: {
+    skill_id?: string;
+    skill_slug?: string;
+    pr_url?: string;
+    branch?: string;
+    spec_only?: boolean;
+    before?: unknown;
+  };
+  error: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+/** What a self-review saw: counts and anonymous topics, never names or chat text. */
+export interface ReviewFindings {
+  activity?: {
+    turns: number;
+    failed_turns: number;
+    people: number;
+    team_runs: number;
+    failed_team_runs: number;
+    team_cost_usd: number;
+    teams_designed: number;
+  };
+  tools?: { tool: string; calls: number; failed: number; avg_ms: number | null }[];
+  failures?: { pattern: string; count: number }[];
+  teams?: {
+    roles: { role: string; count: number }[];
+    tools: { tool: string; count: number }[];
+    topologies: { topology: string; count: number }[];
+  };
+  skills?: {
+    used: { skill: string; uses: number; failed: number }[];
+    unused: string[];
+    learned_drafts_waiting: number;
+  };
+  topics?: { topic: string; count: number }[];
+  gaps?: { gap: string; count: number }[];
+  requests_read?: number;
+}
+
+export interface Review {
+  id: string;
+  status: "running" | "done" | "failed";
+  trigger: "schedule" | "manual";
+  window_start: string;
+  window_end: string;
+  findings: ReviewFindings;
+  proposals: number;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface Improvements {
+  proposals: Proposal[];
+  counts: Record<ProposalStatus, number>;
+  reviews: Review[];
+  schedule: {
+    every_days: number;
+    next_at: string | null;
+    read_requests: boolean;
+    min_count: number;
+    model: string;
+    topic_model: string;
+  };
+  pull_requests: { repo: string | null; ready: boolean };
+}

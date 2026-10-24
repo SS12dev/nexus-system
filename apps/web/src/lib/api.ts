@@ -33,7 +33,13 @@ import type {
   SkillVersion,
   SystemDetail,
   ToolEntry,
+  Alerts,
+  Improvements,
+  LlmQuery,
+  LlmUsage,
   Monitoring,
+  Proposal,
+  Review,
   Usage,
   User,
   UserStatus,
@@ -280,6 +286,25 @@ export const api = {
   },
   backups: () => request<Backup[]>("/api/admin/backups"),
   monitoring: (minutes: number) => request<Monitoring>(`/api/admin/monitoring?minutes=${minutes}`),
+  adminSummary: () => request<{ alerts: number; proposals: number }>("/api/admin/summary"),
+  alerts: () => request<Alerts>("/api/admin/alerts"),
+  llmUsage: (query: LlmQuery) => {
+    const q = forUsers(query.userIds);
+    if (query.since) q.set("since", query.since);
+    if (query.until) q.set("until", query.until);
+    for (const m of query.models) q.append("model", m);
+    for (const p of query.purposes) q.append("purpose", p);
+    return request<LlmUsage>(`/api/admin/llm?${q}`);
+  },
+  improvements: (status?: string) =>
+    request<Improvements>(`/api/admin/improvements${status ? `?status=${status}` : ""}`),
+  reviewNow: () => request<Review>("/api/admin/improvements/review", { method: "POST" }),
+  approveProposal: (id: string, note?: string) =>
+    request<Proposal>(`/api/admin/improvements/${id}/approve`, { method: "POST", body: json({ note: note || null }) }),
+  denyProposal: (id: string, note?: string) =>
+    request<Proposal>(`/api/admin/improvements/${id}/deny`, { method: "POST", body: json({ note: note || null }) }),
+  revertProposal: (id: string) =>
+    request<Proposal>(`/api/admin/improvements/${id}/revert`, { method: "POST" }),
   backupNow: () => request<Backup>("/api/admin/backups", { method: "POST" }),
   config: () => request<ConfigView>("/api/admin/config"),
   /** A value per setting, or null to go back to the .env value. */

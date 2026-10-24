@@ -101,6 +101,20 @@ x-nexus-env: &nexus-env
   ALERT_API_ERRORS_5M: ${ALERT_API_ERRORS_5M:-5}
   ALERT_JOB_FAILURES_15M: ${ALERT_JOB_FAILURES_15M:-3}
   ALERT_EMAIL: ${ALERT_EMAIL:-true}
+  ALERT_LLM_FAILURES_15M: ${ALERT_LLM_FAILURES_15M:-5}
+  ALERT_DAILY_SPEND_USD: ${ALERT_DAILY_SPEND_USD:-10}
+  ALERT_BUDGET_PERCENT: ${ALERT_BUDGET_PERCENT:-90}
+  # The Models tab reads LiteLLM's spend logs; empty means its database next to Nexus's.
+  LITELLM_DATABASE_URL: ${LITELLM_DATABASE_URL:-}
+  # Self-review: proposals for the owner to approve on the Admin page's Improvements tab.
+  IMPROVE_EVERY_DAYS: ${IMPROVE_EVERY_DAYS:-7}
+  IMPROVE_MODEL: ${IMPROVE_MODEL:-nexus-mini}
+  IMPROVE_TOPIC_MODEL: ${IMPROVE_TOPIC_MODEL:-nexus-nano}
+  IMPROVE_READ_REQUESTS: ${IMPROVE_READ_REQUESTS:-true}
+  IMPROVE_MIN_COUNT: ${IMPROVE_MIN_COUNT:-3}
+  IMPROVE_MAX_PROPOSALS: ${IMPROVE_MAX_PROPOSALS:-5}
+  IMPROVE_REPO: ${IMPROVE_REPO:-}
+  IMPROVE_BASE_BRANCH: ${IMPROVE_BASE_BRANCH:-main}
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://nexus:${POSTGRES_PASSWORD}@postgres:5432/langfuse

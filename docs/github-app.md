@@ -95,3 +95,27 @@ The final reply says `Repo: not pushed: …` with GitHub's own message. 401 usua
 App ID or key, 404 an installation id that doesn't match the organisation or an App not
 installed on all repositories, and 403 a missing permission from the table above (after
 changing permissions, accept the new ones on the installation page).
+
+## Pull requests on Nexus itself
+
+Approved code and tool proposals from [self-review](../README.md#self-review) become draft pull
+requests on the repository in `IMPROVE_REPO` (for example `SS12dev/nexus-system`). That
+repository usually lives outside the organisation the App was made for, so it needs its own
+installation, and the App one more permission:
+
+1. On the App's settings page, **Permissions and events**: add **Pull requests: Read and write**
+   (Contents is already read and write). Save, then accept the new permission on the existing
+   installation (Settings, GitHub Apps, Configure on the organisation).
+2. If the App says "Only on this account", switch **Where can this GitHub App be installed?** to
+   **Any account** under **Advanced**, so your personal account can install it. Nobody else can
+   use it without its private key.
+3. **Install App**, choose your personal account, **Only select repositories**, and pick the
+   Nexus repository.
+4. Set **Repository for code proposals** on the Admin page's Configuration tab (Self-review), or
+   `IMPROVE_REPO` in `.env`.
+
+Nexus finds that installation by itself (`GET /repos/{owner}/{name}/installation`) and asks for a
+token limited to that one repository's contents and pull requests. It only ever creates a
+`nexus/proposal-...` branch, commits the spec under `docs/proposals/` and opens a draft pull
+request; it never pushes to `main` or merges. Moving the repository into the organisation
+instead also works, and then steps 2 and 3 aren't needed.

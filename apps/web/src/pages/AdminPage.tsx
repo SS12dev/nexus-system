@@ -1,301 +1,241 @@
 import {
+  Activity,
   AlertTriangle,
+  Archive,
+  BarChart3,
+  Bell,
   CheckCircle2,
   ChevronDown,
+  Cpu,
   ExternalLink,
+  Gauge,
   RefreshCw,
-  Users,
-  X,
+  ScrollText,
+  SlidersHorizontal,
+  Sparkles,
   XCircle,
+  type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { formatAgo, formatDateTime, formatSize, formatTokens } from "../lib/format";
 import type { AuditEntry, Backup, LoggedError, Monitoring, MonitorRow, OpsStatus, Usage, User } from "../lib/types";
 import { APP_NAME } from "../lib/assistant";
 import { ConfigPanel } from "./AdminConfig";
+import { AlertsPanel } from "./AdminAlerts";
+import { ImprovementsPanel } from "./AdminImprovements";
+import { ModelsPanel } from "./AdminModels";
+import { Bars, PeopleFilter, Section, Tile, usd } from "./AdminParts";
 
-type Tab = "status" | "monitoring" | "usage" | "audit" | "backups" | "config";
-const TABS: { key: Tab; label: string }[] = [
-  { key: "status", label: "Status" },
-  { key: "monitoring", label: "Monitoring" },
-  { key: "usage", label: "Usage" },
-  { key: "audit", label: "Audit log" },
-  { key: "backups", label: "Backups" },
-  { key: "config", label: "Configuration" },
+type Tab =
+  | "status"
+  | "alerts"
+  | "models"
+  | "usage"
+  | "improvements"
+  | "monitoring"
+  | "audit"
+  | "backups"
+  | "config";
+
+type TabInfo = { key: Tab; label: string; icon: LucideIcon; hint: string };
+
+/** Grouped as on the side of the page; on a phone they run in one scrolling row. */
+const GROUPS: { title: string; tabs: TabInfo[] }[] = [
+  {
+    title: "Overview",
+    tabs: [
+      { key: "status", label: "Status", icon: Activity, hint: "Services, the last day and maintenance" },
+      { key: "alerts", label: "Alerts", icon: Bell, hint: "What needs you, and what is checked" },
+    ],
+  },
+  {
+    title: "Usage and cost",
+    tabs: [
+      { key: "models", label: "Models", icon: Cpu, hint: "Model calls, cost, latency and caching" },
+      { key: "usage", label: "Usage", icon: BarChart3, hint: "Turns, runs and files per person" },
+    ],
+  },
+  {
+    title: "Improve",
+    tabs: [
+      {
+        key: "improvements",
+        label: "Improvements",
+        icon: Sparkles,
+        hint: "Changes the assistant proposes, for you to approve",
+      },
+    ],
+  },
+  {
+    title: "Operations",
+    tabs: [
+      { key: "monitoring", label: "Monitoring", icon: Gauge, hint: "Routes, jobs and errors" },
+      { key: "audit", label: "Audit log", icon: ScrollText, hint: "Who did what" },
+      { key: "backups", label: "Backups", icon: Archive, hint: "Nightly backups and restores" },
+      { key: "config", label: "Configuration", icon: SlidersHorizontal, hint: "Runtime settings" },
+    ],
+  },
 ];
+const ALL_TABS = GROUPS.flatMap((g) => g.tabs);
+const FILTERED: Tab[] = ["status", "usage", "audit", "models"];
 
-/** Health, monitoring, usage, the audit log, backups, maintenance mode and runtime settings.
- * Owners only. */
+/** Health, alerts, model usage, improvements, monitoring, the audit log, backups and runtime
+ * settings. Owners only. The open tab is in the address (?tab=models), so it can be linked. */
 export function AdminPage() {
-  const [tab, setTab] = useState<Tab>("status");
+  const [params, setParams] = useSearchParams();
+  const asked = params.get("tab") as Tab | null;
+  const tab: Tab = asked && ALL_TABS.some((t) => t.key === asked) ? asked : "status";
   const [error, setError] = useState("");
   const [people, setPeople] = useState<User[]>([]);
   // Who the per-person figures cover; empty means everyone.
   const [picked, setPicked] = useState<string[]>([]);
+  const [badges, setBadges] = useState({ alerts: 0, proposals: 0 });
 
   useEffect(() => {
     api.users().then(setPeople).catch((e) => setError(e.message));
   }, []);
 
+  const refreshBadges = useCallback(() => {
+    api.adminSummary().then(setBadges).catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshBadges();
+    const t = setInterval(refreshBadges, 60_000);
+    return () => clearInterval(t);
+  }, [refreshBadges]);
+
+  const go = (key: Tab) => {
+    setError("");
+    setParams(key === "status" ? {} : { tab: key }, { replace: true });
+  };
+  const badge = (key: Tab) => (key === "alerts" ? badges.alerts : key === "improvements" ? badges.proposals : 0);
+  const current = ALL_TABS.find((t) => t.key === tab)!;
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-4 py-6">
+      <div className="mx-auto max-w-6xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Admin</h1>
         <p className="mb-4 text-sm text-slate-400">
-          How {APP_NAME} is running, who uses it, what it costs and how it is set up. You see counts, costs and errors
-          here, never anyone's chats.
+          How {APP_NAME} is running, what it costs, what it proposes to improve and how it is set up. You see
+          counts, costs and errors here, never anyone's chats.
         </p>
-        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => {
-                setError("");
-                setTab(t.key);
-              }}
-              className={`rounded-md px-3 py-1 ${tab === t.key ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
-            >
-              {t.label}
-            </button>
-          ))}
-          {(tab === "status" || tab === "usage" || tab === "audit") && (
-            <div className="ml-auto">
-              <PeopleFilter people={people} picked={picked} onChange={setPicked} />
+        {(badges.alerts > 0 || badges.proposals > 0) && (
+          <div className="mb-4 flex flex-wrap gap-2 text-sm">
+            {badges.alerts > 0 && tab !== "alerts" && (
+              <button
+                onClick={() => go("alerts")}
+                className="flex items-center gap-2 rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-rose-200 hover:bg-rose-500/20"
+              >
+                <AlertTriangle size={15} /> {badges.alerts} active {badges.alerts === 1 ? "alert" : "alerts"}
+              </button>
+            )}
+            {badges.proposals > 0 && tab !== "improvements" && (
+              <button
+                onClick={() => go("improvements")}
+                className="flex items-center gap-2 rounded-lg border border-violet-500/50 bg-violet-500/10 px-3 py-1.5 text-violet-200 hover:bg-violet-500/20"
+              >
+                <Sparkles size={15} /> {badges.proposals}{" "}
+                {badges.proposals === 1 ? "improvement waits" : "improvements wait"} for you
+              </button>
+            )}
+          </div>
+        )}
+        <div className="md:flex md:gap-6">
+          <nav aria-label="Admin sections" className="mb-4 md:mb-0 md:w-48 md:shrink-0">
+            {/* Phone: one scrolling row. */}
+            <div className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 md:hidden">
+              {ALL_TABS.map((t) => (
+                <TabButton key={t.key} t={t} active={tab === t.key} count={badge(t.key)} onClick={() => go(t.key)} compact />
+              ))}
             </div>
-          )}
+            {/* Larger screens: grouped down the side. */}
+            <div className="sticky top-0 hidden space-y-4 md:block">
+              {GROUPS.map((g) => (
+                <div key={g.title}>
+                  <div className="mb-1 px-2 text-xs font-medium tracking-wide text-slate-500 uppercase">{g.title}</div>
+                  <div className="space-y-0.5">
+                    {g.tabs.map((t) => (
+                      <TabButton key={t.key} t={t} active={tab === t.key} count={badge(t.key)} onClick={() => go(t.key)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </nav>
+          <main className="min-w-0 flex-1">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <div className="min-w-0">
+                <h2 className="text-lg font-medium">{current.label}</h2>
+                <p className="text-xs text-slate-500">{current.hint}</p>
+              </div>
+              {FILTERED.includes(tab) && (
+                <div className="ml-auto">
+                  <PeopleFilter people={people} picked={picked} onChange={setPicked} />
+                </div>
+              )}
+            </div>
+            {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
+            {tab === "status" && <StatusPanel onError={setError} userIds={picked} />}
+            {tab === "alerts" && <AlertsPanel onError={setError} onOpen={(t) => go(t as Tab)} onChange={refreshBadges} />}
+            {tab === "models" && <ModelsPanel onError={setError} userIds={picked} onPickPerson={(id) => setPicked([id])} />}
+            {tab === "usage" && <UsagePanel onError={setError} userIds={picked} />}
+            {tab === "improvements" && (
+              <ImprovementsPanel onError={setError} onOpen={(t) => go(t as Tab)} onChange={refreshBadges} />
+            )}
+            {tab === "monitoring" && <MonitoringPanel onError={setError} onOpenAlerts={() => go("alerts")} />}
+            {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
+            {tab === "backups" && <BackupsPanel onError={setError} />}
+            {tab === "config" && <ConfigPanel onError={setError} />}
+          </main>
         </div>
-        {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
-        {tab === "status" && <StatusPanel onError={setError} userIds={picked} />}
-        {tab === "monitoring" && <MonitoringPanel onError={setError} />}
-        {tab === "usage" && <UsagePanel onError={setError} userIds={picked} />}
-        {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
-        {tab === "backups" && <BackupsPanel onError={setError} />}
-        {tab === "config" && <ConfigPanel onError={setError} />}
       </div>
     </div>
+  );
+}
+
+function TabButton({
+  t,
+  active,
+  count,
+  onClick,
+  compact = false,
+}: {
+  t: TabInfo;
+  active: boolean;
+  count: number;
+  onClick: () => void;
+  compact?: boolean;
+}) {
+  const Icon = t.icon;
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      title={t.hint}
+      className={`flex shrink-0 items-center gap-2 rounded-md text-sm ${compact ? "px-3 py-1.5" : "w-full px-2 py-1.5"} ${
+        active ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50 hover:text-slate-200"
+      }`}
+    >
+      <Icon size={15} className="shrink-0" />
+      <span className="whitespace-nowrap">{t.label}</span>
+      {count > 0 && (
+        <span
+          className={`ml-auto rounded-full px-1.5 text-xs font-medium tabular-nums ${
+            t.key === "alerts" ? "bg-rose-500 text-white" : "bg-violet-500 text-white"
+          }`}
+        >
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
 type PanelProps = { onError: (msg: string) => void };
 type FilteredProps = PanelProps & { userIds: string[] };
-
-const personName = (u: Pick<User, "name" | "email">) => u.name || u.email;
-
-/** Pick one person (tap their name) or several (tick the boxes). None picked means everyone. */
-function PeopleFilter({
-  people,
-  picked,
-  onChange,
-}: {
-  people: User[];
-  picked: string[];
-  onChange: (ids: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const box = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent) {
-        // Escape closes and hands focus back to the button, like a native dropdown.
-        if (e.key !== "Escape") return;
-        setOpen(false);
-        trigger.current?.focus();
-      } else if (!box.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-
-  const chosen = people.filter((p) => picked.includes(p.id));
-  const summary =
-    picked.length === 0
-      ? "Everyone"
-      : picked.length === 1
-        ? (chosen[0] && personName(chosen[0])) || "1 person"
-        : `${picked.length} people`;
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? people.filter((p) => `${p.name ?? ""} ${p.email}`.toLowerCase().includes(q))
-    : people;
-  const toggle = (id: string) =>
-    onChange(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
-
-  return (
-    <div ref={box} className="relative">
-      <div className="flex items-center rounded-md border border-edge bg-panel">
-        <button
-          ref={trigger}
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          aria-label={`Show data for: ${summary}`}
-          className="flex max-w-56 items-center gap-1.5 rounded-md py-1 pr-2 pl-2.5 hover:bg-edge/40"
-        >
-          <Users size={14} className="shrink-0 text-slate-400" />
-          <span className="truncate">{summary}</span>
-          <ChevronDown size={14} className="shrink-0 text-slate-400" />
-        </button>
-        {picked.length > 0 && (
-          <button
-            onClick={() => onChange([])}
-            className="border-l border-edge px-1.5 py-1 text-slate-400 hover:text-white"
-            aria-label="Show everyone"
-            title="Show everyone"
-          >
-            <X size={14} />
-          </button>
-        )}
-      </div>
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Choose people"
-          className="absolute right-0 z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-edge bg-panel p-2 shadow-xl"
-        >
-          {people.length > 6 && (
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find a person"
-              className="mb-2 w-full rounded-md border border-edge bg-ink px-2 py-1"
-            />
-          )}
-          <button
-            onClick={() => {
-              onChange([]);
-              setOpen(false);
-            }}
-            className={`mb-1 w-full rounded-md px-2 py-1.5 text-left hover:bg-edge/60 ${picked.length === 0 ? "text-sky-300" : ""}`}
-          >
-            Everyone
-          </button>
-          <ul aria-label="People" className="max-h-72 overflow-y-auto">
-            {shown.map((p) => (
-              <li key={p.id} className="flex items-center gap-2 rounded-md px-2 hover:bg-edge/60">
-                <input
-                  type="checkbox"
-                  checked={picked.includes(p.id)}
-                  onChange={() => toggle(p.id)}
-                  aria-label={`Include ${personName(p)}`}
-                />
-                <button
-                  onClick={() => {
-                    onChange([p.id]);
-                    setOpen(false);
-                  }}
-                  className="min-w-0 flex-1 py-1.5 text-left"
-                  title={`Only ${personName(p)}`}
-                >
-                  <div className="truncate">{personName(p)}</div>
-                  {p.name && <div className="truncate text-xs text-slate-500">{p.email}</div>}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 border-t border-edge px-2 pt-2 text-xs text-slate-500">
-            Tap a name to see only them, or tick several.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function usd(n: number): string {
-  return `$${n < 10 ? n.toFixed(2) : n.toFixed(0)}`;
-}
-
-function Tile({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-edge bg-panel px-4 py-3">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-slate-500">{hint}</div>}
-    </div>
-  );
-}
-
-function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
-  return (
-    <section className="mb-6">
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="font-medium">{title}</h2>
-        <div className="ml-auto">{action}</div>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** One series of bars over time, with a tooltip per bar. Values are drawn from a zero baseline. */
-function Bars({
-  points,
-  label,
-  format = String,
-}: {
-  points: { key: string; value: number; tip: string }[];
-  label: string;
-  format?: (n: number) => string;
-}) {
-  const [hover, setHover] = useState<number | null>(null);
-  const peak = Math.max(0, ...points.map((p) => p.value));
-  const max = peak || 1;
-  const w = 600;
-  const h = 80;
-  const step = w / Math.max(1, points.length);
-  const bar = Math.max(1, step - 2);
-  const shown = hover != null ? points[hover] : null;
-  return (
-    <figure className="rounded-lg border border-edge bg-panel px-4 py-3">
-      <figcaption className="mb-1 flex text-xs text-slate-400">
-        <span>{label}</span>
-        <span className="ml-auto tabular-nums text-slate-300">
-          {shown ? shown.tip : peak ? `peak ${format(peak)}` : "none yet"}
-        </span>
-      </figcaption>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        className="h-20 w-full"
-        role="img"
-        aria-label={label}
-        onMouseLeave={() => setHover(null)}
-      >
-        <line x1={0} x2={w} y1={h - 0.5} y2={h - 0.5} className="stroke-edge" strokeWidth={1} />
-        {points.map((p, i) => {
-          const bh = p.value ? Math.max(2, (p.value / max) * (h - 4)) : 0;
-          return (
-            <g key={p.key} onMouseEnter={() => setHover(i)} onTouchStart={() => setHover(i)}>
-              {/* Hit target: the whole column, bigger than the bar. */}
-              <rect x={i * step} y={0} width={step} height={h} fill="transparent" />
-              {bh > 0 && (
-                <rect
-                  x={i * step + 1}
-                  y={h - bh}
-                  width={bar}
-                  height={bh}
-                  rx={Math.min(2, bar / 2)}
-                  className={hover === i ? "fill-sky-300" : "fill-sky-500"}
-                />
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </figure>
-  );
-}
 
 function StatusPanel({ onError, userIds }: FilteredProps) {
   const [status, setStatus] = useState<OpsStatus | null>(null);
@@ -867,7 +807,7 @@ function ErrorRow({ e }: { e: LoggedError }) {
   );
 }
 
-function MonitoringPanel({ onError }: PanelProps) {
+function MonitoringPanel({ onError, onOpenAlerts }: PanelProps & { onOpenAlerts: () => void }) {
   const [minutes, setMinutes] = useState(60);
   const [data, setData] = useState<Monitoring | null>(null);
   const [loading, setLoading] = useState(false);
@@ -903,6 +843,9 @@ function MonitoringPanel({ onError }: PanelProps) {
           <CheckCircle2 size={18} className="shrink-0 text-emerald-400" />
         )}
         <span>{active.length ? `${active.length} active ${active.length === 1 ? "alert" : "alerts"}` : "No alerts"}</span>
+        <button onClick={onOpenAlerts} className="text-sky-400 hover:underline">
+          {active.length ? "See them" : "What is checked"}
+        </button>
         <button
           onClick={load}
           className="ml-auto flex items-center gap-1 text-slate-400 hover:text-white"
@@ -911,40 +854,6 @@ function MonitoringPanel({ onError }: PanelProps) {
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
       </div>
-
-      <Section title="Alerts">
-        <p className="mb-2 text-sm text-slate-400">
-          Every minute {APP_NAME} checks its services, workers and backups, API errors in the last 5
-          minutes and failed jobs in the last 15. A problem seen twice in a row becomes an alert; you also
-          get an email when email (SMTP) is set up. A note follows when it clears.
-        </p>
-        {active.length > 0 && (
-          <ul className="mb-3 divide-y divide-edge rounded-lg border border-rose-500/40 bg-panel text-sm">
-            {active.map((a) => (
-              <li key={a.key} className="flex flex-wrap gap-x-3 px-3 py-2">
-                <span className="font-medium text-rose-300">{a.title}</span>
-                <span className="text-slate-400">{a.detail}</span>
-                {a.since && <span className="ml-auto text-xs text-slate-500">since {formatAgo(a.since)}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {data.alerts.recent.length > 0 ? (
-          <ul className="divide-y divide-edge rounded-lg border border-edge bg-panel text-sm">
-            {data.alerts.recent.slice(0, 10).map((a, i) => (
-              <li key={i} className="flex flex-wrap gap-x-3 px-3 py-1.5">
-                <span className="w-28 text-xs text-slate-500">{a.at ? formatDateTime(a.at) : ""}</span>
-                <span className={`w-16 text-xs ${a.state === "raised" ? "text-rose-400" : "text-emerald-400"}`}>
-                  {a.state}
-                </span>
-                <span className="text-slate-300">{a.title}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-slate-500">No alerts so far.</p>
-        )}
-      </Section>
 
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="text-slate-400">Figures for</span>

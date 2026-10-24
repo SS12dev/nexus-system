@@ -103,16 +103,20 @@ class GitHubApp:
         path: str,
         *,
         auth: str = "token",
+        token: str | None = None,
         ok: tuple = (),
         accept: str = "application/vnd.github+json",
         **kw,
     ) -> httpx.Response:
-        """ok: error statuses the caller handles itself (such as 404 for a missing repo)."""
+        """ok: error statuses the caller handles itself (such as 404 for a missing repo).
+        token: use this installation token instead of the organisation's."""
         headers = {
             "Accept": accept,
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        if auth == "jwt":
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        elif auth == "jwt":
             headers["Authorization"] = f"Bearer {self.jwt()}"
         elif auth == "token":
             headers["Authorization"] = f"Bearer {await self.token()}"
@@ -211,3 +215,82 @@ class GitHubApp:
             url=f"https://github.com/{new_owner}/{data.get('name', name)}",
             clone_url=f"https://github.com/{new_owner}/{data.get('name', name)}.git",
         )
+
+    # --- Pull requests on another repository (self-review) ----------------------------------
+
+    async def repo_token(self, full_name: str) -> str:
+        """A token for one repository the App is installed on outside the organisation, such
+        as Nexus's own (IMPROVE_REPO), limited to its contents and pull requests."""
+        owner, name = full_name.split("/", 1)
+        resp = await self._request(
+            "GET", f"/repos/{owner}/{name}/installation", auth="jwt", ok=(404,)
+        )
+        if resp.status_code == 404:
+            raise GitHubError(
+                f"The Nexus GitHub App isn't installed on {full_name}. Install it there with "
+                "contents and pull requests write (docs/github-app.md)."
+            )
+        path = f"/app/installations/{resp.json()['id']}/access_tokens"
+        body = {
+            "repositories": [name],
+            "permissions": {"contents": "write", "pull_requests": "write"},
+        }
+        return (await self._request("POST", path, auth="jwt", json=body)).json()["token"]
+
+    async def open_pull_request(
+        self,
+        full_name: str,
+        *,
+        base: str,
+        branch: str,
+        title: str,
+        body: str,
+        files: dict[str, str],
+        message: str,
+    ) -> str:
+        """Commit `files` (path -> text) to a new branch off `base` and open a draft pull request
+        for them. Returns its URL. An existing branch of that name is reused."""
+        token = await self.repo_token(full_name)
+        repo = f"/repos/{full_name}"
+        sha = (await self._request("GET", f"{repo}/git/ref/heads/{base}", token=token)).json()[
+            "object"
+        ]["sha"]
+        await self._request(
+            "POST",
+            f"{repo}/git/refs",
+            token=token,
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+            ok=(422,),
+        )
+        for path, text in files.items():
+            existing = await self._request(
+                "GET", f"{repo}/contents/{path}", token=token, params={"ref": branch}, ok=(404,)
+            )
+            put = {
+                "message": message,
+                "content": base64.b64encode(text.encode()).decode(),
+                "branch": branch,
+            }
+            if existing.status_code == 200:
+                put["sha"] = existing.json()["sha"]
+            await self._request("PUT", f"{repo}/contents/{path}", token=token, json=put)
+        resp = await self._request(
+            "POST",
+            f"{repo}/pulls",
+            token=token,
+            json={"title": title, "head": branch, "base": base, "body": body, "draft": True},
+            ok=(422,),
+        )
+        if resp.status_code == 422:
+            # One is open for this branch already.
+            owner = full_name.split("/", 1)[0]
+            found = await self._request(
+                "GET",
+                f"{repo}/pulls",
+                token=token,
+                params={"head": f"{owner}:{branch}", "state": "open"},
+            )
+            if found.json():
+                return found.json()[0]["html_url"]
+            raise GitHubError("GitHub refused the pull request.")
+        return resp.json()["html_url"]

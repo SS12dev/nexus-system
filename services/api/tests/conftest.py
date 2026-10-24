@@ -15,6 +15,8 @@ class RecordingQueue:
         self.deploys: list[uuid.UUID] = []
         self.link_previews: list[uuid.UUID] = []
         self.access_notices: list[tuple[str, uuid.UUID]] = []
+        self.reviews: list[uuid.UUID] = []
+        self.proposal_prs: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
@@ -43,6 +45,12 @@ class RecordingQueue:
         if self.fail:
             raise ConnectionError("redis down")
         self.access_notices.append((kind, request_id))
+
+    async def enqueue_review(self, review_id):
+        self.reviews.append(review_id)
+
+    async def enqueue_proposal_pr(self, proposal_id):
+        self.proposal_prs.append(proposal_id)
 
 
 @pytest.fixture(autouse=True)

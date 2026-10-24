@@ -1043,3 +1043,106 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# --- Self-review -------------------------------------------------------------------------------
+
+
+class ReviewStatus(enum.StrEnum):
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+
+class ProposalKind(enum.StrEnum):
+    # A shared skill, active for everyone once approved.
+    skill = "skill"
+    # Text added to the global or a role's standing instructions.
+    instruction = "instruction"
+    # A change to one runtime setting on the Configuration tab.
+    setting = "setting"
+    # A new tool for agents: a spec, opened as a pull request on the Nexus repository.
+    tool = "tool"
+    # Any other change to Nexus's code, also a spec in a pull request.
+    code = "code"
+
+
+class ProposalStatus(enum.StrEnum):
+    pending = "pending"
+    # Approved; a pull request is being opened.
+    applying = "applying"
+    applied = "applied"
+    denied = "denied"
+    # Approved, but applying it failed; `error` says why and it can be tried again.
+    failed = "failed"
+    # Applied, then undone by the owner.
+    reverted = "reverted"
+
+
+class ImprovementReview(Base):
+    """One self-review: what Nexus looked at (as counts and anonymous topics only) and how many
+    proposals came of it. `findings` is shown to the owner as is, so it never holds chat text,
+    names or user ids."""
+
+    __tablename__ = "improvement_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    status: Mapped[ReviewStatus] = mapped_column(_enum(ReviewStatus, "review_status"))
+    # schedule or manual
+    trigger: Mapped[str] = mapped_column(String(16))
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    findings: Mapped[dict] = mapped_column(JSON, default=dict)
+    proposals: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_improvement_reviews_created", "created_at"),)
+
+
+class Proposal(Base):
+    """An improvement Nexus drafted for the owner to approve or deny. Nothing in it applies
+    until they approve; then `result` records what changed, so it can be undone."""
+
+    __tablename__ = "improvement_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    review_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("improvement_reviews.id", ondelete="SET NULL")
+    )
+    kind: Mapped[ProposalKind] = mapped_column(_enum(ProposalKind, "proposal_kind"))
+    status: Mapped[ProposalStatus] = mapped_column(_enum(ProposalStatus, "proposal_status"))
+    title: Mapped[str] = mapped_column(String(200))
+    # Why, in a few sentences.
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # The figures behind it, one line each ("web_fetch failed 14 of 60 calls").
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    # low, medium or high
+    impact: Mapped[str] = mapped_column(String(16), default="medium")
+    effort: Mapped[str] = mapped_column(String(16), default="medium")
+    # What to apply: the skill's SKILL.md, the instruction text, the setting, or the spec.
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    # kind and title, normalised: the same idea isn't proposed twice.
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The owner's reason for a denial, which later reviews read.
+    note: Mapped[str | None] = mapped_column(Text)
+    # skill_id, the instruction or setting before the change, pr_url.
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_improvement_proposals_status_created", "status", "created_at"),
+        Index("ix_improvement_proposals_fingerprint", "fingerprint"),
+    )

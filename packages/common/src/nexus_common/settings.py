@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -207,6 +208,33 @@ class Settings(BaseSettings):
     alert_api_errors_5m: int = 5
     alert_job_failures_15m: int = 3
     alert_email: bool = True
+    # Model calls (from LiteLLM's spend logs): failed calls in 15 minutes, spend since midnight
+    # UTC in dollars, and the share of a person's budget spent before it is raised. 0 is off.
+    alert_llm_failures_15m: int = 5
+    alert_daily_spend_usd: float = 10.0
+    alert_budget_percent: int = 90
+
+    # LiteLLM's own database, read for the Admin page's Models tab (spend logs: one row per
+    # model call with its tokens, cost, timing and cache hit). Empty means the database called
+    # "litellm" next to DATABASE_URL, which is how compose.yaml sets it up.
+    litellm_database_url: str = ""
+
+    # Self-review (nexus_orchestrator/improve.py): every `improve_every_days` days Nexus looks
+    # at how it was used (counts and anonymous topics, never chats or names) and drafts
+    # proposals for the owner to approve or deny on the Admin page. 0 turns the schedule off;
+    # "Review now" still works. Topics need `improve_min_count` requests before they count.
+    improve_every_days: int = 7
+    improve_model: str = "nexus-mini"
+    improve_topic_model: str = "nexus-nano"
+    improve_read_requests: bool = True
+    improve_min_count: int = 3
+    improve_max_proposals: int = 5
+    improve_max_requests: int = 400
+    # Where approved code and tool proposals become pull requests, as owner/name. The Nexus
+    # GitHub App must be installed on that repository with contents and pull requests write.
+    # Empty means they are kept as an approved spec without a PR.
+    improve_repo: str = ""
+    improve_base_branch: str = "main"
 
     @property
     def github_enabled(self) -> bool:
@@ -215,6 +243,16 @@ class Settings(BaseSettings):
             and self.github_app_id
             and self.github_app_installation_id
             and self.github_app_private_key_b64
+        )
+
+    @property
+    def spend_logs_url(self) -> str:
+        if self.litellm_database_url:
+            return self.litellm_database_url
+        return (
+            make_url(self.database_url)
+            .set(database="litellm")
+            .render_as_string(hide_password=False)
         )
 
     @property

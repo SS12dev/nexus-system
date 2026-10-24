@@ -28,6 +28,7 @@ TEST_DATABASE_URL = os.environ.get(
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 DEV_TOKEN = "test-dev-token"
 TABLES = (
+    "improvement_proposals, improvement_reviews, "
     "message_links, links, projects, approvals, run_events, agent_runs, agent_systems, "
     "skill_usages, skill_versions, "
     "skills, instructions, tool_grants, memory_events, memories, episodes, profiles, attachments, "
@@ -49,6 +50,8 @@ def settings() -> Settings:
         dev_login_token=DEV_TOKEN,
         litellm_base_url="http://litellm.invalid",
         litellm_master_key="sk-test-master",
+        # The Models tab reads spend logs from here; tests make the table they need.
+        litellm_database_url=TEST_DATABASE_URL,
         deployer_token="test-deployer-token",
         library_path=str(Path(__file__).parent / "library"),
         # Off by default so scripted models aren't asked to route; routing tests turn it on.

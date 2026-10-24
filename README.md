@@ -364,9 +364,11 @@ on open and after a reconnect. three.js loads only on the home screen, as its ow
 
 ### Admin page
 
-Only owners get **Admin** in the menu (admins get **People** but not this page). A person
-filter at the top narrows Status, Usage and the Audit log to one person (tap a name) or several
-(tick them); service health, queues, API traffic and backups always cover all of Nexus.
+Only owners get **Admin** in the menu (admins get **People** but not this page). Its sections
+are grouped down the side (one scrolling row on a phone), with badges for active alerts and
+improvements waiting; the open one is in the address (`/admin?tab=models`). A person filter
+narrows Status, Models, Usage and the Audit log to one person (tap a name) or several (tick
+them); service health, queues, API traffic and backups always cover all of Nexus.
 
 - **Status:** whether Postgres, Valkey, LiteLLM, MinIO and both workers are up (workers report a
   heartbeat every 30 seconds), jobs waiting in each queue, the last 24 hours (turns, tokens,
@@ -375,19 +377,35 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   rate-limited calls, and the latest failed turns, runs and file parses with their error.
   The owner sees counts, costs and error messages, never chat content. Per-call traces stay in
   Langfuse (`LANGFUSE_URL`).
-- **Monitoring:** active alerts and the last 50 raised or resolved, then, over the last hour,
-  6 hours or 24 hours, every API route and every background job with its calls, failures, the
-  time half of them beat and the time 95% beat (and, for jobs, how long they waited in the
-  queue), and the latest 200 errors logged by the API, the workers or someone's browser, each
-  with its request, user, chat, job and trace ids and its stack. Figures are kept a day in Valkey.
-- **Alerts:** every `ALERT_INTERVAL_S` (60) one API replica checks the services above, the
-  worker heartbeats, the last backup, API errors in the last 5 minutes
-  (`ALERT_API_ERRORS_5M`, 5) and failed jobs in the last 15 (`ALERT_JOB_FAILURES_15M`, 3). A
-  problem seen in two checks in a row is raised; with SMTP set up every owner gets an email, and
-  another when it clears (`ALERT_EMAIL=false` keeps them on the page only). If the API itself is
-  down nothing can send, so a dead Mac or Docker stays silent.
-- **Configuration:** about sixty runtime settings in ten groups (logging, models, budgets, agent
-  teams, memory and context, sign-in and access, rate limits, alerts and backups, email, apps),
+- **Alerts:** what needs you now, every check with its current threshold, and the last 50
+  raised or resolved. Every `ALERT_INTERVAL_S` (60) one API replica checks the services above,
+  the worker heartbeats, the last backup, API errors in the last 5 minutes
+  (`ALERT_API_ERRORS_5M`, 5), failed jobs in the last 15 (`ALERT_JOB_FAILURES_15M`, 3), failed
+  model calls in the last 15 (`ALERT_LLM_FAILURES_15M`, 5), model spend since midnight UTC
+  (`ALERT_DAILY_SPEND_USD`, $10) and anyone who has spent most of their budget
+  (`ALERT_BUDGET_PERCENT`, 90%). A problem seen in two checks in a row is raised; with SMTP set
+  up every owner gets an email, and another when it clears (`ALERT_EMAIL=false` keeps them on
+  the page only). If the API itself is down nothing can send, so a dead Mac or Docker stays
+  silent.
+- **Models:** every model call over 24 hours, 7, 30 or 90 days or chosen dates, from LiteLLM's
+  spend logs (its own `litellm` database next to Nexus's; `LITELLM_DATABASE_URL` if elsewhere):
+  cost, calls and failures, tokens, latency (typical, slowest 5%, first token), LiteLLM's
+  response-cache hit rate and what it saved, and how much input OpenAI's prompt cache billed at
+  the cached price. Per hour or day, then by model, by what the call was for (chat replies,
+  routing, team design, agents, memory, skill drafting, self-review, embeddings: every call
+  carries a tag saying so) and by person, with the latest failed calls. Filter by person, model
+  and purpose. Valkey's own hit rate, memory and evictions sit underneath. Prompts and replies
+  are never read.
+- **Improvements:** what Nexus proposes to change about itself; see
+  [Self-review](#self-review).
+- **Monitoring:** over the last hour, 6 hours or 24 hours, every API route and every background
+  job with its calls, failures, the time half of them beat and the time 95% beat (and, for
+  jobs, how long they waited in the queue), and the latest 200 errors logged by the API, the
+  workers or someone's browser, each with its request, user, chat, job and trace ids and its
+  stack. Figures are kept a day in Valkey.
+- **Configuration:** about seventy runtime settings in eleven groups (logging, models, budgets,
+  agent teams, memory and context, sign-in and access, rate limits, alerts and backups,
+  self-review, email, apps),
   each with what it does, its `.env` name and its `.env` value. See
   [Changing settings without a redeploy](#changing-settings-without-a-redeploy).
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
@@ -401,6 +419,40 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
 
 On the People page an admin can also **sign someone out** on every device. Everyone can see and
 sign out their own signed-in devices on the Connections page.
+
+### Self-review
+
+Every `IMPROVE_EVERY_DAYS` (7; 0 turns the schedule off) the orchestrator looks at how Nexus has
+been used since the last review, and **Review now** on the Improvements tab starts one at once.
+It gathers counts only: chat turns and agent runs and how many failed; each tool's calls,
+failures and time; the roles, tools and shapes of the teams built; which shared skills were
+used; model cost by purpose; and failure messages with anything that looks like data (numbers,
+ids, quoted text, addresses) taken out. With `IMPROVE_READ_REQUESTS` on, the topic model
+(`IMPROVE_TOPIC_MODEL`, nano) also reads each request once, with the start of its reply, and
+names its topic in a few generic words and what the assistant lacked if it couldn't help; only
+the counts are kept, and only topics asked `IMPROVE_MIN_COUNT` (3) times or more. People who
+turned memory off in Settings are left out. None of it holds a name, an email, a user id or chat
+text, and the Improvements tab shows exactly what the review saw.
+
+One call to `IMPROVE_MODEL` (mini, a cent or two) then drafts up to `IMPROVE_MAX_PROPOSALS` (5)
+proposals from it, given what Nexus can already do and every earlier proposal with your reasons
+for denials, so it doesn't repeat itself. Each is checked before it is kept: a skill must parse,
+an instruction must name a real role, a setting must be a valid value (and never sign-up,
+dev login or where code goes). You get an email when SMTP is set up. Nothing changes until you
+approve:
+
+| Kind | On approval | Undo |
+| --- | --- | --- |
+| Skill | a shared skill, on for everyone | turns it off |
+| Instruction | added to the global or a role's instructions | puts the text back, unless edited since |
+| Setting | changed as on the Configuration tab | puts the old value back |
+| Tool, code change | a draft pull request on `IMPROVE_REPO` with the spec in `docs/proposals/`, opened by the GitHub App | close the pull request |
+
+Implement a code proposal on its branch (by hand, with a Claude Code session or a dev team),
+then mark it ready and merge as usual; nothing merges by itself. Without `IMPROVE_REPO` (set it
+to `SS12dev/nexus-system` on the Configuration tab) an approved code proposal stays a spec on
+the page. The App needs installing on that repository too; see
+[docs/github-app.md](docs/github-app.md#pull-requests-on-nexus-itself).
 
 ### Changing settings without a redeploy
 
