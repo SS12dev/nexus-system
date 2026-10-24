@@ -64,7 +64,8 @@ export function AppsPage() {
         <p className="mb-5 text-sm text-slate-400">
           Software {assistant}'s teams built, running on this machine.{" "}
           {owner ? "You see everyone's apps." : "Members can have 3 running at once."} Ask {assistant} in a chat to
-          build one.
+          build one. New apps are public, so their links can be shared (the code stays in a private repo);
+          make one private to keep it to its owner, who opens it signed in to Nexus.
         </p>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {apps === null ? (

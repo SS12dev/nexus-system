@@ -74,8 +74,12 @@ def dev_agents() -> list[dict]:
                 "app at the project root; web_fastapi: web/ and api/; node: web/ and server/); "
                 "Acceptance criteria, numbered and each one testable; Test plan: unit tests for "
                 "the logic and one Playwright smoke test that loads the page, does the main "
-                "interaction and checks there are no console errors. Keep it short enough to "
-                "read in a minute; the user sees it. Then call submit_plan."
+                "interaction and checks there are no console errors. Plan what the user asked "
+                "for and what it needs to work, nothing more. Nexus itself pushes the repo, "
+                "deploys the app and gives the links, so leave out CI, deployment, hosting, "
+                "repo or live links and post-deploy checks, and every criterion must be "
+                "checkable in the project folder. Keep it short enough to read in a minute; "
+                "the user sees it. Then call submit_plan."
             ),
         },
         {
@@ -153,7 +157,10 @@ def dev_agents() -> list[dict]:
                 "tester for test code); leave out style preferences and nice-to-haves, and "
                 "never ask for extra summary or report files beyond README.md. The house test "
                 "configs (vitest.config.ts, playwright.config.ts, preview.config.ts, pytest.ini) "
-                "are fixed: don't ask for changes to them. Call submit_review."
+                "are fixed: don't ask for changes to them. Nexus pushes the repo, deploys the app "
+                "and adds the links afterwards, so never ask for CI, deployment config, or repo "
+                "or live links in README.md, and pass over criteria about them. Call "
+                "submit_review."
             ),
         },
     ]

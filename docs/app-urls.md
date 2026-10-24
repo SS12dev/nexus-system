@@ -1,7 +1,8 @@
 # App addresses
 
 Every app a software team deploys gets its own address on `APPS_DOMAIN`, for example
-`https://2048.servhub.cc`. Apps are private until their owner makes them public.
+`https://2048.servhub.cc`. New apps are public: anyone with the link can open them, while the code stays in a private
+GitHub repo. An owner can make one private.
 
 ## Names
 
@@ -40,8 +41,8 @@ The Nexus session cookie has no `Domain` either, so browsers only ever send it t
 app's cookie opens that one app and nothing else, so an app reading its own cookies learns
 nothing useful.
 
-**Make public** on the Apps page (or "make 2048 public" to Nexus) removes the middleware;
-**Make private** adds it back. Either takes a few seconds: the app's containers are recreated
+Apps start public (`projects.public` defaults to true). **Make private** on the Apps page (or
+"make 2048 private" to Nexus) adds the middleware; **Make public** removes it again. Either takes a few seconds: the app's containers are recreated
 from the same images, not rebuilt.
 
 The deployer's own health check and screenshot get past the check with a key for that one host,

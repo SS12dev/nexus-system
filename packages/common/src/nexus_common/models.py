@@ -1032,8 +1032,9 @@ class Project(Base):
     deploy_error: Mapped[str | None] = mapped_column(Text)
     # Apps have no internet unless their project opts in.
     internet: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Private apps open only for their owner and Nexus's owner, after signing in to Nexus.
-    public: Mapped[bool] = mapped_column(Boolean, default=False)
+    # New apps are public: anyone with the link opens them (the code stays in a private repo).
+    # A private one opens only for its owner and Nexus's owner, after signing in to Nexus.
+    public: Mapped[bool] = mapped_column(Boolean, default=True)
     # The last deploy's screenshot, a file in the owner's library.
     screenshot_file_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("files.id", ondelete="SET NULL")

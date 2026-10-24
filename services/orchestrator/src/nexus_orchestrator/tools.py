@@ -693,7 +693,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             url = row.live_url or row.app_slug
         if public:
             return f"{row.name} is now public: anyone with the link can open {url}."
-        return f"{row.name} is private again: only its owner can open {url}, after signing in."
+        return f"{row.name} is now private: only its owner can open {url}, after signing in."
 
     async def github_transfer(project: str, github_user: str) -> str:
         """Move one of the user's software projects (by name or repo name) from Nexus's

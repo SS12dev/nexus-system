@@ -15,10 +15,10 @@ from nexus_common.models import Project
 HOST = "2048.apps.localhost"
 
 
-async def add_app(sessionmaker, user_id, slug="2048", **kw) -> uuid.UUID:
+async def add_app(sessionmaker, user_id, slug="2048", public=False, **kw) -> uuid.UUID:
     async with sessionmaker() as db:
         p = Project(user_id=uuid.UUID(user_id), workbench_id=f"w-{slug}", name=slug,
-                    app_slug=slug, app_state="running",
+                    app_slug=slug, app_state="running", public=public,
                     live_url=f"http://{slug}.apps.localhost:8080", **kw)  # fmt: skip
         db.add(p)
         await db.commit()

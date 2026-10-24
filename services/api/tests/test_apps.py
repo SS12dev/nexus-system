@@ -156,21 +156,22 @@ async def test_deployer_errors_are_explained(owner, people, sessionmaker, deploy
 async def test_public_and_private(owner, people, sessionmaker, deployer):
     owner_id, member_id, member = people
     app_id = await add_app(sessionmaker, member_id, "snake-priya")
-    assert (await owner.get("/api/apps")).json()[0]["public"] is False
-    resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": True})
-    assert resp.status_code == 200 and resp.json()["public"] is True
-    # The same images again, without the sign-in check in front.
-    assert deployer.calls == [("deploy", "snake-priya")]
-    assert deployer.deploys[0]["build"] is False and deployer.deploys[0]["private"] is False
+    # New apps are public: links are for sharing.
+    assert (await owner.get("/api/apps")).json()[0]["public"] is True
     resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": False})
-    assert resp.json()["public"] is False and deployer.deploys[1]["private"] is True
+    assert resp.status_code == 200 and resp.json()["public"] is False
+    # The same images again, with the sign-in check in front.
+    assert deployer.calls == [("deploy", "snake-priya")]
+    assert deployer.deploys[0]["build"] is False and deployer.deploys[0]["private"] is True
+    resp = await member.post(f"/api/apps/{app_id}/visibility", json={"public": True})
+    assert resp.json()["public"] is True and deployer.deploys[1]["private"] is False
     # Only the app's owner (or Nexus's) may change it.
     mine = await add_app(sessionmaker, owner_id, "2048")
     assert (
-        await member.post(f"/api/apps/{mine}/visibility", json={"public": True})
+        await member.post(f"/api/apps/{mine}/visibility", json={"public": False})
     ).status_code == 404
     deployer.down = True
-    resp = await owner.post(f"/api/apps/{app_id}/visibility", json={"public": True})
+    resp = await owner.post(f"/api/apps/{app_id}/visibility", json={"public": False})
     assert resp.status_code == 502
 
 
