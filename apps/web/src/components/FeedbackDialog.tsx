@@ -1,15 +1,43 @@
-import { X } from "lucide-react";
+import { AlertTriangle, Heart, Lightbulb, X, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "react-router";
 import { api } from "../lib/api";
 import type { FeedbackKind } from "../lib/types";
 import { toast } from "./Feedback";
 
-const KINDS: { id: FeedbackKind; label: string; hint: string }[] = [
-  { id: "problem", label: "Something's wrong", hint: "What happened, and what did you expect?" },
-  { id: "idea", label: "An idea", hint: "What would make Nexus more useful to you?" },
-  { id: "praise", label: "Something I like", hint: "What's working well?" },
+const KINDS: { id: FeedbackKind; label: string; hint: string; icon: LucideIcon }[] = [
+  {
+    id: "problem",
+    label: "Something's wrong",
+    hint: "What happened, and what did you expect?",
+    icon: AlertTriangle,
+  },
+  { id: "idea", label: "An idea", hint: "What would make Nexus more useful to you?", icon: Lightbulb },
+  { id: "praise", label: "Something I like", hint: "What's working well?", icon: Heart },
 ];
+
+/** Each kind's colour: red for a problem, sky for an idea, green for praise. Picked, it tints
+ * its chip, the text box's border and the Send button; unpicked chips keep a hint of it. */
+const TONE: Record<FeedbackKind, { on: string; off: string; box: string; send: string }> = {
+  problem: {
+    on: "border-rose-400 bg-rose-500/15 text-rose-200",
+    off: "border-rose-500/25 text-rose-300/80 hover:bg-rose-500/10",
+    box: "border-rose-500/50 focus:border-rose-400 focus:outline-rose-400",
+    send: "bg-rose-500 hover:bg-rose-400",
+  },
+  idea: {
+    on: "border-sky-400 bg-sky-500/15 text-sky-200",
+    off: "border-sky-500/25 text-sky-300/80 hover:bg-sky-500/10",
+    box: "border-sky-500/50 focus:border-sky-400 focus:outline-sky-400",
+    send: "bg-sky-500 hover:bg-sky-400",
+  },
+  praise: {
+    on: "border-emerald-400 bg-emerald-500/15 text-emerald-200",
+    off: "border-emerald-500/25 text-emerald-300/80 hover:bg-emerald-500/10",
+    box: "border-emerald-500/50 focus:border-emerald-400 focus:outline-emerald-400",
+    send: "bg-emerald-500 hover:bg-emerald-400",
+  },
+};
 
 /** Send feedback, from the menu: straight to the owner (Admin › Feedback, and by email). */
 export function FeedbackDialog({ onClose }: { onClose: () => void }) {
@@ -40,7 +68,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-labelledby="feedback-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-xl border border-edge bg-panel p-5 shadow-2xl"
+        className="w-full max-w-lg rounded-xl border border-edge bg-panel p-5 shadow-2xl"
       >
         <div className="mb-3 flex items-center">
           <h2 id="feedback-title" className="font-medium">
@@ -57,10 +85,11 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
               type="button"
               aria-pressed={kind === k.id}
               onClick={() => setKind(k.id)}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                kind === k.id ? "border-sky-400 bg-sky-500/15 text-sky-200" : "border-edge text-slate-300 hover:bg-edge/60"
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition ${
+                kind === k.id ? TONE[k.id].on : TONE[k.id].off
               }`}
             >
+              <k.icon size={14} aria-hidden />
               {k.label}
             </button>
           ))}
@@ -73,7 +102,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
           rows={5}
           maxLength={4000}
           onChange={(e) => setMessage(e.target.value)}
-          className="w-full rounded-md border border-edge bg-ink px-3 py-2 text-sm"
+          className={`w-full rounded-md border bg-ink px-3 py-2 text-sm transition-colors ${TONE[kind].box}`}
         />
         <p className="mt-1 text-xs text-slate-500">
           Goes to the owner with your name and the page you're on. Never your chats.
@@ -86,7 +115,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
           <button
             onClick={send}
             disabled={sending || message.trim().length < 3}
-            className="rounded-md bg-sky-500 px-4 py-1.5 text-sm font-medium text-ink hover:bg-sky-400 disabled:opacity-50"
+            className={`rounded-md px-4 py-1.5 text-sm font-medium text-ink transition-colors disabled:opacity-50 ${TONE[kind].send}`}
           >
             Send
           </button>
