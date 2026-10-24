@@ -222,7 +222,9 @@ both.
 jobs from the `arq:docs` queue: it parses uploads (Docling for PDFs and images, MarkItDown for
 Office files), splits them into chunks, embeds them and stores them for search. Every ten
 minutes it embeds anything that was missed while Ollama was off. It is the biggest image (a few
-GB, because of Docling and PyTorch); `DOCLING=false` in `.env` builds a small one without OCR.
+GB, because of Docling and PyTorch). The build fetches only the Docling models it uses (layout,
+tables, RapidOCR on torch) and retries the download, and `DOCLING=false` in `.env` builds a
+small one without OCR.
 
 **backup** ([infra/backup](../infra/backup)) checks every minute for a **Back up now** from the
 Admin page and runs the daily backup after `BACKUP_HOUR_UTC` (02:30 IST by default). Each backup
