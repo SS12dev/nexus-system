@@ -18,14 +18,19 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexus_common import graph
 from nexus_common.embeddings import EmbeddingError
 from nexus_common.events import Event, publish
+from nexus_common.library import document_text
 from nexus_common.litellm import ensure_user_key
 from nexus_common.memory import get_profile, mark_profile_stale, memory_payload, record
 from nexus_common.models import (
     AgentSystem,
     Chat,
+    Entity,
     Episode,
+    File,
+    FileStatus,
     Memory,
     MemoryKind,
     Message,
@@ -39,7 +44,13 @@ from nexus_common.models import (
 )
 from nexus_common.search import hybrid_search
 from nexus_orchestrator.llm import parse_json
-from nexus_orchestrator.prompts import EPISODE, MEMORY_DECIDE, MEMORY_EXTRACT, PROFILE
+from nexus_orchestrator.prompts import (
+    EPISODE,
+    GRAPH_EXTRACT,
+    MEMORY_DECIDE,
+    MEMORY_EXTRACT,
+    PROFILE,
+)
 from nexus_orchestrator.turn import TurnDeps
 
 log = logging.getLogger(__name__)
@@ -145,9 +156,10 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
         data = parse_json(raw)
         candidates = _candidates(data.get("memories"))
         forget = [str(f)[:300] for f in data.get("forget") or [] if str(f).strip()][:5]
-        if not candidates and not forget:
+        found = graph.parse_graph(data) if deps.settings.graph_enabled else graph.Extracted()
+        if not candidates and not forget and not found:
             return
-        await apply_candidates(deps, db, user, chat, latest_user, candidates, forget)
+        await apply_candidates(deps, db, user, chat, latest_user, candidates, forget, found)
 
 
 # Task requests the extractor still sometimes saves ("Wants help choosing a bike", "Agreed to
@@ -185,6 +197,7 @@ def _candidates(raw) -> list[dict]:
                 "content": str(item["content"]).strip()[:500],
                 "kind": kind if kind in MemoryKind.__members__ else "fact",
                 "confidence": min(max(conf, 0.1), 1.0),
+                "about": graph.about_names(item.get("about")),
             }
         )
     return out[:10]
@@ -198,6 +211,7 @@ async def apply_candidates(
     source: Message,
     candidates: list[dict],
     forget: list[str],
+    found: graph.Extracted | None = None,
 ) -> None:
     vectors: list[list[float] | None] = [None] * len(candidates)
     model = ""
@@ -246,6 +260,8 @@ async def apply_candidates(
 
     now = utcnow()
     changed: list[tuple[Memory, str]] = []
+    # Which memory each candidate ended up as, to link it to the entities it is about.
+    by_candidate: dict[int, Memory] = {}
     handled: set[int] = set()
     for act in actions:
         if not isinstance(act, dict):
@@ -261,6 +277,7 @@ async def apply_candidates(
             old.reinforced_at = now
             record(db, old, "reinforce", "assistant", None, source.id)
             changed.append((old, "reinforce"))
+            by_candidate[i] = old
         elif op == "UPDATE" and old is not None and not old.pinned:
             content = str(act.get("content") or cand["content"]).strip()[:500]
             old.content = content
@@ -274,6 +291,7 @@ async def apply_candidates(
                 old.embedding = old.embedding_model = None  # the backfill re-embeds it
             record(db, old, "update", "assistant", content, source.id)
             changed.append((old, "update"))
+            by_candidate[i] = old
         elif op in ("ADD", "UPDATE"):
             # UPDATE of a pinned or unknown memory falls back to adding the new fact.
             m = Memory(
@@ -292,6 +310,7 @@ async def apply_candidates(
             await db.flush()
             record(db, m, "add", "assistant", m.content, source.id)
             changed.append((m, "add"))
+            by_candidate[i] = m
 
     deleted: list[Memory] = []
     for target in to_delete:
@@ -301,7 +320,27 @@ async def apply_candidates(
                 await db.delete(m)
                 deleted.append(m)
 
-    if not changed and not deleted:
+    linked = 0
+    if deps.settings.graph_enabled and (found or by_candidate):
+        ops = {m.id: op for m, op in changed}
+        links = []
+        for i, m in by_candidate.items():
+            about = candidates[i]["about"]
+            if ops[m.id] == "update":
+                await graph.forget_mentions(db, memory_id=m.id)
+            if about:
+                links.append(({"memory_id": m.id}, about))
+            # A reinforced memory keeps its links unless the model named new ones.
+            if about or ops[m.id] != "reinforce":
+                m.graph_at = now
+        linked = await graph.ingest(
+            db, deps.embedder, user, found or graph.Extracted(), chat_id=chat.id, links=links
+        )
+    if deleted:
+        await db.flush()
+        await graph.prune(db, user.id)
+
+    if not changed and not deleted and not linked:
         return
     if any(op != "reinforce" for _, op in changed) or deleted:
         await mark_profile_stale(db, user.id)
@@ -398,7 +437,8 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
             name="episode",
             session_id=str(chat_id),
         )
-        summary = str(parse_json(raw).get("summary") or "").strip()
+        data = parse_json(raw)
+        summary = str(data.get("summary") or "").strip()
         if not summary:
             return False
         vec, model = await deps.embedder.try_embed_one(db, summary)
@@ -410,8 +450,128 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
         episode.message_count = count
         episode.embedding, episode.embedding_model = vec, (model or None)
         episode.updated_at = now
+        if deps.settings.graph_enabled:
+            await db.flush()
+            found = graph.parse_graph(data)
+            await graph.forget_mentions(db, episode_id=episode.id)
+            names = [graph.norm(e["name"]) for e in found.entities]
+            await graph.ingest(
+                db,
+                deps.embedder,
+                user,
+                found,
+                chat_id=chat_id,
+                links=[({"episode_id": episode.id}, names)],
+            )
+            episode.graph_at = now
         await db.commit()
         return True
+
+
+# --- Knowledge graph backfill -----------------------------------------------------------------
+
+# Items per call and characters per item when linking memories, past chats and files that the
+# chat-time extraction didn't cover: ones added on the Memory page, files, and everything from
+# before the graph existed.
+GRAPH_BATCH = 20
+GRAPH_ITEM_CHARS = 1200
+GRAPH_CALLS_PER_USER = 3
+
+
+async def link_graph(deps: TurnDeps, max_users: int = 20) -> int:
+    """Link pending items into each user's graph, a few calls per user per run."""
+    if not deps.settings.graph_enabled:
+        return 0
+    async with deps.sessionmaker() as db:
+        pending = (
+            select(Memory.user_id.label("user_id"))
+            .where(Memory.graph_at.is_(None))
+            .union(
+                select(Episode.user_id).where(Episode.graph_at.is_(None)),
+                select(File.user_id).where(
+                    File.graph_at.is_(None), File.status == FileStatus.ready
+                ),
+            )
+            .subquery()
+        )
+        user_ids = (
+            await db.scalars(
+                select(User.id)
+                .join(pending, pending.c.user_id == User.id)
+                .outerjoin(Profile, Profile.user_id == User.id)
+                .where(User.status == UserStatus.active, Profile.memory_enabled.is_not(False))
+                .limit(max_users)
+            )
+        ).all()
+    done = 0
+    for user_id in user_ids:
+        for _ in range(GRAPH_CALLS_PER_USER):
+            try:
+                n = await _link_batch(deps, user_id)
+            except Exception:
+                log.exception("Linking the graph for %s failed", user_id)
+                break
+            done += n
+            if n < GRAPH_BATCH:
+                break
+    return done
+
+
+async def _link_batch(deps: TurnDeps, user_id: uuid.UUID) -> int:
+    async with deps.sessionmaker() as db:
+        user = await db.get(User, user_id)
+        items: list[tuple[dict, str, Memory | Episode | File]] = []
+        for m in (
+            await db.scalars(
+                select(Memory)
+                .where(Memory.user_id == user_id, Memory.graph_at.is_(None))
+                .limit(GRAPH_BATCH)
+            )
+        ).all():
+            items.append(({"memory_id": m.id}, f"Memory: {m.content}", m))
+        for e in (
+            await db.scalars(
+                select(Episode)
+                .where(Episode.user_id == user_id, Episode.graph_at.is_(None))
+                .limit(max(0, GRAPH_BATCH - len(items)))
+            )
+        ).all():
+            items.append(({"episode_id": e.id}, f"Past chat: {e.content[:GRAPH_ITEM_CHARS]}", e))
+        for f in (
+            await db.scalars(
+                select(File)
+                .where(
+                    File.user_id == user_id,
+                    File.graph_at.is_(None),
+                    File.status == FileStatus.ready,
+                )
+                .limit(max(0, GRAPH_BATCH - len(items)))
+            )
+        ).all():
+            excerpt = await document_text(db, f.id, limit=GRAPH_ITEM_CHARS)
+            items.append(({"file_id": f.id}, f"Document {f.name!r}: {excerpt}", f))
+        if not items:
+            return 0
+        listing = "\n\n".join(f"{i}: {text}" for i, (_t, text, _r) in enumerate(items))
+        raw = await ask_memory_model(
+            deps, db, user, GRAPH_EXTRACT, f"Items:\n\n{listing}", name="graph", session_id=None
+        )
+        data = parse_json(raw)
+        about: dict[int, list[str]] = {}
+        for a in data.get("about") or []:
+            if isinstance(a, dict) and isinstance(a.get("item"), int):
+                about[a["item"]] = graph.about_names(a.get("entities"))
+        now = utcnow()
+        links = []
+        for i, (target, _text, row) in enumerate(items):
+            await graph.forget_mentions(db, **target)
+            if about.get(i):
+                links.append((target, about[i]))
+            row.graph_at = now
+        await graph.ingest(db, deps.embedder, user, graph.parse_graph(data), links=links)
+        await graph.prune(db, user_id)
+        await db.commit()
+        return len(items)
 
 
 # --- Profile ---------------------------------------------------------------------------------
@@ -512,9 +672,13 @@ async def nightly(deps: TurnDeps) -> None:
             await mark_profile_stale(db, drop.user_id)
             await db.delete(drop)
             gone.add(drop.id)
+        # Entities only deleted memories and chats mentioned.
+        pruned = await graph.prune(db)
         stale = (await db.scalars(select(Profile.user_id).where(Profile.stale.is_(True)))).all()
         await db.commit()
-        log.info("Nightly memory: %d faded, %d merged", len(faded), len(gone))
+        log.info(
+            "Nightly memory: %d faded, %d merged, %d entities pruned", len(faded), len(gone), pruned
+        )
     for user_id in stale:
         try:
             await rebuild_profile(deps, user_id)
@@ -536,6 +700,8 @@ async def embed_missing(deps: TurnDeps, limit: int = 256) -> int:
             Episode: lambda r: r.content,
             Skill: lambda r: f"{r.name}: {r.description}",
             AgentSystem: lambda r: f"{r.name}: {r.goal}",
+            # Entities are matched by name, so their vector is of the name alone.
+            Entity: lambda r: r.name,
         }
         for table, text_of in texts.items():
             rows = (

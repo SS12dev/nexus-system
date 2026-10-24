@@ -1,6 +1,7 @@
-import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Brain, History, List, Network, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
+import { Connections } from "../components/Connections";
 import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
 import { Select } from "../components/Select";
@@ -49,8 +50,10 @@ export function MemoryPage() {
   const [kind, setKind] = useState<MemoryKind>("preference");
   const [error, setError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
-  // Tapping a memory in the orb opens it here.
-  const focus = useSearchParams()[0].get("focus");
+  // Tapping a memory in the orb opens it here; ?view=connections opens the graph.
+  const [params, setParams] = useSearchParams();
+  const focus = params.get("focus");
+  const view = params.get("view") === "connections" ? "connections" : "memories";
 
   const load = useCallback(async (q?: string) => {
     const [p, list] = await Promise.all([api.profile(), api.memories(q)]);
@@ -227,42 +230,68 @@ export function MemoryPage() {
           </form>
         )}
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(() => load(query.trim() || undefined));
-          }}
-          className="mb-4 flex items-center gap-2 rounded-md border border-edge bg-panel px-3"
-        >
-          <Search size={16} className="text-slate-500" />
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              if (!e.target.value) run(() => load());
-            }}
-            placeholder={`Search ${profile?.memory_count ?? ""} memories`}
-            className="flex-1 bg-transparent py-2 outline-none"
-          />
-        </form>
-
-        <div className="space-y-2">
-          {memories.length === 0 && (
-            <p className="text-slate-400">
-              {query ? "Nothing found." : `Nothing yet. ${assistant} learns as you chat.`}
-            </p>
-          )}
-          {memories.map((m) => (
-            <MemoryRow
-              key={m.id}
-              memory={m}
-              focused={m.id === focus}
-              canEdit={canEdit}
-              onChange={(changes) => run(async () => replace(await api.updateMemory(m.id, changes)))}
-              onDelete={() => remove(m)}
-            />
+        <div className="mb-4 inline-flex rounded-md border border-edge bg-panel p-0.5 text-sm" role="tablist">
+          {(
+            [
+              ["memories", "Memories", List],
+              ["connections", "Connections", Network],
+            ] as const
+          ).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={view === key}
+              onClick={() => setParams(key === "memories" ? {} : { view: key }, { replace: true })}
+              className={`flex items-center gap-1.5 rounded px-3 py-1 ${view === key ? "bg-edge text-white" : "text-slate-400 hover:text-slate-200"}`}
+            >
+              <Icon size={14} /> {label}
+            </button>
           ))}
         </div>
+
+        {view === "connections" ? (
+          <Connections canEdit={canEdit} onOpenMemory={(id) => setParams({ focus: id }, { replace: true })} />
+        ) : (
+          <>
+        <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(() => load(query.trim() || undefined));
+            }}
+            className="mb-4 flex items-center gap-2 rounded-md border border-edge bg-panel px-3"
+          >
+            <Search size={16} className="text-slate-500" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!e.target.value) run(() => load());
+              }}
+              placeholder={`Search ${profile?.memory_count ?? ""} memories`}
+              className="flex-1 bg-transparent py-2 outline-none"
+            />
+          </form>
+  
+          <div className="space-y-2">
+            {memories.length === 0 && (
+              <p className="text-slate-400">
+                {query ? "Nothing found." : `Nothing yet. ${assistant} learns as you chat.`}
+              </p>
+            )}
+            {memories.map((m) => (
+              <MemoryRow
+                key={m.id}
+                memory={m}
+                focused={m.id === focus}
+                canEdit={canEdit}
+                onChange={(changes) => run(async () => replace(await api.updateMemory(m.id, changes)))}
+                onDelete={() => remove(m)}
+              />
+            ))}
+          </div>
+  
+          </>
+        )}
 
         {canEdit && (profile?.memory_count ?? 0) > 0 && (
           <button onClick={forgetAll} className="mt-10 text-sm text-rose-400 hover:text-rose-300">
@@ -472,6 +501,11 @@ function HowItWorks({ assistant }: { assistant: string }) {
           </li>
           <li>
             Unpinned memories fade if nothing confirms them for 60 days; near duplicates are merged overnight.
+          </li>
+          <li>
+            <b>Connections</b> shows who and what your memories are about (people, projects, places, topics,
+            tools) and how they relate, noted from the same chats. When a fact stops being true it's kept with
+            the date it ended. Removing one keeps its memories.
           </li>
           <li>
             The clock icon shows a memory's history. <b>Forget everything</b> at the bottom wipes memories,

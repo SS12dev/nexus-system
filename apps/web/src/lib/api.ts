@@ -35,6 +35,7 @@ import type {
   ToolEntry,
   Alerts,
   Improvements,
+  KnowledgeGraph,
   LlmQuery,
   LlmUsage,
   Monitoring,
@@ -179,6 +180,8 @@ export const api = {
   deleteMemory: (id: string, rebuild = false) =>
     request<void>(`/api/memories/${id}${rebuild ? "?rebuild=true" : ""}`, { method: "DELETE" }),
   memoryEvents: (id: string) => request<MemoryEvent[]>(`/api/memories/${id}/events`),
+  knowledgeGraph: () => request<KnowledgeGraph>("/api/memories/graph"),
+  deleteEntity: (id: string) => request<void>(`/api/memories/entities/${id}`, { method: "DELETE" }),
   forgetEverything: () => request<void>("/api/memories", { method: "DELETE" }),
   profile: () => request<Profile>("/api/memories/profile"),
   setMemoryEnabled: (memory_enabled: boolean) =>

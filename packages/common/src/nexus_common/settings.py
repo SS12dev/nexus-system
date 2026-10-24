@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     inline_document_chars: int = 16000
     # A chat is summarised once it has been quiet this long.
     episode_idle_minutes: int = 20
+    # Knowledge graph: the people, projects and topics memories are about, and how they relate.
+    graph_enabled: bool = True
     # Nightly memory upkeep (decay, merge, profile rebuild), in UTC. 21:30 UTC is 03:00 IST.
     memory_nightly_hour_utc: int = 21
     memory_nightly_minute_utc: int = 30

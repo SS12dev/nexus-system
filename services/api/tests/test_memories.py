@@ -1,3 +1,10 @@
+import uuid
+
+from sqlalchemy import select
+
+from nexus_common.models import Entity, Mention, Relation, User
+
+
 async def add(client, content, **extra):
     resp = await client.post("/api/memories", json={"content": content, **extra})
     assert resp.status_code == 201, resp.text
@@ -53,3 +60,76 @@ async def test_memories_are_private(owner, client_for, invite):
     assert (await other.get("/api/memories", params={"q": "Falcon"})).json() == []
     assert (await other.patch(f"/api/memories/{m['id']}", json={"pinned": True})).status_code == 404
     assert (await other.delete(f"/api/memories/{m['id']}")).status_code == 404
+
+
+async def seed_graph(sessionmaker, email: str, memory_id: str):
+    """Nexus uses LangGraph, both mentioned by the memory."""
+    async with sessionmaker() as db:
+        user = await db.scalar(select(User).where(User.email == email))
+        nexus = Entity(user_id=user.id, type="project", name="Nexus", aliases=[], summary="")
+        lg = Entity(user_id=user.id, type="tool", name="LangGraph", aliases=[], summary="")
+        db.add_all([nexus, lg])
+        await db.flush()
+        db.add(
+            Relation(
+                user_id=user.id,
+                src_id=nexus.id,
+                dst_id=lg.id,
+                predicate="uses",
+                fact="Nexus uses LangGraph.",
+            )
+        )
+        for e in (nexus, lg):
+            db.add(Mention(user_id=user.id, entity_id=e.id, memory_id=uuid.UUID(memory_id)))
+        await db.commit()
+        return nexus.id, lg.id
+
+
+async def test_connections_follow_their_memories(owner, sessionmaker):
+    m = await add(owner, "Builds Nexus on LangGraph")
+    nexus_id, lg_id = await seed_graph(sessionmaker, "owner@example.com", m["id"])
+
+    g = (await owner.get("/api/memories/graph")).json()
+    by_name = {e["name"]: e for e in g["entities"]}
+    assert by_name["Nexus"]["memories"] == 1 and by_name["Nexus"]["memory_ids"] == [m["id"]]
+    (rel,) = g["relations"]
+    assert rel["src"] == str(nexus_id) and rel["dst"] == str(lg_id) and rel["valid_to"] is None
+
+    # Editing a memory unlinks it until the graph job links the new wording.
+    await owner.patch(f"/api/memories/{m['id']}", json={"content": "Builds Nexus"})
+    g = (await owner.get("/api/memories/graph")).json()
+    assert all(e["memories"] == 0 for e in g["entities"])
+
+
+async def test_deleting_a_memory_prunes_what_only_it_mentioned(owner, sessionmaker):
+    keep = await add(owner, "Uses LangGraph at work")
+    gone = await add(owner, "Builds Nexus on LangGraph")
+    # LangGraph is also mentioned by another memory, so it survives.
+    _nexus, lg_id = await seed_graph(sessionmaker, "owner@example.com", gone["id"])
+    async with sessionmaker() as db:
+        lg = await db.get(Entity, lg_id)
+        db.add(Mention(user_id=lg.user_id, entity_id=lg.id, memory_id=uuid.UUID(keep["id"])))
+        await db.commit()
+
+    assert (await owner.delete(f"/api/memories/{gone['id']}")).status_code == 204
+    g = (await owner.get("/api/memories/graph")).json()
+    assert [e["name"] for e in g["entities"]] == ["LangGraph"] and g["relations"] == []
+
+
+async def test_delete_entity_and_forget_everything(owner, sessionmaker, client_for, invite):
+    m = await add(owner, "Builds Nexus on LangGraph")
+    nexus_id, _lg = await seed_graph(sessionmaker, "owner@example.com", m["id"])
+
+    await invite(owner, "friend@example.com")
+    friend = await client_for("friend@example.com")
+    assert (await friend.delete(f"/api/memories/entities/{nexus_id}")).status_code == 404
+    assert (await friend.get("/api/memories/graph")).json() == {"entities": [], "relations": []}
+
+    assert (await owner.delete(f"/api/memories/entities/{nexus_id}")).status_code == 204
+    g = (await owner.get("/api/memories/graph")).json()
+    assert [e["name"] for e in g["entities"]] == ["LangGraph"] and g["relations"] == []
+    # The memory itself stays.
+    assert len((await owner.get("/api/memories")).json()) == 1
+
+    assert (await owner.delete("/api/memories")).status_code == 204
+    assert (await owner.get("/api/memories/graph")).json()["entities"] == []

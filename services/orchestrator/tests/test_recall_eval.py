@@ -32,7 +32,11 @@ async def setup(sessionmaker, embedder, user_id, contents):
         for c in contents:
             vec, model = await embedder.embed_one(db, c)
             m = Memory(
-                user_id=user_id, kind=MemoryKind.fact, content=c, embedding=vec, embedding_model=model
+                user_id=user_id,
+                kind=MemoryKind.fact,
+                content=c,
+                embedding=vec,
+                embedding_model=model,
             )
             db.add(m)
             await db.flush()

@@ -185,8 +185,14 @@ async def every_ten_minutes(ctx: dict) -> None:
     deps: TurnDeps = ctx["deps"]
     summarised = await memory.summarize_chats(deps)
     embedded = await memory.embed_missing(deps)
-    if summarised or embedded:
-        log.info("Summarised %d chats, embedded %d rows", summarised, embedded)
+    linked = await memory.link_graph(deps)
+    if summarised or embedded or linked:
+        log.info(
+            "Summarised %d chats, embedded %d rows, linked %d into the graph",
+            summarised,
+            embedded,
+            linked,
+        )
 
 
 @traced_job

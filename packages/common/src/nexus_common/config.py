@@ -365,6 +365,16 @@ OPTIONS: tuple[Option, ...] = (
         unit="minutes",
     ),
     Option(
+        "graph_enabled",
+        "Memory and context",
+        "Build the knowledge graph",
+        "Note the people, projects, places, topics and tools memories, past chats and files are "
+        "about, and how they relate, in the same memory-model call that saves memories (files "
+        "and memories you add yourself take one small call per batch). Shown under Connections "
+        "on the Memory page. Off stops adding to it; what is there stays.",
+        "bool",
+    ),
+    Option(
         "memory_nightly_hour_utc",
         "Memory and context",
         "Nightly memory upkeep hour (UTC)",

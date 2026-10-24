@@ -68,7 +68,7 @@ team with their changes. Apps a team runs are private: only {name} can open them
 signing in. When they ask to share one or make it public (or private again), use \
 `app_visibility`."""
 
-MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \
+MEMORY_EXTRACT_TEMPLATE = """You maintain long-term memory about a user of a personal assistant. \
 Read the latest exchange and list durable facts worth remembering about the USER as a person: \
 preferences (format, tone, tools, style), facts about them (role, work, projects, people, \
 location, constraints, things they own), long-term goals, and standing instructions for the \
@@ -108,8 +108,12 @@ the user is working towards over weeks or months, not what they asked for in thi
 "forget".
 - Usually there is nothing to save; then return empty lists.
 
-Reply with JSON only: {"memories": [{"content": str, "kind": "preference"|"fact"|"goal"|\
-"instruction", "confidence": float}], "forget": [str]}"""
+{graph_rules}
+For each memory, "about" lists the entity names it is about (not USER).
+
+Reply with JSON only: {{"memories": [{{"content": str, "kind": "preference"|"fact"|"goal"|\
+"instruction", "confidence": float, "about": [str]}}], "forget": [str], \
+"entities": [entity], "relations": [relation]}}"""
 
 MEMORY_DECIDE = """You keep a user's long-term memory consistent. You get EXISTING memories \
 (with numeric ids) and NEW candidate memories. For each candidate choose one op:
@@ -129,10 +133,42 @@ Never update or delete a memory marked pinned.
 Reply with JSON only: {"actions": [{"candidate": int, "op": "ADD"|"UPDATE"|"NOOP", \
 "target": int|null, "content": str|null}], "delete": [int]}"""
 
-EPISODE = """Summarise this chat between a user and their assistant for the assistant's \
+EPISODE_TEMPLATE = """Summarise this chat between a user and their assistant for the assistant's \
 long-term memory. In 2 to 6 sentences say what the user wanted, what was decided, found or \
 produced (names, numbers, files), and anything left open. Write in the third person about \
-"the user". Reply with JSON only: {"summary": str}"""
+"the user".
+
+{graph_rules}
+
+Reply with JSON only: {{"summary": str, "entities": [entity], "relations": [relation]}}"""
+
+GRAPH_RULES = """Also note the knowledge graph of the user's world: the named people, \
+projects, organisations, places, topics and tools that matter to them beyond this one chat \
+(not generic concepts, not the assistant). Write "USER" for the user themself.
+- entity: {"name": str, "type": "person"|"project"|"organisation"|"place"|"topic"|"tool"|\
+"other", "summary": str (a few words on who or what it is to the user), "aliases": [str]}
+- relation: {"from": str, "predicate": str, "to": str, "fact": str, "ended": bool}: "from" \
+and "to" are entity names or "USER"; "predicate" a short verb phrase in lower case ("works \
+at", "uses", "is building", "lives in", "is planning"); "fact" the same as one sentence; \
+"ended": true only when the user said it is no longer true ("I left UST", "we moved off the \
+Mac").
+Only what the user said or clearly confirmed. Usually there are none; then return empty \
+lists."""
+
+MEMORY_EXTRACT = MEMORY_EXTRACT_TEMPLATE.format(graph_rules=GRAPH_RULES)
+EPISODE = EPISODE_TEMPLATE.format(graph_rules=GRAPH_RULES)
+
+GRAPH_EXTRACT = (
+    """You build the knowledge graph of a user's world for their personal \
+assistant. Each numbered item is a memory about the user, the summary of a past chat, or a \
+document they have. """
+    + GRAPH_RULES
+    + """
+For each item, "about" lists the names of the entities it is about (not USER).
+
+Reply with JSON only: {"entities": [entity], "relations": [relation], \
+"about": [{"item": int, "entities": [str]}]}"""
+)
 
 RECALL_QUESTIONS = """You write test questions for a personal assistant's memory. Each \
 numbered item is something the assistant remembers about its user: a memory, or the summary of \

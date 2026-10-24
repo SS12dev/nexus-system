@@ -187,6 +187,7 @@ per chat and attributed to the user's id.
 | Profile | A short impression of you, in sections | Nightly, on "Rebuild now", and soon after your first memories | Every turn, at the top of the prompt |
 | Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
 | Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
+| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Memory page |
 
 After each turn `nexus-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
@@ -198,6 +199,19 @@ never changed by Nexus. Each night, memories no chat has confirmed in 60 days lo
 On the **Memory** page you see the profile and every memory with where it came from and its
 history, and can add, edit, pin and delete them. Deleting is real deletion; you can also turn
 learning off or forget everything.
+
+**Connections** (the knowledge graph, `nexus_common/graph.py`) sit in three tables beside the
+memories: `entities` (one per person, project, organisation, place, topic or tool, plus one for
+you), `relations` between them ("Nexus uses LangGraph", with `valid_from` and `valid_to`, so a
+fact that stops being true is kept with the date it ended) and `mentions`, which tie an entity
+to each memory, past-chat summary, file and chat about it. The same `nexus-nano` call that
+proposes memories proposes them, so chats cost nothing extra; names resolve to an existing
+entity by name or alias, then by meaning within the same type. Memories you add or edit
+yourself, files, and anything from before are linked by a background job every ten minutes
+(one call per twenty items). Deleting a memory, chat or file deletes its mentions, and an
+entity nothing mentions any more goes with its relations. The Memory page's Connections view
+lists them by type with their facts; removing one keeps its memories. `GRAPH_ENABLED=false`
+(Admin › Configuration) stops adding to it.
 
 Search is hybrid everywhere: pgvector cosine similarity and Postgres full-text search fused by
 reciprocal rank, so it still works by keyword if the embedder is down.

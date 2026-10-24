@@ -928,3 +928,41 @@ export interface RecallSummary {
   past_chats: number;
   checks: RecallCheck[];
 }
+
+/** The knowledge graph: who and what memories are about, and how they relate. */
+export type EntityType = "person" | "project" | "organisation" | "place" | "topic" | "tool" | "other";
+
+export interface GraphEntity {
+  id: string;
+  type: EntityType;
+  name: string;
+  aliases: string[];
+  summary: string;
+  /** The user's own entity, which relations about them start from. */
+  is_self: boolean;
+  seen_at: string;
+  memories: number;
+  past_chats: number;
+  files: number;
+  chats: number;
+  memory_ids: string[];
+  file_ids: string[];
+}
+
+export interface GraphRelation {
+  id: string;
+  src: string;
+  dst: string;
+  predicate: string;
+  fact: string;
+  confidence: number;
+  valid_from: string;
+  /** Set when it stopped being true. */
+  valid_to: string | null;
+  source_chat_id: string | null;
+}
+
+export interface KnowledgeGraph {
+  entities: GraphEntity[];
+  relations: GraphRelation[];
+}
