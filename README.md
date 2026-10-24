@@ -680,9 +680,25 @@ compose.yaml            the whole stack
 ## Developing
 
 `./scripts/check.sh` runs everything CI runs, on your machine: ruff, the backend tests against
-throwaway Postgres and Valkey containers, the web typecheck, tests and build, and the Compose
-config and image builds (`--no-images` skips the builds). Run it before merging while GitHub
-Actions is unavailable.
+throwaway Postgres and Valkey containers, the web typecheck, tests and build, a scan for known
+vulnerabilities in the Python and npm packages (`./scripts/audit.sh`), and the Compose config and
+image builds (`--no-images` skips the builds). Run it before merging while GitHub Actions is
+unavailable.
+
+### Updating dependencies and images
+
+Every image is pinned to an exact version: `image:` lines in `compose.yaml`, `FROM` lines in the
+Dockerfiles and the deployer's app templates, and the `uv` copied into the Python images.
+LiteLLM and MinIO publish no fixed tags, so they are pinned by digest. A rebuild therefore never
+pulls something new by surprise; to upgrade, change the version on purpose and test it:
+
+- **Python and npm packages:** when `./scripts/audit.sh` reports a vulnerability, run
+  `uv lock --upgrade-package <name>` (or `npm update <name>` in `apps/web`), then rebuild.
+- **An image:** pick the new tag on Docker Hub or GHCR, put it in place of the old one, then
+  `./scripts/compose.sh pull && ./scripts/compose.sh --profile tunnel up -d --build`. Upgrade
+  Postgres, ClickHouse and Langfuse one at a time, after a backup: their data formats move
+  forward only. For LiteLLM or MinIO, take the digest of the new build
+  (`docker buildx imagetools inspect ghcr.io/berriai/litellm:main-stable`).
 
 ```sh
 uv sync                                   # Python workspace (Python 3.12+)

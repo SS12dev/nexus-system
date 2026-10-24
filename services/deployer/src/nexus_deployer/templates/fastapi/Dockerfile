@@ -1,6 +1,6 @@
 # House template: a FastAPI back end on 8000, run with the .venv the team made with uv in the
 # workbench (same Python 3.13 on Debian bookworm, so it runs as it is). Built with no network.
-FROM python:3.13-slim-bookworm
+FROM python:3.13.17-slim-bookworm
 ARG ENTRY=main:app
 WORKDIR /srv/app
 COPY src/ ./

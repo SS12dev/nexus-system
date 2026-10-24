@@ -26,6 +26,7 @@ from nexus_common.storage import S3Storage
 from nexus_orchestrator import deploy, improve, links, memory, notify, recall_eval
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
+from nexus_orchestrator.retry import TRIES, retry_transient
 from nexus_orchestrator.sandbox import SandboxClient
 from nexus_orchestrator.systems import learn, runner
 from nexus_orchestrator.turn import TurnDeps
@@ -114,11 +115,13 @@ async def run_turn(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
 
 
 @traced_job
+@retry_transient
 async def extract_memories(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
     await memory.extract_memories(ctx["deps"], uuid.UUID(chat_id), uuid.UUID(assistant_message_id))
 
 
 @traced_job
+@retry_transient
 async def rebuild_profile(ctx: dict, user_id: str) -> None:
     await memory.rebuild_profile(ctx["deps"], uuid.UUID(user_id))
 
@@ -145,6 +148,7 @@ async def deploy_app(ctx: dict, project_id: str) -> None:
 
 
 @traced_job
+@retry_transient
 async def link_preview(ctx: dict, link_id: str) -> None:
     """Fetch the preview of a link the user added in the Library."""
     await links.refresh_preview(ctx["deps"], uuid.UUID(link_id))
@@ -207,10 +211,11 @@ REVIEW_TIMEOUT_S = 900
 class WorkerSettings:
     functions = [
         run_turn,
-        extract_memories,
-        rebuild_profile,
+        # Safe to run again (retry.py): they write only once they have their answer.
+        func(extract_memories, max_tries=TRIES),
+        func(rebuild_profile, max_tries=TRIES),
         draft_skill,
-        func(link_preview, timeout=60, keep_result=0),
+        func(link_preview, timeout=60, keep_result=0, max_tries=TRIES),
         # A run can take a while; when it parks on an approval or a pause the job ends and a
         # later continue_run picks it up from its checkpoint. keep_result=0 so the shared
         # run:<id> job id only blocks a second job while one is queued or running.

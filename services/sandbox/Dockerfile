@@ -1,8 +1,8 @@
 # Build from the repository root: docker build -f services/sandbox/Dockerfile .
 # Runs agent code: no network (Compose puts it on an internal network), a read-only root,
 # resource limits per job, and the document libraries skills rely on.
-FROM python:3.13-slim
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+FROM python:3.13.17-slim
+COPY --from=ghcr.io/astral-sh/uv:0.11.33 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib XDG_CACHE_HOME=/tmp/cache

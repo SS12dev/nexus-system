@@ -3,10 +3,10 @@
 # Python 3.13 and uv, git and headless Chromium for Playwright tests. Internet only through the
 # egress-proxy allowlist (Compose puts it on an internal network), a read-only root, and
 # resource limits per command.
-FROM node:22-bookworm-slim AS node
+FROM node:22.23.4-bookworm-slim AS node
 
-FROM python:3.13-slim-bookworm
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /usr/local/bin/
+FROM python:3.13.17-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:0.11.33 /uv /uvx /usr/local/bin/
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
