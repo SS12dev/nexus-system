@@ -8,6 +8,12 @@ import { useAssistantName } from "../lib/assistant";
  * beside the orb. */
 export function HomePage() {
   const assistant = useAssistantName();
+  return <NewChatComposer placeholder={`Ask ${assistant} anything`} />;
+}
+
+/** A composer that always starts a new chat: the home dock, and the box under the orb while
+ * another chat is open, so a fresh question doesn't need a trip to New chat first. */
+export function NewChatComposer({ placeholder }: { placeholder: string }) {
   const user = useStore((s) => s.user)!;
   const { send, error } = useSend();
   const canChat = hasRole(user, "member");
@@ -17,7 +23,7 @@ export function HomePage() {
       <Composer
         onSend={send}
         disabled={!canChat}
-        placeholder={canChat ? `Ask ${assistant} anything` : "Viewers can read chats but not send messages"}
+        placeholder={canChat ? placeholder : "Viewers can read chats but not send messages"}
       />
     </div>
   );
