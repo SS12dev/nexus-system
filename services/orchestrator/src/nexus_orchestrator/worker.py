@@ -1,5 +1,6 @@
 """arq worker entry point: `arq nexus_orchestrator.worker.WorkerSettings`."""
 
+import asyncio
 import logging
 import uuid
 from functools import partial
@@ -13,6 +14,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
+from nexus_common import config
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
@@ -32,6 +34,8 @@ from nexus_orchestrator.web import WebClient
 from nexus_orchestrator.workbench import WorkbenchClient
 
 settings = get_settings()
+# Before WorkerSettings below reads job timeouts and cron times: the owner's stored changes.
+config.preload(settings, "orchestrator")
 configure_logging(settings, "orchestrator")
 log = logging.getLogger(__name__)
 
@@ -57,9 +61,14 @@ async def startup(ctx: dict) -> None:
     ctx["pool"] = pool
     checkpointer = AsyncPostgresSaver(pool)
     await checkpointer.setup()
+    sessionmaker = make_sessionmaker(engine)
+    # Changes made on the Admin page's Configuration tab while this worker runs.
+    ctx["config_watch"] = asyncio.create_task(
+        config.watch(settings, sessionmaker, ctx["redis"], "orchestrator")
+    )
     ctx["deps"] = TurnDeps(
         settings=settings,
-        sessionmaker=make_sessionmaker(engine),
+        sessionmaker=sessionmaker,
         redis=Redis.from_url(settings.redis_url),
         gateway=LiteLLMAdmin(settings),
         model_factory=partial(chat_model, settings),
@@ -82,6 +91,7 @@ async def startup(ctx: dict) -> None:
 
 
 async def shutdown(ctx: dict) -> None:
+    ctx["config_watch"].cancel()
     deps: TurnDeps = ctx["deps"]
     await deps.embedder.inner.aclose()
     await deps.gateway.aclose()

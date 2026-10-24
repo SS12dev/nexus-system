@@ -1,5 +1,6 @@
 """arq worker entry point: `arq nexus_doc_worker.worker.WorkerSettings`."""
 
+import asyncio
 import logging
 import uuid
 
@@ -7,6 +8,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from redis.asyncio import Redis
 
+from nexus_common import config
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
 from nexus_common.logs import configure_logging, traced_job
@@ -23,9 +25,15 @@ configure_logging(settings, "doc-worker")
 async def startup(ctx: dict) -> None:
     engine = make_engine(settings.database_url)
     ctx["engine"] = engine
+    sessionmaker = make_sessionmaker(engine)
+    # The owner's changes from the Admin page's Configuration tab, kept up to date while running.
+    await config.load_and_apply(settings, sessionmaker, "doc-worker", starting=True)
+    ctx["config_watch"] = asyncio.create_task(
+        config.watch(settings, sessionmaker, ctx["redis"], "doc-worker")
+    )
     ctx["deps"] = DocDeps(
         settings=settings,
-        sessionmaker=make_sessionmaker(engine),
+        sessionmaker=sessionmaker,
         redis=Redis.from_url(settings.redis_url),
         storage=S3Storage(settings),
         embedder=CachedEmbedder(LiteLLMEmbedder(settings), settings.embedding_batch_size),
@@ -34,6 +42,7 @@ async def startup(ctx: dict) -> None:
 
 
 async def shutdown(ctx: dict) -> None:
+    ctx["config_watch"].cancel()
     deps: DocDeps = ctx["deps"]
     await deps.embedder.inner.aclose()
     await deps.storage.aclose()

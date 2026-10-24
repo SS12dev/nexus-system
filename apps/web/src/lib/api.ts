@@ -9,6 +9,8 @@ import type {
   AuditEntry,
   Backup,
   Chat,
+  ConfigValue,
+  ConfigView,
   FileItem,
   GoogleAccess,
   LinkItem,
@@ -279,6 +281,10 @@ export const api = {
   backups: () => request<Backup[]>("/api/admin/backups"),
   monitoring: (minutes: number) => request<Monitoring>(`/api/admin/monitoring?minutes=${minutes}`),
   backupNow: () => request<Backup>("/api/admin/backups", { method: "POST" }),
+  config: () => request<ConfigView>("/api/admin/config"),
+  /** A value per setting, or null to go back to the .env value. */
+  saveConfig: (values: Record<string, ConfigValue | null>) =>
+    request<ConfigView>("/api/admin/config", { method: "PUT", body: json({ values }) }),
   setMaintenance: (enabled: boolean, message?: string) =>
     request<{ enabled: boolean; message: string | null }>("/api/admin/maintenance", {
       method: "PUT",

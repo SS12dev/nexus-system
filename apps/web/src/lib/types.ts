@@ -668,3 +668,44 @@ export interface Monitoring {
   jobs: MonitorRow[];
   errors: LoggedError[];
 }
+
+export type ConfigValue = string | number | boolean;
+
+/** One runtime setting on the Admin page's Configuration tab. */
+export interface ConfigOption {
+  name: string;
+  env: string;
+  group: string;
+  label: string;
+  help: string;
+  kind: "bool" | "int" | "float" | "text" | "choice" | "list";
+  choices: string[];
+  min: number | null;
+  max: number | null;
+  unit: string;
+  /** Services that read it only at start-up. */
+  restart: string[];
+  value: ConfigValue;
+  /** The value from .env, used when not overridden. */
+  default: ConfigValue;
+  overridden: boolean;
+  waiting_for_restart: string[];
+  restart_command: string | null;
+}
+
+export interface ConfigService {
+  service: string;
+  instance: string;
+  version: number;
+  pending_restart: string[];
+  applied_at: string | null;
+}
+
+export interface ConfigView {
+  groups: string[];
+  options: ConfigOption[];
+  version: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  services: ConfigService[];
+}
