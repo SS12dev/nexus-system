@@ -3,7 +3,16 @@ import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AdditiveBlending, Color, Group, InstancedMesh, Mesh, Object3D, Vector3 } from "three";
 import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
-import { KIND_COLOR, type Crystal, type MemoryPoint, type StarLine, type StarPoint, type Vec3 } from "./model";
+import {
+  curve,
+  hash,
+  KIND_COLOR,
+  type Crystal,
+  type MemoryPoint,
+  type StarLine,
+  type StarPoint,
+  type Vec3,
+} from "./model";
 
 const GROW_S = 0.9;
 
@@ -375,10 +384,14 @@ function Lines({
     const normal = { points: [] as Vec3[], colors: [] as Vec3[] };
     const hot = { points: [] as Vec3[], colors: [] as Vec3[] };
     const c = new Color();
-    const put = (into: typeof normal, a: Vec3, b: Vec3, hex: string, k: number) => {
+    // Relations bow gently, each its own way, like threads rather than spokes.
+    const put = (into: typeof normal, a: Vec3, b: Vec3, hex: string, k: number, seed = 0) => {
       c.set(hex).multiplyScalar(k);
-      into.points.push(a, b);
-      into.colors.push([c.r, c.g, c.b], [c.r, c.g, c.b]);
+      const pts = seed ? curve(a, b, seed, 0.14, 8) : [a, b];
+      for (let i = 0; i < pts.length - 1; i++) {
+        into.points.push(pts[i], pts[i + 1]);
+        into.colors.push([c.r, c.g, c.b], [c.r, c.g, c.b]);
+      }
     };
     for (const l of lines) {
       const a = at.get(l.a);
@@ -387,8 +400,9 @@ function Lines({
       // A recalled entity's line to you lights up too, so you can see the path.
       const lights =
         (lit.has(l.a) && lit.has(l.b)) || ((lit.has(l.a) || lit.has(l.b)) && (l.a === self || l.b === self));
-      if (lights) put(hot, a, b, RECALL_COLOR, 1);
-      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended ? 0.6 : 1);
+      const seed = hash(`${l.a}:${l.b}`);
+      if (lights) put(hot, a, b, RECALL_COLOR, 1, seed);
+      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended ? 0.6 : 1, seed);
     }
     for (const cr of crystals) {
       const a = cr.star ? at.get(cr.star) : undefined;

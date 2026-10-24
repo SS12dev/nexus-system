@@ -1,81 +1,85 @@
-import { Html, Line } from "@react-three/drei";
+import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useState } from "react";
-import type { Group } from "three";
-import { ORB_R, SAT_R, type Satellite, type Vec3 } from "./model";
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, type Group } from "three";
+import { curve, hash, orbitPos, type Satellite, type StarPoint, type Vec3 } from "./model";
 
-const RING_STEPS = 96;
-const TILT = 0.32;
+const THREAD_STEPS = 12;
 
-/** The ring just outside the orb, and on it the routines (small rings, like a clock face) and
- * software projects (small cubes): what Nexus does and has made for you, as opposed to what it
- * knows, which is inside. Each has a faint tether to the shell; names show on hover. */
+/** Routines and projects as small moons outside the orb, each drifting on an orbit of its own,
+ * with a faint curved thread back to what it is about inside (its topic, its project, or you).
+ * Routines are soft violet moons, projects small amber crystals; names show on hover. */
 export function Satellites({
   items,
+  stars,
   still,
   selected,
   onPick,
 }: {
   items: Satellite[];
+  stars: StarPoint[];
   still: boolean;
   selected: string | null;
   onPick: (s: Satellite) => void;
 }) {
-  const group = useRef<Group>(null);
+  const moons = useRef<(Group | null)[]>([]);
   const [hovered, setHovered] = useState<string | null>(null);
-  const ring = useMemo(() => {
-    const pts: Vec3[] = [];
-    for (let i = 0; i <= RING_STEPS; i++) {
-      const a = (i / RING_STEPS) * Math.PI * 2;
-      const z = Math.sin(a) * SAT_R;
-      pts.push([Math.cos(a) * SAT_R, z * Math.sin(TILT), z * Math.cos(TILT)]);
-    }
-    return pts;
-  }, []);
+  const clock = useRef(0);
+  const at = useMemo(() => new Map(stars.map((s) => [s.id, s.pos])), [stars]);
+
+  // One line geometry for every thread, rewritten each frame as the moons move.
+  const threads = useMemo(() => {
+    const g = new BufferGeometry();
+    const n = items.length * THREAD_STEPS * 2;
+    g.setAttribute("position", new BufferAttribute(new Float32Array(n * 3), 3));
+    const colors = new Float32Array(n * 3);
+    const c = new Color();
+    items.forEach((s, i) => {
+      c.set(s.color).multiplyScalar(s.active ? 0.55 : 0.25);
+      for (let k = 0; k < THREAD_STEPS * 2; k++) colors.set([c.r, c.g, c.b], (i * THREAD_STEPS * 2 + k) * 3);
+    });
+    g.setAttribute("color", new BufferAttribute(colors, 3));
+    return g;
+  }, [items]);
 
   useFrame((_, dt) => {
-    const g = group.current;
-    if (!g) return;
-    // The ring turns slowly the other way from the scene's own rotation.
-    if (!still) g.rotation.y -= dt * 0.05;
-    g.children.forEach((child) => {
-      if (child.userData.spin && !still) child.rotation.y += dt * 0.9;
+    if (!still) clock.current += dt;
+    const pos = threads.getAttribute("position") as BufferAttribute;
+    items.forEach((s, i) => {
+      const p = orbitPos(s.orbit, clock.current);
+      const moon = moons.current[i];
+      if (moon) {
+        moon.position.set(p[0], p[1], p[2]);
+        const on = s.id === selected || s.id === hovered;
+        moon.scale.setScalar(on ? 1.6 : 1);
+        if (!still) moon.rotation.y += dt * 0.6;
+      }
+      const home: Vec3 = (s.home && at.get(s.home)) || [0, 0, 0];
+      const pts = curve(p, home, hash(s.id), 0.22, THREAD_STEPS);
+      for (let k = 0; k < THREAD_STEPS; k++) {
+        const o = (i * THREAD_STEPS + k) * 2;
+        pos.setXYZ(o, pts[k][0], pts[k][1], pts[k][2]);
+        pos.setXYZ(o + 1, pts[k + 1][0], pts[k + 1][1], pts[k + 1][2]);
+      }
     });
+    pos.needsUpdate = true;
   });
 
   if (items.length === 0) return null;
   return (
-    <group ref={group}>
-      <Line points={ring} color="#818cf8" transparent opacity={0.18} lineWidth={1} raycast={() => null} />
-      {items.map((s) => {
-        const shell: Vec3 = [
-          (s.pos[0] / SAT_R) * ORB_R * 1.02,
-          (s.pos[1] / SAT_R) * ORB_R * 1.02,
-          (s.pos[2] / SAT_R) * ORB_R * 1.02,
-        ];
-        return (
-          <Line
-            key={`t-${s.id}`}
-            points={[shell, s.pos]}
-            color={s.color}
-            transparent
-            opacity={s.active ? 0.3 : 0.12}
-            lineWidth={1}
-            dashed={!s.active}
-            dashSize={0.03}
-            gapSize={0.03}
-            raycast={() => null}
-          />
-        );
-      })}
-      {items.map((s) => {
+    <group>
+      <lineSegments geometry={threads} raycast={() => null} frustumCulled={false}>
+        <lineBasicMaterial vertexColors transparent opacity={0.5} depthWrite={false} blending={AdditiveBlending} toneMapped={false} />
+      </lineSegments>
+      {items.map((s, i) => {
         const on = s.id === selected || s.id === hovered;
         return (
           <group
             key={s.id}
+            ref={(g) => {
+              moons.current[i] = g;
+            }}
             position={s.pos}
-            userData={{ spin: true }}
-            scale={on ? 1.5 : 1}
             onClick={(e) => {
               e.stopPropagation();
               onPick(s);
@@ -91,36 +95,29 @@ export function Satellites({
             }}
           >
             {s.kind === "routine" ? (
-              <>
-                <mesh rotation={[Math.PI / 2, 0, 0]}>
-                  <torusGeometry args={[0.07, 0.014, 10, 28]} />
-                  <meshStandardMaterial color={s.color} emissive={s.color} emissiveIntensity={s.active ? 1.4 : 0.3} toneMapped={false} />
-                </mesh>
-                <mesh>
-                  <sphereGeometry args={[0.028, 12, 12]} />
-                  <meshStandardMaterial color="#ffffff" emissive={s.color} emissiveIntensity={s.active ? 1.8 : 0.2} toneMapped={false} />
-                </mesh>
-              </>
+              <mesh>
+                <sphereGeometry args={[0.045, 20, 20]} />
+                <meshStandardMaterial color={s.color} emissive={s.color} emissiveIntensity={s.active ? 0.75 : 0.2} roughness={0.7} />
+              </mesh>
             ) : (
               <mesh>
-                <boxGeometry args={[0.085, 0.085, 0.085]} />
+                <icosahedronGeometry args={[0.05, 0]} />
                 <meshStandardMaterial
                   color={s.color}
                   emissive={s.color}
-                  emissiveIntensity={s.active ? 1.3 : 0.25}
-                  metalness={0.2}
+                  emissiveIntensity={s.active ? 0.8 : 0.2}
                   roughness={0.3}
-                  toneMapped={false}
+                  flatShading
                 />
               </mesh>
             )}
-            {/* A larger, invisible target so small satellites are easy to tap. */}
+            {/* A larger, invisible target so small moons are easy to tap. */}
             <mesh visible={false}>
-              <sphereGeometry args={[0.12, 8, 8]} />
+              <sphereGeometry args={[0.13, 8, 8]} />
               <meshBasicMaterial />
             </mesh>
             {on && (
-              <Html center position={[0, 0.16, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+              <Html center position={[0, 0.17, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
                 <div className="orb-label" style={{ borderColor: s.color }}>
                   {s.name}
                 </div>

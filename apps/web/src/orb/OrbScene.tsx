@@ -121,6 +121,7 @@ export default function OrbScene({
       />
       <Satellites
         items={sats}
+        stars={inside.stars}
         still={still}
         selected={selId}
         onPick={(sat) => onSelect({ type: "satellite", sat })}

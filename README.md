@@ -493,14 +493,17 @@ box docked underneath; sending a message opens the chat.
   runs down the edge to a busy agent. A new team grows out of the orb, agent by agent; when a
   team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
   springs, so nothing jumps.
-- **On a ring just outside the shell** is what Nexus does and has made for you: routines as
-  small rings (violet when on, grey when paused, red after a failed run) and software projects
-  as small cubes (amber while running as an app), each tethered to the shell. Tapping one opens
-  its chat, the Routines page or the app. Inside is what it knows; outside, what it does.
+- **Just outside the shell**, like moons, is what Nexus does and has made for you: routines as
+  soft violet moons (grey when paused, red after a failed run) and software projects as small
+  amber crystals (bright while running as an app). Each drifts on an orbit of its own, at its
+  own distance, tilt and speed, with a faint curved thread to what it is about inside: a
+  routine from a profile pack to that profession or interest, a project to the project Nexus
+  knows by that name, anything else to you. Tapping one opens its chat, the Routines page or
+  the app. Inside is what it knows; outside, what it does.
 - **Inside it** is what Nexus knows, as a constellation: you at the centre, and around you the
   people, projects, organisations, places, topics and tools from your memories, chats and
-  files (the Connections view on the Memory page), spread evenly around you with each type
-  kept together and tinted by type. The more something is mentioned, the bigger and nearer the
+  files (the Connections view on the Memory page), spread loosely around you with each type
+  kept together and tinted by type, joined by gently curved lines. The more something is mentioned, the bigger and nearer the
   centre it sits. You are at the centre from the first minute, before anything is connected.
   Lines are relations ("Nexus uses LangGraph"), fainter once they stopped being true. Memories
   are small dots circling what they're about; memories only about you circle the centre. The
