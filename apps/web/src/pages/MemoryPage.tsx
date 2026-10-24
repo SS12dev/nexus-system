@@ -250,7 +250,11 @@ export function MemoryPage() {
         </div>
 
         {view === "connections" ? (
-          <Connections canEdit={canEdit} onOpenMemory={(id) => setParams({ focus: id }, { replace: true })} />
+          <Connections
+            canEdit={canEdit}
+            memories={memories}
+            onOpenMemory={(id) => setParams({ focus: id }, { replace: true })}
+          />
         ) : (
           <>
         <form

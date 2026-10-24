@@ -119,11 +119,12 @@ export function RecallPanel({ onError, onOpenConfig }: { onError: (msg: string) 
         <b className={data.graph_recall_enabled ? "text-emerald-300" : "text-slate-200"}>
           {data.graph_recall_enabled ? "on" : "off"}
         </b>
-        . Turn it on when <i>With connections</i> beats <i>Standard, more</i> here; it's{" "}
+        . Turn it on once <i>With connections</i> beats <i>Standard, more</i> here: it's Recall through
+        connections under Memory and context on the{" "}
         <button onClick={onOpenConfig} className="text-sky-300 hover:underline">
-          Recall through connections
-        </button>{" "}
-        under Memory and context.
+          Configuration tab
+        </button>
+        .
       </p>
 
       {latest?.status === "failed" && (
@@ -132,7 +133,7 @@ export function RecallPanel({ onError, onOpenConfig }: { onError: (msg: string) 
 
       {done ? (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mb-6 grid gap-3 sm:grid-cols-3">
             {modes.map((m) => (
               <Tile
                 key={m}

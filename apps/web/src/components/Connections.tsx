@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
-import type { EntityType, GraphEntity, GraphRelation, KnowledgeGraph } from "../lib/types";
+import type { EntityType, GraphEntity, GraphRelation, KnowledgeGraph, Memory } from "../lib/types";
 import { useStore } from "../store/chat";
 import { confirmAction } from "./Feedback";
 
@@ -25,7 +25,16 @@ export function relationText(r: GraphRelation, names: Map<string, string>): stri
 
 /** The Memory page's Connections view: who and what your memories are about, and how they
  * relate. Built from your chats, memories and files; deleting one keeps the memories. */
-export function Connections({ canEdit, onOpenMemory }: { canEdit: boolean; onOpenMemory: (id: string) => void }) {
+export function Connections({
+  canEdit,
+  memories,
+  onOpenMemory,
+}: {
+  canEdit: boolean;
+  /** The memories the Memory page has loaded, to show each entity's by their words. */
+  memories: Memory[];
+  onOpenMemory: (id: string) => void;
+}) {
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string | null>(null);
@@ -51,6 +60,7 @@ export function Connections({ canEdit, onOpenMemory }: { canEdit: boolean; onOpe
   );
 
   const names = useMemo(() => new Map(graph?.entities.map((e) => [e.id, e.name]) ?? []), [graph]);
+  const texts = useMemo(() => new Map(memories.map((m) => [m.id, m.content])), [memories]);
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!graph) return <p className="text-sm text-slate-400">Loading…</p>;
 
@@ -111,6 +121,7 @@ export function Connections({ canEdit, onOpenMemory }: { canEdit: boolean; onOpe
                   (r) => (r.src === e.id || r.dst === e.id) && r.src !== me?.id && r.dst !== me?.id,
                 )}
                 names={names}
+                texts={texts}
                 open={open === e.id}
                 onToggle={() => setOpen(open === e.id ? null : e.id)}
                 canEdit={canEdit}
@@ -138,6 +149,7 @@ function EntityCard({
   e,
   relations,
   names,
+  texts,
   open,
   onToggle,
   canEdit,
@@ -147,6 +159,7 @@ function EntityCard({
   e: GraphEntity;
   relations: GraphRelation[];
   names: Map<string, string>;
+  texts: Map<string, string>;
   open: boolean;
   onToggle: () => void;
   canEdit: boolean;
@@ -179,7 +192,11 @@ function EntityCard({
                 <FileText size={11} /> {e.files} {e.files === 1 ? "file" : "files"}
               </span>
             )}
-            {relations.length > 0 && <span>{relations.length} linked</span>}
+            {relations.length > 0 && (
+              <span>
+                {relations.length} {relations.length === 1 ? "connection" : "connections"}
+              </span>
+            )}
           </span>
         </button>
         {canEdit && (
@@ -205,12 +222,21 @@ function EntityCard({
             <p className="text-slate-500">No links to anything else yet.</p>
           )}
           {e.memory_ids.length > 0 && (
-            <div className="flex flex-wrap gap-2 text-xs">
-              {e.memory_ids.slice(0, 6).map((id, i) => (
-                <button key={id} onClick={() => onOpenMemory(id)} className="text-sky-300 hover:underline">
-                  Memory {i + 1}
-                </button>
-              ))}
+            <div>
+              <div className="mb-1 text-xs text-slate-500">Memories about it</div>
+              <ul className="space-y-1">
+                {e.memory_ids.slice(0, 6).map((id) => (
+                  <li key={id}>
+                    <button
+                      onClick={() => onOpenMemory(id)}
+                      className="text-left text-sky-300 hover:underline"
+                      title="Open on the Memories tab"
+                    >
+                      {texts.get(id) ?? "A memory"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {e.file_ids.length > 0 && (
