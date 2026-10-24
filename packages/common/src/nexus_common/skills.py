@@ -306,14 +306,24 @@ async def usable_skills(db: AsyncSession, user_id: uuid.UUID) -> list[Skill]:
 
 
 async def find_skill(db: AsyncSession, user_id: uuid.UUID, name: str) -> Skill | None:
-    """By slug (core/pdf) or bare name (pdf); the user's own skill wins over a shared one."""
-    name = name.strip()
-    cond = Skill.slug == name if "/" in name else Skill.name == name
-    rows = await db.scalars(
-        select(Skill).where(visible(user_id), Skill.status == SkillStatus.active, cond)
-    )
-    found = sorted(rows.all(), key=lambda s: s.owner_id is None)
-    return found[0] if found else None
+    """By slug (core/pdf) or bare name (pdf); the user's own skill wins over a shared one.
+    Models sometimes put the shelf in front (engineering/core/3d-modeling), so a longer path
+    falls back to its last two parts, then to its last part."""
+    parts = [p for p in name.strip().strip("/").split("/") if p]
+    tries = ["/".join(parts[-2:])] if len(parts) >= 2 else []
+    tries += parts[-1:]
+    for i, ref in enumerate(tries):
+        cond = Skill.slug == ref if "/" in ref else Skill.name == ref
+        rows = await db.scalars(
+            select(Skill).where(visible(user_id), Skill.status == SkillStatus.active, cond)
+        )
+        found = sorted(rows.all(), key=lambda s: s.owner_id is None)
+        if found:
+            return found[0]
+        if i == 0 and len(parts) == 2:
+            # A real scope/name that doesn't exist: don't guess another scope's skill.
+            break
+    return None
 
 
 def catalogue(skills: list[Skill]) -> str:

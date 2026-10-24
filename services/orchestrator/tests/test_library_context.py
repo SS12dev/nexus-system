@@ -8,6 +8,7 @@ from nexus_api.users import create_user
 from nexus_common.models import RoleName, UserStatus
 from nexus_common.skills import (
     catalogue,
+    find_skill,
     instruction_layers,
     role_names,
     sync_library,
@@ -54,3 +55,15 @@ async def test_conventions_reach_agents_and_roles_reach_the_designer(sessionmake
     )
     roles_line = next(line for line in prompt.splitlines() if line.startswith("ROLES: "))
     assert "scientist" in roles_line and "fact_checker" in roles_line and "assistant" in roles_line
+
+
+async def test_find_skill_forgives_a_shelf_in_front(sessionmaker, settings):
+    async with sessionmaker() as db:
+        await sync_library(db, Path(settings.library_path))
+        user = await make_user(db)
+        await db.commit()
+        for ref in ("core/3d-modeling", "3d-modeling", "engineering/core/3d-modeling"):
+            found = await find_skill(db, user.id, ref)
+            assert found is not None and found.slug == "core/3d-modeling", ref
+        assert await find_skill(db, user.id, "mine/3d-modeling") is None
+        assert await find_skill(db, user.id, "engineering/core/nope") is None
