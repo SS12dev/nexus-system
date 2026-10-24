@@ -117,10 +117,16 @@ WhatsApp. It uses Meta's WhatsApp Business **Cloud API**.
 
 1. Go to [business.facebook.com](https://business.facebook.com) and create a **business
    portfolio** (your name as the business is fine).
-2. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create
-   app** → use case **Other** → type **Business** → name it `Nexus` → pick your business
-   portfolio.
-3. In the app's dashboard, **Add product → WhatsApp → Set up**. Meta creates a WhatsApp
+2. Register as a Meta developer (once per Facebook account): logged into Facebook with the
+   account that owns the portfolio, open
+   [developers.facebook.com/async/registration](https://developers.facebook.com/async/registration)
+   (or **Get Started** at the top of developers.facebook.com), accept the terms, confirm your
+   phone and email, and choose **Developer**. Until you do, developers.facebook.com/apps just
+   shows the marketing homepage.
+3. Open [developers.facebook.com/apps/creation](https://developers.facebook.com/apps/creation/),
+   name it `Nexus`, pick the use case **Connect with customers through WhatsApp** (or **Other**
+   → type **Business**), and pick your business portfolio.
+4. In the app's dashboard, **Add product → WhatsApp → Set up**. Meta creates a WhatsApp
    Business Account and a **test phone number**.
 
 ### 4.2 Choose a sending number
