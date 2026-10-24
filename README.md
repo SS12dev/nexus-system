@@ -292,12 +292,14 @@ software team, `dev_project`, in a workbench project:
 The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
 after the plan until you say go. The reply gives what was built, the stack, the test count and
 the review rounds. A follow-up such as "add a high score table" continues the same project.
-Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($2), still
-capped by `MAX_RUN_BUDGET_USD`. It needs the Run code (exec) permission.
+Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($3), still
+capped by `MAX_RUN_BUDGET_USD`; a lower budget Nexus picks itself, without the user naming a sum,
+is ignored, so the team always has room for its three review rounds and the deploy. It needs the Run code (exec) permission.
 
 Projects show in the Library as one card each (stack, latest commit, repo link), never as loose
 files. With the Nexus GitHub App set up ([docs/github-app.md](docs/github-app.md)), each gets a
-private repo in `GITHUB_APPS_ORG`: the run's work goes to a `nexus/<run id>` branch, and `main`
+private repo in `GITHUB_APPS_ORG`: the run's work goes to a `nexus/<run id>` branch (a follow-up keeps using the branch while it
+isn't merged), and `main`
 moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
 transfers a repo to your own account, after you approve it on a card (owner only).
 

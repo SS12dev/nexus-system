@@ -127,7 +127,7 @@ def test_spec_gets_the_house_team_with_stages():
     kinds = {(e["from"], e["to"]): e["kind"] for e in spec.edges()}
     assert kinds[("tester", "reviewer")] == "review"
     assert kinds[("reviewer", "frontend")] == kinds[("reviewer", "backend")] == "feedback"
-    # Fits the $2 default for this template.
+    # Fits the $3 default for this template.
     assert spec.estimate_usd(12, 8) <= 2
     # Other topologies don't get stages, and bad project ids are dropped.
     assert (
@@ -153,7 +153,7 @@ async def test_static_app_end_to_end(sdeps, owner, scripts, seen, wb):
 
     run, messages, events = await load(sdeps, run_id)
     assert run.status == RunStatus.completed, run.error
-    assert run.budget_usd == Decimal("2.0000")
+    assert run.budget_usd == Decimal("3.0000")
     # The plan went to the chat before the result, and the run carried on.
     assert "**Plan for 2048**" in messages[0] and PLAN in messages[0]
     assert "Building it now" in messages[0]
@@ -311,7 +311,7 @@ async def test_software_requests_get_the_dev_team(sdeps, owner, scripts, seen, e
     spec = AgentSystemSpec.model_validate(system.spec)
     assert system.topology == "dev_project" and [a.id for a in spec.agents] == list(DEV_IDS)
     assert spec.project == str(system.id)
-    assert run.budget_usd == Decimal("2.0000")
+    assert run.budget_usd == Decimal("3.0000")
     assert ("run_system", str(run.id)) in enqueued.jobs
 
 
@@ -469,10 +469,10 @@ async def test_nexus_wires_and_runs_the_tests_itself(sdeps, owner, scripts, seen
 @pytest.mark.parametrize(
     "asked,budget,expected",
     [
-        ("go ahead", 0.81, "2.0000"),  # Nexus's own figure: the default stands
-        ("Build me a 2048 game, keep it cheap", 0.25, "2.0000"),
+        ("go ahead", 0.81, "3.0000"),  # Nexus's own figure: the default stands
+        ("Build me a 2048 game, keep it cheap", 0.25, "3.0000"),
         ("Build me a 2048 game for $1.50", 1.5, "1.5000"),  # the user's sum
-        ("yes, go up to 3 dollars", 3.0, "3.0000"),
+        ("yes, go up to 4 dollars", 4.0, "4.0000"),
     ],
 )
 async def test_a_software_budget_is_the_users_sum_or_the_default(

@@ -12,6 +12,9 @@ files.
 
 ## Steps
 
+0. **Read all of it.** If a read comes back cut or paged, read the rest before extracting, and
+   say if any part couldn't be read. The text under review never supports itself: a claim it
+   states, or repeats elsewhere in it, is a claim to check, not evidence.
 1. **Extract checkable claims.** List every statement of fact: numbers, dates, names,
    rankings, quotes, causal claims ("X led to Y"), and superlatives ("the largest").
    Skip opinions and obvious common knowledge. Number them.
@@ -26,6 +29,10 @@ files.
    - Partly supported: right direction, wrong number/scope/date; give the correct version.
    - Contradicted: primary source says otherwise; give it.
    - Unverified: no reliable source found after a real search; say what you searched.
+   - Self-reported: only the author can know it (their own results, metrics, roles); no
+     outside source exists. Say what evidence would back it (a link, a log, a repo).
+   "The document says so" is never Supported. If most claims come out Supported, check that
+   each one names an outside source; if not, they are Unverified or Self-reported.
 
 ## Output
 
