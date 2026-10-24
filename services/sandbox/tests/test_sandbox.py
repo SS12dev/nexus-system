@@ -22,8 +22,10 @@ async def test_bash_and_errors(run):
 
 
 async def test_timeout_kills_the_job(run):
-    result = await run("import time\ntime.sleep(30)", timeout_s=1)
+    result = await run("import time\n\ndef wait():\n    time.sleep(30)\n\nwait()", timeout_s=1)
     assert result["timed_out"] and result["exit_code"] is None
+    # Where it was stuck, from faulthandler, so the agent (and we) can see why.
+    assert "in wait" in result["stderr"] and "main.py" in result["stderr"]
     assert result["duration_ms"] < 10_000
 
 
