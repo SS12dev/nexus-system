@@ -312,11 +312,14 @@ software team, `dev_project`, in a workbench project:
 | 3. Build | Frontend and backend builders (mini) | Build side by side in their own folders and commit as they go; no backend for a static app |
 | 4. Test | Tester (mini) | Unit tests and a headless Playwright smoke test; writes `TEST_REPORT.md` |
 | 5. Review | Reviewer (pro) | Approves, or sends numbered fixes back to stage 3, at most three rounds |
-| 6. Release | (code) | Commits what is left, saves the project to the Library, pushes it to its own private GitHub repo and, once every test passes, runs it as an app (unapproved work only after the last round, with its open points listed) |
+| 6. Release | (code) | Commits what is left, saves the project to the Library, pushes it to its own private GitHub repo and, once every test passes, runs it as an app (unapproved work only after the last round, with its open points listed, and never over a live app) |
 
 The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
 after the plan until you say go. The reply gives what was built, the stack, the test count and
-the review rounds. A follow-up such as "add a high score table" continues the same project.
+the review rounds. A follow-up such as "add a high score table" continues the same project: the researcher only
+updates `BRIEF.md` (no web research), a static app that gains a back end has its front end moved
+into `web/` first, and only one team works on a project at a time (a second request while one is
+running is refused, so Nexus offers to wait or to stop the running one).
 Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($3), still
 capped by `MAX_RUN_BUDGET_USD`; a lower budget Nexus picks itself, without the user naming a sum,
 is ignored, so the team always has room for its three review rounds and the deploy. It needs the Run code (exec) permission.
@@ -328,8 +331,10 @@ isn't merged), and `main`
 moves to it only when the reviewer approved and every test passed. "Move it to my GitHub"
 transfers a repo to your own account, after you approve it on a card (owner only).
 
-When every test passed, the `deployer` runs the app as a container (work the reviewer still
-hasn't approved after the last round is deployed too, with its open points listed) and
+When every test passed and every suite Nexus expects ran (unit, smoke, and the back end's), the
+`deployer` runs the app as a container (work the reviewer still hasn't approved after the last
+round is deployed too, with its open points listed, but never over an app that is already live,
+which keeps its last version) and
 the reply gives its link, `https://<name>.servhub.cc` (`2048`, or `2048-priya` for other people),
 with a screenshot. Apps are public, so the link can be shared (the code stays in its private
 repo). "Make it private" (in chat or on the **Apps** page) limits it to its owner and Nexus's

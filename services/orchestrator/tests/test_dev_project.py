@@ -344,6 +344,52 @@ async def test_follow_up_reuses_the_project(sdeps, owner, scripts, seen):
     assert systems[2].spec["project"] == str(systems[2].id)
 
 
+async def test_a_second_team_never_works_on_a_project_still_being_built(sdeps, owner, scripts):
+    """Two teams in one folder would build over each other's work."""
+    scripts["nexus.design_system"] = [dev_spec()]
+    await build_tool(sdeps, owner).ainvoke({"request": "Build me a 2048 game"})
+    async with sdeps.sessionmaker() as db:
+        first = await db.scalar(select(AgentSystem))
+    project = first.spec["project"]
+
+    scripts["nexus.design_system"] = [dev_spec(project=project)]
+    out = await build_tool(sdeps, owner).ainvoke({"request": "Fix the open points in 2048"})
+    assert out.startswith("Not started: 2048 is still working on this project")
+    async with sdeps.sessionmaker() as db:
+        assert len((await db.scalars(select(AgentRun))).all()) == 1
+
+
+class ChangeWorkbench(FakeWorkbench):
+    """An existing static app (BRIEF.md and package.json at the root)."""
+
+    async def run(self, user, project, command, timeout_s=None):
+        self.calls.append(("run", user, project, command))
+        if "NEXUS_CHANGE" in command:
+            return CommandResult(0, "NEXUS_CHANGE\n", "", False, 3)
+        if "NEXUS_MOVED" in command:
+            return CommandResult(0, "NEXUS_MOVED\n", "", False, 3)
+        return CommandResult(0, "abc1234\n", "", False, 3)
+
+
+async def test_a_change_skips_web_research_and_moves_the_front_end_for_a_back_end(
+    sdeps, owner, scripts, seen
+):
+    wb = sdeps.workbench = ChangeWorkbench()
+    happy(scripts, stack="web_fastapi")
+    _, run_id = await make_dev_run(sdeps, owner, request="Add logins to 2048")
+    await runner.run_system(sdeps, run_id)
+
+    run, _, _ = await load(sdeps, run_id)
+    assert run.status == RunStatus.completed, run.error
+    brief = seen["researcher"][0][-1].content
+    assert "This app exists already" in brief and "No web research" in brief
+    # The static app's root front end goes into web/, where the new stack looks for it.
+    move = next(c[3] for c in wb.calls if c[0] == "run" and "NEXUS_MOVED" in c[3])
+    assert "mkdir -p web" in move and 'git mv "$f" web/' in move
+    assert any(c[0] == "commit" and "into web/" in c[3] for c in wb.calls)
+    assert "moved the existing front end into web/" in seen["architect"][0][-1].content
+
+
 async def test_building_software_needs_the_exec_capability(sdeps, owner, scripts):
     out = await build_tool(sdeps, owner, allowed=DEV_TOOLS - {"ws_run"}).ainvoke(
         {"request": "Build me a 2048 game"}

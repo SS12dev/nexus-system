@@ -89,6 +89,29 @@ async def active_run(db, system_id: uuid.UUID) -> AgentRun | None:
     )
 
 
+async def project_run(
+    db, user_id: uuid.UUID, system: AgentSystem
+) -> tuple[AgentSystem, AgentRun] | None:
+    """Another of the user's dev systems with a run in progress on the same workbench project."""
+    project = (system.spec or {}).get("project")
+    if system.topology != "dev_project" or not project:
+        return None
+    rows = await db.execute(
+        select(AgentSystem, AgentRun)
+        .join(AgentRun, AgentRun.system_id == AgentSystem.id)
+        .where(
+            AgentSystem.user_id == user_id,
+            AgentSystem.topology == "dev_project",
+            AgentSystem.id != system.id,
+            AgentRun.status.in_(ACTIVE_RUN),
+        )
+    )
+    for other, run in rows.all():
+        if (other.spec or {}).get("project") == project:
+            return other, run
+    return None
+
+
 def system_tools(
     ctx: ToolContext,
     user: User,
@@ -138,6 +161,15 @@ def system_tools(
         live = await active_run(db, system.id)
         if live is not None:
             return f"{system.name} is already running (run {live.id}); wait for it or stop it."
+        busy = await project_run(db, user_id, system)
+        if busy is not None:
+            other, run = busy
+            # Two teams in one project folder would build over each other's work.
+            return (
+                f"Not started: {other.name} is still working on this project (system {other.id}, "
+                f"run {run.id}, {run.status}). Tell the user, and offer to wait for its result "
+                "or to stop that run and start this one."
+            )
         owner = await db.get(User, user_id)
         try:
             run = await new_run(

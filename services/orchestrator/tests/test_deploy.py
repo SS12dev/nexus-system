@@ -77,7 +77,7 @@ def scripts_for(scripts: dict, approved=True, failed=0, reviews=1, passed=14) ->
     scripts["reviewer"] = [review] * (reviews + 3)
 
 
-async def dev_run(sdeps, user, chat_id):
+async def dev_run(sdeps, user, chat_id, project=None):
     spec = AgentSystemSpec.model_validate(
         {"name": "2048", "goal": "A 2048 game", "topology": "dev_project", "agents": []}
     )
@@ -87,7 +87,7 @@ async def dev_run(sdeps, user, chat_id):
             spec={}, topology=spec.topology, lifetime=SystemLifetime.ephemeral,
             status=SystemStatus.idle,
         )  # fmt: skip
-        spec.project = str(system.id)
+        spec.project = project or str(system.id)
         system.spec = spec.model_dump()
         db.add(system)
         await db.flush()
@@ -219,6 +219,21 @@ async def test_green_work_still_unapproved_after_the_last_round_is_deployed(ddep
     _, final, _, _ = await outcome(ddeps, run_id)
     assert len(ddeps.deployer.deploys) == 1
     assert f"- Live link: {URL} (with the open points below still to fix)" in final
+
+
+async def test_unapproved_work_never_replaces_a_live_app(ddeps, owner, scripts):
+    """The live app keeps the last good version while the open points wait."""
+    user, chat_id = owner
+    scripts_for(scripts)
+    await runner.run_system(ddeps, await dev_run(ddeps, user, chat_id, project="p-2048"))
+    assert len(ddeps.deployer.deploys) == 1
+
+    scripts_for(scripts, approved=False)
+    run_id = await dev_run(ddeps, user, chat_id, project="p-2048")
+    await runner.run_system(ddeps, run_id)
+    _, final, _, _ = await outcome(ddeps, run_id)
+    assert len(ddeps.deployer.deploys) == 1
+    assert "- Live link: not updated: the live app keeps the last version" in final
 
 
 async def test_members_can_run_three_apps(ddeps, sessionmaker):
