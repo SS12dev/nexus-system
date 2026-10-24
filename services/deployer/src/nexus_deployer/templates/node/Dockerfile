@@ -1,6 +1,6 @@
 # House template: a Node (Express) back end on 3000, with the node_modules the team installed
 # in the workbench. Built with no network.
-FROM node:22-bookworm-slim
+FROM node:22.23.4-bookworm-slim
 WORKDIR /srv/app
 COPY src/ ./
 RUN test -d node_modules || { echo "No node_modules: run npm install in the back end's folder." >&2; exit 1; }; \

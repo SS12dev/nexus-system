@@ -147,7 +147,7 @@ services:
   traefik:
     logging: *logging
     # v3.6+ negotiates the Docker API version; older releases fail against Docker Engine 29.
-    image: traefik:v3.6
+    image: traefik:v3.6.25
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
@@ -170,7 +170,7 @@ services:
 
   cloudflared:
     logging: *logging
-    image: cloudflare/cloudflared:2026.10.0
+    image: cloudflare/cloudflared:2026.10.3
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
     environment:
@@ -436,7 +436,7 @@ services:
   # --- Data ------------------------------------------------------------------
   postgres:
     logging: *logging
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.7-pg17
     environment:
       POSTGRES_USER: nexus
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing, use ./scripts/compose.sh or set it in .env}
@@ -455,7 +455,7 @@ services:
 
   redis:
     logging: *logging
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:8.1.10-alpine
     # Langfuse's queues need noeviction.
     command: ["valkey-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:
@@ -469,7 +469,8 @@ services:
 
   minio:
     logging: *logging
-    image: cgr.dev/chainguard/minio
+    # Chainguard's free images only publish :latest, so this is pinned by digest.
+    image: cgr.dev/chainguard/minio@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c
     entrypoint: sh
     # Folders under /data are buckets: nexus for uploads, langfuse for trace events.
     command: -c 'mkdir -p /data/nexus /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
@@ -490,7 +491,8 @@ services:
   # --- Model gateway and tracing ----------------------------------------------
   litellm:
     logging: *logging
-    image: ghcr.io/berriai/litellm:main-stable
+    # The main-stable build of 2026-10-24, pinned by digest (the tag moves with every release).
+    image: ghcr.io/berriai/litellm:main-stable@sha256:74d0696a9f0afcc993c7659d246f0c542f003368298633e852228250779f1032
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -523,7 +525,7 @@ services:
 
   clickhouse:
     logging: *logging
-    image: clickhouse/clickhouse-server:25.8
+    image: clickhouse/clickhouse-server:25.8.33.6
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
@@ -542,7 +544,7 @@ services:
 
   langfuse-worker:
     logging: *logging
-    image: langfuse/langfuse-worker:3
+    image: langfuse/langfuse-worker:3.225.11
     environment: *langfuse-env
     depends_on: &langfuse-deps
       postgres: { condition: service_healthy }
@@ -553,7 +555,7 @@ services:
 
   langfuse-web:
     logging: *logging
-    image: langfuse/langfuse:3
+    image: langfuse/langfuse:3.225.11
     environment:
       <<: *langfuse-env
       NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:${LANGFUSE_PORT:-3000}}

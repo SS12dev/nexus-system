@@ -111,7 +111,7 @@ A chat message, end to end:
 
 ### Edge
 
-**traefik** (`traefik:v3.6`) is the only container listening beyond the Mac's loopback. It
+**traefik** (`traefik:v3.6.25`) is the only container listening beyond the Mac's loopback. It
 reads the labels on the other containers to build its routes: `/api`, `/auth` and `/ws` go to the
 API, everything else to `web`. It load-balances across the API replicas and stops sending to one
 whose `/healthz` fails. It mounts the Docker socket read-only to discover containers. Version 3.6
@@ -232,7 +232,7 @@ kept. Restore with `scripts/restore.sh`.
 
 ### Data
 
-**postgres** (`pgvector/pgvector:pg17`) holds three databases:
+**postgres** (`pgvector/pgvector:0.8.7-pg17`) holds three databases:
 - `nexus`: users, chats, messages, memories, files and their chunks with vectors, skills,
   agent teams and runs (with checkpoints), the audit log, backups;
 - `litellm`: per-user and per-run virtual keys, budgets and spend;

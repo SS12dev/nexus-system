@@ -177,6 +177,11 @@ def _ms(started: float) -> int:
 RESERVED = {"request_id", "job", "job_id"}
 
 
+def _is_retry(exc: BaseException) -> bool:
+    """arq's Retry, which asks for the job to run again (nexus-common doesn't import arq)."""
+    return type(exc).__name__ == "Retry" and type(exc).__module__.startswith("arq")
+
+
 def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Wrap an arq job function: it takes the `nexus_request_id` its enqueuer passed (see
     `with_request_id`) and runs in a log scope with that id, its job name and its *_id args."""
@@ -191,7 +196,7 @@ def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any
         ids = {k: v for k, v in bound.items() if k.endswith("_id") and k not in RESERVED}
         wait_ms = _queue_ms(ctx)
         started = time.monotonic()
-        failed = True
+        failed, retrying = True, False
         with scope(
             job=fn.__name__,
             job_id=ctx.get("job_id"),
@@ -203,6 +208,10 @@ def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any
                 failed = False
                 return result
             except BaseException as exc:
+                if _is_retry(exc):
+                    # Not a failure: arq runs the job again later (see the job's own warning).
+                    failed, retrying = False, True
+                    raise
                 job_log.exception(
                     "job failed",
                     extra={
@@ -213,7 +222,7 @@ def traced_job(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any
                 )
                 raise
             finally:
-                if not failed:
+                if not failed and not retrying:
                     job_log.info(
                         "job done", extra={"duration_ms": _ms(started), "queue_ms": wait_ms}
                     )
