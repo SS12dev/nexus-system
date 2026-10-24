@@ -136,9 +136,10 @@ async def test_an_approved_green_app_is_deployed_with_a_screenshot(ddeps, owner,
         "project": project.workbench_id,
         "stack": "static",
         "internet": False,
-        "private": True,
+        "private": False,
     }
-    assert f"- Live link: {URL} (private: only you can open it" in final
+    # Public by default, so nothing to explain after the link.
+    assert f"- Live link: {URL}\n" in final
     assert (project.app_slug, project.app_state, project.live_url) == ("2048", "running", URL)
     assert project.deployed_at is not None and project.deploy_error is None
     # The screenshot comes with the team's result.
@@ -194,24 +195,30 @@ async def test_a_second_failure_is_reported(ddeps, owner, scripts):
 
 
 @pytest.mark.parametrize(
-    "approved,passed,failed,why",
-    [
-        (False, 14, 0, "the reviewer hasn't approved it"),
-        (True, 14, 3, "not every test passed"),
-        (True, 0, 0, "no tests ran"),
-    ],
+    "passed,failed,why",
+    [(14, 3, "not every test passed"), (0, 0, "no tests ran")],
 )
-async def test_only_approved_green_apps_are_deployed(
-    ddeps, owner, scripts, approved, passed, failed, why
-):
+async def test_only_green_apps_are_deployed(ddeps, owner, scripts, passed, failed, why):
     user, chat_id = owner
-    scripts_for(scripts, approved=approved, passed=passed, failed=failed)
+    scripts_for(scripts, passed=passed, failed=failed)
     run_id = await dev_run(ddeps, user, chat_id)
     await runner.run_system(ddeps, run_id)
 
     _, final, _, _ = await outcome(ddeps, run_id)
     assert ddeps.deployer.deploys == []
     assert f"- Live link: not deployed, as {why}" in final
+
+
+async def test_green_work_still_unapproved_after_the_last_round_is_deployed(ddeps, owner, scripts):
+    """So the user can try it while the open points wait; the answer says they are open."""
+    user, chat_id = owner
+    scripts_for(scripts, approved=False)
+    run_id = await dev_run(ddeps, user, chat_id)
+    await runner.run_system(ddeps, run_id)
+
+    _, final, _, _ = await outcome(ddeps, run_id)
+    assert len(ddeps.deployer.deploys) == 1
+    assert f"- Live link: {URL} (with the open points below still to fix)" in final
 
 
 async def test_members_can_run_three_apps(ddeps, sessionmaker):
@@ -287,6 +294,6 @@ async def test_the_visibility_tool(ddeps, owner, sessionmaker):
     slug, args = ddeps.deployer.deploys[-1]
     assert slug == "2048" and args["build"] is False and args["private"] is False
     out = await tool.ainvoke({"app": "2048", "public": False})
-    assert "private again" in out and ddeps.deployer.deploys[-1][1]["private"] is True
+    assert "now private" in out and ddeps.deployer.deploys[-1][1]["private"] is True
     async with sessionmaker() as db:
         assert (await db.scalar(select(Project))).public is False

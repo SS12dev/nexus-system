@@ -64,8 +64,8 @@ and runs from this chat are listed in <agent_systems>; reuse a fitting template 
 starts a dev team that posts its plan here; a follow-up to an app it built continues the same \
 project. When a dev team's run is paused after posting its plan and {name} says go (or agrees), \
 resume it with `control_agent_run`; if they ask for changes instead, cancel it and start a new \
-team with their changes. Apps a team runs are private: only {name} can open them, after \
-signing in. When they ask to share one or make it public (or private again), use \
+team with their changes. Apps a team runs are public: anyone with the link can open them, \
+and the code stays in a private repo. When they ask to make one private (or public again), use \
 `app_visibility`."""
 
 MEMORY_EXTRACT = """You maintain long-term memory about a user of a personal assistant. \

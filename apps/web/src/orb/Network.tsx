@@ -62,6 +62,17 @@ export function Network({
     });
   }, [clusters]);
 
+  // The diagram's other arrows (a second builder into the tester, the reviewer's fixes going
+  // back), drawn fainter between agents that are already out.
+  const extra = useMemo(() => {
+    const out: [string, string][] = [];
+    for (const c of clusters) {
+      const parent = new Map(c.nodes.map((n) => [n.key, n.parent]));
+      for (const [a, b] of c.links) if (parent.get(b) !== a && parent.get(a) !== b) out.push([a, b]);
+    }
+    return out;
+  }, [clusters]);
+
   const gone = (key: string) => {
     positions.current.delete(key);
     setEntries((prev) => prev.filter((e) => !(e.leaving && e.node.key === key)));
@@ -69,7 +80,7 @@ export function Network({
 
   return (
     <group>
-      <Edges entries={entries} positions={positions.current} />
+      <Edges entries={entries} extra={extra} positions={positions.current} />
       {entries.map((e) => (
         <AgentNode
           key={e.node.key}
@@ -234,9 +245,18 @@ function AgentNode({
   );
 }
 
-/** Every edge in one draw call: orb to each team's lead, and each agent to its parent.
+/** Every edge in one draw call: orb to each team's lead, each agent to its parent, and the
+ * team's other links.
  * Rebuilt each frame from the springs' current positions. */
-function Edges({ entries, positions }: { entries: Entry[]; positions: Positions }) {
+function Edges({
+  entries,
+  extra,
+  positions,
+}: {
+  entries: Entry[];
+  extra: [string, string][];
+  positions: Positions;
+}) {
   const geometry = useMemo(() => {
     const g = new BufferGeometry();
     g.setAttribute("position", new BufferAttribute(new Float32Array(MAX_EDGES * 6), 3));
@@ -271,6 +291,18 @@ function Edges({ entries, positions }: { entries: Entry[]; positions: Positions 
         Math.min(1, me.grow) * (isActive(me.status) ? 1 : 0.9),
       );
       col.setXYZ(n * 2, c.r * 0.6, c.g * 0.6, c.b * 0.6);
+      col.setXYZ(n * 2 + 1, c.r, c.g, c.b);
+      n++;
+    }
+    for (const [from, to] of extra) {
+      if (n >= MAX_EDGES) break;
+      const a = positions.get(from);
+      const b = positions.get(to);
+      if (!a || !b || a.grow <= 0.01 || b.grow <= 0.01) continue;
+      pos.setXYZ(n * 2, a.pos.x, a.pos.y, a.pos.z);
+      pos.setXYZ(n * 2 + 1, b.pos.x, b.pos.y, b.pos.z);
+      c.set("#334155").multiplyScalar(0.7 * Math.min(1, a.grow, b.grow));
+      col.setXYZ(n * 2, c.r, c.g, c.b);
       col.setXYZ(n * 2 + 1, c.r, c.g, c.b);
       n++;
     }

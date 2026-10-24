@@ -3,7 +3,8 @@
  * colour it is. No three.js here, so it is cheap to test; the scene springs objects toward
  * these targets, which is what makes agents grow out of the orb and fall back into it.
  */
-import type { AgentSystem, Approval, FileItem, Memory, MemoryKind } from "../lib/types";
+import { TEAM_W, teamLayout } from "../lib/teamLayout";
+import type { AgentNode, AgentSystem, Approval, FileItem, Memory, MemoryKind } from "../lib/types";
 
 export type Vec3 = [number, number, number];
 
@@ -146,33 +147,29 @@ export function clusterAnchor(i: number, count: number, compact = false): Vec3 {
   return [Math.cos(theta) * r * radius, y * radius * (compact ? 1.5 : 0.7), Math.sin(theta) * r * radius];
 }
 
-/** Offsets for a team's agents around its anchor, in the plane facing away from the orb. */
+/** World units per diagram unit: the chat card's 520-wide diagram becomes about 3 units. */
+const LAYOUT_SCALE = 3 / TEAM_W;
+
+/** Each agent's place around its team's anchor, in the plane facing away from the orb: the
+ * same shape as the team diagram in the chat card (teamLayout), centred on the anchor. */
 export function agentTargets(
   anchor: Vec3,
-  count: number,
+  nodes: AgentNode[],
   topology: AgentSystem["topology"],
-): Vec3[] {
+): Record<string, Vec3> {
+  if (nodes.length <= 1) return Object.fromEntries(nodes.map((n) => [n.id, anchor]));
   const out = norm(anchor);
   const up: Vec3 = Math.abs(out[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
   const u = norm(cross(out, up));
   const v = cross(out, u);
-  if (count <= 1) return [anchor];
-  if (topology === "pipeline" || topology === "critic_loop" || topology === "dev_project") {
-    // A chain reads as a line, first agent nearest the orb's left.
-    const step = 0.55;
-    return Array.from({ length: count }, (_, i) =>
-      add(anchor, scale(u, (i - (count - 1) / 2) * step)),
-    );
-  }
-  // Lead at the anchor, the rest on a ring around it, pushed slightly outward.
-  const ring = 0.5 + count * 0.05;
-  const targets: Vec3[] = [anchor];
-  const others = count - 1;
-  for (let i = 0; i < others; i++) {
-    const a = (i / others) * Math.PI * 2 + Math.PI / 2;
-    targets.push(
-      add(add(anchor, scale(out, 0.35)), add(scale(u, Math.cos(a) * ring), scale(v, Math.sin(a) * ring))),
-    );
+  const { pos, height } = teamLayout(nodes, topology);
+  const targets: Record<string, Vec3> = {};
+  for (const n of nodes) {
+    const p = pos[n.id];
+    // Diagram x runs along u; its y runs down the screen, so it goes against v.
+    const dx = (p.x - TEAM_W / 2) * LAYOUT_SCALE;
+    const dy = (height / 2 - p.y) * LAYOUT_SCALE;
+    targets[n.id] = add(anchor, add(scale(u, dx), scale(v, dy)));
   }
   return targets;
 }
@@ -201,11 +198,15 @@ export function buildClusters(
   );
   return systems.map((s, i) => {
     const anchor = clusterAnchor(i, systems.length, compact);
-    // The lead goes first so it takes the anchor slot.
+    // The lead goes first, so the team buds off the orb from it.
     const ordered = [...s.nodes].sort((a, b) => Number(b.lead) - Number(a.lead));
-    const targets = agentTargets(anchor, ordered.length, s.topology);
+    const targets = agentTargets(anchor, s.nodes, s.topology);
     const leadKey = ordered[0] ? `${s.id}:${ordered[0].id}` : null;
-    const chain = s.topology === "pipeline" || s.topology === "critic_loop" || s.topology === "dev_project";
+    // Each agent hangs from the first agent that hands it work (as the diagram's arrows
+    // show), else from the lead; the lead hangs from the orb.
+    const feeds: Record<string, string> = {};
+    for (const e of s.edges)
+      if (e.kind !== "feedback" && e.from !== e.to && !(e.to in feeds)) feeds[e.to] = e.from;
     const nodes: OrbNode[] = ordered.map((n, j) => {
       const key = `${s.id}:${n.id}`;
       const live = s.run?.agents?.[n.id];
@@ -219,9 +220,8 @@ export function buildClusters(
         lead: j === 0,
         status: agentStatus(s, n.id, waiting),
         tool: live?.tool,
-        // In a chain each agent hangs from the one before it; otherwise from the lead.
-        parent: j === 0 ? null : chain ? `${s.id}:${ordered[j - 1].id}` : leadKey,
-        target: targets[j],
+        parent: j === 0 ? null : feeds[n.id] ? `${s.id}:${feeds[n.id]}` : leadKey,
+        target: targets[n.id],
       };
     });
     const keys = new Set(nodes.map((n) => n.key));

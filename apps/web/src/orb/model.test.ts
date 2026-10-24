@@ -84,12 +84,22 @@ describe("layout", () => {
       }
   });
 
-  it("places the lead at the anchor and workers around it", () => {
+  it("lays a team out as the chat card's diagram does, around its anchor", () => {
     const anchor = clusterAnchor(0, 1);
-    const t = agentTargets(anchor, 4, "supervisor_workers");
-    expect(t[0]).toEqual(anchor);
-    expect(t).toHaveLength(4);
-    for (const p of t.slice(1)) expect(dist([0, 1, 2].map((k) => p[k] - anchor[k]))).toBeGreaterThan(0.4);
+    const node = (id: string, stage: string) => ({ id, name: id, role: "r", tier: "mini" as const, lead: id === "re", stage });
+    const t = agentTargets(
+      anchor,
+      [node("re", "Brief"), node("ar", "Plan"), node("fe", "Build"), node("be", "Build"), node("te", "Test"), node("rv", "Review")],
+      "dev_project",
+    );
+    const d = (a: number[], b: number[]) => dist([0, 1, 2].map((k) => a[k] - b[k]));
+    // The two builders share a column: equally far from the architect and the tester, apart
+    // from each other; the stages run in a line through them.
+    expect(d(t.fe, t.ar)).toBeCloseTo(d(t.be, t.ar));
+    expect(d(t.fe, t.te)).toBeCloseTo(d(t.be, t.te));
+    expect(d(t.fe, t.be)).toBeGreaterThan(0.4);
+    expect(d(t.re, t.rv)).toBeCloseTo(d(t.re, t.ar) * 4);
+    for (const p of Object.values(t)) expect(d(p, anchor)).toBeLessThan(2);
   });
 });
 
@@ -110,9 +120,40 @@ describe("buildClusters", () => {
           { id: "b", name: "B", role: "r", tier: "mini", lead: false },
           { id: "c", name: "C", role: "r", tier: "mini", lead: false },
         ],
+        edges: [
+          { from: "a", to: "b", kind: "handoff" },
+          { from: "b", to: "c", kind: "handoff" },
+        ],
       }),
     ]);
     expect(c.nodes.map((n) => n.parent)).toEqual([null, "s1:a", "s1:b"]);
+  });
+
+  it("hangs a software team's agents from whoever hands them work", () => {
+    const n = (id: string, stage: string) => ({ id, name: id, role: "r", tier: "mini" as const, lead: id === "researcher", stage });
+    const [c] = buildClusters([
+      sys({
+        topology: "dev_project",
+        nodes: [n("researcher", "Brief"), n("architect", "Plan"), n("frontend", "Build"),
+          n("backend", "Build"), n("tester", "Test"), n("reviewer", "Review")],
+        edges: [
+          { from: "researcher", to: "architect", kind: "handoff" },
+          { from: "architect", to: "frontend", kind: "handoff" },
+          { from: "architect", to: "backend", kind: "handoff" },
+          { from: "frontend", to: "tester", kind: "handoff" },
+          { from: "backend", to: "tester", kind: "handoff" },
+          { from: "tester", to: "reviewer", kind: "review" },
+          { from: "reviewer", to: "frontend", kind: "feedback" },
+          { from: "reviewer", to: "backend", kind: "feedback" },
+        ],
+      }),
+    ]);
+    const parent = Object.fromEntries(c.nodes.map((x) => [x.agentId, x.parent]));
+    expect(parent).toEqual({
+      researcher: null, architect: "s1:researcher", frontend: "s1:architect",
+      backend: "s1:architect", tester: "s1:frontend", reviewer: "s1:tester",
+    });
+    expect(c.links).toHaveLength(8);
   });
 
   it("colours agents from the live run, and a pending approval wins", () => {

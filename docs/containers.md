@@ -186,7 +186,7 @@ the allowed hosts answer, other sites are refused, and Postgres, Redis, the othe
 services, the Mac, the LAN and the internet can't be reached directly.
 
 **deployer** ([services/deployer](../services/deployer)) runs the apps software teams build. At
-the end of a run whose reviewer approved and whose tests passed (or on **Redeploy** on the Apps
+the end of a run whose tests passed (approved, or after the last round with open points; or on **Redeploy** on the Apps
 page) it builds the project from its workbench folder, mounted read-only, using a house
 template ([templates](../services/deployer/src/nexus_deployer/templates)): a static site on
 unprivileged nginx, FastAPI on Python slim, or Express on Node. Agents never write their own

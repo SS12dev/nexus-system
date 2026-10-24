@@ -9,9 +9,10 @@ paused run and carries on when they say go. Builders work side by side in their 
 (no backend for a static app); the tester runs unit and Playwright tests; the reviewer approves
 or sends numbered fixes back to the builders. Release is plain code: it commits what is left,
 marks the project ready, saves it to the Library, pushes it to GitHub when the App is set up
-(release.py). Then deploy runs it as an app (deploy.py) when the reviewer approved and the
-tests passed; a deploy that fails its health check goes back to the builders once, with the
-error and logs, before the user hears about it. Other steps plug in through RELEASE_STEPS.
+(release.py). Then deploy runs it as an app (deploy.py) when the tests passed: approved work,
+or work still unapproved after the last round, whose answer lists the open points. A deploy
+that fails its health check goes back to the builders once, with the error and logs, before
+the user hears about it. Other steps plug in through RELEASE_STEPS.
 """
 
 import logging
@@ -98,12 +99,10 @@ def repo_line(release: dict) -> str:
 
 def live_line(release: dict) -> str:
     if release.get("live_url"):
+        note = " (with the open points below still to fix)" if release.get("preview") else ""
         if release.get("public"):
-            return release["live_url"]
-        return (
-            f"{release['live_url']} (private: only you can open it, after signing in; say "
-            '"make it public" to share it)'
-        )
+            return release["live_url"] + note
+        return f"{release['live_url']} (private: only you can open it, after signing in){note}"
     if release.get("live_note"):
         return release["live_note"]
     return "added here once deploys are switched on"
@@ -388,10 +387,11 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
     async def deploy(state: SystemState) -> dict:
         dev = dict(state.get("dev") or {})
         facts = dict(dev.get("release") or {})
+        # Green tests are what put the app up. Work the reviewer hasn't approved only gets here
+        # after the last round, and is deployed too so the user can try it while the open
+        # points wait; main still moves only on approval (release.py).
         if rc.deps.deployer is None:
             pass  # Deploys are off here; the answer says the link comes later.
-        elif not dev.get("approved"):
-            facts["live_note"] = "not deployed, as the reviewer hasn't approved it"
         elif not releasing.passed(dev):
             tests = dev.get("tests") or {}
             facts["live_note"] = (
@@ -406,6 +406,7 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             if result.ok:
                 facts["live_url"] = result.url
                 facts["public"] = await releasing.is_public(rc, uuid.UUID(facts["project_id"]))
+                facts["preview"] = not dev.get("approved")
             elif dev.get("deploy_retries", 0) < DEPLOY_RETRIES and result.logs:
                 # Back to the builders with what went wrong; the user hears only the outcome.
                 fixes = (
