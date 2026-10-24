@@ -17,6 +17,8 @@ If the embedder is down the file is still marked ready and keyword search works;
 minutes embeds whatever is missing, and re-embeds chunks made by an older model after the
 embedder changes.
 
-The Docker image installs Docling with CPU PyTorch and bakes its models in (a few GB). Build
+The Docker image installs Docling with CPU PyTorch and bakes in only the models `parse.py` uses:
+layout, tables and RapidOCR's torch models (the image has no onnxruntime, so OCR runs on torch).
+The download is tried three times, 15 s apart, so a slow model host doesn't fail the build. Build
 with `--build-arg DOCLING=false` for a small image without it. Generating files (python-pptx,
 openpyxl, python-docx, WeasyPrint) comes with the skills library in phase 3.

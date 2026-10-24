@@ -18,9 +18,13 @@ and topics, with memories and artifacts attached and what it recalls lighting up
 people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
 the audit log, backups and a maintenance switch. Since then it has gained structured logs with
-request ids, a Monitoring tab with alerts, and a Configuration tab where the owner changes
-runtime settings without a redeploy. To make it ready for friends, new people now get a short
-setup interview that tailors Nexus to their work and interests, a short tour, a light theme,
+request ids, a Monitoring tab with alerts, a Models tab that shows every model call's cost,
+speed and failures, and a Configuration tab where the owner changes runtime settings without a
+redeploy. Nexus also **reviews itself**: every week it looks at anonymous usage counts and
+proposes skills, instructions, settings or code changes, and nothing changes until the owner
+approves one on Admin › Improvements ([Self-review](#self-review)). What it knows about you can
+be explored on the **Knowledge** page, and Admin › Recall checks how well it remembers. To make
+it ready for friends, new people now get a short setup interview that tailors Nexus to their work and interests, a short tour, a light theme,
 **routines** (prompts that run on a schedule, like a morning brief, and can notify their phone,
 email or WhatsApp), in-app feedback, and public Terms and Privacy pages they agree to at
 sign-up. Owner checklist: [docs/setup-for-friends.md](docs/setup-for-friends.md).
@@ -590,6 +594,8 @@ them); service health, queues, API traffic and backups always cover all of Nexus
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or
   upgrading Nexus.
+- **Feedback:** what people sent with **Send feedback**, each marked as a problem, an idea or
+  praise with the page it came from, which you can mark handled.
 - **Usage:** turns, tokens, agent runs and their cost, and files per person and per day, over 7,
   30 or 90 days.
 - **Audit log:** sign-ins (with IP), invites, access requests and their decisions, role, budget
@@ -630,7 +636,9 @@ approve:
 | Tool, code change | a draft pull request on `IMPROVE_REPO` with the spec in `docs/proposals/`, opened by the GitHub App | close the pull request |
 
 Implement a code proposal on its branch (by hand, with a Claude Code session or a dev team),
-then mark it ready and merge as usual; nothing merges by itself. Without `IMPROVE_REPO` (set it
+then mark it ready and merge as usual; nothing merges by itself
+([docs/proposals/README.md](docs/proposals/README.md)). Pull requests start from
+`IMPROVE_BASE_BRANCH` (`main`). Without `IMPROVE_REPO` (set it
 to `SS12dev/nexus-system` on the Configuration tab) an approved code proposal stays a spec on
 the page. The App needs installing on that repository too; see
 [docs/github-app.md](docs/github-app.md#pull-requests-on-nexus-itself).
@@ -686,6 +694,12 @@ logged as `http.error` / `http.slow`, refusals (rate limit, cross-site) as `http
 access requests as `access.*` events. Docker keeps 5 files of 10 MB per container, so logs
 can't fill the disk. The orchestrator and doc-worker have Docker health checks on their arq
 heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
+
+Background jobs that are safe to run twice (memory extraction, profile rebuilds, link previews)
+retry a passing problem, such as LiteLLM or OpenAI busy or a dropped database or Valkey
+connection, after 10 s and again after 30 s, with a warning saying so; the third failure is final
+([orchestrator/retry.py](services/orchestrator/src/nexus_orchestrator/retry.py)). Chat turns
+and agent runs are never retried, since they stream to you and spend budget as they go.
 
 ### Privacy
 
@@ -814,12 +828,14 @@ its dump, replaces the MinIO data, and starts everything again (the tunnel too, 
 ## Repository layout
 
 ```
-apps/web/               React + Vite + Tailwind PWA (orb home, chat, Library, Memory, Agents,
-                        Skills, People); the 3D scene is in src/orb
+apps/web/               React + Vite + Tailwind PWA (setup interview, orb home, chat, Library,
+                        Knowledge, Memory, Routines, Agents, Apps, Skills, People, Settings,
+                        Admin); the 3D scene is in src/orb
 services/api/           FastAPI: auth, chats, files, memories, skills, agents, approvals, admin,
                         WebSocket; Alembic migrations
 services/orchestrator/  arq worker: the Nexus graph, the Tool Registry, agent systems (design,
-                        compile, run, approvals), the memory and learned-skill jobs
+                        compile, run, approvals), the memory, knowledge-graph, learned-skill,
+                        routine and self-review jobs
 services/sandbox/       FastAPI: runs agent code with no network and resource limits
 services/workbench/     FastAPI: dev teams' persistent project folders, commands and git
 services/deployer/      FastAPI: builds and runs finished projects as apps, and the Docker gate
@@ -831,7 +847,8 @@ packages/common/        settings, models, events, storage, embeddings, hybrid se
 library/                core skills and the shipped instruction layers
 infra/litellm, postgres, cloudflared   model aliases, database init, tunnel notes
 secrets/                the encrypted secrets file (gitignored; README: Secrets)
-docs/                   INDEX.md (start here), containers, app URLs, the GitHub App, proposals
+docs/                   INDEX.md (start here), containers, app URLs, the GitHub App, setup for
+                        friends, plans, specs of approved self-review proposals
 compose.yaml            the whole stack
 ```
 
@@ -889,5 +906,6 @@ Schema changes: edit `packages/common/src/nexus_common/models.py`, then
 ## Roadmap
 
 1. Foundation · 2. Memory and documents · 3. Agent systems, tools and the skills library ·
-4. The 3D orb · 5. **Production hardening** (this: logs, monitoring, alerts, runtime
-configuration) · 6. Move to a server, voice
+4. The 3D orb · 5. **Production hardening** (this: logs, monitoring, alerts, model monitoring,
+runtime configuration, self-review with owner approval, the knowledge graph, onboarding and
+routines for friends) · 6. Move to a server, voice

@@ -83,7 +83,9 @@ deploy.
 ## Admin
 
 Owner-only Admin page: Status, Alerts, Models (LLM monitoring from LiteLLM spend logs),
-Usage, Improvements (self-review proposals), Recall (scores memory recall on the owner's own
+Usage, Improvements (self-review proposals the owner approves or denies; skills,
+instructions and settings apply at once and can be undone, tools and code become draft pull
+requests with a spec in `docs/proposals/`), Feedback, Recall (scores memory recall on the owner's own
 memories), Monitoring (logs with request ids), Audit,
 Backups and Configuration. Runtime settings are declared in `nexus_common/config.py`;
 overrides are stored in the database and win over `.env`. Secrets live in
@@ -109,7 +111,11 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | the logo | `web/src/components/Orb.tsx` (`NexusMark`), `web/public/icon.svg` |
 | checking one account | `api/inspect_user.py`, `scripts/inspect-user.sh` |
 | what Langfuse stores | `orchestrator/llm.py` (`private`), `nexus_common/embeddings.py` |
-| self-review | `orchestrator/improve.py`, `nexus_common/improve.py` |
+| self-review | `orchestrator/improve.py`, `nexus_common/improve.py`, `api/routes/improvements.py`, `web/src/pages/AdminImprovements.tsx` |
+| alerts | `api/alerts.py`, `web/src/pages/AdminAlerts.tsx` |
+| model monitoring (Models tab) | `nexus_common/llmstats.py`, `web/src/pages/AdminModels.tsx` |
+| logs, request ids, Monitoring tab | `nexus_common/logs.py`, `nexus_common/metrics.py`, `api/middleware.py` |
+| job retries | `orchestrator/retry.py` |
 | an API route | `services/api/src/nexus_api/routes/` |
 | a page | `apps/web/src/pages/` |
 | the database schema | `nexus_common/models.py` + an Alembic migration in `services/api/alembic` |
