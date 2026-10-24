@@ -20,7 +20,7 @@ import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
 import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
 import { formatInZone } from "../lib/schedule";
-import type { KnowledgeGraph, Memory, Project, Recalled, Routine, Run } from "../lib/types";
+import type { KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
 import {
   buildClusters,
   inside as layoutInside,
@@ -88,6 +88,10 @@ export function OrbStage({
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [packInfo, setPackInfo] = useState<Pick<Profiles, "packs" | "interests">>({
+    packs: [],
+    interests: [],
+  });
   const routinesVersion = useStore((s) => s.routinesVersion);
   const recall = useStore((s) => s.recall);
   const [lit, setLit] = useState<Recalled | null>(null);
@@ -107,6 +111,9 @@ export function OrbStage({
   useEffect(() => {
     api.routines().then(setRoutines).catch(() => {});
   }, [routinesVersion, connected]);
+  useEffect(() => {
+    api.profiles().then(setPackInfo).catch(() => {});
+  }, []);
   useEffect(() => {
     api.projects().then(setProjects).catch(() => {});
   }, [connected, Object.keys(files).length]);
@@ -150,9 +157,20 @@ export function OrbStage({
     [graph, memories, artifactList, perf.maxStars, perf.maxMemories, perf.maxCrystals, litIds],
   );
   const known = graph?.entities.filter((e) => !e.is_self).length ?? 0;
+  // Each moon's thread goes to its topic: a routine from a profile pack to that pack's
+  // profession or interest, a project to the project Nexus knows by that name.
+  const homes = useMemo(() => {
+    const labels = new Map<string, string[]>();
+    const interest = new Map(packInfo.interests.map((i) => [i.id, i.label]));
+    for (const p of packInfo.packs) {
+      const names = [p.label, ...[p.id, ...p.match].flatMap((id) => interest.get(id) ?? [])];
+      labels.set(`pack:${p.id}`, names);
+    }
+    return (key: string) => labels.get(key) ?? [];
+  }, [packInfo]);
   const sats = useMemo(
-    () => satellites(routines, projects, perf.lite ? 12 : 24),
-    [routines, projects, perf.lite],
+    () => satellites(routines, projects, insideData.stars, homes, perf.lite ? 12 : 24),
+    [routines, projects, insideData.stars, homes, perf.lite],
   );
 
   // Drop a selection whose object went away.
@@ -353,11 +371,9 @@ function Legend() {
         <span className={item}>{dot(NODE_COLOR.running)} team working</span>
         <span className={item}>{dot(NODE_COLOR.working)} using a tool</span>
         <span className={item}>{dot(NODE_COLOR.waiting)} needs approval</span>
+        <span className={item}>{dot(SATELLITE_COLOR.routine)} routines</span>
         <span className={item}>
-          <span className="inline-block size-2 rounded-full border-2" style={{ borderColor: SATELLITE_COLOR.routine }} /> routines
-        </span>
-        <span className={item}>
-          <span className="inline-block size-2" style={{ background: SATELLITE_COLOR.project }} /> projects
+          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.project }} /> projects
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

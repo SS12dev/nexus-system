@@ -20,10 +20,14 @@ import {
   liveSystems,
   memoryPoints,
   ORB_R,
-  SAT_R,
+  curve,
+  MOON_FAR,
+  MOON_NEAR,
+  orbitPos,
   SATELLITE_COLOR,
   satellites,
   shellFade,
+  type StarPoint,
 } from "./model";
 
 const sys = (over: Partial<AgentSystem> = {}): AgentSystem => ({
@@ -322,7 +326,7 @@ describe("shellFade", () => {
 });
 
 
-describe("satellites outside the orb", () => {
+describe("moons outside the orb", () => {
   const routine = (id: string, extra: Partial<Routine> = {}): Routine => ({
     id,
     name: id,
@@ -342,24 +346,60 @@ describe("satellites outside the orb", () => {
     last_status: null,
     ...extra,
   });
-  const project = (id: string, app_state: string | null = null) =>
-    ({ id, name: id, stack: "static", app_state, updated_at: "2026-10-01T00:00:00Z" }) as Project;
+  const project = (id: string, name = id, app_state: string | null = null) =>
+    ({ id, name, stack: "static", app_state, updated_at: "2026-10-01T00:00:00Z" }) as Project;
+  const star = (id: string, name: string, self = false): StarPoint => ({
+    id,
+    name,
+    type: "topic",
+    summary: "",
+    self,
+    weight: 1,
+    pos: [0.3, 0, 0],
+  });
 
-  it("puts routines and projects on a ring outside the shell, inside the teams' band", () => {
-    const out = satellites([routine("r1"), routine("r2", { enabled: false })], [project("p1", "running")]);
+  it("puts each on its own orbit outside the shell, inside the teams' band", () => {
+    const out = satellites([routine("r1"), routine("r2", { enabled: false })], [project("p1", "p1", "running")]);
     expect(out.map((s) => s.id)).toEqual(["r1", "r2", "p1"]);
-    for (const s of out) {
-      expect(dist(s.pos)).toBeCloseTo(SAT_R, 5);
-      expect(dist(s.pos)).toBeGreaterThan(ORB_R);
-      expect(dist(s.pos)).toBeLessThan(bandRadius(1));
-    }
+    for (const s of out)
+      for (const t of [0, 7, 40]) {
+        const d = dist(orbitPos(s.orbit, t));
+        expect(d).toBeGreaterThanOrEqual(MOON_NEAR - 1e-9);
+        expect(d).toBeLessThanOrEqual(MOON_FAR + 1e-9);
+        expect(d).toBeLessThan(bandRadius(1));
+      }
+    // Orbits differ, so moons don't line up on one ring.
+    expect(new Set(out.map((s) => s.orbit.radius.toFixed(4))).size).toBe(3);
     expect(out[1].color).toBe(SATELLITE_COLOR.paused);
     expect(out[2]).toMatchObject({ kind: "project", active: true, color: SATELLITE_COLOR.project });
     expect(satellites([routine("r1")], [])).toEqual(satellites([routine("r1")], []));
   });
 
+  it("threads each to its topic or project inside, else to you", () => {
+    const stars = [star("me", "You", true), star("t1", "Cooking"), star("t2", "My App")];
+    const homes = (key: string) => (key === "pack:cooking" ? ["Cooking"] : []);
+    const out = satellites(
+      [routine("r1", { source: "pack:cooking" }), routine("r2", { source: "user" })],
+      [project("p1", "my-app")],
+      [...stars],
+      homes,
+    );
+    expect(out.map((s) => s.home)).toEqual(["t1", "me", "t2"]);
+  });
+
   it("keeps to the limit", () => {
     const many = Array.from({ length: 9 }, (_, i) => routine(`r${i}`));
-    expect(satellites(many, [project("p1")], 6)).toHaveLength(6);
+    expect(satellites(many, [project("p1")], [], () => [], 6)).toHaveLength(6);
+  });
+
+  it("bows lines, each its own way, from end to end", () => {
+    const a: [number, number, number] = [0, 0, 0];
+    const b: [number, number, number] = [1, 0, 0];
+    const p1 = curve(a, b, 1);
+    expect(p1[0]).toEqual(a);
+    expect(p1[p1.length - 1]).toEqual(b);
+    const mid = p1[Math.floor(p1.length / 2)];
+    expect(Math.hypot(mid[1], mid[2])).toBeGreaterThan(0.03);
+    expect(curve(a, b, 2)[5]).not.toEqual(mid);
   });
 });

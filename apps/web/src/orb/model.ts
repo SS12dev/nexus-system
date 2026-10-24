@@ -401,12 +401,13 @@ export function inside(
   const lattice = new Map(order.map((e, i) => [e.id, fibonacciDir(i, order.length)]));
   const stars: StarPoint[] = chosen.map((e) => {
     const r = rng(hash(e.id));
-    const j = () => (r() - 0.5) * 0.25;
+    // Loose jitter around the lattice point, so the spread is even without looking gridded.
+    const j = () => (r() - 0.5) * 0.6;
     const dir = norm(add(lattice.get(e.id)!, [j(), j(), j()]));
     // Only a clear lead in mentions pulls a star in: a new graph, where everything is
     // mentioned once, spreads out through the orb instead of crowding you.
-    const near = heaviest > 2 ? Math.sqrt(weightOf(e) / heaviest) : 0.35;
-    const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.08;
+    const near = heaviest > 2 ? Math.sqrt(weightOf(e) / heaviest) : 0.15 + r() * 0.5;
+    const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.1;
     return {
       id: e.id,
       name: e.name,
@@ -467,8 +468,10 @@ export function inside(
 
 // --- Outside the orb: what Nexus does and has made --------------------------------------------
 
-/** A routine or a software project, on the ring just outside the shell: inside is what Nexus
- * knows, outside what it does for you (teams float further out while they work). */
+/** A routine or a software project as a small moon outside the shell: inside is what Nexus
+ * knows, outside what it does for you (teams float further out while they work). Each moon
+ * has an orbit of its own, so they drift like a natural system rather than sit on a rail, and
+ * a thread to what it is about inside the orb. */
 export interface Satellite {
   id: string;
   kind: "routine" | "project";
@@ -476,54 +479,107 @@ export interface Satellite {
   /** "Every day at 08:00", or the project's stack. */
   detail: string;
   color: string;
-  /** A routine that is on and due, or a project running as an app. */
+  /** A routine that is on, or a project running as an app. */
   active: boolean;
+  orbit: Orbit;
+  /** Where it is at time 0 (orbitPos(orbit, 0)). */
   pos: Vec3;
+  /** The star inside the orb its thread goes to: its topic, its project, or you. */
+  home?: string;
 }
 
-/** Radius and tilt of the satellite ring: clear of the shell, well inside the teams' band. */
-export const SAT_R = 1.42;
-const SAT_TILT = 0.32;
+export interface Orbit {
+  radius: number;
+  /** Tilt of the orbit's plane, and which way it is tilted, in radians. */
+  tilt: number;
+  node: number;
+  phase: number;
+  /** Radians per second; the sign is the direction. */
+  speed: number;
+}
+
+/** Moons keep between these distances: clear of the shell, well inside the teams' band. */
+export const MOON_NEAR = 1.22;
+export const MOON_FAR = 1.62;
 
 export const SATELLITE_COLOR = {
-  routine: "#a78bfa",
-  routineFailed: "#f43f5e",
-  paused: "#475569",
-  project: "#fbbf24",
-  projectIdle: "#94a3b8",
+  routine: "#c4b5fd",
+  routineFailed: "#fb7185",
+  paused: "#64748b",
+  project: "#fcd34d",
+  projectIdle: "#cbd5e1",
 };
 
-function ringPoint(angle: number): Vec3 {
-  const x = Math.cos(angle) * SAT_R;
-  const z = Math.sin(angle) * SAT_R;
-  // Tilt the ring about the x axis so it reads as an orbit rather than a flat line.
-  return [x, z * Math.sin(SAT_TILT), z * Math.cos(SAT_TILT)];
+export function orbitPos(o: Orbit, t: number): Vec3 {
+  const a = o.phase + o.speed * t;
+  const x = Math.cos(a) * o.radius;
+  const z = Math.sin(a) * o.radius;
+  // Tilt the plane about the x axis, then turn it about the vertical.
+  const y = z * Math.sin(o.tilt);
+  const z1 = z * Math.cos(o.tilt);
+  const c = Math.cos(o.node);
+  const sn = Math.sin(o.node);
+  return [x * c + z1 * sn, y, -x * sn + z1 * c];
 }
 
-/** Routines on one half of the ring and projects on the other (the whole ring when there is
- * only one kind), evenly spaced in a stable order so nothing jumps when one is added. */
-export function satellites(routines: Routine[], projects: Project[], max = 24): Satellite[] {
+function orbitFor(id: string): Orbit {
+  const r = rng(hash(id));
+  return {
+    radius: MOON_NEAR + (MOON_FAR - MOON_NEAR) * r(),
+    tilt: (r() - 0.5) * 1.1,
+    node: r() * Math.PI * 2,
+    phase: r() * Math.PI * 2,
+    speed: (0.035 + r() * 0.07) * (r() < 0.8 ? 1 : -1),
+  };
+}
+
+const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Routines and projects as moons, newest projects and oldest routines first, at most `max`.
+ * `homes` maps a routine's source pack ("pack:cooking") or a project's name to the names of
+ * stars it belongs to; the first drawn star with one of those names is its home, else you. */
+export function satellites(
+  routines: Routine[],
+  projects: Project[],
+  stars: StarPoint[] = [],
+  homes: (key: string) => string[] = () => [],
+  max = 24,
+): Satellite[] {
+  const byName = new Map<string, string>();
+  for (const st of stars) if (!st.self) byName.set(plain(st.name), st.id);
+  const you = stars.find((st) => st.self)?.id;
+  const homeOf = (keys: string[]) => {
+    for (const k of keys) {
+      const id = byName.get(plain(k));
+      if (id) return id;
+    }
+    return you;
+  };
   const rs = [...routines].sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? -1 : 1));
   const ps = [...projects].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
   // Projects get up to half the slots when there are routines too; routines take the rest.
   const shownP = ps.slice(0, rs.length ? Math.floor(max / 2) : max);
   const shownR = rs.slice(0, max - shownP.length);
-  const arc = shownR.length && shownP.length ? Math.PI : Math.PI * 2;
-  const place = (i: number, n: number, start: number) => start + (arc * (i + 0.5)) / Math.max(n, 1);
-  const out: Satellite[] = shownR.map((r, i) => ({
-    id: r.id,
-    kind: "routine",
-    name: r.name,
-    detail: r.schedule_text,
-    color: !r.enabled
-      ? SATELLITE_COLOR.paused
-      : r.last_status === "failed"
-        ? SATELLITE_COLOR.routineFailed
-        : SATELLITE_COLOR.routine,
-    active: r.enabled,
-    pos: ringPoint(place(i, shownR.length, 0.3)),
-  }));
-  shownP.forEach((p, i) => {
+  const out: Satellite[] = shownR.map((r) => {
+    const orbit = orbitFor(r.id);
+    return {
+      id: r.id,
+      kind: "routine",
+      name: r.name,
+      detail: r.schedule_text,
+      color: !r.enabled
+        ? SATELLITE_COLOR.paused
+        : r.last_status === "failed"
+          ? SATELLITE_COLOR.routineFailed
+          : SATELLITE_COLOR.routine,
+      active: r.enabled,
+      orbit,
+      pos: orbitPos(orbit, 0),
+      home: homeOf(homes(r.source)),
+    };
+  });
+  for (const p of shownP) {
+    const orbit = orbitFor(p.id);
     const live = p.app_state === "running";
     out.push({
       id: p.id,
@@ -532,10 +588,40 @@ export function satellites(routines: Routine[], projects: Project[], max = 24): 
       detail: p.stack ?? "project",
       color: live ? SATELLITE_COLOR.project : SATELLITE_COLOR.projectIdle,
       active: live,
-      pos: ringPoint(place(i, shownP.length, 0.3 + (shownR.length ? Math.PI : 0))),
+      orbit,
+      pos: orbitPos(orbit, 0),
+      home: homeOf([p.name, ...homes(p.name)]),
     });
-  });
+  }
   return out;
+}
+
+/** A gently bowed path from a to b (a quadratic curve through a point pushed sideways by
+ * `bend` of the distance), as `steps` + 1 points. The side it bows to comes from `seed`, so
+ * lines don't all curve the same way, which is what makes straight spokes look machine-made. */
+export function curve(a: Vec3, b: Vec3, seed: number, bend = 0.16, steps = 10): Vec3[] {
+  const d: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const l = len(d);
+  if (l < 1e-6) return [a, b];
+  const dir = scale(d, 1 / l);
+  const up: Vec3 = Math.abs(dir[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const side = norm(cross(dir, up));
+  const r = rng(seed);
+  const angle = r() * Math.PI * 2;
+  const other = cross(dir, side);
+  const push = add(scale(side, Math.cos(angle)), scale(other, Math.sin(angle)));
+  const mid = add(scale(add(a, b), 0.5), scale(push, l * bend));
+  const pts: Vec3[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    pts.push([
+      u * u * a[0] + 2 * u * t * mid[0] + t * t * b[0],
+      u * u * a[1] + 2 * u * t * mid[1] + t * t * b[1],
+      u * u * a[2] + 2 * u * t * mid[2] + t * t * b[2],
+    ]);
+  }
+  return pts;
 }
 
 /** How much of the shell to draw at a camera distance: all of it from the home view out,
