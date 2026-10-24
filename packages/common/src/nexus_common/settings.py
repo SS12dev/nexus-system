@@ -201,6 +201,13 @@ class Settings(BaseSettings):
     whatsapp_template_language: str = "en"
     whatsapp_api_url: str = "https://graph.facebook.com/v23.0"
 
+    # Web push to phones and browsers (nexus_common/push.py). Make the pair once with
+    # `uv run python -m nexus_common.push`; the subject is a mailto: or https: contact the push
+    # services can reach (empty uses SMTP_FROM). Empty keys turn push off.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = ""
+
     # Routines: prompts that run on a schedule as their owner (nexus_common/routines.py).
     routines_enabled: bool = True
     routines_max_per_user: int = 10
@@ -287,6 +294,14 @@ class Settings(BaseSettings):
     @property
     def smtp_enabled(self) -> bool:
         return bool(self.smtp_host and (self.smtp_from or self.smtp_username))
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(
+            self.vapid_public_key
+            and self.vapid_private_key
+            and (self.vapid_subject or self.smtp_from)
+        )
 
     @property
     def whatsapp_enabled(self) -> bool:

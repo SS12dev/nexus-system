@@ -11,7 +11,7 @@ the reply streams like any other. Then:
 
 - with only_if_new, a reply of NOTHING_NEW is a quiet run: both messages are removed and nobody
   is told;
-- otherwise the routine's delivery channels (email, WhatsApp) get a short notice;
+- otherwise the routine's delivery channels (push, email, WhatsApp) get a short notice;
 - a failed run counts toward MAX_FAILURES, after which the routine pauses itself and says why
   in its chat.
 
@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from nexus_common import mail, whatsapp
+from nexus_common import mail, push, whatsapp
 from nexus_common.events import Event, publish
 from nexus_common.litellm import active_key, get_budget
 from nexus_common.models import (
@@ -260,6 +260,16 @@ async def deliver(deps, r: Routine, user: User, content: str) -> list[str]:
     """Tell the person on the routine's channels. Returns the channels that worked."""
     done: list[str] = []
     channels = set(r.delivery or [])
+    if "push" in channels and deps.settings.push_enabled:
+        notice = push.Notice(
+            title=r.name, body=content, url=f"/c/{r.chat_id}", tag=f"routine:{r.id}"
+        )
+        try:
+            async with deps.sessionmaker() as db:
+                if await push.send(db, deps.settings, user.id, notice):
+                    done.append("push")
+        except Exception:
+            log.warning("Routine %s: push failed", r.id, exc_info=True)
     if "email" in channels and deps.settings.smtp_enabled:
         msg = mail.message(deps.settings, [user.email], r.name, notice_text(deps, r, content))
         try:

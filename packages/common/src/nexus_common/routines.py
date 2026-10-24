@@ -205,7 +205,7 @@ def describe(schedule: str) -> str:
 
 # --- Storing routines (shared by the API and the assistant's routine tools) ------------------
 
-DELIVERY = ("email", "whatsapp")
+DELIVERY = ("push", "email", "whatsapp")
 NAME_MAX = 80
 PROMPT_MAX = 4000
 

@@ -35,6 +35,9 @@ EMBEDDING_DIM = 1024
 # What a user's assistant is called until they pick a name of their own.
 DEFAULT_ASSISTANT_NAME = "Jarvis"
 ASSISTANT_NAME_MAX = 24
+# The version of the Terms of Service and Privacy Policy (apps/web/public/terms.html and
+# privacy.html, which show the same date). Changing it asks everyone but owners to agree again.
+TERMS_VERSION = "2026-10-24"
 
 
 def utcnow() -> datetime:
@@ -211,6 +214,9 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(20))
     # May the self-review count the anonymous topics of their requests? (improve.py)
     share_usage: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # The Terms of Service and Privacy Policy version they agreed to (TERMS_VERSION), and when.
+    terms_version: Mapped[str | None] = mapped_column(String(20))
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     roles: Mapped[list["Role"]] = relationship(secondary="user_roles", lazy="selectin")
 
@@ -1385,3 +1391,45 @@ class RoutineRun(Base):
         UniqueConstraint("routine_id", "scheduled_for", name="uq_routine_runs_slot"),
         Index("ix_routine_runs_routine_started", "routine_id", "started_at"),
     )
+
+
+class PushSubscription(Base):
+    """One browser or phone that allowed notifications (nexus_common/push.py)."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(100))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_push_subscriptions_user", "user_id"),)
+
+
+class FeedbackKind(enum.StrEnum):
+    problem = "problem"
+    idea = "idea"
+    praise = "praise"
+
+
+class Feedback(Base):
+    """What someone told the owner from the app's Send feedback form. Listed on the Admin page,
+    emailed to owners, and read by the self-review (without the sender) as evidence."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    kind: Mapped[FeedbackKind] = mapped_column(_enum(FeedbackKind, "feedback_kind"))
+    message: Mapped[str] = mapped_column(Text)
+    # The page they were on, e.g. /routines.
+    page: Mapped[str | None] = mapped_column(String(300))
+    # Set when the owner marks it handled.
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_feedback_created", "created_at"),)

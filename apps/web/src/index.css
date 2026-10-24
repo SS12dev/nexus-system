@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* The theme is on <html data-theme> (lib/theme.ts: the person's choice, or the system's). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --color-ink: #05070d;
   --color-panel: #0b1020;
@@ -27,6 +30,94 @@ input[type="radio"] {
 :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid rgb(56 189 248);
   outline-offset: 1px;
+}
+
+/* Light theme: the same classes, with the surface tokens and the slate scale turned around
+   (slate-100 is the darkest text, slate-700 the lightest line) and the pastel accents that
+   read well on dark swapped for deeper shades that read on white. The 3D orb keeps its own
+   night sky, so its stage is marked data-theme="dark" and gets the dark values back below. */
+[data-theme="light"] {
+  color-scheme: light;
+  --color-ink: #f4f6fb;
+  --color-panel: #ffffff;
+  --color-edge: #dde2ec;
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-600: #94a3b8;
+  --color-slate-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-sky-100: #075985;
+  --color-sky-200: #0369a1;
+  --color-sky-300: #0369a1;
+  --color-emerald-200: #047857;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-rose-200: #be123c;
+  --color-rose-300: #be123c;
+  --color-rose-400: #e11d48;
+  --color-amber-100: #92400e;
+  --color-amber-200: #b45309;
+  --color-amber-300: #b45309;
+  --color-violet-200: #6d28d9;
+  --color-violet-300: #6d28d9;
+  --color-yellow-200: #a16207;
+  --color-yellow-300: #a16207;
+  --color-indigo-300: #4338ca;
+  --color-purple-300: #7e22ce;
+  --color-cyan-300: #0e7490;
+  --color-orange-300: #c2410c;
+}
+/* A dark island inside the light theme (the orb's stage): Tailwind's own values again. */
+[data-theme="light"] [data-theme="dark"] {
+  color-scheme: dark;
+  color: var(--color-slate-100);
+  --color-ink: #05070d;
+  --color-panel: #0b1020;
+  --color-edge: #1c2540;
+  --color-slate-50: oklch(98.4% 0.003 247.858);
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-200: oklch(92.9% 0.013 255.508);
+  --color-slate-300: oklch(86.9% 0.022 252.894);
+  --color-slate-400: oklch(70.4% 0.04 256.788);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(44.6% 0.043 257.281);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-slate-800: oklch(27.9% 0.041 260.031);
+  --color-sky-100: oklch(95.1% 0.026 236.824);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-rose-200: oklch(89.2% 0.058 10.001);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-amber-100: oklch(96.2% 0.059 95.617);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-violet-200: oklch(89.4% 0.057 293.283);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-yellow-200: oklch(94.5% 0.129 101.54);
+  --color-yellow-300: oklch(90.5% 0.182 98.111);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-purple-300: oklch(82.7% 0.119 306.383);
+  --color-cyan-300: oklch(86.5% 0.127 207.078);
+  --color-orange-300: oklch(83.7% 0.128 66.29);
+}
+/* White text is for headings and active items on dark; on light it is the darkest ink. Text on
+   the accent buttons stays dark in both. */
+[data-theme="light"] .text-white:not(:where([data-theme="dark"] *)) {
+  color: #0b1020;
+}
+[data-theme="light"] .text-ink {
+  color: #05070d;
+}
+[data-theme="light"] .shadow-2xl {
+  box-shadow: 0 20px 50px rgb(15 23 42 / 0.18);
 }
 
 body {

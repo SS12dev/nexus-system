@@ -101,6 +101,10 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | onboarding and profile packs | `api/onboarding.py`, `nexus_common/profiles.py`, `library/profiles/*.yaml`, `web/src/pages/OnboardingPage.tsx` |
 | routines | `nexus_common/routines.py` (schedules, storing), `orchestrator/routines.py` (running, delivery), `orchestrator/routine_tools.py`, `api/routes/routines.py` |
 | WhatsApp notices | `nexus_common/whatsapp.py` |
+| push notifications | `nexus_common/push.py`, `api/routes/push.py`, `web/public/push-sw.js`, `web/src/lib/push.ts` |
+| feedback | `api/routes/feedback.py`, `orchestrator/notify.py`, `web/src/components/FeedbackDialog.tsx`, `pages/AdminFeedback.tsx` |
+| terms and privacy pages | `web/public/terms.html`, `privacy.html`, `TERMS_VERSION` in `nexus_common/models.py` |
+| light theme, tour | `web/src/index.css`, `lib/theme.ts`, `components/Tour.tsx` |
 | what Langfuse stores | `orchestrator/llm.py` (`private`), `nexus_common/embeddings.py` |
 | self-review | `orchestrator/improve.py`, `nexus_common/improve.py` |
 | an API route | `services/api/src/nexus_api/routes/` |

@@ -1,7 +1,6 @@
 # Ready for friends: onboarding, profiles and routines
 
-Status: phases A to E built, F partly (email and WhatsApp, no web push), G partly (privacy,
-masking, export, delete account). What has to change for Nexus to work for people who aren't
+Status: built, apart from the two items under **Left** at the end. What has to change for Nexus to work for people who aren't
 its owner (other jobs, other hobbies, not developers), and the order to build it in. The
 **Where it stands** section at the end lists what changed from this plan and what is left.
 
@@ -297,13 +296,16 @@ Built (README: Onboarding and routines, Privacy):
 
 Decided with the owner: friends get every feature except admin; email and WhatsApp for notices.
 
+Added after (owner's requests): web push to phones and browsers (routines and approvals), a
+five-stop first-run tour, a light theme, 12 skills on two new shelves (work: lesson planning,
+study plans, meeting prep, proposals, creative briefs, clinical evidence, job applications,
+sales outreach; life: meal planning, trip planning, training plans, budgeting), in-app
+feedback that reaches the owner and the self-review, and public Terms of Service and Privacy
+Policy pages with recorded agreement at sign-up. WhatsApp stays a send-only notice channel by
+decision; no replies.
+
 Left:
 
-- Web push and an in-app bell for routine results and approvals.
-- Progressive navigation and plainer names (Agents → Teams), a three-stop tour, a first-week
-  checklist, a light theme.
-- The skills the packs name for non-technical work (lesson planning, meal planning, outreach
-  email, meeting prep).
-- An in-app feedback form that lands in Admin.
-- WhatsApp replies (a webhook to talk to the assistant from WhatsApp), which needs a public
-  webhook route and Meta's verification.
+- Plainer names (Agents → Teams) and hiding developer features: not done, since friends get
+  every feature.
+- Linking packs to skills explicitly; for now the assistant finds the right skill by relevance.

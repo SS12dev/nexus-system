@@ -1,4 +1,5 @@
 import {
+  Bell,
   CalendarClock,
   ChevronDown,
   Mail,
@@ -16,6 +17,7 @@ import { Guide, GuideHeading } from "../components/Guide";
 import { SchedulePicker } from "../components/SchedulePicker";
 import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
+import { currentSubscription, enablePush } from "../lib/push";
 import { formatAgo } from "../lib/format";
 import { browserTimezone, DEFAULT_SCHEDULE, formatInZone, toRule } from "../lib/schedule";
 import {
@@ -39,6 +41,7 @@ const STATUS: Record<RoutineRunStatus, { label: string; style: string }> = {
 };
 
 const CHANNELS: { id: Channel; label: string; icon: typeof Mail }[] = [
+  { id: "push", label: "Push", icon: Bell },
   { id: "email", label: "Email", icon: Mail },
   { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
 ];
@@ -453,14 +456,24 @@ function RoutineEditor({
                 type="checkbox"
                 disabled={!available}
                 checked={draft.delivery.includes(c.id)}
-                onChange={(e) =>
+                onChange={async (e) => {
+                  const on = e.target.checked;
                   setDraft({
                     ...draft,
-                    delivery: e.target.checked
+                    delivery: on
                       ? [...draft.delivery, c.id]
                       : draft.delivery.filter((x) => x !== c.id),
-                  })
-                }
+                  });
+                  // Push needs this device's permission, which only a tap can ask for.
+                  if (on && c.id === "push" && !(await currentSubscription())) {
+                    try {
+                      const state = await api.pushState();
+                      if (state.public_key) await enablePush(state.public_key);
+                    } catch (err) {
+                      setError((err as Error).message);
+                    }
+                  }
+                }}
               />
               {c.label}
               {available && needsPhone && draft.delivery.includes(c.id) && (

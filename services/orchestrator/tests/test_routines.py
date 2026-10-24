@@ -257,3 +257,25 @@ async def test_routine_runs_skip_the_team_router(deps, routine):
     finally:
         deps.settings.route_model = ""
     assert [c["model"] for c in deps.factory_calls] == ["nexus-mini"]
+
+
+async def test_push_delivery(deps, routine, sessionmaker, monkeypatch):
+    from nexus_common.models import PushSubscription
+
+    sent = []
+    monkeypatch.setattr(routines.push, "_send", lambda s, sub, data: sent.append(data))
+    deps.settings.vapid_public_key, deps.settings.vapid_private_key = "pub", "priv"
+    deps.settings.vapid_subject = "mailto:o@x.y"
+    try:
+        uid, rid = await routine(delivery=["push"])
+        async with sessionmaker() as db:
+            db.add(PushSubscription(user_id=uid, endpoint="https://p/1", p256dh="k", auth="a"))
+            await db.commit()
+        assert await routines.run_routine(deps, rid, datetime.now(UTC)) == "ok"
+    finally:
+        deps.settings.vapid_public_key = deps.settings.vapid_private_key = ""
+        deps.settings.vapid_subject = ""
+    assert '"title": "Morning brief"' in sent[0] and "/c/" in sent[0]
+    async with sessionmaker() as db:
+        run = await db.scalar(select(RoutineRun))
+    assert run.delivered == ["push"]

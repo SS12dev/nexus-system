@@ -12,6 +12,8 @@ import type {
   Channel,
   ConfigValue,
   ConfigView,
+  FeedbackItem,
+  FeedbackKind,
   FileItem,
   GoogleAccess,
   LinkItem,
@@ -131,7 +133,12 @@ export const api = {
   sessions: () => request<SessionInfo[]>("/api/me/sessions"),
   signOutSession: (id: string) => request<void>(`/api/me/sessions/${id}`, { method: "DELETE" }),
   signOutOthers: () => request<void>("/api/me/sessions/sign-out-others", { method: "POST" }),
-  updateMe: (changes: { timezone?: string; phone?: string; share_usage?: boolean }) =>
+  updateMe: (changes: {
+    timezone?: string;
+    phone?: string;
+    share_usage?: boolean;
+    tour_done?: boolean;
+  }) =>
     request<User>("/api/me", { method: "PATCH", body: json(changes) }),
   profiles: () => request<Profiles>("/api/profiles"),
   onboard: (answers: Partial<OnboardingAnswers>) =>
@@ -140,8 +147,24 @@ export const api = {
       body: json(answers),
     }),
   suggestions: () => request<string[]>("/api/me/suggestions"),
+  acceptTerms: (version: string) =>
+    request<User>("/api/me/terms", { method: "POST", body: json({ version }) }),
   deleteAccount: (confirm: string) =>
     request<void>("/api/me/delete", { method: "POST", body: json({ confirm }) }),
+
+  pushState: () =>
+    request<{ enabled: boolean; public_key: string | null; devices: number }>("/api/push"),
+  pushSubscribe: (sub: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    request<void>("/api/push/subscriptions", { method: "POST", body: json(sub) }),
+  pushUnsubscribe: (endpoint: string) =>
+    request<void>("/api/push/unsubscribe", { method: "POST", body: json({ endpoint }) }),
+  pushTest: () => request<{ sent: number }>("/api/push/test", { method: "POST" }),
+  sendFeedback: (body: { kind: FeedbackKind; message: string; page: string }) =>
+    request<FeedbackItem>("/api/feedback", { method: "POST", body: json(body) }),
+  feedbackList: (openOnly = false) =>
+    request<FeedbackItem[]>(`/api/admin/feedback${openOnly ? "?open_only=true" : ""}`),
+  markFeedback: (id: string, done: boolean) =>
+    request<FeedbackItem>(`/api/admin/feedback/${id}/done?done=${done}`, { method: "POST" }),
 
   routines: () => request<Routine[]>("/api/routines"),
   createRoutine: (body: RoutineInput) =>

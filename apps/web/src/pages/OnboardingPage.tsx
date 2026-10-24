@@ -11,6 +11,7 @@ import {
   SUGGESTED_NAMES,
 } from "../lib/assistant";
 import { packsFor, routineTime, scheduleText } from "../lib/onboarding";
+import { enablePush } from "../lib/push";
 import { browserTimezone, timezones } from "../lib/schedule";
 import type {
   AnswerStyle,
@@ -44,6 +45,8 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
   const [profiles, setProfiles] = useState<Profiles | null>(null);
   const [google, setGoogle] = useState<GoogleAccess | null>(null);
   const [name, setName] = useState(user.assistant_name ?? DEFAULT_ASSISTANT_NAME);
+  const askTerms = !!user.terms_needed;
+  const [agreed, setAgreed] = useState(!askTerms);
   const [roles, setRoles] = useState<string[]>(prior.roles ?? []);
   const [roleNote, setRoleNote] = useState(prior.role_note ?? "");
   const [timezone, setTimezone] = useState(user.timezone || browserTimezone());
@@ -96,9 +99,11 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
     }
     setSaving(true);
     setError("");
+    const terms = askTerms ? { accept_terms: user.terms_current } : {};
     const answers: Partial<OnboardingAnswers> = skip
-      ? { assistant_name: cleanName, timezone }
+      ? { assistant_name: cleanName, timezone, ...terms }
       : {
+          ...terms,
           assistant_name: cleanName,
           roles,
           role_note: roleNote,
@@ -210,6 +215,27 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
               Use up to {ASSISTANT_NAME_MAX} letters, numbers, spaces, dots, hyphens or
               apostrophes.
             </p>
+          )}
+          {askTerms && (
+            <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-edge bg-panel p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-slate-300">
+                I agree to the{" "}
+                <a href="/terms" target="_blank" rel="noopener" className="text-sky-300 underline">
+                  Terms of Service
+                </a>{" "}
+                and the{" "}
+                <a href="/privacy" target="_blank" rel="noopener" className="text-sky-300 underline">
+                  Privacy Policy
+                </a>
+                , including that my messages are sent to an AI provider to get answers.
+              </span>
+            </label>
           )}
         </Step>
       )}
@@ -401,13 +427,24 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
                     <input
                       type="checkbox"
                       checked={delivery.includes(c)}
-                      onChange={(e) =>
-                        setDelivery(
-                          e.target.checked ? [...delivery, c] : delivery.filter((x) => x !== c),
-                        )
-                      }
+                      onChange={async (e) => {
+                        const on = e.target.checked;
+                        setDelivery(on ? [...delivery, c] : delivery.filter((x) => x !== c));
+                        if (on && c === "push") {
+                          try {
+                            const state = await api.pushState();
+                            if (state.public_key) await enablePush(state.public_key);
+                          } catch (err) {
+                            setError((err as Error).message);
+                          }
+                        }
+                      }}
                     />
-                    {c === "email" ? `Email (${user.email})` : "WhatsApp"}
+                    {c === "email"
+                      ? `Email (${user.email})`
+                      : c === "push"
+                        ? "Notification on this device"
+                        : "WhatsApp"}
                   </label>
                 ))}
               </div>
@@ -448,7 +485,7 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
         )}
         <button
           onClick={() => (last ? finish() : next())}
-          disabled={saving || (step === 0 && !cleanName) || !profiles}
+          disabled={saving || (step === 0 && (!cleanName || !agreed)) || !profiles}
           className={`flex items-center gap-1.5 rounded-md bg-sky-500 px-4 py-2 font-medium text-ink hover:bg-sky-400 disabled:opacity-50 ${step === 0 ? "ml-auto" : ""}`}
         >
           {last ? (

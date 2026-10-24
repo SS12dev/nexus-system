@@ -18,6 +18,7 @@ from nexus_api.routes import (
     apps,
     auth,
     chats,
+    feedback,
     files,
     improvements,
     instructions,
@@ -26,6 +27,7 @@ from nexus_api.routes import (
     memories,
     ops,
     projects,
+    push,
     recall,
     routines,
     skills,
@@ -134,6 +136,8 @@ def create_app(
     app.include_router(improvements.router)
     app.include_router(recall.router)
     app.include_router(routines.router)
+    app.include_router(push.router)
+    app.include_router(feedback.router)
     app.include_router(ws.router)
 
     @app.get("/healthz", tags=["ops"])

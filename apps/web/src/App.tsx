@@ -4,6 +4,7 @@ import { Shell } from "./components/Shell";
 import { api, ApiError } from "./lib/api";
 import { APP_NAME } from "./lib/assistant";
 import { useEventSocket } from "./lib/socket";
+import { useTheme } from "./lib/theme";
 import { hasRole, isOwner } from "./lib/types";
 import { AdminPage } from "./pages/AdminPage";
 import { AgentsPage } from "./pages/AgentsPage";
@@ -17,9 +18,9 @@ import { LoginPage } from "./pages/LoginPage";
 import { MemoryPage } from "./pages/MemoryPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PeoplePage } from "./pages/PeoplePage";
-import { PrivacyPage } from "./pages/PrivacyPage";
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { SkillsPage } from "./pages/SkillsPage";
+import { TermsPage } from "./pages/TermsPage";
 import { useStore } from "./store/chat";
 
 export function App() {
@@ -40,6 +41,8 @@ export function App() {
   }, [setUser]);
 
   useEventSocket(!!user);
+  // Keeps <html data-theme> following the system while the choice is "system".
+  useTheme();
 
   const assistant = user?.assistant_name;
   useEffect(() => {
@@ -59,6 +62,8 @@ export function App() {
 
   // The setup interview, once, after first sign-in (it names the assistant too).
   if (!user.onboarded_at) return <OnboardingPage />;
+  // The terms changed since they agreed: ask again before anything else.
+  if (user.terms_needed) return <TermsPage />;
 
   return (
     <Routes>
@@ -72,7 +77,6 @@ export function App() {
         <Route path="apps" element={<AppsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="routines" element={<RoutinesPage />} />
-        <Route path="privacy" element={<PrivacyPage />} />
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />
         <Route path="skills" element={<SkillsPage />} />

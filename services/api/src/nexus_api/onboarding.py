@@ -121,6 +121,8 @@ async def apply(
     }
     mine = packs_for(packs, profile)
     profile["packs"] = [p.id for p in mine]
+    if (user.profile or {}).get("tour_done"):
+        profile["tour_done"] = True
     user.profile = profile
 
     # Earlier onboarding memories go; ones the person edited have source "user" and stay.

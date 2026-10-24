@@ -20,8 +20,10 @@ nightly backups with a restore script, and an Admin page with service health, tr
 the audit log, backups and a maintenance switch. Since then it has gained structured logs with
 request ids, a Monitoring tab with alerts, and a Configuration tab where the owner changes
 runtime settings without a redeploy. To make it ready for friends, new people now get a short
-setup interview that tailors Nexus to their work and interests, and **routines**: prompts that
-run on a schedule (a morning brief, a weekly digest) and can tell them by email or WhatsApp.
+setup interview that tailors Nexus to their work and interests, a short tour, a light theme,
+**routines** (prompts that run on a schedule, like a morning brief, and can notify their phone,
+email or WhatsApp), in-app feedback, and public Terms and Privacy pages they agree to at
+sign-up. Owner checklist: [docs/setup-for-friends.md](docs/setup-for-friends.md).
 All of it runs on one machine with Docker Compose.
 
 ## Quick start
@@ -299,33 +301,53 @@ assistant has `create_routine`, `list_routines` and `update_routine`.
 - **Budget and failures.** A routine is skipped when its owner has less than
   `ROUTINE_MIN_BUDGET_USD` left. Three failed runs in a row pause it, with a note in its chat.
 - **Telling people.** Each run posts in its chat (the chat list and Routines page update live).
-  Per routine, people can also be told by **email** (needs `SMTP_*`) with the result and a link,
+  Per routine, people can also be told by **push** to their phone or browser (below), by
+  **email** (needs `SMTP_*`) with the result and a link,
   or **WhatsApp** (needs the `WHATSAPP_*` settings and their number in Settings) with the
   routine's name and a one-line preview.
 - **Limits.** `ROUTINES_MAX_PER_USER` (10) each, at most every `ROUTINE_MIN_INTERVAL_MINUTES`
   (60). `ROUTINES_ENABLED=false` stops scheduled runs for everyone. All are on Admin ›
   Configuration under *Routines and privacy*.
 
-#### WhatsApp setup
+#### Push notifications
 
-WhatsApp goes through Meta's WhatsApp Business Cloud API. Meta only lets a business start a
-conversation with a template it approved, so every notice uses one:
+Phones and browsers get a notification when a routine with **Push** ticked has something new,
+and when a team is waiting for an approval. It is standard Web Push from the installed PWA:
+the service worker shows the notification (`apps/web/public/push-sw.js`, loaded with
+`importScripts`), each device's subscription is a row in `push_subscriptions`, and the
+orchestrator signs and sends with the VAPID key pair (`nexus_common/push.py`, `pywebpush`); a
+subscription the push service reports gone is deleted. People turn it on per device in
+Settings › Notifications (iPhone and iPad need the app added to the Home Screen first) or by
+ticking Push on a routine. Without `VAPID_*` keys push is off and hidden.
 
-1. In [Meta for Developers](https://developers.facebook.com/), create an app of type
-   *Business*, add the **WhatsApp** product, and add a phone number (the free test number works
-   for up to five recipients you list; a real number needs a Meta Business account).
-2. Under **WhatsApp › Message templates**, create a *Utility* template named `nexus_routine`,
-   language English, with a body of two parameters, e.g.
-   `Your routine *{{1}}* is ready: {{2}} Open Nexus to read it: https://nexus.servhub.cc`.
-   Wait for it to be approved.
-3. Create a **System User** in Business Settings with the WhatsApp app assigned, and generate a
-   permanent token with `whatsapp_business_messaging`.
-4. Set `WHATSAPP_PHONE_NUMBER_ID` (from *API Setup*) in `.env`, and the token with
-   `./scripts/secrets.sh set WHATSAPP_TOKEN`. Use `WHATSAPP_TEMPLATE` and
-   `WHATSAPP_TEMPLATE_LANGUAGE` if you named it differently. Restart.
+#### Setting up the channels
 
-Business-started conversations cost a little per message after Meta's free allowance; for a
-few friends it stays in cents.
+Step-by-step instructions for push keys, WhatsApp (Meta app, template, permanent token) and
+SMTP are in [docs/setup-for-friends.md](docs/setup-for-friends.md). WhatsApp notices use an
+approved template with two parameters (the routine's name and a one-line preview); nobody can
+message Nexus back on WhatsApp.
+
+### The first week
+
+- **Tour.** After setup, a five-stop tour points at the chat box, Routines, Memory, Settings
+  and Send feedback (on a phone, at the menu). Skipping or finishing sets `profile.tour_done`,
+  so it shows once per person, on any device.
+- **Light theme.** Settings › Appearance: match the device, dark or light, saved per device.
+  The light theme swaps the colour tokens and the slate scale in `index.css`; the 3D orb's
+  stage stays dark (`data-theme="dark"` on it).
+- **Send feedback** (in the menu) sends a problem, an idea or praise, with the page it came
+  from, to the owners: by email and on **Admin › Feedback**, where it can be marked handled.
+  The self-review reads it too (kind, page and text, never who sent it).
+
+### Terms and privacy
+
+The **Privacy Policy** and **Terms of Service** are static pages at `/privacy` and `/terms`
+(`apps/web/public/privacy.html`, `terms.html`), served by nginx without signing in, so Google's
+consent screen can link them. The sign-in page links both; the first screen of the setup
+interview has a required "I agree" box; the version agreed to is stored on the user
+(`terms_version`, `terms_accepted_at`, audited as `user.terms_accepted`). Changing
+`TERMS_VERSION` (and the date on both pages, which a test checks) asks everyone but owners to
+agree again before they continue.
 
 ## Agent systems
 
@@ -434,12 +456,14 @@ Skills are folders in the Agent Skills format: a `SKILL.md` with a name and a on
 description, plus `scripts/` and `references/`. Agents see only the names and descriptions; they
 load a skill's instructions with `skills_load` when a task needs it and read its files with
 `skills_read_file`, so prompts stay small. Core skills ship in [library/core](library/core) and
-are synced into the database when the orchestrator starts. 27 skills sit on seven shelves:
+are synced into the database when the orchestrator starts. 40 skills sit on nine shelves:
 documents (PDF, Word, PowerPoint, Excel, charts, images, conversions), research (web research,
 literature reviews, reading papers, research gaps, paper writing, citations, fact-checking),
 writing (reports, summaries, email, meeting notes), data (analysis, statistics, ML experiments,
-LLM evaluation), productivity (inbox triage, scheduling, comparing options), agents (prompt
-writing) and engineering (code review). Every script is tested in the sandbox; see
+LLM evaluation), productivity (inbox triage, scheduling, comparing options), work (lesson
+planning, study plans, meeting prep, proposals and invoices, creative briefs, clinical evidence,
+job applications, sales outreach), life (meal planning, trip planning, training plans,
+budgeting), agents (prompt writing) and engineering (code review). Every script is tested in the sandbox; see
 [library/README.md](library/README.md).
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version
@@ -649,8 +673,8 @@ heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
 
 ### Privacy
 
-Friends should know what you can see; the **Privacy** page (linked from Settings) tells them
-in plain words. In short:
+Friends should know what you can see; the public Privacy Policy at `/privacy` tells them in
+plain words. In short:
 
 - **Langfuse** keeps tokens, cost and timing for everyone, but with `TRACE_MASKING` on (the
   default) it stores `redacted-by-litellm` in place of the prompts and replies of everyone but

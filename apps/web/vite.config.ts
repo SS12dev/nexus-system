@@ -28,8 +28,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Push notifications and taps on them (public/push-sw.js).
+        importScripts: ["push-sw.js"],
         // Never serve the API, auth redirects or the socket from the service worker cache.
-        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/ws/, /^\/privacy/],
+        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/ws/, /^\/privacy/, /^\/terms/],
         // The 3D scene's chunk (three.js) is over the 2 MiB default; precache it for offline use.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },

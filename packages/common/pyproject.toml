@@ -15,6 +15,7 @@ dependencies = [
     "pyyaml>=6.0",
     "cryptography>=43",
     "python-dateutil>=2.9",
+    "pywebpush>=2.0",
 ]
 
 [build-system]

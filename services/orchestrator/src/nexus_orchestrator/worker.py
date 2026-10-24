@@ -161,6 +161,12 @@ async def notify_access(ctx: dict, kind: str, request_id: str) -> None:
 
 
 @traced_job
+async def notify_feedback(ctx: dict, feedback_id: str) -> None:
+    """Email the owners about feedback someone sent from the app."""
+    await notify.feedback(ctx["deps"], uuid.UUID(feedback_id), attempt=ctx.get("job_try", 1))
+
+
+@traced_job
 async def self_review(ctx: dict, review_id: str) -> None:
     """A self-review the owner asked for on the Admin page."""
     await improve.run_review(ctx["deps"], uuid.UUID(review_id))
@@ -240,6 +246,7 @@ class WorkerSettings:
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
         # Emails are safe to retry: the job checks the request is still in the state it's about.
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
+        func(notify_feedback, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
         func(proposal_pr, timeout=120, keep_result=0),
         func(recall_check, timeout=900, keep_result=0),

@@ -8,6 +8,7 @@ import {
   FolderOpen,
   LogOut,
   Menu,
+  MessageSquareHeart,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -26,6 +27,8 @@ import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Orb } from "./Orb";
 import { confirmAction } from "./Feedback";
+import { FeedbackDialog } from "./FeedbackDialog";
+import { Tour } from "./Tour";
 
 const SIDEBAR_KEY = "nexus.sidebar";
 
@@ -51,6 +54,7 @@ export function Shell() {
   const upsertApprovals = useStore((s) => s.upsertApprovals);
   const pendingAccess = useStore((s) => s.pendingAccess) ?? 0;
   const [open, setOpen] = useState(false);
+  const [feedback, setFeedback] = useState(false);
   // Laptop only: fold the sidebar down to a rail of icons. On phones it is a drawer anyway.
   const [collapsed, setCollapsed] = useState(savedCollapsed);
   const navigate = useNavigate();
@@ -195,10 +199,10 @@ export function Shell() {
           <NavLink to="/apps" className={navClass} title={tip("Apps")}>
             <AppWindow size={16} className="shrink-0" /> <span className={label}>Apps</span>
           </NavLink>
-          <NavLink to="/routines" className={navClass} title={tip("Routines")}>
+          <NavLink to="/routines" className={navClass} title={tip("Routines")} data-tour="routines">
             <CalendarClock size={16} className="shrink-0" /> <span className={label}>Routines</span>
           </NavLink>
-          <NavLink to="/memory" className={navClass} title={tip("Memory")}>
+          <NavLink to="/memory" className={navClass} title={tip("Memory")} data-tour="memory">
             <Brain size={16} className="shrink-0" /> <span className={label}>Memory</span>
           </NavLink>
           <NavLink to="/agents" className={(p) => `relative ${navClass(p)}`} title={tip("Agents")}>
@@ -212,7 +216,7 @@ export function Shell() {
           <NavLink to="/skills" className={navClass} title={tip("Skills")}>
             <Sparkles size={16} className="shrink-0" /> <span className={label}>Skills</span>
           </NavLink>
-          <NavLink to="/settings" className={navClass} title={tip("Settings")}>
+          <NavLink to="/settings" className={navClass} title={tip("Settings")} data-tour="settings">
             <Settings size={16} className="shrink-0" /> <span className={label}>Settings</span>
           </NavLink>
           {hasRole(user, "admin") && (
@@ -230,6 +234,15 @@ export function Shell() {
               <Activity size={16} className="shrink-0" /> <span className={label}>Admin</span>
             </NavLink>
           )}
+          <button
+            onClick={() => setFeedback(true)}
+            className={`w-full text-left ${navClass({ isActive: false })}`}
+            title={tip("Send feedback")}
+            data-tour="feedback"
+          >
+            <MessageSquareHeart size={16} className="shrink-0" />{" "}
+            <span className={label}>Send feedback</span>
+          </button>
           <div className="mb-2" />
           <div className={`flex items-center gap-2 px-2 ${collapsed ? "md:justify-center" : ""}`}>
             <div className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
@@ -252,11 +265,14 @@ export function Shell() {
       {open && (
         <div className="fixed inset-0 z-20 bg-black/50 md:hidden" onClick={() => setOpen(false)} />
       )}
+      {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
+      <Tour />
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 border-b border-edge px-4 py-3 md:hidden">
           <button
             onClick={() => setOpen(true)}
             aria-label={waiting + pendingAccess > 0 ? "Open menu, items need your attention" : "Open menu"}
+            data-tour="menu"
             className="relative"
           >
             <Menu size={20} />

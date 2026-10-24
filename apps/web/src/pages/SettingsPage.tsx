@@ -2,11 +2,13 @@ import { CalendarDays, CheckSquare, HardDrive, Mail, Monitor, Users } from "luci
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { AssistantNameForm } from "../components/AssistantNameForm";
+import { PushSettings } from "../components/PushSettings";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDate } from "../lib/format";
 import { browserTimezone, timezones } from "../lib/schedule";
+import { useTheme, type ThemeChoice } from "../lib/theme";
 import type { GoogleAccess, SessionInfo } from "../lib/types";
 import { confirmAction, toast } from "../components/Feedback";
 import { useStore } from "../store/chat";
@@ -60,8 +62,8 @@ export function SettingsPage() {
       <div className="mx-auto max-w-2xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Settings</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Your assistant's name, your time zone and setup, the Google services you let {assistant}
-          and its agents use, the devices you're signed in on, and your data. Only you can see
+          Your assistant's name, your time zone and setup, the Google services you let{" "}
+          {assistant} and its agents use, the devices you're signed in on, and your data. Only you can see
           this.
         </p>
         <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
@@ -72,6 +74,8 @@ export function SettingsPage() {
           <AssistantNameForm />
         </section>
         <AboutYou onError={setError} />
+        <PushSettings onError={setError} />
+        <Appearance />
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {access && !access.available && (
           <p className="text-sm text-slate-400">
@@ -303,10 +307,14 @@ function Privacy({ onError }: { onError: (msg: string) => void }) {
     <section className="mt-6 rounded-lg border border-edge bg-panel p-4">
       <h2 className="mb-1 font-medium">Privacy and your data</h2>
       <p className="mb-3 text-xs text-slate-500">
-        What's kept and who can see it is on the{" "}
-        <Link to="/privacy" className="text-sky-300 hover:underline">
-          privacy page
-        </Link>
+        What's kept and who can see it is in the{" "}
+        <a href="/privacy" target="_blank" rel="noopener" className="text-sky-300 hover:underline">
+          Privacy Policy
+        </a>
+        ; the rules are in the{" "}
+        <a href="/terms" target="_blank" rel="noopener" className="text-sky-300 hover:underline">
+          Terms of Service
+        </a>
         .
       </p>
       <label className="mb-4 flex cursor-pointer items-start gap-3 text-sm">
@@ -372,6 +380,37 @@ function Privacy({ onError }: { onError: (msg: string) => void }) {
         Deleting removes everything {assistant} keeps for you. Delete any running apps on the Apps
         page first.
       </p>
+    </section>
+  );
+}
+
+/** Light or dark, on this device. */
+function Appearance() {
+  const [theme, setTheme] = useTheme();
+  const options: { id: ThemeChoice; label: string }[] = [
+    { id: "system", label: "Match my device" },
+    { id: "dark", label: "Dark" },
+    { id: "light", label: "Light" },
+  ];
+  return (
+    <section className="mb-6 rounded-lg border border-edge bg-panel p-4">
+      <h2 className="mb-1 font-medium">Appearance</h2>
+      <p className="mb-3 text-xs text-slate-500">Saved on this device only.</p>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Theme">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            role="radio"
+            aria-checked={theme === o.id}
+            onClick={() => setTheme(o.id)}
+            className={`rounded-full border px-3 py-1 text-sm ${
+              theme === o.id ? "border-sky-400 bg-sky-500/15 text-sky-200" : "border-edge hover:bg-edge/60"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

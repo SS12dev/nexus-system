@@ -27,6 +27,8 @@ library/
 | writing | `report-writing`, `summarize`, `email-writing`, `meeting-notes` |
 | data | `data-analysis`, `statistics`, `ml-experiments`, `llm-evaluation` |
 | productivity | `inbox-triage`, `scheduling`, `compare-options` |
+| work | `lesson-planning`, `study-plan`, `meeting-prep`, `proposal-writing`, `creative-brief`, `clinical-evidence`, `job-application`, `sales-outreach` |
+| life | `meal-planning`, `trip-planning`, `training-plan`, `budgeting` |
 | agents | `prompt-writing` |
 | engineering | `code-review` |
 

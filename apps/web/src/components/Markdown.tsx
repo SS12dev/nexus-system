@@ -28,7 +28,7 @@ const COMPONENTS: Components = {
 export function Markdown({ children, size = "base", className = "" }: { children: string; size?: "sm" | "base"; className?: string }) {
   return (
     <div
-      className={`prose prose-invert max-w-none min-w-0 break-words prose-pre:border prose-pre:border-edge prose-pre:bg-panel prose-code:rounded prose-code:bg-edge/60 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
+      className={`prose dark:prose-invert max-w-none min-w-0 break-words prose-pre:border prose-pre:border-edge prose-pre:bg-panel prose-code:rounded prose-code:bg-edge/60 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${
         size === "sm" ? "prose-sm" : ""
       } ${className}`}
     >

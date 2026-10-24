@@ -57,6 +57,11 @@ class MeOut(UserOut):
     share_usage: bool = True
     # Which routine notice channels this Nexus can send on.
     channels: list[str] = []
+    # The terms version they agreed to, and the current one; the app asks again when they
+    # differ (never for owners, whose own terms they are).
+    terms_version: str | None = None
+    terms_current: str = ""
+    terms_needed: bool = False
 
 
 def _assistant_name(value: str) -> str:
@@ -89,6 +94,8 @@ class MeIn(BaseModel):
     timezone: str | None = Field(default=None, max_length=64)
     phone: Phone | None = None
     share_usage: bool | None = None
+    # The first-run tour was finished or skipped; kept in profile so it shows once per person.
+    tour_done: bool | None = None
 
 
 class StyleIn(BaseModel):
@@ -104,7 +111,10 @@ class OnboardingRoutineIn(BaseModel):
 
 
 class OnboardingIn(BaseModel):
-    """The setup interview. Every step can be skipped, so everything is optional."""
+    """The setup interview. Every step can be skipped, except agreeing to the terms."""
+
+    # The Terms of Service and Privacy Policy version they agreed to on the first screen.
+    accept_terms: str | None = Field(default=None, max_length=20)
 
     assistant_name: AssistantName | None = None
     roles: list[str] = Field(default=[], max_length=5)
@@ -117,7 +127,7 @@ class OnboardingIn(BaseModel):
     day_start: Time | None = None
     style: StyleIn | None = None
     routines: list[OnboardingRoutineIn] = Field(default=[], max_length=20)
-    delivery: list[Literal["email", "whatsapp"]] = []
+    delivery: list[Literal["push", "email", "whatsapp"]] = []
     phone: Phone | None = None
 
 
@@ -171,7 +181,7 @@ class RoutineIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     schedule: str = Field(min_length=1, max_length=300)
     timezone: str | None = Field(default=None, max_length=64)
-    delivery: list[Literal["email", "whatsapp"]] = []
+    delivery: list[Literal["push", "email", "whatsapp"]] = []
     only_if_new: bool = False
     enabled: bool = True
 
@@ -181,7 +191,7 @@ class RoutineUpdateIn(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=4000)
     schedule: str | None = Field(default=None, min_length=1, max_length=300)
     timezone: str | None = Field(default=None, max_length=64)
-    delivery: list[Literal["email", "whatsapp"]] | None = None
+    delivery: list[Literal["push", "email", "whatsapp"]] | None = None
     only_if_new: bool | None = None
     enabled: bool | None = None
 
@@ -231,6 +241,10 @@ class SchedulePreviewOut(BaseModel):
     text: str = ""
     next: list[datetime] = []
     error: str | None = None
+
+
+class TermsIn(BaseModel):
+    version: str = Field(max_length=20)
 
 
 class DeleteAccountIn(BaseModel):
@@ -612,3 +626,44 @@ class ProposalDecisionIn(BaseModel):
 class MaintenanceIn(BaseModel):
     enabled: bool
     message: str | None = Field(default=None, max_length=300)
+
+
+class PushKeysIn(BaseModel):
+    p256dh: str = Field(max_length=200)
+    auth: str = Field(max_length=100)
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str = Field(max_length=2000, pattern=r"^https://")
+    keys: PushKeysIn
+
+
+class PushEndpointIn(BaseModel):
+    endpoint: str = Field(max_length=2000)
+
+
+class PushStateOut(BaseModel):
+    enabled: bool
+    public_key: str | None = None
+    # Devices this person gets notifications on.
+    devices: int = 0
+
+
+class FeedbackIn(BaseModel):
+    kind: Literal["problem", "idea", "praise"] = "idea"
+    message: str = Field(min_length=3, max_length=4000)
+    page: str = Field(default="", max_length=300)
+
+
+class FeedbackOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    message: str
+    page: str | None
+    done_at: datetime | None
+    created_at: datetime
+    # Who sent it (owners only see this on the Admin page).
+    email: str | None = None
+    name: str | None = None

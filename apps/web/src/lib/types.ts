@@ -32,11 +32,29 @@ export interface User {
   phone?: string | null;
   /** May the self-review count the anonymous topics of their requests? */
   share_usage?: boolean;
-  /** Routine notice channels this Nexus can send on: "email", "whatsapp". */
+  /** Routine notice channels this Nexus can send on: "push", "email", "whatsapp". */
   channels?: Channel[];
+  /** The Terms and Privacy Policy version they agreed to, the current one, and whether the app
+   * must ask (never for owners). */
+  terms_version?: string | null;
+  terms_current?: string;
+  terms_needed?: boolean;
 }
 
-export type Channel = "email" | "whatsapp";
+export type Channel = "push" | "email" | "whatsapp";
+
+export type FeedbackKind = "problem" | "idea" | "praise";
+
+export interface FeedbackItem {
+  id: string;
+  kind: FeedbackKind;
+  message: string;
+  page: string | null;
+  done_at: string | null;
+  created_at: string;
+  email?: string | null;
+  name?: string | null;
+}
 
 export interface UserProfile {
   roles?: string[];
@@ -45,6 +63,8 @@ export interface UserProfile {
   day_start?: string | null;
   style?: AnswerStyle | null;
   packs?: string[];
+  /** The first-run tour was finished or skipped. */
+  tour_done?: boolean;
 }
 
 export interface AnswerStyle {
@@ -95,6 +115,8 @@ export interface Profiles {
 
 export interface OnboardingAnswers {
   assistant_name?: string;
+  /** The terms version agreed to on the first screen. */
+  accept_terms?: string;
   roles: string[];
   role_note: string;
   interests: string[];

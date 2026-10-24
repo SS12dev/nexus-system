@@ -93,6 +93,10 @@ x-nexus-env: &nexus-env
   WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
   WHATSAPP_TEMPLATE: ${WHATSAPP_TEMPLATE:-nexus_routine}
   WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-en}
+  # Web push to phones and browsers; make the keys with `uv run python -m nexus_common.push`.
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  VAPID_SUBJECT: ${VAPID_SUBJECT:-}
   # Routines and privacy
   ROUTINES_ENABLED: ${ROUTINES_ENABLED:-true}
   ROUTINES_MAX_PER_USER: ${ROUTINES_MAX_PER_USER:-10}

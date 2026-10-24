@@ -33,6 +33,7 @@ from nexus_api.schemas import (
     PackRoutineOut,
     ProfilesOut,
     SessionOut,
+    TermsIn,
     UserOut,
 )
 from nexus_api.sessions import hash_token, revoke_all
@@ -40,6 +41,7 @@ from nexus_common import google
 from nexus_common.access import pending_count
 from nexus_common.litellm import active_key, get_budget
 from nexus_common.models import (
+    TERMS_VERSION,
     AuditLog,
     Chat,
     File,
@@ -68,9 +70,15 @@ async def me(
     await db.commit()
     key = await active_key(db, user.id)
     spend = await cached_spend(redis, gateway, key.secret) if key else None
-    channels = [c for c, on in (("email", settings.smtp_enabled),) if on]
-    if settings.whatsapp_enabled:
-        channels.append("whatsapp")
+    channels = [
+        c
+        for c, on in (
+            ("push", settings.push_enabled),
+            ("email", settings.smtp_enabled),
+            ("whatsapp", settings.whatsapp_enabled),
+        )
+        if on
+    ]
     return MeOut(
         **UserOut.model_validate(user).model_dump(),
         assistant_name=user.assistant_name,
@@ -83,7 +91,48 @@ async def me(
         phone=user.phone,
         share_usage=user.share_usage,
         channels=channels,
+        terms_version=user.terms_version,
+        terms_current=TERMS_VERSION,
+        terms_needed=terms_needed(user),
     )
+
+
+def terms_needed(user: User) -> bool:
+    return user.role != RoleName.owner and user.terms_version != TERMS_VERSION
+
+
+def accept_terms(db, user: User, version: str | None) -> None:
+    """Record agreement to the current terms; any other version is refused."""
+    if version != TERMS_VERSION:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Agree to the current Terms of Service and Privacy Policy to continue",
+        )
+    if user.terms_version != version:
+        user.terms_version, user.terms_accepted_at = version, utcnow()
+        db.add(
+            AuditLog(
+                actor_id=user.id,
+                action="user.terms_accepted",
+                target=str(user.id),
+                data={"version": version},
+            )
+        )
+
+
+@router.post("/me/terms", response_model=MeOut)
+async def agree_to_terms(
+    body: TermsIn,
+    user: CurrentUser,
+    db: DbDep,
+    settings: SettingsDep,
+    gateway: GatewayDep,
+    redis: RedisDep,
+) -> MeOut:
+    """Agree to the current Terms of Service and Privacy Policy (after they changed)."""
+    accept_terms(db, user, body.version)
+    await db.commit()
+    return await me(user, db, settings, gateway, redis)
 
 
 @router.patch("/me", response_model=MeOut)
@@ -109,6 +158,8 @@ async def update_me(
         user.phone = body.phone or None
     if body.share_usage is not None:
         user.share_usage = body.share_usage
+    if body.tour_done is not None:
+        user.profile = {**(user.profile or {}), "tour_done": body.tour_done}
     await db.commit()
     return await me(user, db, settings, gateway, redis)
 
@@ -171,6 +222,8 @@ async def onboarding(
     they picked, and write a welcome chat."""
     if not user.assistant_name and not body.assistant_name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Name your assistant first")
+    if terms_needed(user) or body.accept_terms:
+        accept_terms(db, user, body.accept_terms)
     packs = load_packs(settings.library_path)
     chat_id, added = await apply_onboarding(db, settings, user, body, packs)
     await db.commit()
