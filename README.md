@@ -187,6 +187,7 @@ per chat and attributed to the user's id.
 | Profile | A short impression of you, in sections | Nightly, on "Rebuild now", and soon after your first memories | Every turn, at the top of the prompt |
 | Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
 | Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
+| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Memory page |
 
 After each turn `nexus-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
@@ -198,6 +199,30 @@ never changed by Nexus. Each night, memories no chat has confirmed in 60 days lo
 On the **Memory** page you see the profile and every memory with where it came from and its
 history, and can add, edit, pin and delete them. Deleting is real deletion; you can also turn
 learning off or forget everything.
+
+**Connections** (the knowledge graph, `nexus_common/graph.py`) sit in three tables beside the
+memories: `entities` (one per person, project, organisation, place, topic or tool, plus one for
+you), `relations` between them ("Nexus uses LangGraph", with `valid_from` and `valid_to`, so a
+fact that stops being true is kept with the date it ended) and `mentions`, which tie an entity
+to each memory, past-chat summary, file and chat about it. The same `nexus-nano` call that
+proposes memories proposes them, so chats cost nothing extra; names resolve to an existing
+entity by name or alias, then by meaning within the same type. Memories you add or edit
+yourself, files, and anything from before are linked by a background job every ten minutes
+(one call per twenty items). Deleting a memory, chat or file deletes its mentions, and an
+entity nothing mentions any more goes with its relations. The Memory page's Connections view
+lists them by type with their facts; removing one keeps its memories. `GRAPH_ENABLED=false`
+(Admin › Configuration) stops adding to it.
+
+With **Recall through connections** on (`GRAPH_RECALL_ENABLED`, off by default), each turn
+also starts from the entities the message names (or means, within a cosine distance of 0.45)
+and those its closest memories mention, walks up to `GRAPH_HOPS` (2) relations that still hold
+(never through you, since everything links to you), and adds up to `GRAPH_EXTRA_MEMORIES` (4)
+memories about what it reached, best path times confidence first, plus their connections as a
+`<connections>` block. It is one recursive SQL query and no model calls. The `search_memory`
+tool does the same. Every turn sends a `memory.recalled` event with the memories and entities
+it used. Before turning it on, run the check on Admin › Recall: it scores *Standard*,
+*Standard, more* (as many extra memories, without the graph) and *With connections* on the
+same questions, so a gain from the graph shows apart from a gain from sending more.
 
 Search is hybrid everywhere: pgvector cosine similarity and Postgres full-text search fused by
 reciprocal rank, so it still works by keyword if the embedder is down.
@@ -400,6 +425,11 @@ them); service health, queues, API traffic and backups always cover all of Nexus
   are never read.
 - **Improvements:** what Nexus proposes to change about itself; see
   [Self-review](#self-review).
+- **Recall:** how well memory finds the right thing, on your own memories. The memory model
+  writes one question per memory and past chat (once; later checks only ask about new ones),
+  and **Run check** looks each up exactly as a chat turn does, scoring how often the right one
+  comes back and how high, side by side for each way of recalling, with the questions it
+  missed. Run one before and after changing how memory works.
 - **Monitoring:** over the last hour, 6 hours or 24 hours, every API route and every background
   job with its calls, failures, the time half of them beat and the time 95% beat (and, for
   jobs, how long they waited in the queue), and the latest 200 errors logged by the API, the

@@ -510,6 +510,11 @@ export type ServerEvent =
     }
   | { type: "file.updated"; chat_id?: null; data: { file: FileItem } }
   | { type: "memory.updated"; chat_id?: null; data: { op: string; memory: Memory | { id: string } } }
+  | {
+      type: "memory.recalled";
+      chat_id: string;
+      data: { memories: string[]; entities: { id: string; name: string; type: EntityType }[] };
+    }
   | { type: "profile.updated"; chat_id?: null; data: { content: string } }
   | { type: "system.created" | "system.updated"; chat_id?: string | null; data: { system: AgentSystem } }
   | { type: "system.deleted"; chat_id?: string | null; data: { system: { id: string } } }
@@ -894,4 +899,76 @@ export interface Improvements {
     topic_model: string;
   };
   pull_requests: { repo: string | null; ready: boolean };
+}
+
+/** One run of the recall check on the Admin page's Recall tab. */
+export interface RecallScore {
+  n: number;
+  hits: number;
+  hit_rate: number;
+  mrr: number;
+}
+
+export interface RecallMiss {
+  question: string;
+  expected: string;
+  target: "memory" | "past chat";
+  /** The other modes that did find it. */
+  found_by: string[];
+}
+
+export interface RecallCheck {
+  id: string;
+  status: "running" | "done" | "failed";
+  scores: Record<string, RecallScore>;
+  misses: RecallMiss[];
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface RecallSummary {
+  questions: number;
+  memories: number;
+  past_chats: number;
+  checks: RecallCheck[];
+  graph_recall_enabled: boolean;
+}
+
+/** The knowledge graph: who and what memories are about, and how they relate. */
+export type EntityType = "person" | "project" | "organisation" | "place" | "topic" | "tool" | "other";
+
+export interface GraphEntity {
+  id: string;
+  type: EntityType;
+  name: string;
+  aliases: string[];
+  summary: string;
+  /** The user's own entity, which relations about them start from. */
+  is_self: boolean;
+  seen_at: string;
+  memories: number;
+  past_chats: number;
+  files: number;
+  chats: number;
+  memory_ids: string[];
+  file_ids: string[];
+}
+
+export interface GraphRelation {
+  id: string;
+  src: string;
+  dst: string;
+  predicate: string;
+  fact: string;
+  confidence: number;
+  valid_from: string;
+  /** Set when it stopped being true. */
+  valid_to: string | null;
+  source_chat_id: string | null;
+}
+
+export interface KnowledgeGraph {
+  entities: GraphEntity[];
+  relations: GraphRelation[];
 }

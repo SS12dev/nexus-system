@@ -1,5 +1,7 @@
 """The Memory page: see, search, add, edit, pin and delete what Nexus remembers about you, and
-your profile. Deleting a memory deletes it and its history for real."""
+your profile, and the connections (knowledge graph) between the people, projects and topics
+your memories are about. Deleting a memory deletes it and its history for real, and with it
+anything the graph learned only from it."""
 
 import uuid
 
@@ -16,8 +18,9 @@ from nexus_api.schemas import (
     ProfileOut,
     ProfileUpdateIn,
 )
+from nexus_common import graph
 from nexus_common.memory import get_profile, mark_profile_stale, record
-from nexus_common.models import Episode, Memory, MemoryEvent, User, utcnow
+from nexus_common.models import Entity, Episode, Memory, MemoryEvent, User, utcnow
 from nexus_common.search import hybrid_search
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
@@ -109,11 +112,28 @@ async def rebuild_profile(user: MemberUser, queue: QueueDep):
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def forget_everything(user: MemberUser, db: DbDep):
-    """Delete every memory, past-chat summary and the profile text."""
+    """Delete every memory, past-chat summary, connection and the profile text."""
+    await db.execute(delete(Entity).where(Entity.user_id == user.id))
     await db.execute(delete(Memory).where(Memory.user_id == user.id))
     await db.execute(delete(Episode).where(Episode.user_id == user.id))
     profile = await get_profile(db, user.id)
     profile.content, profile.built_at, profile.stale = "", None, False
+    await db.commit()
+
+
+@router.get("/graph")
+async def get_graph(user: CurrentUser, db: DbDep):
+    """Every entity with what mentions it, and every relation, current and ended."""
+    return await graph.graph_payload(db, user.id)
+
+
+@router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_entity(entity_id: uuid.UUID, user: MemberUser, db: DbDep):
+    """Remove a person, project or topic and its connections. Memories about it stay."""
+    e = await db.scalar(select(Entity).where(Entity.id == entity_id, Entity.user_id == user.id))
+    if e is None or e.is_self:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    await db.delete(e)
     await db.commit()
 
 
@@ -137,6 +157,9 @@ async def update_memory(
         m.embedding_model = model or None
         m.source, m.confidence = "user", 1.0
         record(db, m, "update", "user", m.content)
+        # Linked again from the new wording by the next graph job.
+        await graph.forget_mentions(db, memory_id=m.id)
+        m.graph_at = None
     if body.kind is not None:
         m.kind = body.kind
     if body.pinned is not None and body.pinned != m.pinned:
@@ -156,6 +179,8 @@ async def delete_memory(
     the deleted fact leaves the profile at once."""
     m = await own_memory(db, user, memory_id)
     await db.delete(m)
+    await db.flush()
+    await graph.prune(db, user.id)
     await mark_profile_stale(db, user.id)
     await db.commit()
     if rebuild:

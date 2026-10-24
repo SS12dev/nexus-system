@@ -17,6 +17,7 @@ class JobQueue(Protocol):
     async def enqueue_access_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
     async def enqueue_review(self, review_id: uuid.UUID) -> None: ...
     async def enqueue_proposal_pr(self, proposal_id: uuid.UUID) -> None: ...
+    async def enqueue_recall_check(self, eval_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -71,3 +72,7 @@ class ArqJobQueue:
         await self.enqueue_job(
             "proposal_pr", str(proposal_id), _job_id=f"proposal-pr:{proposal_id}"
         )
+
+    async def enqueue_recall_check(self, eval_id: uuid.UUID) -> None:
+        """A recall check the owner started on the Admin page."""
+        await self.enqueue_job("recall_check", str(eval_id), _job_id=f"recall:{eval_id}")

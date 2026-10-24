@@ -1,6 +1,7 @@
-"""Hybrid search over a user's memories, past chats, document chunks, agent systems and skills:
-vector similarity and Postgres full-text search, fused by reciprocal rank. Every query is
-scoped to one user (for skills: the shared ones plus the user's own, active only)."""
+"""Hybrid search over a user's memories, past chats, document chunks, agent systems, skills
+and knowledge-graph entities: vector similarity and Postgres full-text search, fused by
+reciprocal rank. Every query is scoped to one user (for skills: the shared ones plus the
+user's own, active only)."""
 
 import uuid
 from dataclasses import dataclass
@@ -9,8 +10,15 @@ from typing import Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-Table = Literal["memories", "file_chunks", "episodes", "agent_systems", "skills"]
-TABLES: tuple[str, ...] = ("memories", "file_chunks", "episodes", "agent_systems", "skills")
+Table = Literal["memories", "file_chunks", "episodes", "agent_systems", "skills", "entities"]
+TABLES: tuple[str, ...] = (
+    "memories",
+    "file_chunks",
+    "episodes",
+    "agent_systems",
+    "skills",
+    "entities",
+)
 # Standard RRF constant: damps the weight of the very top ranks.
 RRF_K = 60
 CANDIDATES = 40

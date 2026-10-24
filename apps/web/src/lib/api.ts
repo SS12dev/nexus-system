@@ -35,10 +35,13 @@ import type {
   ToolEntry,
   Alerts,
   Improvements,
+  KnowledgeGraph,
   LlmQuery,
   LlmUsage,
   Monitoring,
   Proposal,
+  RecallCheck,
+  RecallSummary,
   Review,
   Usage,
   User,
@@ -177,6 +180,8 @@ export const api = {
   deleteMemory: (id: string, rebuild = false) =>
     request<void>(`/api/memories/${id}${rebuild ? "?rebuild=true" : ""}`, { method: "DELETE" }),
   memoryEvents: (id: string) => request<MemoryEvent[]>(`/api/memories/${id}/events`),
+  knowledgeGraph: () => request<KnowledgeGraph>("/api/memories/graph"),
+  deleteEntity: (id: string) => request<void>(`/api/memories/entities/${id}`, { method: "DELETE" }),
   forgetEverything: () => request<void>("/api/memories", { method: "DELETE" }),
   profile: () => request<Profile>("/api/memories/profile"),
   setMemoryEnabled: (memory_enabled: boolean) =>
@@ -299,6 +304,9 @@ export const api = {
   improvements: (status?: string) =>
     request<Improvements>(`/api/admin/improvements${status ? `?status=${status}` : ""}`),
   reviewNow: () => request<Review>("/api/admin/improvements/review", { method: "POST" }),
+  recall: () => request<RecallSummary>("/api/admin/recall"),
+  runRecallCheck: () => request<RecallCheck>("/api/admin/recall/run", { method: "POST" }),
+  resetRecallQuestions: () => request<void>("/api/admin/recall/questions", { method: "DELETE" }),
   approveProposal: (id: string, note?: string) =>
     request<Proposal>(`/api/admin/improvements/${id}/approve`, { method: "POST", body: json({ note: note || null }) }),
   denyProposal: (id: string, note?: string) =>

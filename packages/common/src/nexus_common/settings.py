@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     inline_document_chars: int = 16000
     # A chat is summarised once it has been quiet this long.
     episode_idle_minutes: int = 20
+    # Knowledge graph: the people, projects and topics memories are about, and how they relate.
+    graph_enabled: bool = True
+    # Recall also follows it: memories about what the question's entities link to, within
+    # graph_hops, up to graph_extra_memories more per turn. Off until the recall check says so.
+    graph_recall_enabled: bool = False
+    graph_hops: int = 2
+    graph_extra_memories: int = 4
     # Nightly memory upkeep (decay, merge, profile rebuild), in UTC. 21:30 UTC is 03:00 IST.
     memory_nightly_hour_utc: int = 21
     memory_nightly_minute_utc: int = 30

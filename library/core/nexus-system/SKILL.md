@@ -70,6 +70,11 @@ deploy.
 
 - Memory (`orchestrator/memory.py`): facts about the person, never task requests; a decider
   adds, updates or ignores each candidate; a profile is rebuilt nightly.
+- Knowledge graph (`nexus_common/graph.py`): entities (people, projects, organisations,
+  places, topics, tools, plus one for the user), relations between them with valid_from and
+  valid_to, and mentions tying each to the memories, past chats, files and chats about it.
+  Extracted in the same memory-model call; `link_graph` backfills the rest every ten minutes;
+  entities nothing mentions are pruned.
 - Skills: SKILL.md folders. Core skills ship in `library/core` and sync on start; learned
   skills are drafted from runs and stay off until approved.
 - Instructions: layered (global, role, user) from `library/instructions` and the database.
@@ -77,7 +82,8 @@ deploy.
 ## Admin
 
 Owner-only Admin page: Status, Alerts, Models (LLM monitoring from LiteLLM spend logs),
-Usage, Improvements (self-review proposals), Monitoring (logs with request ids), Audit,
+Usage, Improvements (self-review proposals), Recall (scores memory recall on the owner's own
+memories), Monitoring (logs with request ids), Audit,
 Backups and Configuration. Runtime settings are declared in `nexus_common/config.py`;
 overrides are stored in the database and win over `.env`. Secrets live in
 `secrets/nexus.sops.env`, never in Admin.
@@ -90,7 +96,7 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | the assistant's prompt or tools | `orchestrator/prompts.py`, `orchestrator/tools.py`, `nexus_common/toolinfo.py` |
 | team design or running | `orchestrator/systems/` |
 | the dev team | `nexus_common/devteam.py`, `systems/dev.py`, `suites.py`, `release.py` |
-| memory | `orchestrator/memory.py` |
+| memory | `orchestrator/memory.py`, `nexus_common/graph.py`, recall in `orchestrator/context.py` |
 | self-review | `orchestrator/improve.py`, `nexus_common/improve.py` |
 | an API route | `services/api/src/nexus_api/routes/` |
 | a page | `apps/web/src/pages/` |

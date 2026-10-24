@@ -443,6 +443,7 @@ class File(Base):
         ForeignKey("files.id", ondelete="SET NULL")
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -557,6 +558,8 @@ class Memory(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     # Last time a chat confirmed it; stale memories lose confidence in the nightly job.
     reinforced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When its entities were last linked in the knowledge graph; null means still to do.
+    graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_memories_user", "user_id", "updated_at"),
@@ -603,6 +606,7 @@ class Episode(Base):
     )
     content: Mapped[str] = mapped_column(Text)
     message_count: Mapped[int] = mapped_column(Integer)
+    graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     embedding_model: Mapped[str | None] = mapped_column(String(64))
     tsv = _tsv()
@@ -619,6 +623,155 @@ class Episode(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
     )
+
+
+# --- Knowledge graph ---------------------------------------------------------------------------
+
+
+class Entity(Base):
+    """Someone or something a user's memories are about: a person, project, organisation,
+    place, topic or tool. Each user has one entity for themselves (is_self), which every
+    relation about "the user" starts from."""
+
+    __tablename__ = "entities"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # person, project, organisation, place, topic, tool or other (nexus_common.graph.TYPES)
+    type: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(200))
+    # Other names it goes by, lower-cased, for matching ("ust global", "the habit app").
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    is_self: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
+    tsv = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', name || ' ' || summary)", persisted=True),
+        deferred=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Last time a chat, memory or file mentioned it.
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_entities_user", "user_id"),
+        Index("ix_entities_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_entities_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class Relation(Base):
+    """A fact linking two entities ("Shivam works at UST"). A fact that stops being true gets
+    valid_to instead of being deleted, so the graph keeps what used to be true."""
+
+    __tablename__ = "relations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    src_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
+    dst_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
+    # A short verb phrase, lower case: "works at", "uses", "is planning".
+    predicate: Mapped[str] = mapped_column(String(80))
+    # The same fact as a sentence, for the prompt and the Memory page.
+    fact: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.7)
+    source_chat_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chats.id", ondelete="SET NULL")
+    )
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_relations_src", "src_id"),
+        Index("ix_relations_dst", "dst_id"),
+        Index("ix_relations_user", "user_id"),
+    )
+
+
+class Mention(Base):
+    """Ties an entity to one memory, past-chat summary, file or chat that is about it. Exactly
+    one of the four is set; deleting that row deletes the mention, and an entity nothing
+    mentions any more is pruned (nexus_common.graph.prune)."""
+
+    __tablename__ = "mentions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    entity_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memories.id", ondelete="CASCADE")
+    )
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="CASCADE")
+    )
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_id",
+            "memory_id",
+            "episode_id",
+            "file_id",
+            "chat_id",
+            name="uq_mentions",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_mentions_memory", "memory_id"),
+        Index("ix_mentions_episode", "episode_id"),
+        Index("ix_mentions_file", "file_id"),
+        Index("ix_mentions_chat", "chat_id"),
+    )
+
+
+class RecallQuestion(Base):
+    """A question whose answer is one memory or past-chat summary, written by the memory model
+    for the recall check on the Admin page. It goes when its target goes."""
+
+    __tablename__ = "recall_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    question: Mapped[str] = mapped_column(Text)
+    # Exactly one of these is set.
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memories.id", ondelete="CASCADE")
+    )
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_recall_questions_user", "user_id"),)
+
+
+class RecallEval(Base):
+    """One run of the recall check: how often each way of recalling finds the memory or past
+    chat a question is about. `scores` maps a mode to {n, hits, hit_rate, mrr}; `misses` lists
+    the questions the standard mode missed, for the owner to read."""
+
+    __tablename__ = "recall_evals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # running, done or failed
+    status: Mapped[str] = mapped_column(String(16))
+    scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    misses: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_recall_evals_user", "user_id", "created_at"),)
 
 
 # --- Skills and instructions -------------------------------------------------------------------

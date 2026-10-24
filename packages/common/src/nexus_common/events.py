@@ -21,6 +21,8 @@ EventType = Literal[
     "link.updated",
     "link.deleted",
     "memory.updated",
+    # Which memories and entities a turn recalled, for the chat and orb to show.
+    "memory.recalled",
     "profile.updated",
     # Agent systems. system.* carry the nodes and edges the UI draws.
     "system.created",

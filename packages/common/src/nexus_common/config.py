@@ -365,6 +365,46 @@ OPTIONS: tuple[Option, ...] = (
         unit="minutes",
     ),
     Option(
+        "graph_enabled",
+        "Memory and context",
+        "Build the knowledge graph",
+        "Note the people, projects, places, topics and tools memories, past chats and files are "
+        "about, and how they relate, in the same memory-model call that saves memories (files "
+        "and memories you add yourself take one small call per batch). Shown under Connections "
+        "on the Memory page. Off stops adding to it; what is there stays.",
+        "bool",
+    ),
+    Option(
+        "graph_recall_enabled",
+        "Memory and context",
+        "Recall through connections",
+        "Besides the memories closest to the message, also recall memories about the people, "
+        "projects and topics it is about and what they link to, and put their connections in "
+        "the prompt. Costs no model calls, only a little more prompt. Compare on the Recall tab "
+        "before turning it on.",
+        "bool",
+    ),
+    Option(
+        "graph_hops",
+        "Memory and context",
+        "Connection steps to follow",
+        "How far recall walks from the entities a message is about: 1 is their direct links, 2 "
+        "also the links of those.",
+        "int",
+        min=1,
+        max=3,
+    ),
+    Option(
+        "graph_extra_memories",
+        "Memory and context",
+        "Extra memories through connections",
+        "At most this many memories found through connections are added to the ones closest to "
+        "the message.",
+        "int",
+        min=0,
+        max=20,
+    ),
+    Option(
         "memory_nightly_hour_utc",
         "Memory and context",
         "Nightly memory upkeep hour (UTC)",
