@@ -5,8 +5,24 @@
 # nexus-api-1, nexus-workbench), so changing it starts Nexus on empty volumes.
 name: nexus
 
+# Every container's logs rotate: 5 files of 10 MB, so they can't fill the Mac's disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+# The orchestrator and doc-worker are alive while arq refreshes their queue's heartbeat key.
+x-worker-health: &worker-health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
 x-nexus-env: &nexus-env
   ENV: ${ENV:-development}
+  # text, or json (one JSON object per line) for a log collector. Both carry the request,
+  # job and trace ids.
   LOG_FORMAT: ${LOG_FORMAT:-text}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   DATABASE_URL: postgresql+asyncpg://nexus:${POSTGRES_PASSWORD}@postgres:5432/nexus
@@ -81,6 +97,10 @@ x-nexus-env: &nexus-env
   RATE_LIMIT_RUNS_PER_HOUR: ${RATE_LIMIT_RUNS_PER_HOUR:-30}
   LANGFUSE_URL: ${LANGFUSE_URL:-http://localhost:3000}
   BACKUP_STALE_HOURS: ${BACKUP_STALE_HOURS:-36}
+  ALERT_INTERVAL_S: ${ALERT_INTERVAL_S:-60}
+  ALERT_API_ERRORS_5M: ${ALERT_API_ERRORS_5M:-5}
+  ALERT_JOB_FAILURES_15M: ${ALERT_JOB_FAILURES_15M:-3}
+  ALERT_EMAIL: ${ALERT_EMAIL:-true}
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://nexus:${POSTGRES_PASSWORD}@postgres:5432/langfuse
@@ -111,6 +131,7 @@ x-langfuse-env: &langfuse-env
 services:
   # --- Edge ------------------------------------------------------------------
   traefik:
+    logging: *logging
     # v3.6+ negotiates the Docker API version; older releases fail against Docker Engine 29.
     image: traefik:v3.6
     command:
@@ -134,6 +155,7 @@ services:
     restart: unless-stopped
 
   cloudflared:
+    logging: *logging
     image: cloudflare/cloudflared:2026.10.0
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
@@ -144,6 +166,7 @@ services:
 
   # --- Nexus ----------------------------------------------------------------
   web:
+    logging: *logging
     build: apps/web
     labels:
       - traefik.enable=true
@@ -155,6 +178,7 @@ services:
     restart: unless-stopped
 
   migrate:
+    logging: *logging
     build: { context: ., dockerfile: services/api/Dockerfile }
     command: ["alembic", "upgrade", "head"]
     environment: *nexus-env
@@ -162,6 +186,7 @@ services:
       postgres: { condition: service_healthy }
 
   api:
+    logging: *logging
     build: { context: ., dockerfile: services/api/Dockerfile }
     environment: *nexus-env
     # deployer: the Apps page stops, restarts and deletes apps.
@@ -187,6 +212,10 @@ services:
     restart: unless-stopped
 
   orchestrator:
+    logging: *logging
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD", "python", "-c", "import os, redis; r = redis.Redis.from_url(os.environ['REDIS_URL']); raise SystemExit(0 if r.exists('arq:queue:health-check') else 1)"]
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
     environment: *nexus-env
     # The only service that can reach the sandbox and the workbench.
@@ -204,6 +233,7 @@ services:
   # Runs agent code. Its network is internal, so jobs can't reach the internet, Nexus's
   # databases or your LAN; the root filesystem is read-only and jobs run in /tmp.
   sandbox:
+    logging: *logging
     build: { context: ., dockerfile: services/sandbox/Dockerfile }
     environment:
       SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
@@ -230,6 +260,7 @@ services:
   # way out is egress-proxy, which allows npm, PyPI and GitHub and nothing else: no Nexus
   # databases, no LAN, no other sites. Each command is locked to its own project folder.
   workbench:
+    logging: *logging
     build: { context: ., dockerfile: services/workbench/Dockerfile }
     environment:
       WORKBENCH_TOKEN: ${WORKBENCH_TOKEN:-}
@@ -263,6 +294,7 @@ services:
   # The workbench's allowlist proxy (infra/egress-proxy/allowlist). It is the only container on
   # both the internal workbench network and the egress network, which has internet access.
   egress-proxy:
+    logging: *logging
     build: infra/egress-proxy
     networks: [workbench, egress]
     read_only: true
@@ -282,6 +314,7 @@ services:
   # from house templates and with no network during the build, then checks it answers through
   # Traefik and takes a screenshot. Only the orchestrator and the API can reach it.
   deployer:
+    logging: *logging
     build: { context: ., dockerfile: services/deployer/Dockerfile }
     environment:
       DEPLOYER_TOKEN: ${DEPLOYER_TOKEN:-}
@@ -324,6 +357,7 @@ services:
   # (services/deployer/src/nexus_deployer/gate.py). Root inside, to open the socket, but with no
   # capabilities and only the deployer able to reach it.
   docker-gate:
+    logging: *logging
     build: { context: ., dockerfile: services/deployer/Dockerfile }
     command: ["uvicorn", "nexus_deployer.gate:app", "--host", "0.0.0.0", "--port", "2375"]
     user: "0"
@@ -348,6 +382,10 @@ services:
     restart: unless-stopped
 
   doc-worker:
+    logging: *logging
+    healthcheck:
+      <<: *worker-health
+      test: ["CMD", "python", "-c", "import os, redis; r = redis.Redis.from_url(os.environ['REDIS_URL']); raise SystemExit(0 if r.exists('arq:docs:health-check') else 1)"]
     build:
       context: .
       dockerfile: services/doc-worker/Dockerfile
@@ -363,6 +401,7 @@ services:
   # Nightly backups of every database and the uploaded files to BACKUP_DIR on this machine,
   # plus "Back up now" from the Admin page. Restore with scripts/restore.sh.
   backup:
+    logging: *logging
     build: infra/backup
     environment:
       PGHOST: postgres
@@ -382,6 +421,7 @@ services:
 
   # --- Data ------------------------------------------------------------------
   postgres:
+    logging: *logging
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: nexus
@@ -400,6 +440,7 @@ services:
     restart: unless-stopped
 
   redis:
+    logging: *logging
     image: valkey/valkey:8-alpine
     # Langfuse's queues need noeviction.
     command: ["valkey-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
@@ -413,6 +454,7 @@ services:
     restart: unless-stopped
 
   minio:
+    logging: *logging
     image: cgr.dev/chainguard/minio
     entrypoint: sh
     # Folders under /data are buckets: nexus for uploads, langfuse for trace events.
@@ -433,6 +475,7 @@ services:
 
   # --- Model gateway and tracing ----------------------------------------------
   litellm:
+    logging: *logging
     image: ghcr.io/berriai/litellm:main-stable
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
@@ -465,6 +508,7 @@ services:
     restart: unless-stopped
 
   clickhouse:
+    logging: *logging
     image: clickhouse/clickhouse-server:25.8
     user: "101:101"
     environment:
@@ -483,6 +527,7 @@ services:
     restart: unless-stopped
 
   langfuse-worker:
+    logging: *logging
     image: langfuse/langfuse-worker:3
     environment: *langfuse-env
     depends_on: &langfuse-deps
@@ -493,6 +538,7 @@ services:
     restart: unless-stopped
 
   langfuse-web:
+    logging: *logging
     image: langfuse/langfuse:3
     environment:
       <<: *langfuse-env

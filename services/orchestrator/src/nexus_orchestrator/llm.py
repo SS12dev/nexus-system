@@ -4,13 +4,16 @@ import re
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
+from nexus_common import logs
 from nexus_common.settings import Settings
 
 
 def chat_model(settings: Settings, *, model: str, api_key: str, metadata: dict) -> BaseChatModel:
     """A chat model bound to one turn. Calls go to LiteLLM under a nexus-* alias; the metadata
     lets LiteLLM's Langfuse callback group generations into a trace per turn and a session per
-    chat, attributed to the user."""
+    chat, attributed to the user. The request id lets a Langfuse trace be found in the logs."""
+    if request_id := logs.get("request_id"):
+        metadata = {**metadata, "request_id": request_id}
     return ChatOpenAI(
         model=model,
         base_url=f"{settings.litellm_base_url.rstrip('/')}/v1",

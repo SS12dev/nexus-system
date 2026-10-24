@@ -622,3 +622,49 @@ export interface AuditEntry {
   target_user?: string | null;
   data: Record<string, unknown>;
 }
+
+/** One route or job on the Admin Monitoring tab. Latencies are histogram edges (p95 at or
+ * under that many ms); null means slower than the last edge, or no calls. */
+export interface MonitorRow {
+  name: string;
+  count: number;
+  failed: number;
+  avg_ms: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  avg_wait_ms?: number | null;
+}
+
+export interface AlertItem {
+  key: string;
+  title: string;
+  detail?: string;
+  since?: string;
+  state?: "raised" | "resolved";
+  at?: string;
+}
+
+export interface LoggedError {
+  ts: string;
+  service: string;
+  level: string;
+  logger: string;
+  msg: string;
+  error?: string;
+  stack?: string;
+  page?: string;
+  request_id?: string;
+  user_id?: string;
+  chat_id?: string;
+  run_id?: string;
+  job?: string;
+  trace_id?: string;
+}
+
+export interface Monitoring {
+  minutes: number;
+  alerts: { active: AlertItem[]; recent: AlertItem[] };
+  routes: MonitorRow[];
+  jobs: MonitorRow[];
+  errors: LoggedError[];
+}

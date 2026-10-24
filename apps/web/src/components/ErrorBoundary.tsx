@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportClientError } from "../lib/api";
 
 /** Shows what broke, instead of a blank screen, when a page throws while rendering. A new
  * `resetKey` (the route) clears it, so moving to another page recovers without a reload. */
@@ -19,6 +20,7 @@ export class ErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(error, info.componentStack);
+    reportClientError(error, location.pathname);
   }
 
   render() {
@@ -31,7 +33,7 @@ export class ErrorBoundary extends Component<
             <AlertTriangle size={16} /> This page hit an error
           </h1>
           <p className="mt-1 text-sm text-slate-300">
-            Other pages still work. Copy the details below when reporting it.
+            Other pages still work. The details were sent to the owner's Admin page; copy them below if you report it.
           </p>
           <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-ink p-3 text-xs whitespace-pre-wrap text-slate-300">
             {`${error.name}: ${error.message}\n${error.stack ?? ""}`}

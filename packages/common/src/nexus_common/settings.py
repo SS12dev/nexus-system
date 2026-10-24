@@ -200,6 +200,14 @@ class Settings(BaseSettings):
     # "back up now"; this is how old the last good backup may be before the Admin page warns.
     backup_stale_hours: int = 36
 
+    # Alerts (nexus_api/alerts.py): checked this often by one API replica (0 turns them off),
+    # raised after two failing checks in a row, shown on the Admin page and emailed to the
+    # owners when SMTP is set up. Thresholds are over the last 5 and 15 minutes.
+    alert_interval_s: int = 60
+    alert_api_errors_5m: int = 5
+    alert_job_failures_15m: int = 3
+    alert_email: bool = True
+
     @property
     def github_enabled(self) -> bool:
         return bool(

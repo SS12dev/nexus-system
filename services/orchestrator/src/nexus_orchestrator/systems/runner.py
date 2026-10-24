@@ -16,6 +16,7 @@ import openai
 from langgraph.types import Command
 from sqlalchemy import func, select, update
 
+from nexus_common import logs
 from nexus_common.events import Event, publish
 from nexus_common.library import file_payload
 from nexus_common.links import link_payload
@@ -165,6 +166,7 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
             )
         await db.commit()
         chat_id, request, trace_id = run.chat_id, run.input, run.trace_id
+        logs.bind(user_id=run.user_id, chat_id=chat_id, trace_id=trace_id)
         budget = float(run.budget_usd)
         await _announce(deps, system, run)
 

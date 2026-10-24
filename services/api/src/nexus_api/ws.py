@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from nexus_api.sessions import user_for_token
+from nexus_common import logs
 from nexus_common.events import user_channel
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def events(websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    logs.bind(user_id=user.id)
     await websocket.accept()
     pubsub = app.state.redis.pubsub()
     await pubsub.subscribe(user_channel(user.id))

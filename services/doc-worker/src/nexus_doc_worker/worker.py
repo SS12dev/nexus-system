@@ -9,14 +9,15 @@ from redis.asyncio import Redis
 
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
+from nexus_common.logs import configure_logging, traced_job
 from nexus_common.queues import DOCS_QUEUE
 from nexus_common.settings import get_settings
 from nexus_common.storage import S3Storage
 from nexus_doc_worker.ingest import DocDeps, embed_missing, ingest_file
 from nexus_doc_worker.parse import docling_available
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 settings = get_settings()
+configure_logging(settings, "doc-worker")
 
 
 async def startup(ctx: dict) -> None:
@@ -40,10 +41,12 @@ async def shutdown(ctx: dict) -> None:
     await ctx["engine"].dispose()
 
 
+@traced_job
 async def parse_file(ctx: dict, file_id: str) -> None:
     await ingest_file(ctx["deps"], uuid.UUID(file_id))
 
 
+@traced_job
 async def backfill_embeddings(ctx: dict) -> None:
     await embed_missing(ctx["deps"])
 

@@ -31,6 +31,7 @@ import type {
   SkillVersion,
   SystemDetail,
   ToolEntry,
+  Monitoring,
   Usage,
   User,
   UserStatus,
@@ -60,6 +61,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     try {
       const body = await resp.json();
       detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      // Unexpected server errors name the request, so the owner can find it in the logs.
+      if (typeof body.request_id === "string") detail += ` (ref ${body.request_id})`;
     } catch {
       /* not JSON */
     }
@@ -69,6 +72,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 const json = (body: unknown) => JSON.stringify(body);
+
+/** Tell the server a page crashed, for the Admin page's recent errors. Best effort, silent. */
+export function reportClientError(error: Error, page: string): void {
+  fetch("/api/me/client-error", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: json({
+      message: `${error.name}: ${error.message}`.slice(0, 1000),
+      stack: (error.stack ?? "").slice(-4000),
+      page: page.slice(0, 300),
+    }),
+  }).catch(() => {});
+}
 
 /** Admin stats narrowed to these people: one user_id per person, none for everyone. */
 function forUsers(ids: string[]): URLSearchParams {
@@ -260,6 +277,7 @@ export const api = {
     );
   },
   backups: () => request<Backup[]>("/api/admin/backups"),
+  monitoring: (minutes: number) => request<Monitoring>(`/api/admin/monitoring?minutes=${minutes}`),
   backupNow: () => request<Backup>("/api/admin/backups", { method: "POST" }),
   setMaintenance: (enabled: boolean, message?: string) =>
     request<{ enabled: boolean; message: string | null }>("/api/admin/maintenance", {

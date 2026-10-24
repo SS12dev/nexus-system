@@ -375,6 +375,17 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
   rate-limited calls, and the latest failed turns, runs and file parses with their error.
   The owner sees counts, costs and error messages, never chat content. Per-call traces stay in
   Langfuse (`LANGFUSE_URL`).
+- **Monitoring:** active alerts and the last 50 raised or resolved, then, over the last hour,
+  6 hours or 24 hours, every API route and every background job with its calls, failures, the
+  time half of them beat and the time 95% beat (and, for jobs, how long they waited in the
+  queue), and the latest 200 errors logged by the API, the workers or someone's browser, each
+  with its request, user, chat, job and trace ids and its stack. Figures are kept a day in Valkey.
+- **Alerts:** every `ALERT_INTERVAL_S` (60) one API replica checks the services above, the
+  worker heartbeats, the last backup, API errors in the last 5 minutes
+  (`ALERT_API_ERRORS_5M`, 5) and failed jobs in the last 15 (`ALERT_JOB_FAILURES_15M`, 3). A
+  problem seen in two checks in a row is raised; with SMTP set up every owner gets an email, and
+  another when it clears (`ALERT_EMAIL=false` keeps them on the page only). If the API itself is
+  down nothing can send, so a dead Mac or Docker stays silent.
 - **Maintenance mode:** while it is on, everyone sees your message in a banner and can read
   their chats, but only admins can start turns and agent runs. Turn it on before restarting or
   upgrading Nexus.
@@ -386,6 +397,25 @@ filter at the top narrows Status, Usage and the Audit log to one person (tap a n
 
 On the People page an admin can also **sign someone out** on every device. Everyone can see and
 sign out their own signed-in devices on the Connections page.
+
+### Logs and request ids
+
+Every line from the API, orchestrator and doc-worker carries whatever is known at the time:
+`request_id`, `user_id`, `chat_id`, `run_id`, `job`, `job_id` and `trace_id`, the turn's or run's
+Langfuse trace (as `key=value` at the end of the line, or as keys with `LOG_FORMAT=json`). Every API response carries `X-Request-ID`; the jobs a request queues carry the
+same id, and so does each model call's metadata in Langfuse. An unexpected error answers
+`{"detail": ..., "request_id": ...}`, so one id finds every line it caused:
+
+```sh
+./scripts/compose.sh logs api orchestrator doc-worker | grep 4f1c2a9e0b7d4e21a8c3f06e9d5b7a12
+./scripts/compose.sh logs orchestrator | grep ' ERROR '
+```
+
+The API writes one access line per request (`nexus.access`, with the route, status and time;
+health checks left out), and each worker writes `job done` or `job failed` per job with its run
+time and how long it waited in the queue. Docker keeps 5 files of 10 MB per container, so logs
+can't fill the disk. The orchestrator and doc-worker have Docker health checks on their arq
+heartbeat, so `docker compose ps` shows a stuck worker as unhealthy.
 
 ### Limits and security
 
@@ -413,10 +443,10 @@ Counters live in Valkey, so they hold across API replicas; 0 turns a limit off a
   Postgres, LiteLLM, Langfuse and the MinIO console are bound to 127.0.0.1, and the API docs
   (`/docs`) aren't routed. Keep `DEV_LOGIN_ENABLED=false` and `SESSION_COOKIE_SECURE=true`
   on the public hostname.
-- **Logs and request ids:** every service logs to stdout; `LOG_FORMAT=json` makes that one JSON
-  object per line (`ts`, `level`, `service`, `logger`, `msg`, `request_id` and any structured
+- **Logs and request ids:** every service logs to stderr; `LOG_FORMAT=json` makes that one JSON
+  object per line (`ts`, `level`, `service`, `logger`, `msg`, the ids above and any structured
   fields) for a log collector. Each API response carries `X-Request-ID` (kept from the caller
-  when it sends a sane one), and every log line for that request has the same id. 5xx responses
+  when it sends a sane one); see [Logs and request ids](#logs-and-request-ids). 5xx responses
   and requests slower than 5 s are logged as `http.error` / `http.slow`, refusals (rate limit,
   cross-site) as `http.refused`, and access requests as `access.*` events.
 - **Cloudflare Access** (optional) can sit in front of `nexus.servhub.cc` for an extra

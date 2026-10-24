@@ -1,5 +1,8 @@
-"""The API's outer layer: cross-site request checks, the per-IP and sign-in rate limits,
-security headers, and per-minute request counters for the Admin page.
+"""The API's outer layers. RequestContextMiddleware gives each request an id, writes the access
+line, and turns an unhandled error into a 500 that names that id. GuardMiddleware does the
+cross-site request checks, the per-IP and sign-in rate limits, security headers, and per-minute
+request counters for the Admin page.
+
 
 A plain ASGI middleware rather than BaseHTTPMiddleware, so streamed downloads pass straight
 through. WebSockets check their own Origin (see ws.py).
@@ -7,9 +10,7 @@ through. WebSockets check their own Origin (see ws.py).
 
 import json
 import logging
-import re
 import time
-import uuid
 from urllib.parse import urlsplit
 
 from redis.exceptions import RedisError
@@ -17,7 +18,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from nexus_api.ratelimit import METRICS_TTL_S, hit, metrics_key
 from nexus_api.sessions import client_ip
-from nexus_common.logs import request_id
+from nexus_common import logs, metrics
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -38,8 +39,8 @@ SECURITY_HEADERS = [
     (b"permissions-policy", b"camera=(), geolocation=(), payment=()"),
 ]
 HSTS = (b"strict-transport-security", b"max-age=31536000")
-# An id passed in by a proxy in front (X-Request-ID) is kept if it looks like one.
-REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
+HEALTH_PATHS = ("/healthz", "/readyz")
+access_log = logging.getLogger("nexus.access")
 # Requests slower than this are logged, to spot what needs work.
 SLOW_MS = 5000
 
@@ -59,23 +60,14 @@ class GuardMiddleware:
             await self.app(scope, receive, send)
             return
         path: str = scope["path"]
-        if path in ("/healthz", "/readyz"):
+        if path in HEALTH_PATHS:
             await self.app(scope, receive, send)
             return
 
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
         started = time.monotonic()
         redis = getattr(scope["app"].state, "redis", None)
-        given = headers.get("x-request-id", "")
-        rid = given if REQUEST_ID_RE.match(given) else uuid.uuid4().hex
-        rid_header = (b"x-request-id", rid.encode())
-        token = request_id.set(rid)
-        try:
-            await self._handle(scope, receive, send, path, headers, started, redis, rid_header)
-        finally:
-            request_id.reset(token)
-
-    async def _handle(self, scope, receive, send, path, headers, started, redis, rid_header):
+        # The request id and its X-Request-ID header come from RequestContextMiddleware, outside.
         refusal = self._cross_site(scope["method"], headers)
         if refusal is None and redis is not None and self.settings.rate_limit_enabled:
             refusal = await self._limited(redis, path, headers, scope.get("client"))
@@ -85,7 +77,7 @@ class GuardMiddleware:
                 "http.refused",
                 extra={"status": code, "method": scope["method"], "path": path, "why": detail},
             )
-            await self._reject(send, code, detail, extra, rid_header)
+            await self._reject(send, code, detail, extra)
             await self._count(redis, code, started)
             return
 
@@ -103,7 +95,6 @@ class GuardMiddleware:
                 if path.startswith("/api") and b"cache-control" not in have:
                     # Responses carry private data; never let a shared cache keep them.
                     extra.append((b"cache-control", b"no-store"))
-                extra.append(rid_header)
                 message["headers"] = [*message.get("headers", []), *extra]
             await send(message)
 
@@ -144,13 +135,12 @@ class GuardMiddleware:
                 return 429, f"Too many requests. Try again in {wait} s.", wait
         return None
 
-    async def _reject(self, send: Send, code: int, detail: str, retry_after, rid_header) -> None:
+    async def _reject(self, send: Send, code: int, detail: str, retry_after) -> None:
         body = json.dumps({"detail": detail}).encode()
         headers = [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode()),
             *SECURITY_HEADERS,
-            rid_header,
         ]
         if retry_after:
             headers.append((b"retry-after", str(retry_after).encode()))
@@ -172,3 +162,81 @@ class GuardMiddleware:
                 await pipe.execute()
         except RedisError:
             pass
+
+
+class RequestContextMiddleware:
+    """Outermost. Takes the caller's X-Request-ID if it is a plain id, else makes one, binds it
+    to every log line of the request (and to the jobs it queues), returns it in X-Request-ID, and
+    logs one access line per request. An error nothing else caught is logged here with its stack
+    and answered with a JSON 500 that carries the id, so a person can quote it."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        request_id = logs.clean_request_id(headers.get("x-request-id")) or logs.new_request_id()
+        scope.setdefault("state", {})["request_id"] = request_id
+        with logs.scope(request_id=request_id):
+            if scope["type"] == "websocket":
+                await self.app(scope, receive, send)
+                return
+            await self._http(scope, receive, send, request_id)
+
+    async def _http(self, scope: Scope, receive: Receive, send: Send, request_id: str) -> None:
+        started = time.monotonic()
+        status_code = 500
+        response_started = False
+        rid = request_id.encode()
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code, response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+                status_code = message["status"]
+                message["headers"] = [*message.get("headers", []), (b"x-request-id", rid)]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            log.exception("Unhandled error in %s %s", scope["method"], scope["path"])
+            if response_started:
+                raise
+            body = json.dumps(
+                {"detail": "Something went wrong on our side.", "request_id": request_id}
+            ).encode()
+            await send_wrapper(
+                {
+                    "type": "http.response.start",
+                    "status": 500,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        *SECURITY_HEADERS,
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+        finally:
+            if scope["path"] not in HEALTH_PATHS:
+                route = getattr(scope.get("route"), "path", None)
+                ms = int((time.monotonic() - started) * 1000)
+                access_log.info(
+                    "%s %s %s",
+                    scope["method"],
+                    scope["path"],
+                    status_code,
+                    extra={
+                        "method": scope["method"],
+                        "path": scope["path"],
+                        "route": route,
+                        "status": status_code,
+                        "duration_ms": ms,
+                    },
+                )
+                redis = getattr(scope["app"].state, "redis", None)
+                await metrics.record_request(redis, scope["method"], route, status_code, ms)

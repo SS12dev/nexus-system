@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -6,7 +7,15 @@ from sqlalchemy import select
 from nexus_api.appsettings import maintenance_notice
 from nexus_api.cache import cached_spend
 from nexus_api.deps import CurrentUser, DbDep, GatewayDep, RedisDep, SettingsDep
-from nexus_api.schemas import BudgetOut, GoogleAccessOut, MeIn, MeOut, SessionOut, UserOut
+from nexus_api.schemas import (
+    BudgetOut,
+    ClientErrorIn,
+    GoogleAccessOut,
+    MeIn,
+    MeOut,
+    SessionOut,
+    UserOut,
+)
 from nexus_api.sessions import hash_token, revoke_all
 from nexus_common import google
 from nexus_common.access import pending_count
@@ -14,6 +23,7 @@ from nexus_common.litellm import active_key, get_budget
 from nexus_common.models import AuditLog, RoleName, Session, utcnow
 
 router = APIRouter(prefix="/api", tags=["me"])
+web_log = logging.getLogger("nexus.web")
 
 
 @router.get("/me", response_model=MeOut)
@@ -114,3 +124,15 @@ async def google_disconnect(
     """Revoke Nexus's access to the user's Google services."""
     await google.disconnect(db, settings, user.id, http=request.app.state.google_http)
     await db.commit()
+
+
+@router.post("/me/client-error", status_code=status.HTTP_204_NO_CONTENT)
+async def client_error(body: ClientErrorIn, user: CurrentUser) -> None:
+    """Log a page that crashed in someone's browser, so it shows with the other recent errors on
+    the Admin page. The per-IP limit applies, and the size of each field is capped."""
+    web_log.error(
+        "Page error on %s: %s",
+        body.page[:300] or "?",
+        body.message[:1000],
+        extra={"page": body.page, "stack": body.stack[-4000:]},
+    )
