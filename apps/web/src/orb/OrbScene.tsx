@@ -12,22 +12,26 @@ import {
   type MemoryPoint,
   type OrbCluster,
   type OrbNode,
+  type Satellite,
   type StarPoint,
 } from "./model";
 import { Network } from "./Network";
+import { Satellites } from "./Satellites";
 import type { Perf } from "./perf";
 
 export type Selection =
   | { type: "agent"; node: OrbNode }
   | { type: "memory"; point: MemoryPoint }
   | { type: "artifact"; crystal: Crystal }
-  | { type: "entity"; star: StarPoint };
+  | { type: "entity"; star: StarPoint }
+  | { type: "satellite"; sat: Satellite };
 
 export function selectionId(s: Selection | null): string | null {
   if (!s) return null;
   if (s.type === "agent") return s.node.key;
   if (s.type === "memory") return s.point.id;
   if (s.type === "entity") return s.star.id;
+  if (s.type === "satellite") return s.sat.id;
   return s.crystal.id;
 }
 
@@ -37,6 +41,7 @@ export default function OrbScene({
   activity = null,
   clusters,
   inside,
+  sats = [],
   lit,
   litSeq,
   labels,
@@ -51,6 +56,8 @@ export default function OrbScene({
   clusters: OrbCluster[];
   /** The constellation, memories and artifacts inside the orb. */
   inside: Inside;
+  /** Routines and projects on the ring outside it. */
+  sats?: Satellite[];
   /** What the latest reply recalled; seq changes each time it lights up. */
   lit: Set<string>;
   litSeq: number;
@@ -111,6 +118,12 @@ export default function OrbScene({
         still={still}
         selected={selId}
         onPick={(crystal) => onSelect({ type: "artifact", crystal })}
+      />
+      <Satellites
+        items={sats}
+        still={still}
+        selected={selId}
+        onPick={(sat) => onSelect({ type: "satellite", sat })}
       />
       <Network
         clusters={clusters}

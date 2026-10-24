@@ -1,13 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Nexus's mark (components/Orb.tsx) on the app's night background, for the tab and the
+       installed app. -->
   <defs>
-    <radialGradient id="g" cx="50%" cy="45%" r="55%">
-      <stop offset="0" stop-color="#e0f2fe"/>
-      <stop offset="0.35" stop-color="#38bdf8"/>
-      <stop offset="0.75" stop-color="#1e3a8a"/>
-      <stop offset="1" stop-color="#05070d"/>
+    <radialGradient id="glass" cx="42%" cy="36%" r="70%">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#1d4ed8" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#0b1020"/>
     </radialGradient>
+    <radialGradient id="core" cx="50%" cy="45%" r="50%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="#bae6fd"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="96" fill="#05070d"/>
-  <circle cx="256" cy="256" r="150" fill="url(#g)"/>
-  <circle cx="256" cy="256" r="190" fill="none" stroke="#38bdf8" stroke-opacity="0.35" stroke-width="6"/>
+  <rect width="512" height="512" rx="112" fill="#05070d"/>
+  <g transform="translate(56 56) scale(4)">
+    <ellipse cx="50" cy="50" rx="46" ry="17" fill="none" stroke="url(#rim)" stroke-opacity="0.5" stroke-width="1.6" transform="rotate(-24 50 50)"/>
+    <circle cx="91" cy="35" r="3.6" fill="#a5b4fc"/>
+    <circle cx="9" cy="65" r="2.8" fill="#7dd3fc"/>
+    <circle cx="50" cy="50" r="34" fill="url(#glass)"/>
+    <circle cx="50" cy="50" r="34" fill="none" stroke="url(#rim)" stroke-width="1.6"/>
+    <g stroke="#7dd3fc" stroke-opacity="0.6" stroke-width="1">
+      <line x1="50" y1="50" x2="50" y2="26"/><line x1="50" y1="50" x2="74" y2="36"/>
+      <line x1="50" y1="50" x2="76" y2="60"/><line x1="50" y1="50" x2="56" y2="74"/>
+      <line x1="50" y1="50" x2="30" y2="66"/><line x1="50" y1="50" x2="24" y2="42"/>
+    </g>
+    <g stroke="#a5b4fc" stroke-opacity="0.4" stroke-width="0.8">
+      <line x1="50" y1="26" x2="76" y2="60"/><line x1="74" y1="36" x2="56" y2="74"/>
+      <line x1="76" y1="60" x2="30" y2="66"/><line x1="56" y1="74" x2="24" y2="42"/>
+      <line x1="24" y1="42" x2="74" y2="36"/>
+    </g>
+    <circle cx="50" cy="26" r="3.4" fill="#e0f2fe"/><circle cx="74" cy="36" r="2.6" fill="#a5b4fc"/>
+    <circle cx="76" cy="60" r="3.4" fill="#e0f2fe"/><circle cx="56" cy="74" r="2.6" fill="#a5b4fc"/>
+    <circle cx="30" cy="66" r="3.4" fill="#e0f2fe"/><circle cx="24" cy="42" r="2.6" fill="#a5b4fc"/>
+    <circle cx="50" cy="50" r="7.5" fill="url(#core)" filter="url(#glow)"/>
+    <ellipse cx="38" cy="30" rx="11" ry="5" fill="#ffffff" fill-opacity="0.12" transform="rotate(-30 38 30)"/>
+  </g>
 </svg>

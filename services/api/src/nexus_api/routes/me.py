@@ -12,6 +12,7 @@ from nexus_api.cache import cached_spend
 from nexus_api.deps import (
     CurrentUser,
     DbDep,
+    EmbedderDep,
     GatewayDep,
     QueueDep,
     RedisDep,
@@ -217,6 +218,7 @@ async def onboarding(
     gateway: GatewayDep,
     redis: RedisDep,
     queue: QueueDep,
+    embedder: EmbedderDep,
 ) -> OnboardingOut:
     """The setup interview, finished or skipped: store the answers as memories, add the routines
     they picked, and write a welcome chat."""
@@ -225,7 +227,7 @@ async def onboarding(
     if terms_needed(user) or body.accept_terms:
         accept_terms(db, user, body.accept_terms)
     packs = load_packs(settings.library_path)
-    chat_id, added = await apply_onboarding(db, settings, user, body, packs)
+    chat_id, added = await apply_onboarding(db, settings, user, body, packs, embedder)
     await db.commit()
     try:
         await queue.enqueue_profile_rebuild(user.id)

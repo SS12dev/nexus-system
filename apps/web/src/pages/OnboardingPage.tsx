@@ -1,4 +1,33 @@
-import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Briefcase,
+  BriefcaseBusiness,
+  CalendarDays,
+  Check,
+  ChefHat,
+  CodeXml,
+  Dumbbell,
+  FlaskConical,
+  GraduationCap,
+  House,
+  Lightbulb,
+  Mail,
+  Megaphone,
+  Newspaper,
+  Palette,
+  PenLine,
+  Plane,
+  Rocket,
+  Scale,
+  School,
+  Search,
+  Sparkles,
+  Stethoscope,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Orb } from "../components/Orb";
@@ -10,7 +39,7 @@ import {
   DEFAULT_ASSISTANT_NAME,
   SUGGESTED_NAMES,
 } from "../lib/assistant";
-import { packsFor, routineTime, scheduleText } from "../lib/onboarding";
+import { defaultPicks, packsFor, routineTime, scheduleText } from "../lib/onboarding";
 import { enablePush } from "../lib/push";
 import { browserTimezone, timezones } from "../lib/schedule";
 import type {
@@ -24,6 +53,36 @@ import type {
 import { useStore } from "../store/chat";
 
 const STEPS = ["Name", "Work", "Day", "Help", "Style", "Routines"] as const;
+// Icons for the profession and interest tiles; anything new falls back to a sparkle.
+const ICONS: Record<string, LucideIcon> = {
+  student: GraduationCap,
+  software: CodeXml,
+  research: FlaskConical,
+  founder: Rocket,
+  creative: Palette,
+  sales: Megaphone,
+  healthcare: Stethoscope,
+  teaching: School,
+  finance: Scale,
+  freelance: Briefcase,
+  other: Sparkles,
+  email: Mail,
+  calendar: CalendarDays,
+  writing: PenLine,
+  learning: Lightbulb,
+  reading: BookOpen,
+  news: Newspaper,
+  job_hunt: BriefcaseBusiness,
+  coding: CodeXml,
+  fitness: Dumbbell,
+  cooking: ChefHat,
+  money: Wallet,
+  travel: Plane,
+  family: House,
+};
+const INTEREST_ICONS: Record<string, LucideIcon> = { research: Search };
+// More than this many routines and the step warns about budget.
+const MANY_ROUTINES = 5;
 const SERVICE_LABEL: Record<string, string> = {
   gmail: "Gmail",
   calendar: "Calendar",
@@ -84,8 +143,9 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
   const openRoutines = () => {
     if (picked === null) {
       const start: Record<string, string> = {};
+      const keys = new Set(defaultPicks(packs));
       for (const { routine } of offered) {
-        if (routine.default_on) start[routine.key] = routineTime(routine, dayStart);
+        if (keys.has(routine.key)) start[routine.key] = routineTime(routine, dayStart);
       }
       setPicked(start);
     }
@@ -245,8 +305,12 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
           title="What do you do?"
           hint={`Pick up to three. It helps ${cleanName} suggest the right things.`}
         >
-          <Chips
-            options={[...(profiles?.roles ?? []), { id: "other", label: "Something else" }]}
+          <Tiles
+            icons={ICONS}
+            options={[
+              ...(profiles?.roles ?? []),
+              { id: "other", label: "Something else", blurb: "Tell us below" },
+            ]}
             selected={roles}
             onToggle={(id) =>
               setRoles(
@@ -300,7 +364,9 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
 
       {step === 3 && (
         <Step title={`What should ${cleanName} help with?`} hint="Pick as many as you like.">
-          <Chips
+          <Tiles
+            compact
+            icons={{ ...ICONS, ...INTEREST_ICONS }}
             options={profiles?.interests ?? []}
             selected={interests}
             onToggle={(id) =>
@@ -364,6 +430,18 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
         >
           {!canMember && (
             <p className="text-sm text-slate-400">Viewers can't have routines.</p>
+          )}
+          {canMember && (
+            <p
+              className={`mb-3 text-center text-xs ${
+                Object.keys(picked ?? {}).length > MANY_ROUTINES ? "text-amber-300" : "text-slate-500"
+              }`}
+            >
+              {Object.keys(picked ?? {}).length} picked
+              {Object.keys(picked ?? {}).length > MANY_ROUTINES
+                ? " · each run uses your monthly budget, so a few that matter work best"
+                : " · add more any time from the Routines page"}
+            </p>
           )}
           {canMember && (
             <ul className="space-y-2 sm:max-h-72 sm:overflow-y-auto sm:pr-1">
@@ -506,7 +584,7 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
 function Frame({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full items-start justify-center overflow-y-auto px-4 py-10 sm:items-center">
-      <div className="w-full max-w-lg">{children}</div>
+      <div className="w-full max-w-2xl">{children}</div>
     </div>
   );
 }
@@ -526,6 +604,61 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <div className="mb-4">
       <div className="mb-1.5 text-sm text-slate-400">{label}</div>
       {children}
+    </div>
+  );
+}
+
+/** Choices as a grid of tiles with an icon and a line on what each means: tidier than a wrap
+ * of pills when there are many. */
+function Tiles({
+  options,
+  selected,
+  onToggle,
+  icons,
+  compact = false,
+}: {
+  options: { id: string; label: string; blurb?: string }[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  icons: Record<string, LucideIcon>;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+      {options.map((o) => {
+        const on = selected.includes(o.id);
+        const Icon = icons[o.id] ?? Sparkles;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onToggle(o.id)}
+            className={`group relative flex items-center gap-3 rounded-xl border px-3 text-left transition ${
+              compact ? "py-2.5" : "py-3"
+            } ${
+              on
+                ? "border-sky-400/80 bg-sky-500/10 shadow-[0_0_0_1px_rgb(56_189_248_/_0.35)]"
+                : "border-edge bg-panel hover:border-slate-600 hover:bg-edge/40"
+            }`}
+          >
+            <span
+              className={`grid shrink-0 place-items-center rounded-lg ${compact ? "size-8" : "size-9"} ${
+                on ? "bg-sky-500/20 text-sky-200" : "bg-edge/70 text-slate-300 group-hover:text-slate-100"
+              }`}
+            >
+              <Icon size={compact ? 16 : 18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{o.label}</span>
+              {!compact && o.blurb && (
+                <span className="block truncate text-xs text-slate-500">{o.blurb}</span>
+              )}
+            </span>
+            {on && <Check size={15} className="shrink-0 text-sky-300" />}
+          </button>
+        );
+      })}
     </div>
   );
 }

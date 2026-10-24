@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { Brain, CheckCircle2, Clock, Lock, Network, Send, ShieldCheck, Users, XCircle } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { APP_NAME } from "../lib/assistant";
+import { NexusMark } from "../components/Orb";
 import { formatAgo, formatDate } from "../lib/format";
 import type { AccessState, AuthConfig } from "../lib/types";
 
@@ -84,7 +85,7 @@ export function LoginPage() {
     <div className="login-bg relative min-h-full overflow-x-hidden">
       <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 sm:px-8">
         <header className="flex items-center gap-2.5 py-5">
-          <img src="/icon.svg" alt="" className="h-8 w-8" />
+          <NexusMark size={32} />
           <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
           <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-edge bg-panel/60 px-3 py-1 text-xs text-slate-300">
             <Lock className="h-3.5 w-3.5" aria-hidden /> Invite only
@@ -93,7 +94,7 @@ export function LoginPage() {
 
         <main className="grid flex-1 items-center gap-10 py-6 lg:grid-cols-[1.15fr_1fr] lg:gap-16 lg:py-4">
           <section className="order-1">
-            <NetworkMark />
+            <NexusMark size={120} />
             <h1 className="mt-6 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl lg:text-5xl">
               One assistant.
               <br />
@@ -395,43 +396,3 @@ function GoogleButton() {
   );
 }
 
-/** A light, CSS-animated picture of the idea: the assistant at the centre with agent teams
- * orbiting and linking to it. Plain SVG, so the login page needs no WebGL. */
-function NetworkMark() {
-  const nodes = [
-    [70, 14], [118, 40], [122, 96], [76, 126], [24, 104], [16, 46],
-  ];
-  return (
-    <svg viewBox="0 0 140 140" className="h-24 w-24 sm:h-28 sm:w-28" aria-hidden>
-      <defs>
-        <radialGradient id="login-core" cx="50%" cy="42%" r="55%">
-          <stop offset="0" stopColor="#e0f2fe" />
-          <stop offset="0.4" stopColor="#38bdf8" />
-          <stop offset="1" stopColor="#1e3a8a" />
-        </radialGradient>
-      </defs>
-      <circle cx="70" cy="70" r="58" fill="none" stroke="#38bdf8" strokeOpacity="0.18" strokeDasharray="2 5" />
-      <g className="login-orbit">
-        {nodes.map(([x, y], i) => (
-          <line key={`l${i}`} x1="70" y1="70" x2={x} y2={y} stroke="#38bdf8" strokeOpacity="0.35" strokeWidth="1" />
-        ))}
-        {nodes.map(([x, y], i) => (
-          <line
-            key={`r${i}`}
-            x1={x}
-            y1={y}
-            x2={nodes[(i + 1) % nodes.length][0]}
-            y2={nodes[(i + 1) % nodes.length][1]}
-            stroke="#818cf8"
-            strokeOpacity="0.25"
-            strokeWidth="1"
-          />
-        ))}
-        {nodes.map(([x, y], i) => (
-          <circle key={`n${i}`} cx={x} cy={y} r={i % 2 ? 4 : 5} fill={i % 2 ? "#818cf8" : "#7dd3fc"} className="login-node" style={{ animationDelay: `${i * 0.4}s` }} />
-        ))}
-      </g>
-      <circle cx="70" cy="70" r="24" fill="url(#login-core)" className="login-core" />
-    </svg>
-  );
-}

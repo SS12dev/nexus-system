@@ -13,6 +13,8 @@ import type {
   KnowledgeGraph,
   Memory,
   MemoryKind,
+  Project,
+  Routine,
 } from "../lib/types";
 
 export type Vec3 = [number, number, number];
@@ -330,21 +332,25 @@ export function crystals(files: FileItem[], max: number): Crystal[] {
 
 // --- The constellation: the knowledge graph inside the orb -----------------------------------
 
-/** Where each entity type gathers: spread-out directions from the centre, so people,
- * projects and topics each have their own part of the orb. */
-const TYPE_DIR: Record<EntityType, Vec3> = {
-  person: norm([0, 1, 0.35]),
-  project: norm([1, 0.1, 0.3]),
-  organisation: norm([0.55, -0.75, 0.4]),
-  place: norm([-0.45, -0.8, 0.25]),
-  topic: norm([-1, 0.25, 0.1]),
-  tool: norm([0.1, 0.25, -1]),
-  other: norm([-0.3, -0.2, -0.9]),
-};
+
+const TYPE_ORDER: EntityType[] = ["person", "project", "organisation", "place", "topic", "tool", "other"];
+
+/** The i-th of n directions spread evenly over a sphere. */
+export function fibonacciDir(i: number, n: number): Vec3 {
+  if (n <= 1) return norm([1, 0.25, 0.35]);
+  const y = 1 - (2 * (i + 0.5)) / n;
+  const r = Math.sqrt(1 - y * y);
+  const theta = i * GOLDEN + 0.4;
+  // Flatten the poles a little: the camera looks from the side, so stars on the equator read best.
+  return norm([Math.cos(theta) * r, y * 0.75, Math.sin(theta) * r]);
+}
+
+/** The id of the "you" star while the graph has no entity for the user yet. */
+export const YOU = "you";
 
 /** Stars sit between these distances from the centre; the most mentioned ones closest. */
-const STAR_NEAR = 0.38;
-const STAR_FAR = 0.72;
+const STAR_NEAR = 0.42;
+const STAR_FAR = 0.74;
 
 const weightOf = (e: KnowledgeGraph["entities"][number]) => e.memories + e.files + e.chats + e.past_chats;
 
@@ -359,15 +365,25 @@ export function inside(
   focus: Set<string> = new Set(),
 ): Inside {
   const others = (graph?.entities ?? []).filter((e) => !e.is_self);
+  const self = graph?.entities.find((e) => e.is_self);
+  // You are always at the centre, even before the graph has anything else (or anything at all).
+  const you: StarPoint = {
+    id: self?.id ?? YOU,
+    name: self?.name ?? "You",
+    type: self?.type ?? "person",
+    summary: self?.summary ?? "",
+    self: true,
+    weight: self ? weightOf(self) : 0,
+    pos: [0, 0, 0],
+  };
   if (!graph || others.length === 0)
     return {
-      stars: [],
+      stars: [you],
       lines: [],
       memories: memoryPoints(memories, limits.memories),
       crystals: crystals(files, limits.crystals),
     };
 
-  const self = graph.entities.find((e) => e.is_self);
   const ranked = [...others].sort(
     (a, b) =>
       Number(focus.has(b.id)) - Number(focus.has(a.id)) ||
@@ -376,11 +392,20 @@ export function inside(
   );
   const chosen = ranked.slice(0, limits.stars);
   const heaviest = Math.max(1, ...chosen.map(weightOf));
+  // Directions spread evenly over a sphere (a Fibonacci lattice), handed out by type so each
+  // type keeps its own region, and turned so the first type faces its usual direction. Plain
+  // per-type directions bunched up when most stars shared a type (a new user's topics).
+  const order = [...chosen].sort(
+    (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || hash(a.id) - hash(b.id),
+  );
+  const lattice = new Map(order.map((e, i) => [e.id, fibonacciDir(i, order.length)]));
   const stars: StarPoint[] = chosen.map((e) => {
     const r = rng(hash(e.id));
-    const j = () => (r() - 0.5) * 1.3;
-    const dir = norm(add(TYPE_DIR[e.type] ?? TYPE_DIR.other, [j(), j(), j()]));
-    const near = Math.sqrt(weightOf(e) / heaviest);
+    const j = () => (r() - 0.5) * 0.25;
+    const dir = norm(add(lattice.get(e.id)!, [j(), j(), j()]));
+    // Only a clear lead in mentions pulls a star in: a new graph, where everything is
+    // mentioned once, spreads out through the orb instead of crowding you.
+    const near = heaviest > 2 ? Math.sqrt(weightOf(e) / heaviest) : 0.35;
     const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.08;
     return {
       id: e.id,
@@ -392,16 +417,7 @@ export function inside(
       pos: scale(dir, dist),
     };
   });
-  if (self)
-    stars.unshift({
-      id: self.id,
-      name: self.name,
-      type: self.type,
-      summary: self.summary,
-      self: true,
-      weight: weightOf(self),
-      pos: [0, 0, 0],
-    });
+  stars.unshift(you);
   const byId = new Map(stars.map((s) => [s.id, s]));
 
   const lines: StarLine[] = graph.relations
@@ -447,6 +463,79 @@ export function inside(
   });
 
   return { stars, lines, memories: points, crystals: placed };
+}
+
+// --- Outside the orb: what Nexus does and has made --------------------------------------------
+
+/** A routine or a software project, on the ring just outside the shell: inside is what Nexus
+ * knows, outside what it does for you (teams float further out while they work). */
+export interface Satellite {
+  id: string;
+  kind: "routine" | "project";
+  name: string;
+  /** "Every day at 08:00", or the project's stack. */
+  detail: string;
+  color: string;
+  /** A routine that is on and due, or a project running as an app. */
+  active: boolean;
+  pos: Vec3;
+}
+
+/** Radius and tilt of the satellite ring: clear of the shell, well inside the teams' band. */
+export const SAT_R = 1.42;
+const SAT_TILT = 0.32;
+
+export const SATELLITE_COLOR = {
+  routine: "#a78bfa",
+  routineFailed: "#f43f5e",
+  paused: "#475569",
+  project: "#fbbf24",
+  projectIdle: "#94a3b8",
+};
+
+function ringPoint(angle: number): Vec3 {
+  const x = Math.cos(angle) * SAT_R;
+  const z = Math.sin(angle) * SAT_R;
+  // Tilt the ring about the x axis so it reads as an orbit rather than a flat line.
+  return [x, z * Math.sin(SAT_TILT), z * Math.cos(SAT_TILT)];
+}
+
+/** Routines on one half of the ring and projects on the other (the whole ring when there is
+ * only one kind), evenly spaced in a stable order so nothing jumps when one is added. */
+export function satellites(routines: Routine[], projects: Project[], max = 24): Satellite[] {
+  const rs = [...routines].sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? -1 : 1));
+  const ps = [...projects].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  // Projects get up to half the slots when there are routines too; routines take the rest.
+  const shownP = ps.slice(0, rs.length ? Math.floor(max / 2) : max);
+  const shownR = rs.slice(0, max - shownP.length);
+  const arc = shownR.length && shownP.length ? Math.PI : Math.PI * 2;
+  const place = (i: number, n: number, start: number) => start + (arc * (i + 0.5)) / Math.max(n, 1);
+  const out: Satellite[] = shownR.map((r, i) => ({
+    id: r.id,
+    kind: "routine",
+    name: r.name,
+    detail: r.schedule_text,
+    color: !r.enabled
+      ? SATELLITE_COLOR.paused
+      : r.last_status === "failed"
+        ? SATELLITE_COLOR.routineFailed
+        : SATELLITE_COLOR.routine,
+    active: r.enabled,
+    pos: ringPoint(place(i, shownR.length, 0.3)),
+  }));
+  shownP.forEach((p, i) => {
+    const live = p.app_state === "running";
+    out.push({
+      id: p.id,
+      kind: "project",
+      name: p.name,
+      detail: p.stack ?? "project",
+      color: live ? SATELLITE_COLOR.project : SATELLITE_COLOR.projectIdle,
+      active: live,
+      pos: ringPoint(place(i, shownP.length, 0.3 + (shownR.length ? Math.PI : 0))),
+    });
+  });
+  return out;
 }
 
 /** How much of the shell to draw at a camera distance: all of it from the home view out,

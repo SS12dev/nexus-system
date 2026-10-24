@@ -11,7 +11,7 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
 header { border-bottom: 1px solid var(--line); background: var(--card); }
 .bar { max-width: 46rem; margin: 0 auto; padding: 0.9rem 1.25rem; display: flex; align-items: center; gap: 0.75rem; }
-.logo { width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #e0f2fe, #38bdf8 35%, #1e3a8a 75%); box-shadow: 0 0 14px rgb(56 189 248 / 0.45); }
+.logo { width: 30px; height: 30px; border-radius: 8px; }
 .bar a { color: var(--ink); text-decoration: none; font-weight: 600; letter-spacing: 0.02em; }
 .bar nav { margin-left: auto; display: flex; gap: 1rem; font-size: 0.9rem; }
 .bar nav a { font-weight: 400; color: var(--muted); }

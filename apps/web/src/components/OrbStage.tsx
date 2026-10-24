@@ -1,10 +1,26 @@
-import { Bot, Box, Brain, ChevronDown, ChevronUp, ExternalLink, List, Maximize2, Minimize2, Orbit, Share2, X } from "lucide-react";
+import {
+  Bot,
+  Box,
+  Brain,
+  CalendarClock,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  FolderGit2,
+  List,
+  Maximize2,
+  Minimize2,
+  Orbit,
+  Share2,
+  X,
+} from "lucide-react";
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
 import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
-import type { KnowledgeGraph, Memory, Recalled, Run } from "../lib/types";
+import { formatInZone } from "../lib/schedule";
+import type { KnowledgeGraph, Memory, Project, Recalled, Routine, Run } from "../lib/types";
 import {
   buildClusters,
   inside as layoutInside,
@@ -12,6 +28,8 @@ import {
   KIND_COLOR,
   liveSystems,
   NODE_COLOR,
+  satellites,
+  SATELLITE_COLOR,
   type OrbCluster,
 } from "../orb/model";
 import { StarLabels } from "../orb/StarLabels";
@@ -40,7 +58,8 @@ function savedView(): "orb" | "list" {
 
 /** Nexus as a 3D orb with the live agent network around it and, inside it, what it knows:
  * you at the centre, the people, projects and topics you've mentioned around you, memories as
- * their satellites and the newest artifacts by their project. Or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
+ * their satellites and the newest artifacts by their project. Just outside the shell, on a
+ * ring, what it does for you: routines and software projects. Or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
  * phones) so you can watch Nexus and its teams work while you talk. */
 export function OrbStage({
   mode,
@@ -67,6 +86,9 @@ export function OrbStage({
   const [view, setView] = useState(savedView);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const routinesVersion = useStore((s) => s.routinesVersion);
   const recall = useStore((s) => s.recall);
   const [lit, setLit] = useState<Recalled | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -80,6 +102,14 @@ export function OrbStage({
     api.files().then(syncFiles).catch(() => {});
     api.approvals().then(upsertApprovals).catch(() => {});
   }, [connected]);
+
+  // Routines and projects ride the ring outside the orb.
+  useEffect(() => {
+    api.routines().then(setRoutines).catch(() => {});
+  }, [routinesVersion, connected]);
+  useEffect(() => {
+    api.projects().then(setProjects).catch(() => {});
+  }, [connected, Object.keys(files).length]);
 
   // Memories change in bursts after a chat; wait for the burst to settle.
   useEffect(() => {
@@ -120,6 +150,10 @@ export function OrbStage({
     [graph, memories, artifactList, perf.maxStars, perf.maxMemories, perf.maxCrystals, litIds],
   );
   const known = graph?.entities.filter((e) => !e.is_self).length ?? 0;
+  const sats = useMemo(
+    () => satellites(routines, projects, perf.lite ? 12 : 24),
+    [routines, projects, perf.lite],
+  );
 
   // Drop a selection whose object went away.
   useEffect(() => {
@@ -146,7 +180,7 @@ export function OrbStage({
       ? (activity ?? (state === "thinking" ? "Thinking…" : "Answering…"))
       : lit
         ? remembered(lit)
-        : summary(clusters.length, agentCount, working, memories.length, known, artifactList.length);
+        : summary(clusters.length, agentCount, working, memories.length, known, artifactList.length, routines.length);
 
   if (chat && collapsed) {
     return (
@@ -196,6 +230,7 @@ export function OrbStage({
                 activity={state !== "idle" ? activity : null}
                 clusters={clusters}
                 inside={insideData}
+                sats={sats}
                 lit={litIds}
                 litSeq={recall?.seq ?? 0}
                 labels={chat ? 3 : perf.lite ? 5 : 8}
@@ -264,16 +299,32 @@ export function OrbStage({
 
       {selected && (
         <div className={chat ? "absolute inset-x-2 bottom-2 z-20" : "relative z-10 px-3 pb-2"}>
-          <SelectionCard selection={selected} clusters={clusters} graph={graph} onClose={() => setSelected(null)} />
+          <SelectionCard
+            selection={selected}
+            clusters={clusters}
+            graph={graph}
+            routines={routines}
+            projects={projects}
+            onClose={() => setSelected(null)}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function summary(teams: number, agents: number, working: number, memories: number, known: number, artifacts: number) {
+function summary(
+  teams: number,
+  agents: number,
+  working: number,
+  memories: number,
+  known: number,
+  artifacts: number,
+  routines = 0,
+) {
   const parts = [
     teams ? `${teams} team${teams > 1 ? "s" : ""} (${agents} agents${working ? `, ${working} working` : ""})` : "No teams right now",
+    ...(routines ? [`${routines} routine${routines === 1 ? "" : "s"}`] : []),
     `${memories} memor${memories === 1 ? "y" : "ies"}`,
     ...(known ? [`${known} connection${known === 1 ? "" : "s"}`] : []),
     `${artifacts} artifact${artifacts === 1 ? "" : "s"}`,
@@ -292,22 +343,36 @@ export function remembered(r: Recalled): string {
 }
 
 function Legend() {
-  const dot = (c: string) => <span className="inline-block size-2 rounded-full" style={{ background: c }} />;
+  const dot = (c: string) => <span className="inline-block size-2 shrink-0 rounded-full" style={{ background: c }} />;
+  const item = "flex items-center gap-1.5 whitespace-nowrap";
+  const group = "text-[10px] font-semibold uppercase tracking-wider text-slate-500";
   return (
-    <div className="mx-auto hidden flex-wrap justify-center gap-x-4 gap-y-1 rounded-2xl border border-edge bg-ink/75 px-4 py-1.5 text-xs text-slate-300 backdrop-blur sm:flex">
-      <span className="flex items-center gap-1.5">{dot(NODE_COLOR.running)} working</span>
-      <span className="flex items-center gap-1.5">{dot(NODE_COLOR.working)} using a tool</span>
-      <span className="flex items-center gap-1.5">{dot(NODE_COLOR.waiting)} needs approval</span>
-      <span className="flex items-center gap-1.5">{dot(NODE_COLOR.idle)} idle</span>
-      <span className="flex items-center gap-1.5">{dot(ENTITY_COLOR.project)} people, projects and topics inside</span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
-      </span>
-      <span className="flex items-center gap-1.5">{dot(KIND_COLOR.preference)} memories</span>
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block size-2 rotate-45 bg-purple-400" /> newest artifacts
-      </span>
-      <span className="flex items-center gap-1.5">{dot(RECALL_COLOR)} just remembered</span>
+    <div className="mx-auto hidden max-w-full flex-col gap-1 rounded-2xl border border-edge bg-ink/75 px-4 py-2 text-xs text-slate-300 backdrop-blur sm:flex">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className={group}>Outside</span>
+        <span className={item}>{dot(NODE_COLOR.running)} team working</span>
+        <span className={item}>{dot(NODE_COLOR.working)} using a tool</span>
+        <span className={item}>{dot(NODE_COLOR.waiting)} needs approval</span>
+        <span className={item}>
+          <span className="inline-block size-2 rounded-full border-2" style={{ borderColor: SATELLITE_COLOR.routine }} /> routines
+        </span>
+        <span className={item}>
+          <span className="inline-block size-2" style={{ background: SATELLITE_COLOR.project }} /> projects
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className={group}>Inside</span>
+        <span className={item}>{dot("#f8fafc")} you</span>
+        <span className={item}>{dot(ENTITY_COLOR.project)} people, projects and topics</span>
+        <span className={item}>
+          <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
+        </span>
+        <span className={item}>{dot(KIND_COLOR.preference)} memories</span>
+        <span className={item}>
+          <span className="inline-block size-2 rotate-45 bg-purple-400" /> artifacts
+        </span>
+        <span className={item}>{dot(RECALL_COLOR)} just remembered</span>
+      </div>
     </div>
   );
 }
@@ -316,11 +381,15 @@ function SelectionCard({
   selection,
   clusters,
   graph,
+  routines,
+  projects,
   onClose,
 }: {
   selection: Selection;
   clusters: OrbCluster[];
   graph: KnowledgeGraph | null;
+  routines: Routine[];
+  projects: Project[];
   onClose: () => void;
 }) {
   let body: ReactNode;
@@ -395,6 +464,46 @@ function SelectionCard({
         <Link to={`/memory?focus=${m.id}`} className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
           Open in Memory <ExternalLink size={13} />
         </Link>
+      </>
+    );
+  } else if (selection.type === "satellite") {
+    const sat = selection.sat;
+    const r = sat.kind === "routine" ? routines.find((x) => x.id === sat.id) : undefined;
+    const p = sat.kind === "project" ? projects.find((x) => x.id === sat.id) : undefined;
+    body = (
+      <>
+        <div className="flex items-center gap-2 text-xs" style={{ color: sat.color }}>
+          {sat.kind === "routine" ? <CalendarClock size={14} /> : <FolderGit2 size={14} />}
+          {sat.kind === "routine" ? (r?.enabled === false ? "Routine · paused" : "Routine") : "Project"}
+        </div>
+        <div className="mt-1 font-medium">{sat.name}</div>
+        <p className="mt-0.5 text-sm text-slate-400">
+          {sat.detail}
+          {r?.next_run_at && ` · next ${formatInZone(r.next_run_at, r.timezone)}`}
+          {p?.app_state === "running" && " · live"}
+        </p>
+        <div className="mt-2 flex gap-4 text-sm">
+          {r?.chat_id && (
+            <Link to={`/c/${r.chat_id}`} className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
+              Open chat <ExternalLink size={13} />
+            </Link>
+          )}
+          {r && (
+            <Link to="/routines" className="text-slate-300 hover:text-white">
+              Routines
+            </Link>
+          )}
+          {p?.live_url && (
+            <a href={p.live_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
+              Open app <ExternalLink size={13} />
+            </a>
+          )}
+          {p && (
+            <Link to="/library" className="text-slate-300 hover:text-white">
+              Library
+            </Link>
+          )}
+        </div>
       </>
     );
   } else {
