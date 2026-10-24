@@ -218,3 +218,117 @@ async def test_graph_off_learns_memories_only(deps, model, chat, sessionmaker):
     await memory.extract_memories(deps, chat_id, reply_id)
     assert await entities(sessionmaker, user_id) == {}
     assert await memory.link_graph(deps) == 0
+
+
+async def seed_nexus(sessionmaker, embedder, user_id):
+    """Nexus uses LangGraph; the reason for LangGraph is in a memory that never says Nexus,
+    and a distractor shares a word with the question."""
+    async with sessionmaker() as db:
+        user = await db.get(User, user_id)
+        why = Memory(
+            user_id=user_id,
+            kind=MemoryKind.fact,
+            content="Chose it for its state model",
+            confidence=0.9,
+        )
+        others = [
+            Memory(user_id=user_id, kind=MemoryKind.fact, content=c)
+            for c in ("Likes to pick strawberries", "Bakes a layer cake on birthdays")
+        ]
+        for m in (why, *others):
+            m.embedding, m.embedding_model = await embedder.embed_one(db, m.content)
+        db.add_all([why, *others])
+        await db.flush()
+        found = graph.parse_graph(
+            {
+                "entities": [
+                    {"name": "Nexus", "type": "project"},
+                    {"name": "LangGraph", "type": "tool"},
+                ],
+                "relations": [
+                    {
+                        "from": "Nexus",
+                        "predicate": "uses",
+                        "to": "LangGraph",
+                        "fact": "Nexus uses LangGraph.",
+                    },
+                    {"from": "USER", "predicate": "is building", "to": "Nexus"},
+                ],
+            }
+        )
+        await graph.ingest(
+            db, embedder, user, found, links=[({"memory_id": why.id}, ["langgraph"])]
+        )
+        await db.commit()
+        return why.id, [m.id for m in others]
+
+
+QUESTION = "Why did I pick the orchestration layer for Nexus?"
+
+
+async def test_recall_through_connections_finds_what_search_misses(
+    deps, chat, sessionmaker, embedder
+):
+    from nexus_orchestrator.context import recall
+
+    user_id, _c, _r = chat
+    why, (other, _cake) = await seed_nexus(sessionmaker, embedder, user_id)
+    settings = deps.settings.model_copy(update={"memory_top_k": 1, "graph_extra_memories": 2})
+    async with sessionmaker() as db:
+        vec, _ = await embedder.try_embed_one(db, QUESTION)
+        plain = await recall(db, settings, user_id, QUESTION, vec, through_graph=False)
+        linked = await recall(db, settings, user_id, QUESTION, vec, through_graph=True)
+        # Off by default: the setting decides when not asked.
+        default = await recall(db, settings, user_id, QUESTION, vec)
+    assert [m.id for m in plain.memories] == [other] and plain.facts == []
+    assert [m.id for m in linked.memories] == [other, why]
+    assert [e.name for e in linked.entities] == ["Nexus", "LangGraph"]
+    assert "Nexus uses LangGraph." in linked.facts and "Shivam is building Nexus" in linked.facts
+    assert [m.id for m in default.memories] == [other]
+
+    # An ended relation is not followed.
+    async with sessionmaker() as db:
+        rel = await db.scalar(select(Relation).where(Relation.predicate == "uses"))
+        rel.valid_to = utcnow()
+        await db.commit()
+        cut = await recall(db, settings, user_id, QUESTION, vec, through_graph=True)
+    assert why not in [m.id for m in cut.memories]
+
+
+async def test_recall_check_scores_graph_recall_side_by_side(
+    deps, model, chat, sessionmaker, embedder
+):
+    from nexus_common.models import RecallEval
+    from nexus_orchestrator import recall_eval
+
+    user_id, _c, _r = chat
+    await seed_nexus(sessionmaker, embedder, user_id)
+    deps.settings = deps.settings.model_copy(update={"memory_top_k": 1, "graph_extra_memories": 1})
+    model.script = [
+        json.dumps({"questions": [{"item": 0, "question": QUESTION}]}),
+    ]
+    async with sessionmaker() as db:
+        ev = RecallEval(user_id=user_id, status="running", scores={}, misses=[])
+        db.add(ev)
+        await db.commit()
+    await recall_eval.run_eval(deps, ev.id)
+    async with sessionmaker() as db:
+        ev = await db.get(RecallEval, ev.id)
+    # The most confident memory comes first, so item 0 is "why".
+    assert ev.scores["standard"]["hits"] == 0
+    assert ev.scores["graph"]["hits"] == 1 and ev.scores["graph"]["mrr"] == 0.5
+    assert ev.misses[0]["found_by"] == ["graph"]
+
+
+async def test_turn_context_carries_the_connections(deps, chat, sessionmaker, embedder):
+    from nexus_orchestrator.context import assemble
+
+    user_id, chat_id, _r = chat
+    await seed_nexus(sessionmaker, embedder, user_id)
+    deps.settings = deps.settings.model_copy(update={"graph_recall_enabled": True})
+    async with sessionmaker() as db:
+        c = await db.get(Chat, chat_id)
+        ctx = await assemble(db, deps.settings, embedder, c, QUESTION, False)
+    rendered = ctx.render()
+    assert "<connections>\n- Nexus uses LangGraph." in rendered
+    assert {e.name for e in ctx.entities} == {"Nexus", "LangGraph"}

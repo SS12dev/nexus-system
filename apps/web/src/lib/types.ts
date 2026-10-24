@@ -510,6 +510,11 @@ export type ServerEvent =
     }
   | { type: "file.updated"; chat_id?: null; data: { file: FileItem } }
   | { type: "memory.updated"; chat_id?: null; data: { op: string; memory: Memory | { id: string } } }
+  | {
+      type: "memory.recalled";
+      chat_id: string;
+      data: { memories: string[]; entities: { id: string; name: string; type: EntityType }[] };
+    }
   | { type: "profile.updated"; chat_id?: null; data: { content: string } }
   | { type: "system.created" | "system.updated"; chat_id?: string | null; data: { system: AgentSystem } }
   | { type: "system.deleted"; chat_id?: string | null; data: { system: { id: string } } }
@@ -927,6 +932,7 @@ export interface RecallSummary {
   memories: number;
   past_chats: number;
   checks: RecallCheck[];
+  graph_recall_enabled: boolean;
 }
 
 /** The knowledge graph: who and what memories are about, and how they relate. */

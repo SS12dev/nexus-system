@@ -12,7 +12,7 @@ from datetime import timedelta
 from fastapi import APIRouter, status
 from sqlalchemy import delete, func, select
 
-from nexus_api.deps import DbDep, OwnerUser, QueueDep
+from nexus_api.deps import DbDep, OwnerUser, QueueDep, SettingsDep
 from nexus_common.models import AuditLog, Episode, Memory, RecallEval, RecallQuestion, utcnow
 
 router = APIRouter(prefix="/api/admin/recall", tags=["admin"])
@@ -35,7 +35,7 @@ def _eval_out(e: RecallEval) -> dict:
 
 
 @router.get("")
-async def recall_summary(actor: OwnerUser, db: DbDep):
+async def recall_summary(actor: OwnerUser, db: DbDep, settings: SettingsDep):
     count = select(func.count())
     questions = await db.scalar(count.where(RecallQuestion.user_id == actor.id))
     memories = await db.scalar(count.where(Memory.user_id == actor.id))
@@ -53,6 +53,8 @@ async def recall_summary(actor: OwnerUser, db: DbDep):
         "memories": memories or 0,
         "past_chats": episodes or 0,
         "checks": [_eval_out(e) for e in evals],
+        # Whether chats recall through connections now (Configuration tab).
+        "graph_recall_enabled": settings.graph_recall_enabled,
     }
 
 

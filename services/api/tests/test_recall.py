@@ -5,7 +5,13 @@ from nexus_common.models import RecallEval
 
 async def test_owner_starts_one_check_at_a_time(owner, queue, sessionmaker):
     summary = (await owner.get("/api/admin/recall")).json()
-    assert summary == {"questions": 0, "memories": 0, "past_chats": 0, "checks": []}
+    assert summary == {
+        "questions": 0,
+        "memories": 0,
+        "past_chats": 0,
+        "checks": [],
+        "graph_recall_enabled": False,
+    }
 
     first = await owner.post("/api/admin/recall/run")
     assert first.status_code == 202 and first.json()["status"] == "running"

@@ -382,6 +382,15 @@ async def _generate(
     )
     try:
         context = await assemble(db, deps.settings, deps.embedder, chat, question, truncated)
+        if context.memories or context.entities:
+            # What it remembered for this reply, for the chat and the orb to show.
+            await emit(
+                "memory.recalled",
+                memories=[str(m.id) for m in context.memories],
+                entities=[
+                    {"id": str(e.id), "name": e.name, "type": e.type} for e in context.entities
+                ],
+            )
         # Outbound and destructive tools are for agents in a system, where every call is approved.
         names = {t.name for t in TOOLS if t.assistant and t.name in allowed} | {"remember"}
         extra = []

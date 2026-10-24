@@ -77,10 +77,13 @@ async def test_check_writes_questions_once_and_scores_recall(
         qs = (await db.scalars(select(RecallQuestion))).all()
     assert ev.status == "done" and ev.finished_at is not None
     assert len(qs) == 2 and {q.memory_id for q in qs} == set(ids[:2])
+    assert set(ev.scores) == {"standard", "standard_more", "graph"}
     s = ev.scores["standard"]
     assert s["n"] == 2 and s["hits"] == 1 and s["hit_rate"] == 0.5 and s["mrr"] == 0.5
     (miss,) = ev.misses
-    assert miss["expected"] == "Keeps bees in the garden" and miss["found_by"] == []
+    assert miss["expected"] == "Keeps bees in the garden"
+    # Sending more memories finds it here only because there are just three.
+    assert miss["found_by"] == ["standard_more"]
     assert deps.factory_calls[0]["metadata"]["trace_name"] == "nexus.recall.questions"
 
     # A second check keeps the questions and only asks about the memory still without one.

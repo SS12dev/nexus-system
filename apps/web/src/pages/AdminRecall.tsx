@@ -13,6 +13,10 @@ const MODES: Record<string, { label: string; help: string }> = {
     label: "Standard",
     help: "Meaning and keyword search over memories and past-chat summaries, as every chat uses today.",
   },
+  standard_more: {
+    label: "Standard, more",
+    help: "Standard with as many extra memories as connections can add, to tell a real gain from just sending more.",
+  },
   graph: {
     label: "With connections",
     help: "Standard, plus memories about the people, projects and topics linked to what the question is about.",
@@ -22,7 +26,7 @@ const modeLabel = (m: string) => MODES[m]?.label ?? m;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
 /** The recall check: does the assistant find the right memory when a question needs it? */
-export function RecallPanel({ onError }: { onError: (msg: string) => void }) {
+export function RecallPanel({ onError, onOpenConfig }: { onError: (msg: string) => void; onOpenConfig: () => void }) {
   const assistant = useAssistantName();
   const [data, setData] = useState<RecallSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -109,6 +113,18 @@ export function RecallPanel({ onError }: { onError: (msg: string) => void }) {
             : `${data.questions} questions for ${data.memories} memories and ${data.past_chats} past chats. A check only calls the model for items without a question.`}
         </span>
       </div>
+
+      <p className="mb-4 text-sm text-slate-400">
+        Chats recall through connections:{" "}
+        <b className={data.graph_recall_enabled ? "text-emerald-300" : "text-slate-200"}>
+          {data.graph_recall_enabled ? "on" : "off"}
+        </b>
+        . Turn it on when <i>With connections</i> beats <i>Standard, more</i> here; it's{" "}
+        <button onClick={onOpenConfig} className="text-sky-300 hover:underline">
+          Recall through connections
+        </button>{" "}
+        under Memory and context.
+      </p>
 
       {latest?.status === "failed" && (
         <p className="mb-4 text-sm text-rose-400">The last check failed: {latest.error}</p>

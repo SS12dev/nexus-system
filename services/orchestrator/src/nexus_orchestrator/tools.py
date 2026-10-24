@@ -42,6 +42,7 @@ from nexus_common.models import (
 from nexus_common.search import hybrid_search
 from nexus_common.skills import find_skill
 from nexus_orchestrator.artifacts import save_generated
+from nexus_orchestrator.context import recall
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.google_tools import build_google_tools
 from nexus_orchestrator.links import keep_link
@@ -355,7 +356,8 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     # --- Memory ----------------------------------------------------------------------------
 
     async def search_memory(query: str) -> str:
-        """Search what you remember about the user and summaries of past chats."""
+        """Search what you remember about the user, the connections between the people,
+        projects and topics in their life, and summaries of past chats."""
         await note("search_memory", query=query)
         if not ctx.memory_enabled:
             return "The user has turned memory off."
@@ -369,7 +371,14 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             eps = (
                 await db.scalars(select(Episode).where(Episode.id.in_([h.id for h in ep_hits])))
             ).all()
+            facts: list[str] = []
+            if deps.settings.graph_recall_enabled:
+                more = await recall(db, deps.settings, user_id, query, vec, through_graph=True)
+                seen = {m.id for m in mems}
+                mems = [*mems, *(m for m in more.memories if m.id not in seen)]
+                facts = more.facts
         lines = [f"- [{m.kind}] {m.content}" for m in mems]
+        lines += [f"- (connection) {f}" for f in facts]
         lines += [f"- (past chat, {e.updated_at:%d %b %Y}) {e.content}" for e in eps]
         return "\n".join(lines) or "Nothing found."
 

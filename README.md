@@ -213,6 +213,17 @@ entity nothing mentions any more goes with its relations. The Memory page's Conn
 lists them by type with their facts; removing one keeps its memories. `GRAPH_ENABLED=false`
 (Admin › Configuration) stops adding to it.
 
+With **Recall through connections** on (`GRAPH_RECALL_ENABLED`, off by default), each turn
+also starts from the entities the message names (or means, within a cosine distance of 0.45)
+and those its closest memories mention, walks up to `GRAPH_HOPS` (2) relations that still hold
+(never through you, since everything links to you), and adds up to `GRAPH_EXTRA_MEMORIES` (4)
+memories about what it reached, best path times confidence first, plus their connections as a
+`<connections>` block. It is one recursive SQL query and no model calls. The `search_memory`
+tool does the same. Every turn sends a `memory.recalled` event with the memories and entities
+it used. Before turning it on, run the check on Admin › Recall: it scores *Standard*,
+*Standard, more* (as many extra memories, without the graph) and *With connections* on the
+same questions, so a gain from the graph shows apart from a gain from sending more.
+
 Search is hybrid everywhere: pgvector cosine similarity and Postgres full-text search fused by
 reciprocal rank, so it still works by keyword if the embedder is down.
 

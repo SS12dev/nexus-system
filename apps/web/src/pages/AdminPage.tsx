@@ -189,7 +189,7 @@ export function AdminPage() {
             {tab === "improvements" && (
               <ImprovementsPanel onError={setError} onOpen={(t) => go(t as Tab)} onChange={refreshBadges} />
             )}
-            {tab === "recall" && <RecallPanel onError={setError} />}
+            {tab === "recall" && <RecallPanel onError={setError} onOpenConfig={() => go("config")} />}
             {tab === "monitoring" && <MonitoringPanel onError={setError} onOpenAlerts={() => go("alerts")} />}
             {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
             {tab === "backups" && <BackupsPanel onError={setError} />}

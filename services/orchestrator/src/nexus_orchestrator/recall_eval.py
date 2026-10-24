@@ -43,10 +43,27 @@ Mode = Callable[[AsyncSession, Settings, uuid.UUID, str, list[float] | None], Aw
 
 
 async def _standard(db, settings, user_id, question, vec) -> Recall:
-    return await recall(db, settings, user_id, question, vec)
+    return await recall(db, settings, user_id, question, vec, through_graph=False)
 
 
-MODES: dict[str, Mode] = {"standard": _standard}
+async def _standard_more(db, settings, user_id, question, vec) -> Recall:
+    """Standard with as many memories as graph recall can add: shows how much of a gain is
+    only from putting more memories in the prompt."""
+    more = settings.model_copy(
+        update={"memory_top_k": settings.memory_top_k + settings.graph_extra_memories}
+    )
+    return await recall(db, more, user_id, question, vec, through_graph=False)
+
+
+async def _graph(db, settings, user_id, question, vec) -> Recall:
+    return await recall(db, settings, user_id, question, vec, through_graph=True)
+
+
+MODES: dict[str, Mode] = {
+    "standard": _standard,
+    "standard_more": _standard_more,
+    "graph": _graph,
+}
 
 
 async def _add_questions(deps: TurnDeps, db: AsyncSession, user: User) -> int:
