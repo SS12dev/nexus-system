@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Outlet, useParams } from "react-router";
+import { X } from "lucide-react";
+import { Outlet, useNavigate, useParams } from "react-router";
 import { FilePreview } from "../components/FilePreview";
 import { useAutoOpenResult } from "../components/Notices";
 import { OrbStage } from "../components/OrbStage";
@@ -76,6 +77,7 @@ export function OrbLayout() {
         setOrbOpen={setOrbOpen}
         assistant={assistant}
         result={showing && wide ? <FilePreview inline file={showing.file} onClose={close} /> : null}
+        chatId={chatId}
       />
       {showing && !wide && <FilePreview file={showing.file} onClose={close} />}
     </>
@@ -88,6 +90,7 @@ function OrbLayoutBody({
   setOrbOpen,
   assistant,
   result = null,
+  chatId,
 }: {
   inChat: boolean;
   orbOpen: boolean;
@@ -95,7 +98,10 @@ function OrbLayoutBody({
   assistant: string;
   /** A result shown in the orb's place. */
   result?: ReactNode;
+  chatId?: string;
 }) {
+  const navigate = useNavigate();
+  const title = useStore((s) => s.chats.find((c) => c.id === chatId)?.title);
 
   const collapse = (collapsed: boolean) => {
     setOrbOpen(!collapsed);
@@ -126,6 +132,19 @@ function OrbLayoutBody({
         <OrbStage mode={inChat ? "chat" : "home"} collapsed={inChat} onCollapse={collapse} className={stage} />
       )}
       <div className={panel}>
+        {inChat && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-edge px-2 py-1.5">
+            <button
+              onClick={() => navigate("/")}
+              className="rounded-md p-1 text-slate-400 hover:bg-edge/60 hover:text-white"
+              aria-label="Close chat"
+              title="Close chat"
+            >
+              <X size={16} />
+            </button>
+            <span className="min-w-0 truncate text-sm text-slate-400">{title || "Chat"}</span>
+          </div>
+        )}
         <Outlet />
       </div>
     </div>
