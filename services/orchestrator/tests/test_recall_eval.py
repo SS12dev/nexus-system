@@ -57,7 +57,9 @@ async def test_check_writes_questions_once_and_scores_recall(
         ["Works at UST as a data scientist", "Keeps bees in the garden", "Does not have a car"],
     )
     # One memory per question, so a near miss counts.
-    deps.settings = deps.settings.model_copy(update={"memory_top_k": 1})
+    # No distance cut-off: the fake embedder's vectors are far apart, and a near miss is the
+    # point here.
+    deps.settings = deps.settings.model_copy(update={"memory_top_k": 1, "memory_max_distance": 2.0})
     model.script = [
         json.dumps(
             {

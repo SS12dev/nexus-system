@@ -26,16 +26,28 @@ class ParseError(Exception):
 def _docling():
     try:
         from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
-        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
+        from docling.document_converter import (
+            DocumentConverter,
+            ImageFormatOption,
+            PdfFormatOption,
+        )
     except ImportError:
         return None
-    options = PdfPipelineOptions(do_ocr=True, do_table_structure=True)
+    # RapidOCR on torch: the image has only its torch models (see the Dockerfile), and left to
+    # itself Docling picks the onnxruntime ones and fails on every image.
+    options = PdfPipelineOptions(
+        do_ocr=True, do_table_structure=True, ocr_options=RapidOcrOptions(backend="torch")
+    )
     # The Docker image downloads the models at build time so parsing works offline.
     if artifacts := os.environ.get("DOCLING_ARTIFACTS_PATH"):
         options.artifacts_path = artifacts
+    # Images get the same options; without their own entry they use Docling's defaults.
     return DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=options),
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=options),
+        }
     )
 
 

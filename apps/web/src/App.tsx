@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { Shell } from "./components/Shell";
 import { api, ApiError } from "./lib/api";
 import { APP_NAME } from "./lib/assistant";
+import { browserTimezone } from "./lib/schedule";
 import { useEventSocket } from "./lib/socket";
 import { useTheme } from "./lib/theme";
 import { hasRole, isOwner } from "./lib/types";
@@ -44,6 +45,18 @@ export function App() {
   useEventSocket(!!user);
   // Keeps <html data-theme> following the system while the choice is "system".
   useTheme();
+
+  // A zone left at UTC (or none) is the server's default, not a choice: take this device's, so
+  // "every day at 9 pm" means 9 pm where they are. Routines on the old zone move with it.
+  const zone = user?.onboarded_at ? user.timezone || "UTC" : null;
+  useEffect(() => {
+    const device = browserTimezone();
+    if (zone !== "UTC" || device === "UTC") return;
+    api
+      .updateMe({ timezone: device })
+      .then(setUser)
+      .catch((e) => console.warn("Couldn't set the time zone", e));
+  }, [zone, setUser]);
 
   const assistant = user?.assistant_name;
   useEffect(() => {

@@ -86,3 +86,7 @@ and save the script too (`out/stand.py`) so it can be changed later. In the repl
 was made and its key dimensions, the assumptions you made, how to print it (orientation,
 supports or not, material, about how many grams), and what's easy to change. For a change
 request, edit the parameters in the saved script rather than starting over.
+
+If the CAD library itself keeps failing (an abort, a crash, a timeout on a simple shape), stop
+and say so plainly. Never write placeholder or empty STEP, STL or 3MF files to stand in for a
+model, and list only files that `ls -l out/` shows with a real size.

@@ -154,7 +154,9 @@ Reply with JSON only: {{"summary": str, "entities": [entity], "relations": [rela
 
 GRAPH_RULES = """Also note the knowledge graph of the user's world: the named people, \
 projects, organisations, places, topics and tools that matter to them beyond this one chat \
-(not generic concepts, not the assistant). Write "USER" for the user themself.
+(not generic concepts, not the assistant). Write "USER" for the user themself. Name each \
+entity the way the user would say it, without its type ("Tray design", not "topic:tray \
+design"). Files and file names ("tray.stl", "out/preview.png") are not entities.
 - entity: {"name": str, "type": "person"|"project"|"organisation"|"place"|"topic"|"tool"|\
 "other", "summary": str (a few words on who or what it is to the user), "aliases": [str]}
 - relation: {"from": str, "predicate": str, "to": str, "fact": str, "ended": bool}: "from" \

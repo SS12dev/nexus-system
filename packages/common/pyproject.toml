@@ -16,6 +16,7 @@ dependencies = [
     "cryptography>=43",
     "python-dateutil>=2.9",
     "pywebpush>=2.0",
+    "tzdata>=2025.2",
 ]
 
 [build-system]

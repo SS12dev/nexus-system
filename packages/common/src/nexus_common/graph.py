@@ -39,6 +39,23 @@ def norm(name: str) -> str:
     return re.sub(r"\s+", " ", name.casefold()).strip(" .,;:!?\"'()[]")
 
 
+# The model sometimes writes the type into the name ("topic:tray design").
+TYPE_PREFIX = re.compile(rf"^(?:{'|'.join(TYPES)})\s*:\s*", re.IGNORECASE)
+# A file name or path ("out/tray.stl", "rocket_preview.png") is a file in the library, not
+# something in the user's world. Code-like names such as Node.js or socket.io stay.
+FILE_NAME = re.compile(
+    r"^\S*\.(?:stl|3mf|step|stp|obj|png|jpe?g|gif|webp|svg|pdf|docx?|xlsx?|pptx?|csv|"
+    r"txt|md|json|ya?ml|py|sh|zip|html?)$",
+    re.IGNORECASE,
+)
+
+
+def clean_name(name: str) -> str:
+    """The name as a person would say it, or "" for one that isn't an entity."""
+    name = TYPE_PREFIX.sub("", " ".join(str(name).split()))
+    return "" if FILE_NAME.match(name) else name
+
+
 @dataclass
 class Extracted:
     """Entities and relations the model found, validated."""
@@ -56,13 +73,13 @@ def parse_graph(data: dict) -> Extracted:
     for e in data.get("entities") or []:
         if not isinstance(e, dict):
             continue
-        name = str(e.get("name") or "").strip()[:200]
+        name = clean_name(str(e.get("name") or ""))[:200]
         key = norm(name)
         if not key or key == SELF or key in seen:
             continue
         seen.add(key)
         kind = str(e.get("type") or "other").lower()
-        aliases = [norm(str(a)) for a in e.get("aliases") or [] if norm(str(a))][:5]
+        aliases = [norm(a) for a in map(clean_name, e.get("aliases") or []) if norm(a)][:5]
         out.entities.append(
             {
                 "name": name,
@@ -74,7 +91,8 @@ def parse_graph(data: dict) -> Extracted:
     for r in data.get("relations") or []:
         if not isinstance(r, dict):
             continue
-        src, dst = norm(str(r.get("from") or "")), norm(str(r.get("to") or ""))
+        src = norm(clean_name(str(r.get("from") or "")))
+        dst = norm(clean_name(str(r.get("to") or "")))
         predicate = norm(str(r.get("predicate") or ""))[:80]
         if not src or not dst or not predicate or src == dst:
             continue
@@ -93,7 +111,9 @@ def parse_graph(data: dict) -> Extracted:
 
 def about_names(raw) -> list[str]:
     """The entity names one memory or item is about, as the model listed them."""
-    return [norm(str(n)) for n in raw or [] if norm(str(n))][:8] if isinstance(raw, list) else []
+    if not isinstance(raw, list):
+        return []
+    return [norm(n) for n in map(clean_name, raw) if norm(n)][:8]
 
 
 async def self_entity(db: AsyncSession, user: User) -> Entity:

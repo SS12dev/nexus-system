@@ -30,7 +30,12 @@ from pydantic import BaseModel, Field
 TOKEN = os.environ.get("SANDBOX_TOKEN", "")
 WORK_ROOT = Path(os.environ.get("SANDBOX_WORK_DIR", tempfile.gettempdir()))
 MAX_TIMEOUT_S = int(os.environ.get("SANDBOX_MAX_TIMEOUT_S", "300"))
-MEMORY_MB = int(os.environ.get("SANDBOX_MEMORY_MB", "1536"))
+MEMORY_MB = int(os.environ.get("SANDBOX_MEMORY_MB", "3072"))
+# The job's address-space cap, well above MEMORY_MB: OpenCascade (build123d) and the BLAS
+# libraries start a thread per core, each reserving stack and a malloc arena it never fills,
+# so capped at 1.5 GB every CAD boolean aborted on a 10-core Mac. The container's mem_limit
+# still caps what is really used.
+ADDRESS_SPACE_MB = int(os.environ.get("SANDBOX_ADDRESS_SPACE_MB", str(MEMORY_MB * 4)))
 MAX_FILE_MB = int(os.environ.get("SANDBOX_MAX_FILE_MB", "50"))
 CONCURRENCY = int(os.environ.get("SANDBOX_CONCURRENCY", "4"))
 MAX_OUTPUT_CHARS = 20_000
@@ -72,7 +77,7 @@ def safe_path(root: Path, rel: str) -> Path:
 def _limits(cpu_s: int) -> None:
     """Runs in the child before exec."""
     os.setsid()
-    mem = MEMORY_MB * 1024 * 1024
+    mem = ADDRESS_SPACE_MB * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s + 1))
     try:
         resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
