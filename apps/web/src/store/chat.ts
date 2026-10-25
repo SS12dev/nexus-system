@@ -8,6 +8,7 @@ import type {
   FileItem,
   Message,
   Notice,
+  Widget,
   Recalled,
   ServerEvent,
   User,
@@ -58,6 +59,9 @@ interface Store extends ChatState {
   viewer: { file: FileBrief; chatId: string | null } | null;
   openViewer: (file: FileBrief, chatId: string | null) => void;
   closeViewer: () => void;
+  setWidgets: (widgets: Widget[]) => void;
+  upsertWidget: (widget: Widget) => void;
+  removeWidget: (id: string) => void;
 }
 
 export const useStore = create<Store>((set) => ({
@@ -92,4 +96,11 @@ export const useStore = create<Store>((set) => ({
   viewer: null,
   openViewer: (file, chatId) => set({ viewer: { file, chatId } }),
   closeViewer: () => set({ viewer: null }),
+  setWidgets: (widgets) => set({ widgets: Object.fromEntries(widgets.map((w) => [w.id, w])) }),
+  upsertWidget: (widget) => set((s) => ({ widgets: { ...s.widgets, [widget.id]: widget } })),
+  removeWidget: (id) =>
+    set((s) => {
+      const { [id]: _gone, ...widgets } = s.widgets;
+      return { widgets };
+    }),
 }));

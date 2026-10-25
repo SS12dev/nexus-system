@@ -1,4 +1,4 @@
-import { AlertTriangle, Bell, CheckCircle2, Hand, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Bell, BellRing, CheckCircle2, Hand, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../lib/api";
@@ -13,6 +13,8 @@ const ICON = {
   result: <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />,
   failed: <AlertTriangle size={16} className="shrink-0 text-rose-400" />,
   approval: <Hand size={16} className="shrink-0 text-amber-300" />,
+  timer: <AlarmClock size={16} className="shrink-0 text-sky-300" />,
+  reminder: <BellRing size={16} className="shrink-0 text-violet-300" />,
 };
 
 /** Load the bell's tray when signed in, and again after a reconnect in case notices were

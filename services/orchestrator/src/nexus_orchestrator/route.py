@@ -24,6 +24,9 @@ Answer "self" only for direct, one-step things the assistant can answer at once:
 - a quick fact, definition or short explanation that needs no sources, in a few lines
 - one look at their mail, calendar, contacts or tasks ("what's on today", "any mail from \
 Alice"), or adding, moving or completing one task or event
+- timers, alarms, stopwatches and reminders ("set a timer for 5 minutes", "wake me at 7", \
+"remind me to call mum at 6", "remind me every day at 9 pm to ..."), and putting a clock or \
+note on the screen: the assistant has its own tools for these
 - a quick question about a document already in the chat
 - orchestration: questions about a team or its result, keeping, changing, pausing or stopping \
 a team, or a short follow-up on an answer the assistant just gave

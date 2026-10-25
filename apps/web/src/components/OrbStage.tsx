@@ -37,6 +37,7 @@ import type { Selection } from "../orb/OrbScene";
 import { hasWebGL, usePerf } from "../orb/perf";
 import { useStore } from "../store/chat";
 import { NoticeBell } from "./Notices";
+import { WidgetDock } from "./Widgets";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
@@ -307,6 +308,13 @@ export function OrbStage({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Widgets: a row under the top bar on phones, a column on the right on laptops. */}
+      <div
+        className={`pointer-events-none relative z-20 ${chat ? "px-3 pt-2" : "px-4 pt-3"} lg:absolute lg:bottom-28 lg:right-4 lg:top-16 lg:px-0 lg:pt-0`}
+      >
+        <WidgetDock compact={chat} />
       </div>
 
       {showOrb ? (

@@ -8,6 +8,7 @@ import type {
   AssistantState,
   Message,
   Notice,
+  Widget,
   Recalled,
   ServerEvent,
   ToolStep,
@@ -50,6 +51,8 @@ export interface ChatState {
   /** The newest notice that arrived live (not loaded with the tray), so the open chat can
    * open its result by itself. */
   freshNotice: Notice | null;
+  /** Widgets on the main screen, by id. */
+  widgets: Record<string, Widget>;
 }
 
 export const initialState: ChatState = {
@@ -72,6 +75,7 @@ export const initialState: ChatState = {
   unread: 0,
   toasts: [],
   freshNotice: null,
+  widgets: {},
 };
 
 /** Notices kept in the tray, like the server's TRAY_SIZE. */
@@ -371,12 +375,19 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         ...state,
         notices: [n, ...state.notices].slice(0, TRAY_MAX),
         unread: state.unread + 1,
-        toasts: [...state.toasts, n.id],
+        // Timers and reminders ring in their own overlay (RingOverlay) instead.
+        toasts: n.kind === "timer" || n.kind === "reminder" ? state.toasts : [...state.toasts, n.id],
         freshNotice: n,
       };
     }
     case "notification.read":
       return markRead(state, event.data.ids);
+    case "widget.updated":
+      return { ...state, widgets: { ...state.widgets, [event.data.widget.id]: event.data.widget } };
+    case "widget.deleted": {
+      const { [event.data.id]: _gone, ...widgets } = state.widgets;
+      return { ...state, widgets };
+    }
     default:
       return state;
   }

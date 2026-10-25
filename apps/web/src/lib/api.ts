@@ -24,6 +24,9 @@ import type {
   MemoryKind,
   Message,
   Notice,
+  Widget,
+  WidgetAction,
+  WidgetInput,
   OnboardingAnswers,
   OpsStatus,
   Profile,
@@ -149,6 +152,12 @@ export const api = {
     }),
   suggestions: () => request<string[]>("/api/me/suggestions"),
   notifications: () => request<{ items: Notice[]; unread: number }>("/api/notifications"),
+  widgets: () => request<Widget[]>("/api/widgets"),
+  addWidget: (body: WidgetInput) => request<Widget>("/api/widgets", { method: "POST", body: json(body) }),
+  widgetAction: (id: string, action: WidgetAction, minutes?: number) =>
+    request<Widget | null>(`/api/widgets/${id}/action`, { method: "POST", body: json({ action, minutes }) }),
+  editWidget: (id: string, body: { title?: string; text?: string; slot?: number }) =>
+    request<Widget>(`/api/widgets/${id}`, { method: "PATCH", body: json(body) }),
   /** Mark these notices read, or every one when ids is left out. */
   readNotifications: (ids?: string[]) =>
     request<void>("/api/notifications/read", { method: "POST", body: json({ ids: ids ?? null }) }),

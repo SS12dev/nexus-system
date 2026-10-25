@@ -74,6 +74,32 @@ TOOLS: list[ToolInfo] = [
     ),
     ToolInfo("list_routines", "List routines", "read", "List the user's scheduled routines."),
     ToolInfo(
+        "start_timer",
+        "Start a timer",
+        "write",
+        "Start a countdown on the user's main screen that rings when it ends.",
+    ),
+    ToolInfo("set_alarm", "Set an alarm", "write", "Set a one-off or repeating alarm."),
+    ToolInfo(
+        "remind_me",
+        "Set a reminder",
+        "write",
+        "Remind the user at a time, in some minutes, or on a schedule, with no model run.",
+    ),
+    ToolInfo(
+        "add_widget",
+        "Add a widget",
+        "write",
+        "Put a stopwatch, clock or note on the user's main screen.",
+    ),
+    ToolInfo("list_widgets", "List widgets", "read", "List the widgets on the main screen."),
+    ToolInfo(
+        "control_widget",
+        "Change a widget",
+        "write",
+        "Pause, resume, reset, snooze, dismiss or remove a widget, or add time to a timer.",
+    ),
+    ToolInfo(
         "update_routine",
         "Change a routine",
         "write",

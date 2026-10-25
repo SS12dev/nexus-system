@@ -694,6 +694,8 @@ export type ServerEvent =
   | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
+  | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }
+  | { type: "widget.deleted"; chat_id?: null; data: { id: string } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };
@@ -1148,7 +1150,7 @@ export interface KnowledgeGraph {
  * opening, failed, or is waiting for approval. */
 export interface Notice {
   id: string;
-  kind: "result" | "failed" | "approval";
+  kind: "result" | "failed" | "approval" | "timer" | "reminder";
   title: string;
   body: string;
   chat_id: string | null;
@@ -1160,3 +1162,44 @@ export interface Notice {
   read_at: string | null;
   created_at: string;
 }
+
+export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note";
+
+/** A widget on the main screen. The server keeps the time: a timer has ends_at, not a
+ * countdown, so every device shows the same. */
+export interface Widget {
+  id: string;
+  kind: WidgetKind;
+  title: string;
+  state: {
+    status?: "running" | "paused" | "ringing" | "done" | "set" | "off";
+    duration_s?: number;
+    ends_at?: string | null;
+    remaining_s?: number;
+    started_at?: string | null;
+    elapsed_s?: number;
+    time?: string;
+    repeat?: string | null;
+    text?: string;
+    zones?: string[];
+    rang_at?: string;
+  };
+  slot: number;
+  chat_id: string | null;
+  fires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WidgetInput {
+  kind: WidgetKind;
+  title?: string;
+  minutes?: number;
+  time?: string;
+  days?: string | string[];
+  when?: string;
+  text?: string;
+  zones?: string[];
+}
+
+export type WidgetAction = "pause" | "resume" | "reset" | "add_time" | "snooze" | "dismiss" | "remove";

@@ -1442,6 +1442,10 @@ class NotificationKind(enum.StrEnum):
     failed = "failed"
     # A step is waiting for the person's approval.
     approval = "approval"
+    # A timer or alarm widget is ringing.
+    timer = "timer"
+    # A reminder widget is due.
+    reminder = "reminder"
 
 
 class Notification(Base):
@@ -1468,3 +1472,30 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_notifications_user_created", "user_id", "created_at"),)
+
+
+class Widget(Base):
+    """A widget on the main screen: a timer, alarm, stopwatch, reminder, clock or note
+    (nexus_common/widgets.py). The server keeps the time, so a timer keeps running with the tab
+    closed and rings on every device; fires_at is when the worker next has to act."""
+
+    __tablename__ = "widgets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(120), default="")
+    # Kind-specific: a timer's ends_at and status, an alarm's time and repeat, a note's text.
+    state: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Order on the dock, lowest first.
+    slot: Mapped[int] = mapped_column(Integer, default=0)
+    # The chat that asked for it, if any.
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    fires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_widgets_user", "user_id", "slot"),
+        Index("ix_widgets_fires_at", "fires_at"),
+    )

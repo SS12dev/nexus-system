@@ -1,0 +1,113 @@
+"""Widgets: adding from the dock, a timer's buttons, alarms and reminders in the person's own
+time zone, the worker ringing what's due, and nobody touching another person's widgets."""
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+
+from nexus_common.models import Notification, NotificationKind, User, Widget
+from nexus_common.widgets import WidgetError, act, add, fire_due, next_at_time
+
+NOW = datetime(2026, 10, 25, 18, 0, tzinfo=UTC)  # 23:30 in Kolkata
+
+
+def user(tz="Asia/Kolkata") -> User:
+    import uuid
+
+    return User(id=uuid.uuid4(), email="x@y.z", timezone=tz)
+
+
+def test_an_alarm_rings_at_the_next_local_clock_time():
+    # 07:00 in Kolkata is tomorrow, 01:30 UTC.
+    assert next_at_time("07:00", "Asia/Kolkata", NOW) == datetime(2026, 10, 26, 1, 30, tzinfo=UTC)
+    assert next_at_time("23:45", "Asia/Kolkata", NOW) == datetime(2026, 10, 25, 18, 15, tzinfo=UTC)
+    with pytest.raises(WidgetError):
+        next_at_time("25:00", "UTC", NOW)
+
+
+async def test_timer_pause_resume_add_time_and_snooze(owner, sessionmaker):
+    await owner.get("/api/me")
+    async with sessionmaker() as db:
+        u = await db.scalar(select(User).where(User.email == "owner@example.com"))
+        w = await add(db, u, "timer", minutes=5, now=NOW)
+        assert w.title == "5 min timer" and w.fires_at == NOW + timedelta(minutes=5)
+
+        act(w, "pause", now=NOW + timedelta(minutes=2))
+        assert w.state["status"] == "paused" and w.state["remaining_s"] == 180 and not w.fires_at
+        act(w, "resume", now=NOW + timedelta(minutes=10))
+        assert w.fires_at == NOW + timedelta(minutes=13)
+        act(w, "add_time", minutes=1, now=NOW + timedelta(minutes=11))
+        assert w.fires_at == NOW + timedelta(minutes=14)
+        with pytest.raises(WidgetError):
+            act(w, "snooze", now=NOW)  # not ringing
+        w.state = {**w.state, "status": "ringing"}
+        act(w, "snooze", now=NOW + timedelta(minutes=14))
+        assert w.fires_at == NOW + timedelta(minutes=19) and w.state["status"] == "running"
+        act(w, "dismiss", now=NOW)
+        assert w.state["status"] == "done" and w.fires_at is None
+
+
+async def test_reminders_need_a_time_and_a_daily_one_repeats(owner, sessionmaker):
+    await owner.get("/api/me")
+    async with sessionmaker() as db:
+        u = await db.scalar(select(User).where(User.email == "owner@example.com"))
+        u.timezone = "Asia/Kolkata"
+        with pytest.raises(WidgetError):
+            await add(db, u, "reminder", text="Job hunting", now=NOW)
+        with pytest.raises(WidgetError):
+            await add(db, u, "reminder", text="Job hunting", when="2026-10-25T10:00", now=NOW)
+        w = await add(db, u, "reminder", text="Job hunting", time="21:00", days="daily", now=NOW)
+        # 21:00 Kolkata = 15:30 UTC, and today's has passed.
+        assert w.fires_at == datetime(2026, 10, 26, 15, 30, tzinfo=UTC)
+        assert w.state["repeat"] == "FREQ=DAILY;BYHOUR=21;BYMINUTE=0"
+
+
+async def test_the_worker_rings_due_widgets_and_moves_repeats_on(
+    owner, sessionmaker, redis, settings
+):
+    await owner.get("/api/me")
+    async with sessionmaker() as db:
+        u = await db.scalar(select(User).where(User.email == "owner@example.com"))
+        t = await add(db, u, "timer", minutes=1, now=NOW)
+        r = await add(db, u, "reminder", text="Stretch", time="21:00", days="daily", now=NOW)
+        later = await add(db, u, "timer", minutes=60, now=NOW)
+        await db.commit()
+        r_first = r.fires_at
+
+    async with sessionmaker() as db:
+        assert await fire_due(db, redis, settings, now=NOW + timedelta(minutes=2)) == 1
+        assert await fire_due(db, redis, settings, now=NOW + timedelta(minutes=2)) == 0
+    async with sessionmaker() as db:
+        t, later = await db.get(Widget, t.id), await db.get(Widget, later.id)
+        assert t.state["status"] == "ringing" and t.fires_at is None
+        assert later.state["status"] == "running"
+        assert await fire_due(db, redis, settings, now=r_first + timedelta(seconds=5)) == 2
+    async with sessionmaker() as db:
+        r = await db.get(Widget, r.id)
+        assert r.state["status"] == "ringing" and r.fires_at == r_first + timedelta(days=1)
+        kinds = sorted(n.kind for n in (await db.scalars(select(Notification))).all())
+    assert kinds == [NotificationKind.reminder, NotificationKind.timer, NotificationKind.timer]
+
+
+async def test_dock_api_and_isolation(owner, client_for, invite):
+    await invite(owner, "friend@example.com")
+    friend = await client_for("friend@example.com")
+    resp = await owner.post("/api/widgets", json={"kind": "timer", "minutes": 5, "title": "Pasta"})
+    assert resp.status_code == 201, resp.text
+    w = resp.json()
+    assert w["title"] == "Pasta" and w["state"]["status"] == "running"
+    note = (await owner.post("/api/widgets", json={"kind": "note", "text": "milk"})).json()
+    assert (await owner.post("/api/widgets", json={"kind": "timer"})).status_code == 422
+
+    paused = await owner.post(f"/api/widgets/{w['id']}/action", json={"action": "pause"})
+    assert paused.json()["state"]["status"] == "paused"
+    edited = await owner.patch(f"/api/widgets/{note['id']}", json={"text": "milk, eggs"})
+    assert edited.json()["state"]["text"] == "milk, eggs"
+    assert (await owner.patch(f"/api/widgets/{w['id']}", json={"text": "x"})).status_code == 409
+
+    assert (await friend.get("/api/widgets")).json() == []
+    stolen = await friend.post(f"/api/widgets/{w['id']}/action", json={"action": "remove"})
+    assert stolen.status_code == 404
+    await owner.post(f"/api/widgets/{w['id']}/action", json={"action": "remove"})
+    assert [x["kind"] for x in (await owner.get("/api/widgets")).json()] == ["note"]

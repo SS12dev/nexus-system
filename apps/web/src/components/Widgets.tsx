@@ -1,0 +1,448 @@
+import {
+  AlarmClock,
+  BellRing,
+  Clock,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  StickyNote,
+  Timer,
+  Watch,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api } from "../lib/api";
+import type { Widget, WidgetAction, WidgetInput } from "../lib/types";
+import { clock, elapsed, isRinging, nextRing, repeatText, timeIn, timerLeft, zoneCity } from "../lib/widgets";
+import { useStore } from "../store/chat";
+
+/** The clock every widget reads from, ticking once a second (or faster for a stopwatch). */
+export function useNow(ms = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(t);
+  }, [ms]);
+  return now;
+}
+
+/** Load the widgets when signed in, and again after a reconnect. */
+export function useWidgetsLoader() {
+  const connected = useStore((s) => s.connected);
+  const setWidgets = useStore((s) => s.setWidgets);
+  useEffect(() => {
+    if (!connected) return;
+    api
+      .widgets()
+      .then(setWidgets)
+      .catch(() => {});
+  }, [connected, setWidgets]);
+}
+
+function useWidgetList(): Widget[] {
+  const widgets = useStore((s) => s.widgets);
+  return useMemo(() => Object.values(widgets).sort((a, b) => a.slot - b.slot), [widgets]);
+}
+
+async function press(w: Widget, action: WidgetAction, minutes?: number) {
+  const { upsertWidget, removeWidget } = useStore.getState();
+  try {
+    const next = await api.widgetAction(w.id, action, minutes);
+    if (next) upsertWidget(next);
+    else removeWidget(w.id);
+  } catch {
+    /* the widget changed meanwhile; its event brings the truth */
+  }
+}
+
+const ICONS: Record<Widget["kind"], ReactNode> = {
+  timer: <Timer size={13} />,
+  alarm: <AlarmClock size={13} />,
+  stopwatch: <Watch size={13} />,
+  reminder: <BellRing size={13} />,
+  clock: <Clock size={13} />,
+  note: <StickyNote size={13} />,
+};
+
+const btn =
+  "rounded-md border border-edge bg-ink/40 p-1 text-slate-300 hover:border-sky-400/60 hover:text-white disabled:opacity-40";
+
+/** The widgets beside the orb: a column on laptops, a row you swipe on phones. Orion adds
+ * them when asked ("set a timer for 5 minutes"); the + button adds one by hand. */
+export function WidgetDock({ compact = false }: { compact?: boolean }) {
+  const list = useWidgetList();
+  const now = useNow(list.some((w) => w.kind === "stopwatch" && w.state.status === "running") ? 100 : 1000);
+  if (list.length === 0 && compact) return null;
+  // The + sits outside the scrolling list, so its menu isn't clipped by it.
+  return (
+    <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
+      {list.length > 0 && (
+        <div
+          className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
+          aria-label="Widgets"
+        >
+          {list.map((w) => (
+            <WidgetCard key={w.id} widget={w} now={now} compact={compact} />
+          ))}
+        </div>
+      )}
+      <AddWidget empty={list.length === 0} compact={compact} />
+    </div>
+  );
+}
+
+function Card({ widget, children, compact }: { widget: Widget; children: ReactNode; compact: boolean }) {
+  return (
+    <div
+      className={`group relative shrink-0 rounded-xl border border-edge bg-panel/85 backdrop-blur lg:w-full ${
+        compact ? "w-32 px-2.5 py-1.5 lg:px-3 lg:py-2" : "w-44 px-3 py-2"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 pr-5 text-[11px] text-slate-400">
+        {ICONS[widget.kind]}
+        <span className="truncate">{widget.title}</span>
+      </div>
+      <button
+        onClick={() => press(widget, "remove")}
+        aria-label={`Remove ${widget.title}`}
+        title="Remove"
+        className="absolute right-1.5 top-1.5 rounded p-0.5 text-slate-500 hover:text-white lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100"
+      >
+        <X size={12} />
+      </button>
+      {children}
+    </div>
+  );
+}
+
+function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; compact: boolean }) {
+  const s = w.state;
+  // In a chat on a phone the orb strip is short: values only, buttons on the ring screen.
+  const big = compact ? "text-lg lg:text-2xl" : "text-2xl";
+  const row = compact ? "mt-2 hidden gap-1 lg:flex" : "mt-2 flex gap-1";
+  if (w.kind === "timer") {
+    const left = timerLeft(w, now);
+    const total = s.duration_s || 1;
+    const running = s.status === "running";
+    return (
+      <Card widget={w} compact={compact}>
+        <div className={`mt-0.5 font-mono ${big} tabular-nums text-slate-100`}>
+          {s.status === "done" ? "Done" : clock(left)}
+        </div>
+        <div className="mt-1 h-1 overflow-hidden rounded bg-edge">
+          <div className="h-full bg-sky-400 transition-[width]" style={{ width: `${(100 * left) / total}%` }} />
+        </div>
+        <div className={row}>
+          {running ? (
+            <button className={btn} onClick={() => press(w, "pause")} aria-label="Pause" title="Pause">
+              <Pause size={13} />
+            </button>
+          ) : (
+            s.status === "paused" && (
+              <button className={btn} onClick={() => press(w, "resume")} aria-label="Resume" title="Resume">
+                <Play size={13} />
+              </button>
+            )
+          )}
+          <button className={`${btn} px-1.5 text-[11px]`} onClick={() => press(w, "add_time", 1)} title="Add a minute">
+            +1 min
+          </button>
+          <button className={btn} onClick={() => press(w, "reset")} aria-label="Reset" title="Reset">
+            <RotateCcw size={13} />
+          </button>
+        </div>
+      </Card>
+    );
+  }
+  if (w.kind === "stopwatch") {
+    const t = elapsed(w, now);
+    return (
+      <Card widget={w} compact={compact}>
+        <div className={`mt-0.5 font-mono ${big} tabular-nums text-slate-100`}>
+          {clock(Math.floor(t))}
+          <span className="text-base text-slate-400">.{Math.floor((t % 1) * 10)}</span>
+        </div>
+        <div className={row}>
+          {s.status === "running" ? (
+            <button className={btn} onClick={() => press(w, "pause")} aria-label="Pause" title="Pause">
+              <Pause size={13} />
+            </button>
+          ) : (
+            <button className={btn} onClick={() => press(w, "resume")} aria-label="Start" title="Start">
+              <Play size={13} />
+            </button>
+          )}
+          <button className={btn} onClick={() => press(w, "reset")} aria-label="Reset" title="Reset">
+            <RotateCcw size={13} />
+          </button>
+        </div>
+      </Card>
+    );
+  }
+  if (w.kind === "alarm") {
+    const on = s.status !== "off";
+    return (
+      <Card widget={w} compact={compact}>
+        <div className="mt-0.5 flex items-center justify-between">
+          <span className={`font-mono ${big} tabular-nums ${on ? "text-slate-100" : "text-slate-500"}`}>{s.time}</span>
+          <button
+            role="switch"
+            aria-checked={on}
+            aria-label={on ? "Turn alarm off" : "Turn alarm on"}
+            onClick={() => press(w, on ? "pause" : "resume")}
+            className={`relative h-5 w-9 rounded-full transition ${on ? "bg-sky-500" : "bg-edge"}`}
+          >
+            <span className={`absolute top-0.5 size-4 rounded-full bg-white transition-all ${on ? "left-4.5" : "left-0.5"}`} />
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-slate-400">{repeatText(s.repeat)}</p>
+      </Card>
+    );
+  }
+  if (w.kind === "reminder") {
+    const done = s.status === "done";
+    return (
+      <Card widget={w} compact={compact}>
+        <p className={`mt-0.5 line-clamp-2 text-sm ${done ? "text-slate-500 line-through" : "text-slate-100"}`}>{s.text}</p>
+        <p className="mt-1 truncate text-[11px] text-slate-400">
+          {done ? "Done" : `${nextRing(w.fires_at, now)}${s.repeat ? ` · ${repeatText(s.repeat)}` : ""}`}
+        </p>
+      </Card>
+    );
+  }
+  if (w.kind === "clock") {
+    return (
+      <Card widget={w} compact={compact}>
+        <ul className="mt-0.5 space-y-0.5">
+          {(s.zones ?? []).map((z) => (
+            <li key={z} className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-xs text-slate-400">{zoneCity(z)}</span>
+              <span className="font-mono text-lg tabular-nums text-slate-100">{timeIn(z, now)}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    );
+  }
+  return (
+    <Card widget={w} compact={compact}>
+      <NoteText widget={w} />
+    </Card>
+  );
+}
+
+function NoteText({ widget }: { widget: Widget }) {
+  const [text, setText] = useState(widget.state.text ?? "");
+  useEffect(() => setText(widget.state.text ?? ""), [widget.state.text]);
+  const save = () => {
+    if (text === (widget.state.text ?? "")) return;
+    api
+      .editWidget(widget.id, { text })
+      .then(useStore.getState().upsertWidget)
+      .catch(() => {});
+  };
+  return (
+    <textarea
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={save}
+      rows={3}
+      placeholder="Write something…"
+      aria-label={`${widget.title} text`}
+      className="mt-1 w-full resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
+    />
+  );
+}
+
+const QUICK_TIMERS = [1, 5, 10, 25];
+
+/** The + on the dock: a timer, stopwatch, alarm, clock or note by hand. */
+function AddWidget({ empty, compact }: { empty: boolean; compact: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [minutes, setMinutes] = useState("");
+  const [time, setTime] = useState("07:00");
+  const [error, setError] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+
+  const make = async (body: WidgetInput) => {
+    setError("");
+    try {
+      useStore.getState().upsertWidget(await api.addWidget(body));
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't add it");
+    }
+  };
+  const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-edge/60";
+  const chip = "rounded-full border border-edge px-2 py-0.5 text-xs hover:border-sky-400/60 hover:text-sky-200";
+
+  return (
+    <div ref={box} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="Add a widget"
+        className={`flex items-center gap-1.5 rounded-xl border border-dashed border-edge bg-panel/60 px-3 py-2 text-xs text-slate-400 backdrop-blur hover:border-sky-400/60 hover:text-sky-200 ${
+          empty ? "" : "lg:w-full lg:justify-center"
+        }`}
+      >
+        <Plus size={13} /> {empty ? "Add a widget" : <span className={compact ? "sr-only lg:not-sr-only" : ""}>Add</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl lg:bottom-full lg:top-auto lg:mb-1 lg:mt-0">
+          <p className="px-2 pb-1 text-[11px] text-slate-500">
+            Or just ask: "set a timer for 10 minutes", "wake me at 7 on weekdays", "remind me to call mum at 6".
+          </p>
+          <div className="px-2 py-1">
+            <div className="flex items-center gap-2 text-sm">
+              <Timer size={14} /> Timer
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {QUICK_TIMERS.map((m) => (
+                <button key={m} className={chip} onClick={() => make({ kind: "timer", minutes: m })}>
+                  {m} min
+                </button>
+              ))}
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (Number(minutes) > 0) make({ kind: "timer", minutes: Number(minutes) });
+                }}
+              >
+                <input
+                  value={minutes}
+                  onChange={(e) => setMinutes(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="min"
+                  aria-label="Timer minutes"
+                  className="w-12 rounded-md border border-edge bg-ink px-1.5 py-0.5 text-base sm:text-xs"
+                />
+                <button className={chip}>Start</button>
+              </form>
+            </div>
+          </div>
+          <form
+            className="flex items-center gap-2 px-2 py-1.5 text-sm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              make({ kind: "alarm", time });
+            }}
+          >
+            <AlarmClock size={14} /> Alarm
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              aria-label="Alarm time"
+              className="ml-auto rounded-md border border-edge bg-ink px-1.5 py-0.5 text-base sm:text-xs"
+            />
+            <button className={chip}>Set</button>
+          </form>
+          <button className={item} onClick={() => make({ kind: "stopwatch" })}>
+            <Watch size={14} /> Stopwatch
+          </button>
+          <button
+            className={item}
+            onClick={() => make({ kind: "clock", zones: [Intl.DateTimeFormat().resolvedOptions().timeZone] })}
+          >
+            <Clock size={14} /> Clock
+          </button>
+          <button className={item} onClick={() => make({ kind: "note" })}>
+            <StickyNote size={14} /> Note
+          </button>
+          {error && <p className="px-2 pt-1 text-xs text-rose-400">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A soft two-tone chime, repeated while something rings. Browsers allow sound only after the
+ * person has used the page, so a silent first ring is expected on a fresh tab. */
+function useChime(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    let ctx: AudioContext | null = null;
+    try {
+      ctx = new AudioContext();
+    } catch {
+      return;
+    }
+    const ring = () => {
+      if (!ctx) return;
+      [880, 660].forEach((f, i) => {
+        const o = ctx!.createOscillator();
+        const g = ctx!.createGain();
+        const t = ctx!.currentTime + i * 0.25;
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+        o.connect(g).connect(ctx!.destination);
+        o.start(t);
+        o.stop(t + 0.25);
+      });
+      navigator.vibrate?.([200, 100, 200]);
+    };
+    ring();
+    const t = window.setInterval(ring, 1800);
+    return () => {
+      window.clearInterval(t);
+      ctx?.close().catch(() => {});
+    };
+  }, [on]);
+}
+
+/** What's ringing, over everything, until it's snoozed or dismissed. */
+export function RingOverlay() {
+  const list = useWidgetList();
+  const now = useNow();
+  const ringing = list.filter((w) => isRinging(w, now));
+  useChime(ringing.length > 0);
+  const w = ringing[0];
+  if (!w) return null;
+  const text = w.kind === "reminder" ? w.state.text : w.kind === "timer" ? "Time's up" : w.state.time;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="alertdialog" aria-label={w.title}>
+      <div className="w-full max-w-sm rounded-2xl border border-edge bg-panel p-6 text-center shadow-2xl">
+        <div className="mx-auto grid size-14 animate-pulse place-items-center rounded-full bg-sky-500/20 text-sky-300">
+          {w.kind === "reminder" ? <BellRing size={26} /> : <AlarmClock size={26} />}
+        </div>
+        <p className="mt-3 text-sm text-slate-400">{w.title}</p>
+        <p className="mt-1 text-2xl font-semibold text-slate-100">{text}</p>
+        <div className="mt-5 flex justify-center gap-2">
+          <button
+            onClick={() => press(w, "snooze", 5)}
+            className="rounded-lg border border-edge px-4 py-2 text-sm text-slate-200 hover:bg-edge/60"
+          >
+            Snooze 5 min
+          </button>
+          {w.kind === "timer" && (
+            <button
+              onClick={() => press(w, "add_time", 1)}
+              className="rounded-lg border border-edge px-4 py-2 text-sm text-slate-200 hover:bg-edge/60"
+            >
+              +1 min
+            </button>
+          )}
+          <button
+            onClick={() => press(w, "dismiss")}
+            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            Dismiss
+          </button>
+        </div>
+        {ringing.length > 1 && <p className="mt-3 text-xs text-slate-500">{ringing.length - 1} more ringing</p>}
+      </div>
+    </div>
+  );
+}

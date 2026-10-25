@@ -42,6 +42,9 @@ EventType = Literal[
     # being read on another device.
     "notification.created",
     "notification.read",
+    # A widget on the main screen was added, changed or rang (nexus_common.widgets), or removed.
+    "widget.updated",
+    "widget.deleted",
 ]
 
 AssistantState = Literal["idle", "thinking", "speaking"]
