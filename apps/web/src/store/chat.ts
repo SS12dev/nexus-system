@@ -4,8 +4,10 @@ import type {
   Approval,
   Chat,
   FeedItem,
+  FileBrief,
   FileItem,
   Message,
+  Notice,
   Recalled,
   ServerEvent,
   User,
@@ -14,6 +16,7 @@ import {
   addMessages,
   applyEvent,
   initialState,
+  markRead,
   mergeFetched,
   seedRunFeed,
   upsertChat,
@@ -47,6 +50,14 @@ interface Store extends ChatState {
   seedRunFeed: (runId: string, items: FeedItem[]) => void;
   /** Light up a reply's recall in the orb again (its chips were tapped). */
   showRecall: (recalled: Recalled) => void;
+  /** The tray as loaded from the server. */
+  setNotices: (notices: Notice[], unread: number) => void;
+  dismissToast: (id: string) => void;
+  markNoticesRead: (ids: string[] | null) => void;
+  /** A result open on the main screen, in the orb's place (a sheet on phones). */
+  viewer: { file: FileBrief; chatId: string | null } | null;
+  openViewer: (file: FileBrief, chatId: string | null) => void;
+  closeViewer: () => void;
 }
 
 export const useStore = create<Store>((set) => ({
@@ -75,4 +86,10 @@ export const useStore = create<Store>((set) => ({
   upsertApprovals: (approvals) => set((s) => upsertApprovals(s, approvals)),
   seedRunFeed: (runId, items) => set((s) => seedRunFeed(s, runId, items)),
   showRecall: (recalled) => set((s) => ({ recall: { ...recalled, seq: (s.recall?.seq ?? 0) + 1 } })),
+  setNotices: (notices, unread) => set({ notices, unread }),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t !== id) })),
+  markNoticesRead: (ids) => set((s) => markRead(s, ids)),
+  viewer: null,
+  openViewer: (file, chatId) => set({ viewer: { file, chatId } }),
+  closeViewer: () => set({ viewer: null }),
 }));

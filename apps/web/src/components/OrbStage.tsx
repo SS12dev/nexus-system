@@ -36,6 +36,7 @@ import { StarLabels } from "../orb/StarLabels";
 import type { Selection } from "../orb/OrbScene";
 import { hasWebGL, usePerf } from "../orb/perf";
 import { useStore } from "../store/chat";
+import { NoticeBell } from "./Notices";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
@@ -213,6 +214,7 @@ export function OrbStage({
             {working}
           </span>
         )}
+        <NoticeBell />
         <button
           onClick={() => onCollapse?.(false)}
           className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-edge hover:text-white"
@@ -275,6 +277,7 @@ export function OrbStage({
           </p>
         </div>
         <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1">
+          <NoticeBell />
           <div className="flex rounded-lg border border-edge bg-panel/80 p-0.5 text-sm backdrop-blur">
             <button
               onClick={() => changeView("orb")}

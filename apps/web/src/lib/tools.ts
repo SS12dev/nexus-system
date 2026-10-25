@@ -38,6 +38,7 @@ export const TOOL_LABEL: Record<string, string> = {
   skills_load: "Loading a skill",
   skills_read_file: "Reading a skill",
   skills_search: "Looking for a skill",
+  present_result: "Picking the result to show you",
   build_agent_system: "Designing a team of agents",
   update_agent_system: "Redesigning the team",
   run_agent_system: "Starting the team",

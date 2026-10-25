@@ -692,6 +692,8 @@ export type ServerEvent =
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
   | { type: "access.pending"; chat_id?: null; data: { count: number } }
   | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
+  | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }
+  | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };
@@ -1140,4 +1142,21 @@ export interface GraphRelation {
 export interface KnowledgeGraph {
   entities: GraphEntity[];
   relations: GraphRelation[];
+}
+
+/** A notice on the main screen (toast and bell): a team finished, with the result worth
+ * opening, failed, or is waiting for approval. */
+export interface Notice {
+  id: string;
+  kind: "result" | "failed" | "approval";
+  title: string;
+  body: string;
+  chat_id: string | null;
+  run_id: string | null;
+  /** Where Open goes in the app. */
+  url: string;
+  file: FileBrief | null;
+  link: LinkItem | null;
+  read_at: string | null;
+  created_at: string;
 }

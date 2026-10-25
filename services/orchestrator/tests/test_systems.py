@@ -19,7 +19,11 @@ from nexus_common.models import (
     Attachment,
     AuditLog,
     File,
+    FileStatus,
+    Link,
     Message,
+    Notification,
+    NotificationKind,
     RunEvent,
     RunStatus,
     Skill,
@@ -27,6 +31,7 @@ from nexus_common.models import (
     SystemLifetime,
     SystemStatus,
 )
+from nexus_common.notices import featured
 from nexus_common.spec import AgentSystemSpec
 from nexus_common.systems import BudgetProblem, control_run, decide_approval, new_run
 from nexus_orchestrator.systems import runner, runtime
@@ -596,3 +601,67 @@ async def test_a_batch_of_searches_runs_side_by_side(sdeps, owner, scripts, seen
     assert [m.content.split("\n")[0] for m in tool_msgs[:6]] == [
         f"1. Result for {q}" for q in queries
     ]
+
+
+# --- Notices when a team finishes -----------------------------------------------------
+
+
+def _file(name: str, status: FileStatus = FileStatus.ready) -> File:
+    return File(id=uuid.uuid4(), name=name, status=status)
+
+
+def test_a_model_beats_the_script_and_the_step_file():
+    files = [_file("rocket_model.py"), _file("rocket_model.step"), _file("rocket_model.stl")]
+    assert featured(files, []).file.name == "rocket_model.stl"
+
+
+def test_a_failed_preview_is_skipped_and_a_live_app_wins():
+    files = [_file("rocket.stl"), _file("preview.png", FileStatus.failed)]
+    assert featured(files, []).file.name == "rocket.stl"
+    app = Link(id=uuid.uuid4(), url="https://game.servhub.cc", kind="app")
+    assert featured(files, [app]).link is app
+
+
+def test_the_agents_pick_wins_and_source_files_alone_give_nothing():
+    files = [_file("render.png"), _file("report.md")]
+    assert featured(files, [], {"file_id": str(files[1].id)}).file is files[1]
+    assert featured([_file("main.py")], []).file is None
+
+
+async def test_a_finished_run_presents_its_result(sdeps, owner, scripts):
+    stl = "solid r\nendsolid r\n"
+    scripts["solo"] = [
+        {"tool": "save_file", "args": {"name": "notes.md", "content": "# Notes\n" + stl}},
+        {"tool": "save_file", "args": {"name": "summary.txt", "content": "short"}},
+        {"tool": "present_result", "args": {"name": "summary.txt"}},
+        "## Rocket ready\nAll done.",
+    ]
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=["save_file"])])
+    await runner.run_system(sdeps, run_id)
+
+    run, system = await load(sdeps, run_id)
+    async with sdeps.sessionmaker() as db:
+        n = await db.scalar(select(Notification).where(Notification.run_id == run_id))
+        f = await db.get(File, n.file_id)
+    assert n.kind == NotificationKind.result
+    assert n.title == f"{system.name} finished" and n.body == "Rocket ready"
+    assert n.url == f"/c/{run.chat_id}" and f.name == "summary.txt"
+
+
+async def test_presenting_something_the_run_did_not_make_says_so(sdeps, owner, scripts, seen):
+    scripts["solo"] = [
+        {"tool": "present_result", "args": {"name": "nope.stl"}},
+        "Done.",
+    ]
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=[])])
+    await runner.run_system(sdeps, run_id)
+    async with sdeps.sessionmaker() as db:
+        n = await db.scalar(select(Notification).where(Notification.run_id == run_id))
+    assert n.file_id is None and n.kind == NotificationKind.result
+
+
+async def test_a_stopped_run_gets_no_notice(sdeps, owner, scripts):
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=[])])
+    await runner.finish(sdeps, run_id, RunStatus.cancelled)
+    async with sdeps.sessionmaker() as db:
+        assert await db.scalar(select(Notification).where(Notification.run_id == run_id)) is None

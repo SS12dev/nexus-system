@@ -27,7 +27,6 @@ from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 from sqlalchemy import select
 
-from nexus_common import push
 from nexus_common.events import Event, publish
 from nexus_common.models import (
     AgentRun,
@@ -38,12 +37,14 @@ from nexus_common.models import (
     Message,
     MessageRole,
     MessageStatus,
+    NotificationKind,
     RunEvent,
     RunStatus,
     SystemStatus,
     User,
     utcnow,
 )
+from nexus_common.notices import notify
 from nexus_common.spec import TIER_MODEL, AgentSpec, AgentSystemSpec, tier_down, tier_up
 from nexus_common.systems import approval_payload, money
 from nexus_common.toolinfo import BY_NAME, needs_approval
@@ -325,17 +326,23 @@ class RunContext:
     async def push_approval(self, agent: str, a: Approval) -> None:
         """Tell the person's phone a step is waiting for them; the run is parked until then."""
         info = BY_NAME.get(a.tool)
-        notice = push.Notice(
-            title="Waiting for your approval",
-            body=f"{agent} wants to {(info.title if info else a.tool).lower()}. Tap to review.",
-            url=f"/agents/{self.system_id}",
-            tag=f"approval:{a.id}",
-        )
         try:
             async with self.deps.sessionmaker() as db:
-                await push.send(db, self.deps.settings, self.user.id, notice)
+                await notify(
+                    db,
+                    self.deps.redis,
+                    self.deps.settings,
+                    self.user.id,
+                    NotificationKind.approval,
+                    "Waiting for your approval",
+                    f"{agent} wants to {(info.title if info else a.tool).lower()}. Tap to review.",
+                    url=f"/agents/{self.system_id}",
+                    chat_id=self.chat_id,
+                    run_id=self.run_id,
+                    tag=f"approval:{a.id}",
+                )
         except Exception:
-            log.warning("Could not push an approval request", exc_info=True)
+            log.warning("Could not post an approval notice", exc_info=True)
 
     async def reload_approval(self, approval_id: uuid.UUID) -> Approval:
         async with self.deps.sessionmaker() as db:

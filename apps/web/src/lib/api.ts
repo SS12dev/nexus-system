@@ -23,6 +23,7 @@ import type {
   MemoryEvent,
   MemoryKind,
   Message,
+  Notice,
   OnboardingAnswers,
   OpsStatus,
   Profile,
@@ -147,6 +148,10 @@ export const api = {
       body: json(answers),
     }),
   suggestions: () => request<string[]>("/api/me/suggestions"),
+  notifications: () => request<{ items: Notice[]; unread: number }>("/api/notifications"),
+  /** Mark these notices read, or every one when ids is left out. */
+  readNotifications: (ids?: string[]) =>
+    request<void>("/api/notifications/read", { method: "POST", body: json({ ids: ids ?? null }) }),
   acceptTerms: (version: string) =>
     request<User>("/api/me/terms", { method: "POST", body: json({ version }) }),
   deleteAccount: (confirm: string) =>

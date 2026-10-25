@@ -51,6 +51,14 @@ TOOLS: list[ToolInfo] = [
         "save_file", "Save a file", "write", "Save text or Markdown as a file in the library."
     ),
     ToolInfo(
+        "present_result",
+        "Show the result",
+        "write",
+        "Name the file or link that opens on the user's screen when the team finishes. Every "
+        "agent in a team has it.",
+        assistant=False,
+    ),
+    ToolInfo(
         "save_link",
         "Save a link",
         "write",

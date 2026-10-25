@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSystem, FileItem, Message } from "../lib/types";
+import type { AgentSystem, FileItem, Message, Notice } from "../lib/types";
 import {
   addMessages,
   applyEvent,
   initialState,
+  markRead,
   mergeFetched,
   syncFiles,
   seedRunFeed,
@@ -293,5 +294,46 @@ describe("access requests", () => {
     const state = applyEvent(initialState, { type: "access.pending", data: { count: 3 } });
     expect(state.pendingAccess).toBe(3);
     expect(applyEvent(state, { type: "access.pending", data: { count: 0 } }).pendingAccess).toBe(0);
+  });
+});
+
+describe("notices", () => {
+  const notice = (id: string, over: Partial<Notice> = {}): Notice => ({
+    id,
+    kind: "result",
+    title: "Rocket team finished",
+    body: "",
+    chat_id: "c1",
+    run_id: "r1",
+    url: "/c/c1",
+    file: null,
+    link: null,
+    read_at: null,
+    created_at: "2026-10-25T00:00:00Z",
+    ...over,
+  });
+
+  it("adds a live notice to the tray and the toasts once, and marks it fresh", () => {
+    let s = applyEvent(initialState, { type: "notification.created", data: { notification: notice("n1") } });
+    s = applyEvent(s, { type: "notification.created", data: { notification: notice("n1") } });
+    expect(s.notices.map((n) => n.id)).toEqual(["n1"]);
+    expect(s.unread).toBe(1);
+    expect(s.toasts).toEqual(["n1"]);
+    expect(s.freshNotice?.id).toBe("n1");
+  });
+
+  it("marks some or all read, here or from another device", () => {
+    let s = initialState;
+    for (const id of ["n1", "n2", "n3"])
+      s = applyEvent(s, { type: "notification.created", data: { notification: notice(id) } });
+    s = markRead(s, ["n2"]);
+    expect(s.unread).toBe(2);
+    expect(s.toasts).toEqual(["n1", "n3"]);
+    s = markRead(s, ["n2"]);
+    expect(s.unread).toBe(2);
+    s = applyEvent(s, { type: "notification.read", data: { ids: null } });
+    expect(s.unread).toBe(0);
+    expect(s.toasts).toEqual([]);
+    expect(s.notices.every((n) => n.read_at)).toBe(true);
   });
 });
