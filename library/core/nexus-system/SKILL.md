@@ -107,6 +107,8 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | feedback | `api/routes/feedback.py`, `orchestrator/notify.py`, `web/src/components/FeedbackDialog.tsx`, `pages/AdminFeedback.tsx` |
 | terms and privacy pages | `web/public/terms.html`, `privacy.html`, `TERMS_VERSION` in `nexus_common/models.py` |
 | light theme, tour | `web/src/index.css`, `lib/theme.ts`, `components/Tour.tsx` |
+| the main screen: notices, widgets, screen control | `nexus_common/notices.py`, `widgets.py`, `screen.py`, `orchestrator/widget_tools.py`, `screen_tools.py`, `web/src/components/Notices.tsx`, `Widgets.tsx`, `Screen.tsx` |
+| custom widgets (sandboxed HTML) | `nexus_common/custom_widgets.py` (checks, bridge, frame CSP), `save_widget` in `orchestrator/widget_tools.py`, `library/core/widget-builder` |
 | the orb's layout (stars, memories, moons outside) | `web/src/orb/model.ts`; drawing in `orb/Inside.tsx`, `Network.tsx`, `Satellites.tsx` |
 | the logo | `web/src/components/Orb.tsx` (`NexusMark`), `web/public/icon.svg` |
 | checking one account | `api/inspect_user.py`, `scripts/inspect-user.sh` |

@@ -24,6 +24,7 @@ import type {
   MemoryKind,
   Message,
   Notice,
+  BridgeCall,
   ScreenMode,
   ScreenState,
   Widget,
@@ -166,6 +167,10 @@ export const api = {
     request<ScreenState>("/api/screen/mode", { method: "PUT", body: json({ mode }) }),
   closeOnScreen: (kind: "file" | "widget", id: string) =>
     request<ScreenState>("/api/screen/close", { method: "POST", body: json({ kind, id }) }),
+  widgetBridge: (id: string, call: BridgeCall, args: Record<string, unknown>) =>
+    request<{ result: unknown }>(`/api/widgets/${id}/bridge`, { method: "POST", body: json({ call, args }) }),
+  approveWidget: (id: string, hosts: string[], data: string[]) =>
+    request<Widget>(`/api/widgets/${id}/approve`, { method: "POST", body: json({ hosts, data }) }),
   readNotifications: (ids?: string[]) =>
     request<void>("/api/notifications/read", { method: "POST", body: json({ ids: ids ?? null }) }),
   acceptTerms: (version: string) =>

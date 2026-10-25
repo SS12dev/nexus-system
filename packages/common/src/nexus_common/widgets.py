@@ -51,11 +51,15 @@ def _parse(t: str | None) -> datetime | None:
 
 
 def payload(w: Widget) -> dict:
+    state = w.state or {}
+    if w.kind == "custom":
+        # A custom widget's own data goes to its frame through the bridge, not to every tab.
+        state = {k: v for k, v in state.items() if k != "data"}
     return {
         "id": str(w.id),
         "kind": w.kind,
         "title": w.title,
-        "state": w.state or {},
+        "state": state,
         "slot": w.slot,
         "chat_id": str(w.chat_id) if w.chat_id else None,
         "fires_at": _iso(w.fires_at),
@@ -324,6 +328,8 @@ def describe_widget(w: Widget, tz: str) -> str:
         when = f", rings {local:%a %d %b %H:%M}"
     repeat = f", {describe(s['repeat']).lower()}" if s.get("repeat") else ""
     status = f" ({s['status']})" if s.get("status") else ""
+    if w.kind == "custom":
+        status = f" (version {s.get('version')} of {s.get('versions')})"
     return f"- {w.kind} {w.title!r} (id {w.id}){status}{when}{repeat}"
 
 

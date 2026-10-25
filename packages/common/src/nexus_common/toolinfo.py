@@ -100,6 +100,14 @@ TOOLS: list[ToolInfo] = [
         "Pause, resume, reset, snooze, dismiss or remove a widget, or add time to a timer.",
     ),
     ToolInfo(
+        "save_widget",
+        "Save a custom widget",
+        "write",
+        "Check, test and save a custom HTML widget (or a new version of one) on the user's "
+        "main screen. For widget-builder teams.",
+        assistant=False,
+    ),
+    ToolInfo(
         "screen",
         "Change the main screen",
         "write",

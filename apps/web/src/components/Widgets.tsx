@@ -7,15 +7,30 @@ import {
   Play,
   Plus,
   RotateCcw,
+  ShieldCheck,
+  Sparkles,
+  Undo2,
   StickyNote,
   Timer,
   Watch,
   X,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { api } from "../lib/api";
-import type { Widget, WidgetAction, WidgetInput } from "../lib/types";
-import { clock, elapsed, isRinging, nextRing, repeatText, timeIn, timerLeft, zoneCity } from "../lib/widgets";
+import type { BridgeCall, Widget, WidgetAction, WidgetInput } from "../lib/types";
+import {
+  clock,
+  DATA_LABELS,
+  elapsed,
+  frameHeight,
+  isRinging,
+  nextRing,
+  pendingAsks,
+  repeatText,
+  timeIn,
+  timerLeft,
+  zoneCity,
+} from "../lib/widgets";
 import { useStore } from "../store/chat";
 import { useWidgetPointedAt } from "./Screen";
 import { useAssistantName } from "../lib/assistant";
@@ -66,6 +81,7 @@ const ICONS: Record<Widget["kind"], ReactNode> = {
   reminder: <BellRing size={13} />,
   clock: <Clock size={13} />,
   note: <StickyNote size={13} />,
+  custom: <Sparkles size={13} />,
 };
 
 const btn =
@@ -94,7 +110,7 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
             Your widgets, big. Ask {assistant} for a timer, alarm, reminder, clock or note, or switch back to the orb above.
           </p>
         </div>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3" aria-label="Widgets">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] items-start gap-3" aria-label="Widgets">
           {list.map((w) => (
             <WidgetCard key={w.id} widget={w} now={now} compact={false} />
           ))}
@@ -109,7 +125,7 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
       <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
         {list.length > 0 && (
           <div
-            className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
+            className="flex min-w-0 items-start gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
             aria-label="Widgets"
           >
             {list.map((w) => (
@@ -183,6 +199,7 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
 }
 
 function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; compact: boolean }) {
+  if (w.kind === "custom") return <CustomWidgetCard widget={w} compact={compact} />;
   const s = w.state;
   // In a chat on a phone the orb strip is short: values only, buttons on the ring screen.
   const big = compact ? "text-lg lg:text-2xl" : "text-2xl";
@@ -318,6 +335,111 @@ function NoteText({ widget }: { widget: Widget }) {
       aria-label={`${widget.title} text`}
       className="mt-1 w-full resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
     />
+  );
+}
+
+/** The theme where a card sits: dark over the orb's night sky, the app's own elsewhere. The
+ * widget's page is served in it, and reloads when it changes. */
+function useCardTheme(ref: RefObject<HTMLElement | null>): "dark" | "light" | null {
+  const [theme, setTheme] = useState<"dark" | "light" | null>(null);
+  useEffect(() => {
+    const read = () =>
+      setTheme(ref.current?.closest("[data-theme]")?.getAttribute("data-theme") === "light" ? "light" : "dark");
+    read();
+    const watch = new MutationObserver(read);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"], subtree: true });
+    return () => watch.disconnect();
+  }, [ref]);
+  return theme;
+}
+
+const BRIDGE_CALLS: BridgeCall[] = ["state.get", "state.set", "fetch", "data", "notify"];
+
+/** A custom widget: its page in a locked-down frame (no network, no cookies, its own opaque
+ * origin), and the bridge its window.nexus talks through. Calls go to the server, which checks
+ * them against what you allowed; resize is handled here. */
+function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boolean }) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [asked, setAsked] = useState<number | null>(null);
+  const theme = useCardTheme(frame);
+  const asks = pendingAsks(w);
+  const waiting = asks.hosts.length + asks.data.length > 0;
+  const size = w.state.manifest?.size ?? "m";
+
+  useEffect(() => {
+    const onMessage = async (e: MessageEvent) => {
+      const win = frame.current?.contentWindow;
+      const m = e.data;
+      if (!win || e.source !== win || !m || m.nexus !== 1 || typeof m.id !== "number") return;
+      // The frame's origin is opaque ("null"), so replies can only be addressed with "*"; they
+      // go to this frame's window and nowhere else.
+      const reply = (body: Record<string, unknown>) => win.postMessage({ nexus: 1, id: m.id, ...body }, "*");
+      if (m.call === "resize") {
+        setAsked(Number(m.args?.height) || null);
+        return reply({ ok: true, result: true });
+      }
+      if (!BRIDGE_CALLS.includes(m.call)) return reply({ ok: false, error: `Unknown call ${m.call}` });
+      try {
+        const { result } = await api.widgetBridge(w.id, m.call, m.args ?? {});
+        reply({ ok: true, result });
+      } catch (err) {
+        reply({ ok: false, error: err instanceof Error ? err.message : "Nexus refused" });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [w.id]);
+
+  const allow = async () => {
+    try {
+      useStore.getState().upsertWidget(await api.approveWidget(w.id, asks.hosts, asks.data));
+    } catch {
+      /* its event brings the truth */
+    }
+  };
+
+  const height = compact ? Math.min(frameHeight(size, asked), 140) : frameHeight(size, asked);
+  return (
+    <Card widget={w} compact={compact}>
+      {waiting && !compact && (
+        <div className="mt-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 p-2 text-[11px] text-amber-100">
+          <p>
+            Wants to{" "}
+            {[
+              ...asks.hosts.map((h) => `fetch from ${h}`),
+              ...asks.data.map((d) => `read ${DATA_LABELS[d] ?? d}`),
+            ].join(", ")}
+            .
+          </p>
+          <button
+            onClick={allow}
+            className="mt-1.5 flex items-center gap-1 rounded-md bg-amber-500 px-2 py-0.5 font-medium text-black hover:bg-amber-400"
+          >
+            <ShieldCheck size={12} /> Allow
+          </button>
+        </div>
+      )}
+      <iframe
+        ref={frame}
+        // A new version or an approval reloads the page, so it starts with what it may use.
+        key={`${w.state.custom_id}:${(w.state.approved?.hosts ?? []).length}:${(w.state.approved?.data ?? []).length}`}
+        src={theme ? `/api/widgets/${w.id}/frame?theme=${theme}` : undefined}
+        title={w.title}
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        className="mt-1 block w-full rounded-md border-0 bg-transparent"
+        style={{ height }}
+      />
+      {(w.state.version ?? 1) > 1 && !compact && (
+        <button
+          onClick={() => press(w, "undo")}
+          className="mt-1 flex items-center gap-1 text-[11px] text-slate-500 hover:text-white"
+          title="Go back to the previous version"
+        >
+          <Undo2 size={11} /> Undo last change (v{w.state.version})
+        </button>
+      )}
+    </Card>
   );
 }
 

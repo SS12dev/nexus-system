@@ -539,6 +539,35 @@ Everything is driven by the existing WebSocket events (`assistant.state`, `syste
 the knowledge graph from `GET /api/memories/graph`, and a fresh fetch
 on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
 
+## The main screen
+
+Around the orb is a live screen that the assistant runs with you.
+
+- **Notices.** When a team finishes, fails or needs approval, a toast appears and the bell
+  keeps a tray (`notifications` table, `notification.created`). A finished team's result
+  (the one file worth opening, chosen in `nexus_common/notices.py` or named by the team with
+  `present_result`) opens in the orb's place by itself when that chat is open and the tab is
+  visible; otherwise the toast opens it.
+- **Widgets** sit on a dock beside the orb: timers, alarms, stopwatches, reminders, world
+  clocks and notes (`nexus_common/widgets.py`). The server keeps the time and the worker rings
+  them every 15 seconds, in the app and as a push notification, so a timer runs with the app
+  closed. The assistant sets them with its own tools (no team), and the + button adds one by
+  hand.
+- **Custom widgets** are small HTML apps a one-agent widget-builder team writes
+  (`library/core/widget-builder`, tool `save_widget`): a countdown, a habit tracker, a weather
+  card. The page is served by `/api/widgets/{id}/frame` with a CSP whose `sandbox` directive
+  gives it an opaque origin with no network, cookies or storage, inside an
+  `<iframe sandbox="allow-scripts">`. It talks to Nexus only through `window.nexus` (its own
+  state, a server-side fetch to hosts you allowed, read-only data you allowed such as today's
+  calendar, notices, resize), checked in `nexus_common/custom_widgets.py`. Before saving, the
+  HTML is checked (size, no outside scripts or network) and loaded in headless Chromium on the
+  workbench. Each change is a version you can undo.
+- **Screen control.** The assistant's `screen` tool opens a file in the orb's place, switches
+  between **Orb**, **List** and a **Widgets** board, orders the dock, lights names in the orb
+  or posts a notice (`nexus_common/screen.py`, `screen.op`). The layout is saved per user. Your
+  own changes win for 12 hours unless you ask for the change, something it opens waits as a
+  toast while you're typing, teams can't use it, and every change is in the audit log.
+
 ## Running it for other people
 
 ### Admin page
