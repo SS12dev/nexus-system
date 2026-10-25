@@ -138,7 +138,12 @@ async def recall(
     if hits:
         rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
         by_id = {m.id: m for m in rows.all()}
-        found.memories = [by_id[h.id] for h in hits if h.id in by_id]
+        found.memories = [
+            by_id[h.id]
+            for h in hits
+            if h.id in by_id
+            and (h.keyword or h.distance is None or h.distance < settings.memory_max_distance)
+        ]
     if vec is not None and settings.episode_top_k:
         hits = await hybrid_search(
             db,

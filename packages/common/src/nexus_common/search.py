@@ -30,6 +30,8 @@ class Hit:
     score: float
     # Cosine distance to the query (0 = same direction), when the vector search found it.
     distance: float | None
+    # Whether full-text search matched it too (a word of the query is in it).
+    keyword: bool = False
 
 
 def vector_literal(vec: list[float]) -> str:
@@ -88,10 +90,14 @@ async def hybrid_search(
         limit :n""")
     union = " union all ".join(f"({p})" for p in parts)
     sql = f"""
-        select id, sum(1.0 / ({RRF_K} + r)) as score, min(d) as distance
+        select id, sum(1.0 / ({RRF_K} + r)) as score, min(d) as distance,
+               bool_or(d is null) as keyword
         from ({union}) ranked
         group by id
         order by score desc
         limit :k"""
     rows = await db.execute(text(sql), params)
-    return [Hit(id=r.id, score=float(r.score), distance=r.distance) for r in rows]
+    return [
+        Hit(id=r.id, score=float(r.score), distance=r.distance, keyword=bool(r.keyword))
+        for r in rows
+    ]

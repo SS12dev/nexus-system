@@ -125,6 +125,36 @@ async def test_settings_fields(owner):
     assert resp.json()["profile"]["tour_done"] is True
 
 
+async def test_browser_zone_aliases_are_accepted(owner):
+    # Chrome reports India as Asia/Calcutta, which slim images' system tz database lacks.
+    resp = await owner.patch("/api/me", json={"timezone": "Asia/Calcutta"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["timezone"] == "Asia/Calcutta"
+
+
+async def test_changing_zone_moves_routines_on_the_old_zone(owner, sessionmaker):
+    await owner.patch("/api/me", json={"timezone": "UTC"})
+    setup = {
+        "assistant_name": "Friday",
+        "roles": ["software"],
+        "routines": [{"key": "essentials/morning-brief"}],
+    }
+    resp = await owner.post("/api/me/onboarding", json=setup)
+    assert resp.status_code == 200, resp.text
+    own = {"name": "Berlin digest", "prompt": "Digest", "schedule": "FREQ=DAILY;BYHOUR=9"}
+    resp = await owner.post("/api/routines", json={**own, "timezone": "Europe/Berlin"})
+    assert resp.status_code == 201, resp.text
+    async with sessionmaker() as db:
+        before = (await db.scalars(select(Routine).where(Routine.name == "Morning brief"))).one()
+        before_next = before.next_run_at
+    await owner.patch("/api/me", json={"timezone": "Asia/Kolkata"})
+    async with sessionmaker() as db:
+        zones = {r.name: r for r in (await db.scalars(select(Routine))).all()}
+    assert zones["Morning brief"].timezone == "Asia/Kolkata"
+    assert zones["Morning brief"].next_run_at != before_next
+    assert zones["Berlin digest"].timezone == "Europe/Berlin"
+
+
 async def test_export_has_chats_memories_and_routines(owner):
     await owner.post(
         "/api/me/onboarding",

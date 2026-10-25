@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     memory_model: str = "nexus-nano"
     # Memories, past-chat summaries and document chunks put in the prompt each turn.
     memory_top_k: int = 8
+    # Memories further than this (cosine distance) from the message are left out unless a word
+    # of it is in them: short ones like "Wants help with cooking." sit 0.4 to 0.5 from
+    # anything, while one really about the message is nearer 0.2 to 0.35.
+    memory_max_distance: float = 0.4
     episode_top_k: int = 2
     chunk_top_k: int = 6
     # Attached documents shorter than this go into the prompt whole instead of as excerpts.

@@ -269,16 +269,17 @@ services:
       args: { CAD: "${CAD:-true}" }
     environment:
       SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
-      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-1536}
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-3072}
       SANDBOX_CONCURRENCY: "4"
     networks: [sandbox]
     read_only: true
     tmpfs:
-      - /tmp:size=1g,mode=1777
+      - /tmp:size=2g,mode=1777
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    mem_limit: 3g
-    cpus: 2
+    # Room for CAD booleans and meshing, plots and data work; a ceiling, not a reservation.
+    mem_limit: 6g
+    cpus: 4
     pids_limit: 256
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]

@@ -56,7 +56,13 @@ from nexus_common.models import (
     utcnow,
 )
 from nexus_common.profiles import INTERESTS, Pack, load_packs, suggested_prompts
-from nexus_common.routines import ScheduleError, check_timezone, describe, routine_payload
+from nexus_common.routines import (
+    ScheduleError,
+    check_timezone,
+    describe,
+    reschedule,
+    routine_payload,
+)
 
 router = APIRouter(prefix="/api", tags=["me"])
 web_log = logging.getLogger("nexus.web")
@@ -152,9 +158,19 @@ async def update_me(
         db.add(AuditLog(actor_id=user.id, action="user.assistant_named", target=str(user.id)))
     if body.timezone is not None and body.timezone != user.timezone:
         try:
-            user.timezone = check_timezone(body.timezone)
+            zone = check_timezone(body.timezone)
         except ScheduleError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+        # Routines that ran on the old zone move with the person ("8:00" stays their 8:00);
+        # one given a zone of its own on the Routines page keeps it.
+        moved = await db.scalars(
+            select(Routine).where(Routine.user_id == user.id, Routine.timezone == user.timezone)
+        )
+        now = utcnow()
+        for r in moved.all():
+            r.timezone = zone
+            reschedule(r, now)
+        user.timezone = zone
     if body.phone is not None:
         user.phone = body.phone or None
     if body.share_usage is not None:

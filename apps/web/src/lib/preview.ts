@@ -66,6 +66,13 @@ export const codeLanguage = (name: string) => CODE_LANGUAGES[extension(name)] ??
 /** Kinds read as text in the browser (the others are binary or shown as extracted text). */
 export const TEXT_KINDS: PreviewKind[] = ["markdown", "json", "notebook", "csv", "html", "code", "text"];
 
+/** Whether the preview can show the file: a file Nexus couldn't read the text of is still
+ * intact, so an image, PDF or model whose reading failed still opens (only the extracted-text
+ * view needs the reading). */
+export const canPreview = (f: { name: string; content_type?: string; status: string }) =>
+  f.status === "ready" ||
+  (f.status === "failed" && previewKind(f.name, f.content_type ?? "") !== "extracted");
+
 /** Kinds with no text for the assistant to read (kept as they are, not parsed). */
 export const UNREAD_KINDS: PreviewKind[] = ["model3d", "cad"];
 

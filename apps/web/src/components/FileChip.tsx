@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import { api } from "../lib/api";
 import { formatSize } from "../lib/format";
+import { canPreview } from "../lib/preview";
 import type { FileBrief, FileStatus } from "../lib/types";
 import { FilePreview } from "./FilePreview";
 
@@ -45,12 +46,15 @@ export function FileChip({
   onRemove?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const viewable = canPreview({ ...file, status });
+  // Failed to read but still viewable: the file is fine, only searching its text isn't.
+  const failed = status === "failed" && !viewable;
   const label =
     status === "uploading"
       ? "Uploading"
       : status === "processing"
         ? "Reading"
-        : status === "failed"
+        : failed
           ? (error ?? "Couldn't read this file")
           : formatSize(file.size);
   const body = (
@@ -58,11 +62,11 @@ export function FileChip({
       <FileIcon name={file.name} />
       <span className="min-w-0">
         <span className="block max-w-48 truncate">{file.name}</span>
-        <span className={`block text-xs ${status === "failed" ? "text-rose-400" : "text-slate-500"}`}>
+        <span className={`block text-xs ${failed ? "text-rose-400" : "text-slate-500"}`}>
           {label}
         </span>
       </span>
-      <StatusIcon status={status} />
+      {(failed || status !== "failed") && <StatusIcon status={status} />}
     </>
   );
   return (
@@ -70,7 +74,7 @@ export function FileChip({
       className="flex max-w-full items-center gap-2 rounded-lg border border-edge bg-panel px-2.5 py-1.5 text-sm"
       title={error ?? file.name}
     >
-      {file.id && file.content_type && status === "ready" && !onRemove ? (
+      {file.id && file.content_type && viewable && !onRemove ? (
         <>
           <button
             onClick={() => setOpen(true)}

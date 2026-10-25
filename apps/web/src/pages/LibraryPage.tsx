@@ -8,6 +8,7 @@ import { ProjectCard } from "../components/ProjectCard";
 import { api } from "../lib/api";
 import { ACCEPT, formatDate, formatSize } from "../lib/format";
 import { LINK_KIND_LABEL, linkSource, shortUrl } from "../lib/links";
+import { canPreview } from "../lib/preview";
 import { hasRole, type FileItem, type LinkItem, type Project, type SearchHit } from "../lib/types";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
@@ -305,7 +306,7 @@ export function LibraryPage() {
                 <FileIcon name={f.name} size={20} />
                 <div className="min-w-40 flex-1">
                   <div className="flex items-center gap-2">
-                    {f.status === "ready" ? (
+                    {canPreview(f) ? (
                       <button onClick={() => setPreview(f)} className="truncate text-left hover:text-sky-300">
                         {f.name}
                       </button>
@@ -331,7 +332,7 @@ export function LibraryPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 text-slate-400">
-                  {f.status === "ready" && (
+                  {canPreview(f) && (
                     <IconButton label="Preview" onClick={() => setPreview(f)}>
                       <Eye size={16} />
                     </IconButton>

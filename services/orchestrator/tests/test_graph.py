@@ -332,3 +332,23 @@ async def test_turn_context_carries_the_connections(deps, chat, sessionmaker, em
     rendered = ctx.render()
     assert "<connections>\n- Nexus uses LangGraph." in rendered
     assert {e.name for e in ctx.entities} == {"Nexus", "LangGraph"}
+
+
+def test_names_drop_type_prefixes_and_files_are_not_entities():
+    found = graph.parse_graph(
+        {
+            "entities": [
+                {"name": "topic:tray design", "type": "topic", "aliases": ["Topic: trays"]},
+                {"name": "out/tray.stl", "type": "tool"},
+                {"name": "rocket_preview.png", "type": "other"},
+                {"name": "Node.js", "type": "tool"},
+            ],
+            "relations": [{"from": "USER", "predicate": "is designing", "to": "topic:tray design"}],
+        }
+    )
+    assert [(e["name"], e["aliases"]) for e in found.entities] == [
+        ("tray design", ["trays"]),
+        ("Node.js", []),
+    ]
+    assert found.relations[0]["to"] == "tray design"
+    assert graph.about_names(["project: Nexus", "tray.3mf"]) == ["nexus"]

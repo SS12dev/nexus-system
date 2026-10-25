@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { codeLanguage, modelFormat, notebookCells, parseCsv, prettyJson, previewKind, readableText } from "./preview";
+import {
+  canPreview,
+  codeLanguage,
+  modelFormat,
+  notebookCells,
+  parseCsv,
+  prettyJson,
+  previewKind,
+  readableText,
+} from "./preview";
 
 describe("file previews", () => {
   it("picks a view from the file name", () => {
@@ -46,5 +55,15 @@ describe("file previews", () => {
       { kind: "markdown", source: "# Title", outputs: [] },
       { kind: "code", source: "print(1)", outputs: ["1\n"] },
     ]);
+  });
+});
+
+describe("canPreview", () => {
+  it("opens images and models whose text couldn't be read, but not unreadable documents", () => {
+    expect(canPreview({ name: "rocket_preview.png", status: "failed" })).toBe(true);
+    expect(canPreview({ name: "tray.stl", status: "failed" })).toBe(true);
+    expect(canPreview({ name: "notes.pptx", status: "failed" })).toBe(false);
+    expect(canPreview({ name: "notes.pptx", status: "ready" })).toBe(true);
+    expect(canPreview({ name: "a.png", status: "processing" })).toBe(false);
   });
 });
