@@ -45,6 +45,9 @@ EventType = Literal[
     # A widget on the main screen was added, changed or rang (nexus_common.widgets), or removed.
     "widget.updated",
     "widget.deleted",
+    # The assistant or the person changed the main screen (nexus_common.screen): data has the
+    # op, the saved screen, and the file or recall it opens or lights.
+    "screen.op",
 ]
 
 AssistantState = Literal["idle", "thinking", "speaking"]

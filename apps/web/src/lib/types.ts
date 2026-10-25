@@ -696,6 +696,7 @@ export type ServerEvent =
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
   | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }
   | { type: "widget.deleted"; chat_id?: null; data: { id: string } }
+  | { type: "screen.op"; chat_id?: string | null; data: ScreenOpData }
   | { type: "pong"; chat_id?: null; data?: undefined };
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 10, member: 20, admin: 30, owner: 40 };
@@ -1150,7 +1151,7 @@ export interface KnowledgeGraph {
  * opening, failed, or is waiting for approval. */
 export interface Notice {
   id: string;
-  kind: "result" | "failed" | "approval" | "timer" | "reminder";
+  kind: "result" | "failed" | "approval" | "timer" | "reminder" | "info";
   title: string;
   body: string;
   chat_id: string | null;
@@ -1161,6 +1162,28 @@ export interface Notice {
   link: LinkItem | null;
   read_at: string | null;
   created_at: string;
+}
+
+/** How the main screen is laid out: the 3D orb, plain lists, or a board of widgets. */
+export type ScreenMode = "orb" | "list" | "dashboard";
+
+/** The main screen as saved on the server, the same on every device. */
+export interface ScreenState {
+  mode: ScreenMode;
+  /** What the assistant opened over the main area. */
+  focus: { kind: "file" | "widget"; id: string; chat_id?: string | null; at?: string } | null;
+  updated_at: string | null;
+}
+
+/** A change to the main screen, by the assistant's screen tool or by the person. */
+export interface ScreenOpData {
+  op: "pin" | "move" | "focus" | "mode" | "highlight" | "clear" | "close";
+  by: "assistant" | "user";
+  screen: ScreenState;
+  /** focus: the file to open. */
+  file?: FileBrief;
+  /** highlight: what to light in the orb. */
+  recall?: Recalled;
 }
 
 export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note";

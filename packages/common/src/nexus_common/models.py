@@ -1446,6 +1446,8 @@ class NotificationKind(enum.StrEnum):
     timer = "timer"
     # A reminder widget is due.
     reminder = "reminder"
+    # Something the assistant put on the main screen with its screen tool.
+    info = "info"
 
 
 class Notification(Base):
@@ -1499,3 +1501,23 @@ class Widget(Base):
         Index("ix_widgets_user", "user_id", "slot"),
         Index("ix_widgets_fires_at", "fires_at"),
     )
+
+
+class ScreenState(Base):
+    """How a user's main screen is laid out (nexus_common/screen.py): the orb, plain lists or a
+    board of widgets, and what's open over it. One row per user, so a reload or a second device
+    shows the same screen. overrides are the person's own recent changes, which the assistant's
+    screen tool leaves alone unless asked."""
+
+    __tablename__ = "screen_states"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # orb, list or dashboard
+    mode: Mapped[str] = mapped_column(String(16), default="orb")
+    # What's open over the main area: {"kind": "file" | "widget", "id", "chat_id", "at"}.
+    focus: Mapped[dict | None] = mapped_column(JSONB)
+    # [{"key": "mode" | "move:<widget>" | "focus:file:<id>", "at": iso}], newest last.
+    overrides: Mapped[list] = mapped_column(JSONB, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

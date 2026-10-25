@@ -337,3 +337,38 @@ describe("notices", () => {
     expect(s.notices.every((n) => n.read_at)).toBe(true);
   });
 });
+
+describe("screen ops", () => {
+  const screen = (mode: "orb" | "list" | "dashboard" = "orb") => ({ mode, focus: null, updated_at: null });
+
+  it("saves the layout and lights what the assistant highlights", () => {
+    let s = applyEvent(initialState, { type: "screen.op", data: { op: "mode", by: "assistant", screen: screen("dashboard") } });
+    expect(s.screen.mode).toBe("dashboard");
+    expect(s.screenOp).toBeNull();
+    s = applyEvent(s, {
+      type: "screen.op",
+      data: {
+        op: "highlight",
+        by: "assistant",
+        screen: screen("dashboard"),
+        recall: { memories: [], entities: [{ id: "e1", name: "Asha", type: "person" }] },
+      },
+    });
+    expect(s.recall?.entities[0].name).toBe("Asha");
+    expect(s.recall?.seq).toBe(1);
+  });
+
+  it("queues a focus with its chat for the open tab to act on", () => {
+    const file = { id: "f1", name: "rocket.stl", content_type: "model/stl", size: 1, status: "ready" as const };
+    const s = applyEvent(initialState, {
+      type: "screen.op",
+      chat_id: "c1",
+      data: { op: "focus", by: "assistant", screen: { mode: "orb", focus: { kind: "file", id: "f1" }, updated_at: null }, file },
+    });
+    expect(s.screenOp?.file?.name).toBe("rocket.stl");
+    expect(s.screenOp?.chatId).toBe("c1");
+    const again = applyEvent(s, { type: "screen.op", data: { op: "clear", by: "assistant", screen: screen() } });
+    expect(again.screenOp?.op).toBe("clear");
+    expect(again.screenOp?.seq).toBe(2);
+  });
+});

@@ -2,6 +2,7 @@ import {
   AlarmClock,
   BellRing,
   Clock,
+  ArrowUpToLine,
   Pause,
   Play,
   Plus,
@@ -11,11 +12,13 @@ import {
   Watch,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import type { Widget, WidgetAction, WidgetInput } from "../lib/types";
 import { clock, elapsed, isRinging, nextRing, repeatText, timeIn, timerLeft, zoneCity } from "../lib/widgets";
 import { useStore } from "../store/chat";
+import { useWidgetPointedAt } from "./Screen";
+import { useAssistantName } from "../lib/assistant";
 
 /** The clock every widget reads from, ticking once a second (or faster for a stopwatch). */
 export function useNow(ms = 1000): number {
@@ -68,49 +71,112 @@ const ICONS: Record<Widget["kind"], ReactNode> = {
 const btn =
   "rounded-md border border-edge bg-ink/40 p-1 text-slate-300 hover:border-sky-400/60 hover:text-white disabled:opacity-40";
 
-/** The widgets beside the orb: a column on laptops, a row you swipe on phones. Orion adds
- * them when asked ("set a timer for 5 minutes"); the + button adds one by hand. */
-export function WidgetDock({ compact = false }: { compact?: boolean }) {
+/** Where a card sits: the widget board fills the main area with a grid of full cards. */
+const Dock = createContext<{ board: boolean; firstId: string | null }>({ board: false, firstId: null });
+
+/** How long a widget the assistant pointed at stays lit. */
+const POINTED_MS = 5000;
+
+/** The widgets beside the orb: a column on laptops, a row you swipe on phones; or, as the
+ * widget board, a grid over the whole main area. Orion adds them when asked ("set a timer for
+ * 5 minutes"); the + button adds one by hand. */
+export function WidgetDock({ compact = false, board = false }: { compact?: boolean; board?: boolean }) {
   const list = useWidgetList();
   const now = useNow(list.some((w) => w.kind === "stopwatch" && w.state.status === "running") ? 100 : 1000);
+  const ctx = useMemo(() => ({ board, firstId: list[0]?.id ?? null }), [board, list]);
+  const assistant = useAssistantName();
+  if (board) {
+    return (
+      <Dock.Provider value={ctx}>
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <AddWidget empty={list.length === 0} compact={false} board />
+          <p className="text-xs text-slate-400">
+            Your widgets, big. Ask {assistant} for a timer, alarm, reminder, clock or note, or switch back to the orb above.
+          </p>
+        </div>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3" aria-label="Widgets">
+          {list.map((w) => (
+            <WidgetCard key={w.id} widget={w} now={now} compact={false} />
+          ))}
+        </div>
+      </Dock.Provider>
+    );
+  }
   if (list.length === 0 && compact) return null;
   // The + sits outside the scrolling list, so its menu isn't clipped by it.
   return (
-    <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
-      {list.length > 0 && (
-        <div
-          className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
-          aria-label="Widgets"
-        >
-          {list.map((w) => (
-            <WidgetCard key={w.id} widget={w} now={now} compact={compact} />
-          ))}
-        </div>
-      )}
-      <AddWidget empty={list.length === 0} compact={compact} />
-    </div>
+    <Dock.Provider value={ctx}>
+      <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
+        {list.length > 0 && (
+          <div
+            className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
+            aria-label="Widgets"
+          >
+            {list.map((w) => (
+              <WidgetCard key={w.id} widget={w} now={now} compact={compact} />
+            ))}
+          </div>
+        )}
+        <AddWidget empty={list.length === 0} compact={compact} />
+      </div>
+    </Dock.Provider>
   );
 }
 
+/** Put a widget first on the dock. Done by hand, so the assistant leaves its place alone. */
+async function moveFirst(w: Widget) {
+  try {
+    useStore.getState().upsertWidget(await api.editWidget(w.id, { slot: 1 }));
+  } catch {
+    /* its event brings the truth */
+  }
+}
+
 function Card({ widget, children, compact }: { widget: Widget; children: ReactNode; compact: boolean }) {
+  const { board, firstId } = useContext(Dock);
+  const pointed = useWidgetPointedAt(widget.id);
+  const [lit, setLit] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pointed) return;
+    setLit(true);
+    box.current?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    const t = window.setTimeout(() => setLit(false), POINTED_MS);
+    return () => window.clearTimeout(t);
+  }, [pointed]);
+  const size = board ? "w-full px-4 py-3" : compact ? "w-32 px-2.5 py-1.5 lg:px-3 lg:py-2" : "w-44 px-3 py-2";
+  const hover = "lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100";
   return (
     <div
-      className={`group relative shrink-0 rounded-xl border border-edge bg-panel/85 backdrop-blur lg:w-full ${
-        compact ? "w-32 px-2.5 py-1.5 lg:px-3 lg:py-2" : "w-44 px-3 py-2"
+      ref={box}
+      className={`group relative shrink-0 rounded-xl border bg-panel/85 backdrop-blur transition-shadow lg:w-full ${size} ${
+        lit ? "border-sky-400 shadow-[0_0_0_3px_rgba(56,189,248,0.35)]" : "border-edge"
       }`}
     >
-      <div className="flex items-center gap-1.5 pr-5 text-[11px] text-slate-400">
+      <div className="flex items-center gap-1.5 pr-10 text-[11px] text-slate-400">
         {ICONS[widget.kind]}
         <span className="truncate">{widget.title}</span>
       </div>
-      <button
-        onClick={() => press(widget, "remove")}
-        aria-label={`Remove ${widget.title}`}
-        title="Remove"
-        className="absolute right-1.5 top-1.5 rounded p-0.5 text-slate-500 hover:text-white lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100"
-      >
-        <X size={12} />
-      </button>
+      <div className="absolute right-1.5 top-1.5 flex gap-0.5">
+        {firstId !== widget.id && !compact && (
+          <button
+            onClick={() => moveFirst(widget)}
+            aria-label={`Move ${widget.title} first`}
+            title="Move first"
+            className={`rounded p-0.5 text-slate-500 hover:text-white ${hover}`}
+          >
+            <ArrowUpToLine size={12} />
+          </button>
+        )}
+        <button
+          onClick={() => press(widget, "remove")}
+          aria-label={`Remove ${widget.title}`}
+          title="Remove"
+          className={`rounded p-0.5 text-slate-500 hover:text-white ${hover}`}
+        >
+          <X size={12} />
+        </button>
+      </div>
       {children}
     </div>
   );
@@ -258,7 +324,7 @@ function NoteText({ widget }: { widget: Widget }) {
 const QUICK_TIMERS = [1, 5, 10, 25];
 
 /** The + on the dock: a timer, stopwatch, alarm, clock or note by hand. */
-function AddWidget({ empty, compact }: { empty: boolean; compact: boolean }) {
+function AddWidget({ empty, compact, board = false }: { empty: boolean; compact: boolean; board?: boolean }) {
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState("");
   const [time, setTime] = useState("07:00");
@@ -291,13 +357,17 @@ function AddWidget({ empty, compact }: { empty: boolean; compact: boolean }) {
         aria-expanded={open}
         title="Add a widget"
         className={`flex items-center gap-1.5 rounded-xl border border-dashed border-edge bg-panel/60 px-3 py-2 text-xs text-slate-400 backdrop-blur hover:border-sky-400/60 hover:text-sky-200 ${
-          empty ? "" : "lg:w-full lg:justify-center"
+          empty || board ? "" : "lg:w-full lg:justify-center"
         }`}
       >
         <Plus size={13} /> {empty ? "Add a widget" : <span className={compact ? "sr-only lg:not-sr-only" : ""}>Add</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl lg:bottom-full lg:top-auto lg:mb-1 lg:mt-0">
+        <div
+          className={`absolute top-full z-30 mt-1 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl ${
+            board ? "left-0" : "right-0 lg:bottom-full lg:top-auto lg:mb-1 lg:mt-0"
+          }`}
+        >
           <p className="px-2 pb-1 text-[11px] text-slate-500">
             Or just ask: "set a timer for 10 minutes", "wake me at 7 on weekdays", "remind me to call mum at 6".
           </p>

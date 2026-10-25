@@ -31,6 +31,7 @@ from nexus_api.routes import (
     push,
     recall,
     routines,
+    screen,
     skills,
     systems,
     widgets,
@@ -126,6 +127,7 @@ def create_app(
     app.include_router(links.router)
     app.include_router(notifications.router)
     app.include_router(widgets.router)
+    app.include_router(screen.router)
     app.include_router(projects.router)
     app.include_router(apps.router)
     app.include_router(app_access.router)

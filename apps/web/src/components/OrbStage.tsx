@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ExternalLink,
   FolderGit2,
+  LayoutGrid,
   List,
   Maximize2,
   Minimize2,
@@ -41,21 +42,21 @@ import { WidgetDock } from "./Widgets";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
+import type { ScreenMode } from "../lib/types";
+import { setScreenMode } from "./Screen";
 
 const OrbScene = lazy(() => import("../orb/OrbScene"));
 
-const VIEW_KEY = "nexus.home.view";
+/** The main screen's layouts. The assistant can switch them too ("show me my widgets"), but a
+ * switch made here is yours and it leaves it alone for a while. */
+const VIEWS: { id: ScreenMode; label: string; icon: ReactNode; hint: string }[] = [
+  { id: "orb", label: "Orb", icon: <Orbit size={14} />, hint: "The 3D orb: teams at work and what Nexus knows" },
+  { id: "list", label: "List", icon: <List size={14} />, hint: "The same as plain lists" },
+  { id: "dashboard", label: "Widgets", icon: <LayoutGrid size={14} />, hint: "A board of your widgets" },
+];
+
 /** How long what a reply recalled stays lit in the orb. */
 const LIT_MS = 15000;
-
-function savedView(): "orb" | "list" {
-  if (!hasWebGL()) return "list";
-  try {
-    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "orb";
-  } catch {
-    return "orb";
-  }
-}
 
 /** Nexus as a 3D orb with the live agent network around it and, inside it, what it knows:
  * you at the centre, the people, projects and topics you've mentioned around you, memories as
@@ -84,7 +85,7 @@ export function OrbStage({
   const files = useStore((s) => s.files);
   const memoryVersion = useStore((s) => s.memoryVersion);
   const perf = usePerf();
-  const [view, setView] = useState(savedView);
+  const view = useStore((s) => s.screen.mode);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
@@ -180,18 +181,14 @@ export function OrbStage({
       setSelected(null);
   }, [clusters, selected]);
 
-  const changeView = (v: "orb" | "list") => {
-    setView(v);
+  const changeView = (v: ScreenMode) => {
     setSelected(null);
-    try {
-      localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      /* private mode */
-    }
+    setScreenMode(v);
   };
 
   const chat = mode === "chat";
-  const showOrb = view === "orb" && !webglFailed;
+  const board = view === "dashboard";
+  const showOrb = view === "orb" && hasWebGL() && !webglFailed;
   const working = clusters.filter((c) => ["queued", "running", "awaiting_approval"].includes(c.status)).length;
   const agentCount = clusters.reduce((n, c) => n + c.nodes.length, 0);
   const status =
@@ -279,22 +276,27 @@ export function OrbStage({
         </div>
         <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1">
           <NoticeBell />
-          <div className="flex rounded-lg border border-edge bg-panel/80 p-0.5 text-sm backdrop-blur">
-            <button
-              onClick={() => changeView("orb")}
-              disabled={!hasWebGL()}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 disabled:opacity-40 ${showOrb ? "bg-edge text-white" : "text-slate-400"}`}
-              aria-pressed={showOrb}
-            >
-              <Orbit size={14} /> {!chat && "Orb"}
-            </button>
-            <button
-              onClick={() => changeView("list")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 ${!showOrb ? "bg-edge text-white" : "text-slate-400"}`}
-              aria-pressed={!showOrb}
-            >
-              <List size={14} /> {!chat && "List"}
-            </button>
+          <div
+            className="flex rounded-lg border border-edge bg-panel/80 p-0.5 text-sm backdrop-blur"
+            role="group"
+            aria-label="Main screen layout"
+          >
+            {VIEWS.map(({ id, label, icon, hint }) => {
+              const on = id === "orb" ? showOrb : id === "list" ? !showOrb && !board : board;
+              return (
+                <button
+                  key={id}
+                  onClick={() => changeView(id)}
+                  disabled={id === "orb" && !hasWebGL()}
+                  title={hint}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 disabled:opacity-40 ${on ? "bg-edge text-white" : "text-slate-400"}`}
+                  aria-pressed={on}
+                  aria-label={label}
+                >
+                  {icon} {!chat && <span className="hidden sm:inline">{label}</span>}
+                </button>
+              );
+            })}
           </div>
           {chat && (
             <button
@@ -310,14 +312,21 @@ export function OrbStage({
         </div>
       </div>
 
-      {/* Widgets: a row under the top bar on phones, a column on the right on laptops. */}
-      <div
-        className={`pointer-events-none relative z-20 ${chat ? "px-3 pt-2" : "px-4 pt-3"} lg:absolute lg:bottom-28 lg:right-4 lg:top-16 lg:px-0 lg:pt-0`}
-      >
-        <WidgetDock compact={chat} />
-      </div>
+      {/* Widgets: a row under the top bar on phones, a column on the right on laptops; or, on
+          the widget board, the whole main area. */}
+      {board ? (
+        <div className={`relative z-10 min-h-0 flex-1 overflow-y-auto ${chat ? "px-3 py-2" : "px-4 py-3"}`}>
+          <WidgetDock board />
+        </div>
+      ) : (
+        <div
+          className={`pointer-events-none relative z-20 ${chat ? "px-3 pt-2" : "px-4 pt-3"} lg:absolute lg:bottom-28 lg:right-4 lg:top-16 lg:px-0 lg:pt-0`}
+        >
+          <WidgetDock compact={chat} />
+        </div>
+      )}
 
-      {showOrb ? (
+      {board ? null : showOrb ? (
         <div className="pointer-events-none relative z-10 flex flex-1 flex-col justify-end px-4 pb-2">
           {!chat && <Legend />}
         </div>
