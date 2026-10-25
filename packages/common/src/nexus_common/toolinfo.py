@@ -100,6 +100,13 @@ TOOLS: list[ToolInfo] = [
         "Pause, resume, reset, snooze, dismiss or remove a widget, or add time to a timer.",
     ),
     ToolInfo(
+        "screen",
+        "Change the main screen",
+        "write",
+        "Open a result over the orb, switch between orb, lists and widget board, order the "
+        "widget dock, light names in the orb or put up a notice.",
+    ),
+    ToolInfo(
         "update_routine",
         "Change a routine",
         "write",

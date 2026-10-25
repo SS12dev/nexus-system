@@ -10,6 +10,8 @@ import type {
   Notice,
   Widget,
   Recalled,
+  ScreenOpData,
+  ScreenState,
   ServerEvent,
   ToolStep,
 } from "../lib/types";
@@ -53,6 +55,11 @@ export interface ChatState {
   freshNotice: Notice | null;
   /** Widgets on the main screen, by id. */
   widgets: Record<string, Widget>;
+  /** The main screen's saved layout. */
+  screen: ScreenState;
+  /** The latest change to the screen that the open tab has to act on (open a file, point at
+   * a widget, put a result away); seq changes each time. */
+  screenOp: (ScreenOpData & { chatId: string | null; seq: number }) | null;
 }
 
 export const initialState: ChatState = {
@@ -76,6 +83,8 @@ export const initialState: ChatState = {
   toasts: [],
   freshNotice: null,
   widgets: {},
+  screen: { mode: "orb", focus: null, updated_at: null },
+  screenOp: null,
 };
 
 /** Notices kept in the tray, like the server's TRAY_SIZE. */
@@ -387,6 +396,17 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     case "widget.deleted": {
       const { [event.data.id]: _gone, ...widgets } = state.widgets;
       return { ...state, widgets };
+    }
+    case "screen.op": {
+      const d = event.data;
+      const next = { ...state, screen: d.screen };
+      if (d.op === "highlight" && d.recall) {
+        return { ...next, recall: { ...d.recall, seq: (state.recall?.seq ?? 0) + 1 } };
+      }
+      if (d.op === "focus" || d.op === "clear" || d.op === "close") {
+        return { ...next, screenOp: { ...d, chatId: event.chat_id ?? null, seq: (state.screenOp?.seq ?? 0) + 1 } };
+      }
+      return next;
     }
     default:
       return state;

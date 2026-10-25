@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
 from nexus_api.deps import CurrentUser, DbDep, RedisDep
+from nexus_common import screen as sc
 from nexus_common.models import Widget, utcnow
 from nexus_common.widgets import NOTE_CHARS, TITLE_CHARS, WidgetError, act, add, announce, payload
 
@@ -34,7 +35,8 @@ class ActionIn(BaseModel):
 class WidgetPatch(BaseModel):
     title: str | None = Field(None, max_length=TITLE_CHARS)
     text: str | None = Field(None, max_length=NOTE_CHARS)
-    slot: int | None = None
+    # Place on the dock, 1 = first.
+    slot: int | None = Field(None, ge=1)
 
 
 async def _own(db, user, widget_id: uuid.UUID) -> Widget:
@@ -94,7 +96,14 @@ async def edit_widget(
             raise HTTPException(status.HTTP_409_CONFLICT, "Only a note has text to edit")
         w.state = {**(w.state or {}), "text": body.text}
     if body.slot is not None:
-        w.slot = body.slot
+        # Moved by hand: the assistant leaves its place alone for a while.
+        state = await sc.load(db, user.id, lock=True)
+        sc.mark_override(state, sc.override_key("move", str(w.id)))
+        w.updated_at = utcnow()
+        await sc.reorder(db, redis, user.id, w, body.slot)
+        await db.refresh(w)
+        await announce(redis, user.id, w)
+        return payload(w)
     w.updated_at = utcnow()
     await db.commit()
     await announce(redis, user.id, w)

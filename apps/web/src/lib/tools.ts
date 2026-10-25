@@ -45,6 +45,7 @@ export const TOOL_LABEL: Record<string, string> = {
   add_widget: "Adding a widget",
   list_widgets: "Checking your widgets",
   control_widget: "Changing a widget",
+  screen: "Changing your screen",
   build_agent_system: "Designing a team of agents",
   update_agent_system: "Redesigning the team",
   run_agent_system: "Starting the team",

@@ -3,6 +3,8 @@ import { Outlet, useParams } from "react-router";
 import { FilePreview } from "../components/FilePreview";
 import { useAutoOpenResult } from "../components/Notices";
 import { OrbStage } from "../components/OrbStage";
+import { useScreenOps } from "../components/Screen";
+import { api } from "../lib/api";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
 import { NewChatComposer } from "./HomePage";
@@ -40,7 +42,8 @@ function savedOrbOpen(): boolean {
  *
  * A team's result (a 3D model, an image, a report) opens in the orb's place on laptops and as
  * a panel over everything on phones: by itself when it lands for the chat that's open, or
- * from a notice. Closing it brings the orb back. */
+ * from a notice, or when you ask the assistant to show you something. Closing it brings the orb
+ * back. */
 export function OrbLayout() {
   const { chatId } = useParams();
   const inChat = !!chatId;
@@ -50,12 +53,19 @@ export function OrbLayout() {
   const viewer = useStore((s) => s.viewer);
   const closeViewer = useStore((s) => s.closeViewer);
   useAutoOpenResult(chatId);
+  useScreenOps(chatId);
 
   // A result belongs to its chat: moving to another chat (or home) puts it away.
   const showing = viewer && viewer.chatId === (chatId ?? null) ? viewer : null;
   useEffect(() => {
     if (viewer && viewer.chatId !== (chatId ?? null)) closeViewer();
   }, [chatId, viewer, closeViewer]);
+
+  // Closed by hand: it stays closed on every device, and the assistant won't reopen it unasked.
+  const close = () => {
+    if (viewer) api.closeOnScreen("file", viewer.file.id).catch(() => {});
+    closeViewer();
+  };
 
   // The orb stays mounted under a result, so closing it finds the scene as it was.
   return (
@@ -65,9 +75,9 @@ export function OrbLayout() {
         orbOpen={orbOpen || (!!showing && wide)}
         setOrbOpen={setOrbOpen}
         assistant={assistant}
-        result={showing && wide ? <FilePreview inline file={showing.file} onClose={closeViewer} /> : null}
+        result={showing && wide ? <FilePreview inline file={showing.file} onClose={close} /> : null}
       />
-      {showing && !wide && <FilePreview file={showing.file} onClose={closeViewer} />}
+      {showing && !wide && <FilePreview file={showing.file} onClose={close} />}
     </>
   );
 }

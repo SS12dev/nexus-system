@@ -28,6 +28,7 @@ import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NoticeToasts, useNoticeTray } from "./Notices";
 import { RingOverlay, useWidgetsLoader } from "./Widgets";
+import { useScreenLoader } from "./Screen";
 import { Orb } from "./Orb";
 import { confirmAction } from "./Feedback";
 import { FeedbackDialog } from "./FeedbackDialog";
@@ -118,6 +119,7 @@ export function Shell() {
 
   useNoticeTray();
   useWidgetsLoader();
+  useScreenLoader();
   const spend = user.budget.spend_usd;
   return (
     <div className="flex h-full">

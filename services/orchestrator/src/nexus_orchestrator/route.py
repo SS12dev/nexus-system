@@ -27,6 +27,8 @@ Alice"), or adding, moving or completing one task or event
 - timers, alarms, stopwatches and reminders ("set a timer for 5 minutes", "wake me at 7", \
 "remind me to call mum at 6", "remind me every day at 9 pm to ..."), and putting a clock or \
 note on the screen: the assistant has its own tools for these
+- changing the main screen: "show me / open the rocket model", "switch to the dashboard", \
+"pin the timer first", "show the orb"
 - a quick question about a document already in the chat
 - orchestration: questions about a team or its result, keeping, changing, pausing or stopping \
 a team, or a short follow-up on an answer the assistant just gave

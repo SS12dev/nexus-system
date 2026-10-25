@@ -1,4 +1,4 @@
-import { AlarmClock, AlertTriangle, Bell, BellRing, CheckCircle2, Hand, X } from "lucide-react";
+import { AlarmClock, AlertTriangle, Bell, BellRing, CheckCircle2, Hand, Info, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../lib/api";
@@ -15,7 +15,11 @@ const ICON = {
   approval: <Hand size={16} className="shrink-0 text-amber-300" />,
   timer: <AlarmClock size={16} className="shrink-0 text-sky-300" />,
   reminder: <BellRing size={16} className="shrink-0 text-violet-300" />,
+  info: <Info size={16} className="shrink-0 text-sky-300" />,
 };
+
+/** Notices made in this tab (see addLocalNotice) aren't on the server to mark read. */
+const saved = (id: string) => !id.startsWith("local-");
 
 /** Load the bell's tray when signed in, and again after a reconnect in case notices were
  * missed while offline. */
@@ -38,7 +42,7 @@ export function useOpenNotice() {
   return (n: Notice) => {
     if (!n.read_at) {
       markNoticesRead([n.id]);
-      api.readNotifications([n.id]).catch(() => {});
+      if (saved(n.id)) api.readNotifications([n.id]).catch(() => {});
     }
     if (n.file) openViewer(n.file, n.chat_id);
     else if (n.link?.kind === "app") window.open(n.link.url, "_blank", "noopener");

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { cachedMode } from "../lib/screen";
 import type {
   AgentSystem,
   Approval,
@@ -10,6 +11,7 @@ import type {
   Notice,
   Widget,
   Recalled,
+  ScreenState,
   ServerEvent,
   User,
 } from "../lib/types";
@@ -62,10 +64,18 @@ interface Store extends ChatState {
   setWidgets: (widgets: Widget[]) => void;
   upsertWidget: (widget: Widget) => void;
   removeWidget: (id: string) => void;
+  setScreen: (screen: ScreenState) => void;
+  /** A notice made here, not saved: something the assistant opened while you were typing or
+   * away, waiting for you as a toast instead of taking over the screen. */
+  addLocalNotice: (notice: Omit<Notice, "id" | "read_at" | "created_at">) => void;
 }
+
+let localNotices = 0;
 
 export const useStore = create<Store>((set) => ({
   ...initialState,
+  // The layout this device showed last, until the saved screen loads.
+  screen: { ...initialState.screen, mode: cachedMode() ?? initialState.screen.mode },
   user: null,
   connected: false,
   setUser: (user) => set({ user, pendingAccess: user?.pending_access ?? null }),
@@ -102,5 +112,11 @@ export const useStore = create<Store>((set) => ({
     set((s) => {
       const { [id]: _gone, ...widgets } = s.widgets;
       return { widgets };
+    }),
+  setScreen: (screen) => set({ screen }),
+  addLocalNotice: (notice) =>
+    set((s) => {
+      const n: Notice = { ...notice, id: `local-${++localNotices}`, read_at: null, created_at: new Date().toISOString() };
+      return { notices: [n, ...s.notices], unread: s.unread + 1, toasts: [...s.toasts, n.id] };
     }),
 }));

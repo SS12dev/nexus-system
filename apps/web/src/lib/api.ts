@@ -24,6 +24,8 @@ import type {
   MemoryKind,
   Message,
   Notice,
+  ScreenMode,
+  ScreenState,
   Widget,
   WidgetAction,
   WidgetInput,
@@ -159,6 +161,11 @@ export const api = {
   editWidget: (id: string, body: { title?: string; text?: string; slot?: number }) =>
     request<Widget>(`/api/widgets/${id}`, { method: "PATCH", body: json(body) }),
   /** Mark these notices read, or every one when ids is left out. */
+  screen: () => request<ScreenState>("/api/screen"),
+  setScreenMode: (mode: ScreenMode) =>
+    request<ScreenState>("/api/screen/mode", { method: "PUT", body: json({ mode }) }),
+  closeOnScreen: (kind: "file" | "widget", id: string) =>
+    request<ScreenState>("/api/screen/close", { method: "POST", body: json({ kind, id }) }),
   readNotifications: (ids?: string[]) =>
     request<void>("/api/notifications/read", { method: "POST", body: json({ ids: ids ?? null }) }),
   acceptTerms: (version: string) =>
