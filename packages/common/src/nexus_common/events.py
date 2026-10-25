@@ -38,6 +38,13 @@ EventType = Literal[
     "access.pending",
     # A routine was added, changed or ran (data: routine, and status after a run).
     "routine.updated",
+    # A notice for the main screen's toasts and bell (nexus_common.notices), and the tray
+    # being read on another device.
+    "notification.created",
+    "notification.read",
+    # A widget on the main screen was added, changed or rang (nexus_common.widgets), or removed.
+    "widget.updated",
+    "widget.deleted",
 ]
 
 AssistantState = Literal["idle", "thinking", "speaking"]

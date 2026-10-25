@@ -26,6 +26,8 @@ import { useAssistantName } from "../lib/assistant";
 import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { NoticeToasts, useNoticeTray } from "./Notices";
+import { RingOverlay, useWidgetsLoader } from "./Widgets";
 import { Orb } from "./Orb";
 import { confirmAction } from "./Feedback";
 import { FeedbackDialog } from "./FeedbackDialog";
@@ -114,9 +116,13 @@ export function Shell() {
     }`;
   const tip = (text: string) => (collapsed ? text : undefined);
 
+  useNoticeTray();
+  useWidgetsLoader();
   const spend = user.budget.spend_usd;
   return (
     <div className="flex h-full">
+      <NoticeToasts />
+      <RingOverlay />
       <aside
         className={`fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-edge bg-panel transition-[transform,width] md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"

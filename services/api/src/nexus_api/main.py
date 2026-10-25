@@ -25,6 +25,7 @@ from nexus_api.routes import (
     links,
     me,
     memories,
+    notifications,
     ops,
     projects,
     push,
@@ -32,6 +33,7 @@ from nexus_api.routes import (
     routines,
     skills,
     systems,
+    widgets,
 )
 from nexus_api.routes import (
     config as config_routes,
@@ -122,6 +124,8 @@ def create_app(
     app.include_router(chats.router)
     app.include_router(files.router)
     app.include_router(links.router)
+    app.include_router(notifications.router)
+    app.include_router(widgets.router)
     app.include_router(projects.router)
     app.include_router(apps.router)
     app.include_router(app_access.router)

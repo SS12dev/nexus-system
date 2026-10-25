@@ -26,8 +26,17 @@ const ModelView = lazy(() => import("./ModelView"));
 const MAX_TEXT = 400_000;
 
 /** A side panel showing a file as itself (PDF, image, Word, 3D model, code, JSON, CSV, text…),
- * plus the text the assistant read from it, with a download button either way. */
-export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () => void }) {
+ * plus the text the assistant read from it, with a download button either way. Inline, it
+ * fills its container instead (a team's result opened in the orb's place). */
+export function FilePreview({
+  file,
+  onClose,
+  inline = false,
+}: {
+  file: FileBrief;
+  onClose: () => void;
+  inline?: boolean;
+}) {
   const assistant = useAssistantName();
   const kind = previewKind(file.name, file.content_type);
   const hasOriginal = kind !== "extracted";
@@ -40,66 +49,74 @@ export function FilePreview({ file, onClose }: { file: FileBrief; onClose: () =>
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const panel = (
+    <div
+      role={inline ? "region" : "dialog"}
+      aria-label={file.name}
+      className={
+        inline
+          ? "flex h-full min-h-0 w-full flex-col bg-ink"
+          : "flex h-full w-full max-w-4xl flex-col border-l border-edge bg-ink"
+      }
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-3 border-b border-edge px-4 py-3">
+        <FileIcon name={file.name} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{file.name}</div>
+          <div className="text-xs text-slate-500">{formatSize(file.size)}</div>
+        </div>
+        {(kind === "pdf" || kind === "image") && (
+          <a
+            href={api.fileUrl(file.id, true)}
+            target="_blank"
+            rel="noreferrer"
+            className="hidden items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60 sm:flex"
+          >
+            <ExternalLink size={14} /> Open
+          </a>
+        )}
+        <a
+          href={api.fileUrl(file.id)}
+          download={file.name}
+          className="flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1 text-sm hover:bg-sky-500"
+        >
+          <Download size={14} /> Download
+        </a>
+        <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white">
+          <X size={18} />
+        </button>
+      </div>
+      {hasOriginal && hasText && (
+        <div className="flex gap-1 border-b border-edge px-4 py-2 text-sm">
+          {(["original", "text"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              aria-pressed={view === v}
+              className={`rounded-md px-2.5 py-0.5 ${view === v ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
+            >
+              {v === "original" ? "Preview" : `What ${assistant} read`}
+            </button>
+          ))}
+        </div>
+      )}
+      {kind === "cad" ? (
+        <Note>
+          A STEP file is the exact, editable CAD model: open it in Fusion, FreeCAD, Onshape or SolidWorks.
+          The STL or 3MF made with it previews here and goes to the slicer.
+        </Note>
+      ) : view === "original" && hasOriginal ? (
+        <Original file={file} kind={kind} />
+      ) : (
+        <ReadText file={file} />
+      )}
+    </div>
+  );
+  if (inline) return panel;
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={file.name}
-        className="flex h-full w-full max-w-4xl flex-col border-l border-edge bg-ink"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 border-b border-edge px-4 py-3">
-          <FileIcon name={file.name} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{file.name}</div>
-            <div className="text-xs text-slate-500">{formatSize(file.size)}</div>
-          </div>
-          {(kind === "pdf" || kind === "image") && (
-            <a
-              href={api.fileUrl(file.id, true)}
-              target="_blank"
-              rel="noreferrer"
-              className="hidden items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-sm hover:bg-edge/60 sm:flex"
-            >
-              <ExternalLink size={14} /> Open
-            </a>
-          )}
-          <a
-            href={api.fileUrl(file.id)}
-            download={file.name}
-            className="flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1 text-sm hover:bg-sky-500"
-          >
-            <Download size={14} /> Download
-          </a>
-          <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white">
-            <X size={18} />
-          </button>
-        </div>
-        {hasOriginal && hasText && (
-          <div className="flex gap-1 border-b border-edge px-4 py-2 text-sm">
-            {(["original", "text"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                aria-pressed={view === v}
-                className={`rounded-md px-2.5 py-0.5 ${view === v ? "bg-edge text-white" : "text-slate-400 hover:bg-edge/50"}`}
-              >
-                {v === "original" ? "Preview" : `What ${assistant} read`}
-              </button>
-            ))}
-          </div>
-        )}
-        {kind === "cad" ? (
-          <Note>
-            A STEP file is the exact, editable CAD model: open it in Fusion, FreeCAD, Onshape or SolidWorks.
-            The STL or 3MF made with it previews here and goes to the slicer.
-          </Note>
-        ) : view === "original" && hasOriginal ? (
-          <Original file={file} kind={kind} />
-        ) : (
-          <ReadText file={file} />
-        )}
-      </div>
+      {panel}
     </div>
   );
 }

@@ -7,6 +7,8 @@ import type {
   FileItem,
   AssistantState,
   Message,
+  Notice,
+  Widget,
   Recalled,
   ServerEvent,
   ToolStep,
@@ -41,6 +43,16 @@ export interface ChatState {
   /** What the orb lights up: the latest reply's recall, or one whose chips were tapped.
    * seq changes each time, so lighting the same recall again replays it. */
   recall: (Recalled & { seq: number }) | null;
+  /** The bell's tray, newest first, and how many of the person's notices are unread. */
+  notices: Notice[];
+  unread: number;
+  /** Notices showing as toasts on the main screen right now, by id. */
+  toasts: string[];
+  /** The newest notice that arrived live (not loaded with the tray), so the open chat can
+   * open its result by itself. */
+  freshNotice: Notice | null;
+  /** Widgets on the main screen, by id. */
+  widgets: Record<string, Widget>;
 }
 
 export const initialState: ChatState = {
@@ -59,7 +71,27 @@ export const initialState: ChatState = {
   routinesVersion: 0,
   pendingAccess: null,
   recall: null,
+  notices: [],
+  unread: 0,
+  toasts: [],
+  freshNotice: null,
+  widgets: {},
 };
+
+/** Notices kept in the tray, like the server's TRAY_SIZE. */
+export const TRAY_MAX = 50;
+
+export function markRead(state: ChatState, ids: string[] | null): ChatState {
+  const now = new Date().toISOString();
+  const hit = (n: Notice) => !n.read_at && (ids === null || ids.includes(n.id));
+  const changed = state.notices.filter(hit).length;
+  return {
+    ...state,
+    notices: state.notices.map((n) => (hit(n) ? { ...n, read_at: now } : n)),
+    unread: ids === null ? 0 : Math.max(0, state.unread - changed),
+    toasts: ids === null ? [] : state.toasts.filter((t) => !ids.includes(t)),
+  };
+}
 
 /** Most feed lines kept per run; older ones drop off the top. */
 export const FEED_MAX = 60;
@@ -336,6 +368,26 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       return { ...state, chats: upsertChat(state.chats, event.data.chat) };
     case "routine.updated":
       return { ...state, routinesVersion: state.routinesVersion + 1 };
+    case "notification.created": {
+      const n = event.data.notification;
+      if (state.notices.some((x) => x.id === n.id)) return state;
+      return {
+        ...state,
+        notices: [n, ...state.notices].slice(0, TRAY_MAX),
+        unread: state.unread + 1,
+        // Timers and reminders ring in their own overlay (RingOverlay) instead.
+        toasts: n.kind === "timer" || n.kind === "reminder" ? state.toasts : [...state.toasts, n.id],
+        freshNotice: n,
+      };
+    }
+    case "notification.read":
+      return markRead(state, event.data.ids);
+    case "widget.updated":
+      return { ...state, widgets: { ...state.widgets, [event.data.widget.id]: event.data.widget } };
+    case "widget.deleted": {
+      const { [event.data.id]: _gone, ...widgets } = state.widgets;
+      return { ...state, widgets };
+    }
     default:
       return state;
   }

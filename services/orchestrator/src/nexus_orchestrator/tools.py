@@ -34,6 +34,7 @@ from nexus_common.models import (
     MemoryKind,
     Project,
     RoleName,
+    RunEvent,
     Skill,
     SkillUsage,
     User,
@@ -49,6 +50,7 @@ from nexus_orchestrator.links import keep_link
 from nexus_orchestrator.routine_tools import build_routine_tools
 from nexus_orchestrator.sandbox import SandboxError
 from nexus_orchestrator.web import WebError
+from nexus_orchestrator.widget_tools import build_widget_tools
 from nexus_orchestrator.workbench import WorkbenchError
 
 log = logging.getLogger(__name__)
@@ -158,7 +160,8 @@ def as_tools(ctx: ToolContext, fns: list[ToolFn]) -> list[BaseTool]:
 
 
 def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]:
-    """Tools by name, plus the skills tools, which every caller gets."""
+    """Tools by name, plus the skills tools, which every caller gets, and present_result,
+    which every agent in a run gets."""
     deps = ctx.deps
     sessionmaker, embedder, user_id = deps.sessionmaker, deps.embedder, ctx.user_id
 
@@ -785,6 +788,49 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         found = [by_id[h.id] for h in hits if h.id in by_id]
         return "\n".join(f"- {s.slug}: {s.description}" for s in found) or "No matching skills."
 
+    # --- Results ---------------------------------------------------------------------------
+
+    async def present_result(name: str) -> str:
+        """Name the one output the user should see first when the team finishes: a file this
+        run made (by name or id, e.g. rocket.stl, not the script that made it) or a link it
+        saved (a live app). It opens on the user's screen by itself. Call it once, at the end."""
+        await note("present_result", result=name)
+        async with sessionmaker() as db:
+            files = (
+                await db.scalars(
+                    select(File)
+                    .where(File.run_id == ctx.run_id, File.user_id == user_id)
+                    .order_by(File.created_at.desc())
+                )
+            ).all()
+            hit = next((f for f in files if str(f.id) == name or f.name == name), None)
+            data: dict[str, str] = {}
+            if hit is not None:
+                data = {"file_id": str(hit.id)}
+            else:
+                links = (
+                    await db.scalars(
+                        select(Link).where(Link.run_id == ctx.run_id, Link.user_id == user_id)
+                    )
+                ).all()
+                link = next((x for x in links if str(x.id) == name or x.url == name), None)
+                if link is not None:
+                    data = {"link_id": str(link.id)}
+            if not data:
+                made = ", ".join(dict.fromkeys(f.name for f in files)) or "nothing yet"
+                return f"This run made no file or link called {name}. Its files: {made}."
+            db.add(
+                RunEvent(
+                    run_id=ctx.run_id,
+                    user_id=user_id,
+                    type="result.presented",
+                    agent=ctx.agent,
+                    data=data,
+                )
+            )
+            await db.commit()
+        return f"{name} will open on the user's screen when the team finishes."
+
     impls = {
         "search_documents": search_documents,
         "read_document": read_document,
@@ -809,7 +855,10 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "app_visibility": app_visibility,
         **build_google_tools(ctx, note),
         **build_routine_tools(ctx, note),
+        **build_widget_tools(ctx, note),
     }
     chosen = [impls[n] for n in impls if n in set(names)]
     chosen += [skills_load, skills_read_file, skills_search]
+    if ctx.run_id is not None:
+        chosen.append(present_result)
     return as_tools(ctx, chosen)

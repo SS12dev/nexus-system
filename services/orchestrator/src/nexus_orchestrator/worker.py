@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
-from nexus_common import config
+from nexus_common import config, widgets
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
@@ -200,6 +200,14 @@ async def routines_due(ctx: dict) -> None:
         log.info("Queued %d routines", queued)
 
 
+async def widgets_due(ctx: dict) -> None:
+    """Every 15 seconds: ring the timers, alarms and reminders whose time has come."""
+    deps: TurnDeps = ctx["deps"]
+    async with deps.sessionmaker() as db:
+        if rang := await widgets.fire_due(db, deps.redis, deps.settings):
+            log.info("Rang %d widgets", rang)
+
+
 @traced_job
 async def daily_review(ctx: dict) -> None:
     """Starts a self-review when the last one is IMPROVE_EVERY_DAYS old."""
@@ -255,6 +263,7 @@ class WorkerSettings:
     ]
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
+        cron(widgets_due, second={0, 15, 30, 45}, unique=True, timeout=30),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
         cron(
             nightly,

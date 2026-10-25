@@ -34,6 +34,7 @@ from nexus_common.models import (
     MessageLink,
     MessageRole,
     MessageStatus,
+    NotificationKind,
     RunEvent,
     RunStatus,
     Skill,
@@ -44,6 +45,7 @@ from nexus_common.models import (
     UserStatus,
     utcnow,
 )
+from nexus_common.notices import featured, notify
 from nexus_common.skills import find_skill, instruction_layers, usable_skills
 from nexus_common.spec import AgentSystemSpec
 from nexus_common.systems import (
@@ -335,6 +337,8 @@ async def finish(
                 run.user_id,
                 Event(type="message.completed", chat_id=run.chat_id, data={"message": payload}),
             )
+    if status != RunStatus.cancelled:
+        await _notify_finished(deps, system, run, files, links)
     if deps.checkpointer is not None:
         try:
             await deps.checkpointer.adelete_thread(str(run_id))
@@ -348,6 +352,39 @@ async def finish(
         and deps.enqueue is not None
     ):
         await deps.enqueue("draft_skill", str(run_id), _job_id=f"learn:{run_id}")
+
+
+async def _notify_finished(deps, system: AgentSystem, run: AgentRun, files, links) -> None:
+    """Put a notice on the main screen, with the result worth opening, and on the phone. A run
+    the person stopped themselves gets none."""
+    try:
+        async with deps.sessionmaker() as db:
+            presented = await db.scalar(
+                select(RunEvent.data)
+                .where(RunEvent.run_id == run.id, RunEvent.type == "result.presented")
+                .order_by(RunEvent.created_at.desc())
+                .limit(1)
+            )
+            done = run.status == RunStatus.completed
+            pick = featured(files, links, presented) if done else None
+            first = next((line for line in (run.output or "").splitlines() if line.strip()), "")
+            await notify(
+                db,
+                deps.redis,
+                deps.settings,
+                run.user_id,
+                NotificationKind.result if done else NotificationKind.failed,
+                f"{system.name} finished" if done else f"{system.name} stopped",
+                (first.lstrip("#* ").strip() if done else (run.error or "")),
+                url=f"/c/{run.chat_id}" if run.chat_id else f"/agents/{system.id}",
+                chat_id=run.chat_id,
+                run_id=run.id,
+                file=pick.file if pick else None,
+                link=pick.link if pick else None,
+                tag=f"run:{run.id}",
+            )
+    except Exception:
+        log.warning("Couldn't post the notice for run %s", run.id, exc_info=True)
 
 
 # A result shorter than this that leaves the answer in a text file it made ("Saved guide.md. It
