@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Widget } from "./types";
-import { clock, elapsed, isRinging, repeatText, timerLeft, zoneCity } from "./widgets";
+import { clock, elapsed, frameHeight, isRinging, pendingAsks, repeatText, timerLeft, zoneCity } from "./widgets";
 
 const T0 = Date.parse("2026-10-25T18:00:00Z");
 const widget = (kind: Widget["kind"], state: Widget["state"]): Widget => ({
@@ -48,5 +48,22 @@ describe("widgets", () => {
     expect(repeatText("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=0")).toBe("Weekdays");
     expect(repeatText("FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=7;BYMINUTE=0")).toBe("Mon, Thu");
     expect(zoneCity("America/New_York")).toBe("New York");
+  });
+});
+
+describe("custom widgets", () => {
+  it("keeps the frame near its size class", () => {
+    expect(frameHeight("m")).toBe(200);
+    expect(frameHeight("s", 1000)).toBe(180);
+    expect(frameHeight("l", 10)).toBe(160);
+    expect(frameHeight("m", 260)).toBe(260);
+  });
+
+  it("lists only what isn't allowed yet", () => {
+    const w = widget("custom", {
+      manifest: { size: "m", hosts: ["api.open-meteo.com", "x.io"], data: ["calendar.today"], about: "" },
+      approved: { hosts: ["x.io"], data: [] },
+    });
+    expect(pendingAsks(w)).toEqual({ hosts: ["api.open-meteo.com"], data: ["calendar.today"] });
   });
 });

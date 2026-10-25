@@ -72,3 +72,32 @@ export function nextRing(iso: string | null, now: number): string {
     ? time
     : `${t.toLocaleDateString("en-GB", { weekday: "short" })} ${time}`;
 }
+
+/** A custom widget's frame height in px by its size class; a height it asks for with
+ * nexus.resize is kept within half to one and a half times that. */
+export const FRAME_HEIGHT = { s: 120, m: 200, l: 320 } as const;
+
+export function frameHeight(size: keyof typeof FRAME_HEIGHT = "m", asked?: number | null): number {
+  const base = FRAME_HEIGHT[size] ?? FRAME_HEIGHT.m;
+  if (!asked || !Number.isFinite(asked)) return base;
+  return Math.round(Math.min(base * 1.5, Math.max(base / 2, asked)));
+}
+
+/** What the Allow button names, in plain words. */
+export const DATA_LABELS: Record<string, string> = {
+  "calendar.today": "today's calendar",
+  "tasks.open": "your open tasks",
+  "files.recent": "your newest file names",
+  "memory.search": "searching your memories",
+  widgets: "your other widgets",
+};
+
+/** What a custom widget asks for that you haven't allowed yet. */
+export function pendingAsks(w: Widget): { hosts: string[]; data: string[] } {
+  const m = w.state.manifest;
+  const ok = w.state.approved ?? { hosts: [], data: [] };
+  return {
+    hosts: (m?.hosts ?? []).filter((h) => !ok.hosts.includes(h)),
+    data: (m?.data ?? []).filter((d) => !ok.data.includes(d)),
+  };
+}

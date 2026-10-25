@@ -1503,6 +1503,30 @@ class Widget(Base):
     )
 
 
+class CustomWidget(Base):
+    """One version of a custom widget: a small HTML app a widget-builder team wrote, shown in a
+    locked-down frame on the main screen (nexus_common/custom_widgets.py). Each edit is a new
+    row with the same root_id, so a change can be rolled back; the Widget on the dock points at
+    the version it shows (state.custom_id)."""
+
+    __tablename__ = "custom_widgets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The first version's id; every version of one widget shares it.
+    root_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(120))
+    html: Mapped[str] = mapped_column(Text)
+    # {"size": "s" | "m" | "l", "hosts": [...], "data": [...], "about": "..."}
+    manifest: Mapped[dict] = mapped_column(JSONB, default=dict)
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_custom_widgets_root", "root_id", "version"),)
+
+
 class ScreenState(Base):
     """How a user's main screen is laid out (nexus_common/screen.py): the orb, plain lists or a
     board of widgets, and what's open over it. One row per user, so a reload or a second device

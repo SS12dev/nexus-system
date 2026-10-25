@@ -1186,7 +1186,16 @@ export interface ScreenOpData {
   recall?: Recalled;
 }
 
-export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note";
+export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note" | "custom";
+
+/** What a custom widget asks for: its size class, the web hosts it fetches from and the Nexus
+ * data it reads, each approved once. */
+export interface WidgetManifest {
+  size: "s" | "m" | "l";
+  hosts: string[];
+  data: string[];
+  about: string;
+}
 
 /** A widget on the main screen. The server keeps the time: a timer has ends_at, not a
  * countdown, so every device shows the same. */
@@ -1206,6 +1215,12 @@ export interface Widget {
     text?: string;
     zones?: string[];
     rang_at?: string;
+    /** custom: the version on screen, how many there are, and what it may use. */
+    custom_id?: string;
+    version?: number;
+    versions?: number;
+    manifest?: WidgetManifest;
+    approved?: { hosts: string[]; data: string[] };
   };
   slot: number;
   chat_id: string | null;
@@ -1215,7 +1230,7 @@ export interface Widget {
 }
 
 export interface WidgetInput {
-  kind: WidgetKind;
+  kind: Exclude<WidgetKind, "custom">;
   title?: string;
   minutes?: number;
   time?: string;
@@ -1225,4 +1240,7 @@ export interface WidgetInput {
   zones?: string[];
 }
 
-export type WidgetAction = "pause" | "resume" | "reset" | "add_time" | "snooze" | "dismiss" | "remove";
+export type WidgetAction = "pause" | "resume" | "reset" | "add_time" | "snooze" | "dismiss" | "remove" | "undo";
+
+/** A call from a custom widget's page (window.nexus) that the app forwards to the server. */
+export type BridgeCall = "state.get" | "state.set" | "fetch" | "data" | "notify";
