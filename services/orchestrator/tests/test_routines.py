@@ -6,8 +6,10 @@ from sqlalchemy import select
 
 from nexus_common import whatsapp
 from nexus_common.models import (
+    Chat,
     Message,
     MessageRole,
+    Notification,
     RoleName,
     Routine,
     RoutineRun,
@@ -100,6 +102,9 @@ async def test_a_run_posts_in_its_chat_without_learning(deps, enqueued, routine,
     assert run.status == "ok" and run.message_id == rows[1].id and run.output_tokens == 4
     assert r.last_run_at is not None and r.failures == 0
     assert not [j for j in enqueued.jobs if j[0] == "extract_memories"]
+    # It ran in a hidden chat that stays out of the chat list.
+    async with sessionmaker() as db:
+        assert (await db.get(Chat, r.chat_id)).kind == "routine"
     # The same slot never runs twice.
     assert await routines.run_routine(deps, rid, slot) is None
 
@@ -125,8 +130,12 @@ async def test_failures_pause_the_routine(deps, model, routine, sessionmaker):
     async with sessionmaker() as db:
         r = await db.get(Routine, rid)
     assert not r.enabled and r.next_run_at is None and r.failures == 3
-    last = (await messages(sessionmaker, r.chat_id))[-1]
-    assert "I paused **Morning brief** after 3 failed runs" in last.content
+    # The pause is a notice, not a message in the hidden chat.
+    async with sessionmaker() as db:
+        notices = (await db.scalars(select(Notification))).all()
+    assert [n.title for n in notices] == ["Paused Morning brief"]
+    assert "3 failed runs in a row" in notices[0].body
+    assert notices[0].url == f"/routines?open={rid}"
 
 
 async def test_skipped_without_budget(deps, gateway, routine, sessionmaker, settings):
@@ -165,7 +174,9 @@ async def test_delivery_by_email_and_whatsapp(deps, routine, sessionmaker, monke
         deps.settings.smtp_host = deps.settings.smtp_from = ""
         deps.settings.whatsapp_token = deps.settings.whatsapp_phone_number_id = ""
     assert sent["email"]["Subject"] == "Morning brief"
-    assert "Hello there, Shivam." in sent["email"].get_body(("plain",)).get_content()
+    plain = sent["email"].get_body(("plain",)).get_content()
+    assert "Hello there, Shivam." in plain
+    assert f"/routines?open={rid}" in plain
     assert sent["whatsapp"] == ("+919812345678", ["Morning brief", "Hello there, Shivam."])
     async with sessionmaker() as db:
         run = await db.scalar(select(RoutineRun))
@@ -275,7 +286,7 @@ async def test_push_delivery(deps, routine, sessionmaker, monkeypatch):
     finally:
         deps.settings.vapid_public_key = deps.settings.vapid_private_key = ""
         deps.settings.vapid_subject = ""
-    assert '"title": "Morning brief"' in sent[0] and "/c/" in sent[0]
+    assert '"title": "Morning brief"' in sent[0] and f"/routines?open={rid}" in sent[0]
     async with sessionmaker() as db:
         run = await db.scalar(select(RoutineRun))
     assert run.delivered == ["push"]

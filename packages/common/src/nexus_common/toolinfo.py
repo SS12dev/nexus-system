@@ -70,7 +70,7 @@ TOOLS: list[ToolInfo] = [
         "Schedule a routine",
         "write",
         "Save a prompt that runs on a schedule as the user (a morning brief, a weekly digest), "
-        "posting into a chat of its own.",
+        "with its results on the Routines page.",
     ),
     ToolInfo("list_routines", "List routines", "read", "List the user's scheduled routines."),
     ToolInfo(

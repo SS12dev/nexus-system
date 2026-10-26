@@ -121,8 +121,8 @@ def welcome_text(user: User, routines: list[Routine], prompts: list[str]) -> str
         lines += [f"- **{r.name}**: {lower_first(describe(r.schedule))}" for r in routines]
         lines += [
             "",
-            "Each one posts in a chat of its own. Change, pause or add routines on the "
-            '**Routines** page, or just ask me ("every Monday at 9, send me …").',
+            "Their results are on the **Routines** page, not in your chats. Change, pause or "
+            'add routines there, or just ask me ("every Monday at 9, send me …").',
         ]
     lines += [
         "",

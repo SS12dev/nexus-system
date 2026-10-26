@@ -38,7 +38,7 @@ export interface ChatState {
   linksVersion: number;
   /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
   runFeed: Record<string, FeedItem[]>;
-  /** Bumped when a routine is added, changed or runs, so the Routines page and chat list reload. */
+  /** Bumped when a routine is added, changed or runs, so the Routines page and orb reload. */
   routinesVersion: number;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;

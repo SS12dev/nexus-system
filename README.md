@@ -303,7 +303,8 @@ assistant has `create_routine`, `list_routines` and `update_routine`.
 - **Running.** Every minute the orchestrator claims the routines that are due (`FOR UPDATE SKIP
   LOCKED`), moves each to its next time and queues `run_routine` once per routine and slot
   (`routine_runs` has a unique row per slot, so a retry never runs it twice). A run is an
-  ordinary chat turn in the routine's own chat, with the person's memory, tools and Google
+  ordinary chat turn in the routine's own hidden chat (`chats.kind = 'routine'`, kept out of the
+  chat list and memory summaries; its replies show in the run history on the Routines page), with the person's memory, tools and Google
   services, and the local date and time in the prompt. Routine runs skip the team router and
   don't feed memory extraction: a team every morning would eat a $5 budget in days, and a news
   digest says nothing new about the person. A run more than an hour late (the worker was down)

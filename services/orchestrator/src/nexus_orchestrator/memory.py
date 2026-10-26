@@ -387,6 +387,8 @@ async def summarize_chats(deps: TurnDeps, limit: int = 20) -> int:
             .where(
                 User.status == UserStatus.active,
                 Profile.memory_enabled.is_not(False),
+                # A routine's runs (a news digest) say nothing about the person.
+                Chat.kind == "chat",
                 counts.c.n >= 2,
                 or_(
                     (Chat.updated_at < idle_before)

@@ -229,6 +229,8 @@ class RoutineRunOut(BaseModel):
     error: str | None
     started_at: datetime
     finished_at: datetime | None
+    # What the run said (its reply), for reading on the Routines page.
+    content: str | None = None
 
 
 class SchedulePreviewIn(BaseModel):

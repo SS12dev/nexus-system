@@ -88,8 +88,13 @@ def message_out(
 
 @router.get("", response_model=list[ChatOut])
 async def list_chats(user: CurrentUser, db: DbDep):
+    """The person's conversations. Routines run in hidden chats of their own, which stay out:
+    their runs are on the Routines page."""
     rows = await db.scalars(
-        select(Chat).where(Chat.user_id == user.id).order_by(Chat.updated_at.desc()).limit(200)
+        select(Chat)
+        .where(Chat.user_id == user.id, Chat.kind == "chat")
+        .order_by(Chat.updated_at.desc())
+        .limit(200)
     )
     return rows.all()
 

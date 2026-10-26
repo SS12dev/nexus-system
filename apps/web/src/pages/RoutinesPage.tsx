@@ -10,10 +10,11 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { confirmAction, toast } from "../components/Feedback";
 import { Guide, GuideHeading } from "../components/Guide";
+import { Markdown } from "../components/Markdown";
 import { SchedulePicker } from "../components/SchedulePicker";
 import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
@@ -46,7 +47,8 @@ const CHANNELS: { id: Channel; label: string; icon: typeof Mail }[] = [
   { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
 ];
 
-/** Prompts that run on a schedule as you, each posting in a chat of its own. */
+/** Prompts that run on a schedule as you. They stay out of the chat list: each run's result is
+ * read in the routine's history here (notices and emails link to /routines?open=<id>). */
 export function RoutinesPage() {
   const user = useStore((s) => s.user)!;
   const assistant = useAssistantName();
@@ -56,6 +58,8 @@ export function RoutinesPage() {
   const [editing, setEditing] = useState<Routine | "new" | null>(null);
   const [error, setError] = useState("");
   const canEdit = hasRole(user, "member");
+  const [params] = useSearchParams();
+  const focus = params.get("open");
   const timezone = user.timezone || browserTimezone();
 
   const load = useCallback(
@@ -90,7 +94,7 @@ export function RoutinesPage() {
   const remove = async (r: Routine) => {
     const ok = await confirmAction({
       title: `Delete ${r.name}?`,
-      body: "It stops running and its history goes. Its chat stays.",
+      body: "It stops running, and its history and results go too.",
       confirmLabel: "Delete",
       danger: true,
     });
@@ -119,7 +123,8 @@ export function RoutinesPage() {
         </div>
         <p className="mb-4 text-sm text-slate-400">
           Things {assistant} does for you on a schedule, like a morning brief or a weekly digest.
-          Each one posts in a chat of its own. Times are in {timezone}.
+          They don't clutter your chats: each run's result is in the routine's history below,
+          and can also come to your phone or inbox. Times are in {timezone}.
         </p>
         <Guide title="How routines work">
           <div>
@@ -132,8 +137,8 @@ export function RoutinesPage() {
           <div>
             <GuideHeading>When it runs</GuideHeading>
             <p>
-              It's a normal chat turn on your budget, with your memory and connected Google
-              services. "Only tell me when there's something new" keeps digests quiet on slow days.
+              It's a normal turn on your budget, with your memory and connected Google services,
+              but it stays out of your chat list: open History to read what each run found. "Only tell me when there's something new" keeps digests quiet on slow days.
               After three failed runs in a row a routine pauses itself and says why.
             </p>
           </div>
@@ -167,6 +172,8 @@ export function RoutinesPage() {
               <RoutineCard
                 key={r.id}
                 routine={r}
+                version={version}
+                focused={focus === r.id}
                 canEdit={canEdit}
                 onToggle={() =>
                   act(
@@ -221,6 +228,8 @@ export function RoutinesPage() {
 
 function RoutineCard({
   routine: r,
+  version,
+  focused,
   canEdit,
   onToggle,
   onRun,
@@ -228,6 +237,10 @@ function RoutineCard({
   onDelete,
 }: {
   routine: Routine;
+  /** Bumped when any routine changes or runs: an open history reloads. */
+  version: number;
+  /** Opened from a notice or email: show the history with the latest result. */
+  focused: boolean;
   canEdit: boolean;
   onToggle: () => void;
   onRun: () => void;
@@ -235,14 +248,31 @@ function RoutineCard({
   onDelete: () => void;
 }) {
   const [history, setHistory] = useState<RoutineRun[] | null>(null);
-  const [open, setOpen] = useState(false);
-  const toggleHistory = async () => {
-    setOpen(!open);
-    if (!open) setHistory(await api.routineRuns(r.id).catch(() => []));
-  };
+  const [open, setOpen] = useState(focused);
+  // The run whose result is shown; by default the latest one that said something.
+  const [reading, setReading] = useState<string | null>(null);
+  const card = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    api
+      .routineRuns(r.id)
+      .then((runs) => live && setHistory(runs))
+      .catch(() => live && setHistory([]));
+    return () => {
+      live = false;
+    };
+  }, [open, r.id, version]);
+  useEffect(() => {
+    if (focused) card.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [focused]);
+  const shown = reading ?? history?.find((h) => h.content)?.id ?? null;
   const status = r.last_status ? STATUS[r.last_status] : null;
   return (
-    <li className={`rounded-lg border border-edge bg-panel p-4 ${r.enabled ? "" : "opacity-70"}`}>
+    <li
+      ref={card}
+      className={`scroll-mt-4 rounded-lg border bg-panel p-4 ${focused ? "border-sky-500/50" : "border-edge"} ${r.enabled ? "" : "opacity-70"}`}
+    >
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -284,18 +314,13 @@ function RoutineCard({
         )}
       </div>
       <div className="mt-3 flex flex-wrap gap-2 border-t border-edge pt-3 text-sm">
-        {r.chat_id && (
-          <Link
-            to={`/c/${r.chat_id}`}
-            className="rounded-md border border-edge px-2.5 py-1 hover:bg-edge/60"
-          >
-            Open chat
-          </Link>
-        )}
         {canEdit && (
           <>
             <button
-              onClick={onRun}
+              onClick={() => {
+                setOpen(true);
+                onRun();
+              }}
               className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 hover:bg-edge/60"
             >
               <Play size={13} /> Run now
@@ -315,7 +340,8 @@ function RoutineCard({
           </>
         )}
         <button
-          onClick={toggleHistory}
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
           className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:text-slate-200"
         >
           History
@@ -339,15 +365,31 @@ function RoutineCard({
             <li className="text-slate-500">It hasn't run yet.</li>
           ) : (
             history.map((h) => (
-              <li key={h.id} className="flex flex-wrap items-center gap-2">
-                <span className={`rounded px-1.5 py-0.5 ${STATUS[h.status].style}`}>
-                  {STATUS[h.status].label}
-                </span>
-                <span className="text-slate-400">{formatInZone(h.started_at, r.timezone)}</span>
-                {h.delivered.length > 0 && (
-                  <span className="text-slate-500">sent by {h.delivered.join(" and ")}</span>
+              <li key={h.id}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded px-1.5 py-0.5 ${STATUS[h.status].style}`}>
+                    {STATUS[h.status].label}
+                  </span>
+                  <span className="text-slate-400">{formatInZone(h.started_at, r.timezone)}</span>
+                  {h.delivered.length > 0 && (
+                    <span className="text-slate-500">sent by {h.delivered.join(" and ")}</span>
+                  )}
+                  {h.error && <span className="text-rose-300">{h.error}</span>}
+                  {h.content && (
+                    <button
+                      onClick={() => setReading(shown === h.id ? "" : h.id)}
+                      aria-expanded={shown === h.id}
+                      className="ml-auto rounded-md px-1.5 py-0.5 text-sky-300 hover:bg-edge/60"
+                    >
+                      {shown === h.id ? "Hide result" : "Read result"}
+                    </button>
+                  )}
+                </div>
+                {h.content && shown === h.id && (
+                  <div className="mt-2 mb-3 max-h-[60vh] overflow-y-auto rounded-md border border-edge bg-ink/60 p-3">
+                    <Markdown size="sm">{h.content}</Markdown>
+                  </div>
                 )}
-                {h.error && <span className="text-rose-300">{h.error}</span>}
               </li>
             ))
           )}

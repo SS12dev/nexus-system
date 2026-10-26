@@ -17,7 +17,7 @@ from nexus_api.schemas import (
     SchedulePreviewIn,
     SchedulePreviewOut,
 )
-from nexus_common.models import AuditLog, Routine, RoutineRun, User, utcnow
+from nexus_common.models import AuditLog, Message, Routine, RoutineRun, User, utcnow
 from nexus_common.routines import (
     RoutineLimit,
     ScheduleError,
@@ -25,6 +25,7 @@ from nexus_common.routines import (
     check_timezone,
     clean_delivery,
     describe,
+    remove_routine,
     reschedule,
     routine_payload,
     upcoming,
@@ -142,9 +143,9 @@ async def update_routine(
 
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_routine(routine_id: uuid.UUID, user: MemberUser, db: DbDep):
-    """Delete the routine and its run history. Its chat stays, like any other chat."""
+    """Delete the routine, its run history and the hidden chat it ran in."""
     r = await own_routine(db, user, routine_id)
-    await db.delete(r)
+    await remove_routine(db, r)
     db.add(AuditLog(actor_id=user.id, action="routine.deleted", target=str(routine_id)))
     await db.commit()
 
@@ -159,11 +160,19 @@ async def run_now(routine_id: uuid.UUID, user: MemberUser, db: DbDep, queue: Que
 
 @router.get("/{routine_id}/runs", response_model=list[RoutineRunOut])
 async def runs(routine_id: uuid.UUID, user: CurrentUser, db: DbDep):
+    """The latest runs, each with what it said: routines aren't in the chat list, so this is
+    where their results are read."""
     r = await own_routine(db, user, routine_id)
-    rows = await db.scalars(
-        select(RoutineRun)
+    rows = await db.execute(
+        select(RoutineRun, Message.content)
+        .outerjoin(Message, Message.id == RoutineRun.message_id)
         .where(RoutineRun.routine_id == r.id)
         .order_by(RoutineRun.started_at.desc())
         .limit(30)
     )
-    return rows.all()
+    out = []
+    for run, content in rows.all():
+        item = RoutineRunOut.model_validate(run)
+        item.content = content or None
+        out.append(item)
+    return out

@@ -162,6 +162,8 @@ export interface RoutineRun {
   error: string | null;
   started_at: string;
   finished_at: string | null;
+  /** What the run said: routines stay out of the chat list, so their results are read here. */
+  content: string | null;
 }
 
 export interface RoutineInput {
