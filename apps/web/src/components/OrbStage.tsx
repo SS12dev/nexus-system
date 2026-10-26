@@ -32,6 +32,7 @@ import {
   NODE_COLOR,
   OUTSIDE_TYPES,
   plain,
+  profileEntities,
   satellites,
   SATELLITE_COLOR,
   works,
@@ -165,7 +166,7 @@ export function OrbStage({
     () => layoutInside(graph, memories, { stars: perf.maxStars, memories: perf.maxMemories }, litIds),
     [graph, memories, perf.maxStars, perf.maxMemories, litIds],
   );
-  const known = graph?.entities.filter((e) => !e.is_self && !OUTSIDE_TYPES.has(e.type)).length ?? 0;
+  const known = useMemo(() => profileEntities(graph).length, [graph]);
   const projectList = useMemo(() => works(projects, folders, fileList), [projects, folders, fileList]);
   // Each moon's thread goes to its topic: a routine from a profile pack to that pack's
   // profession or interest; a project to what the project Nexus knows by that name relates

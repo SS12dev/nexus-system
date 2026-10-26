@@ -319,7 +319,7 @@ function Lines({ stars, lines, lit }: { stars: StarPoint[]; lines: StarLine[]; l
         (lit.has(l.a) && lit.has(l.b)) || ((lit.has(l.a) || lit.has(l.b)) && (l.a === self || l.b === self));
       const seed = hash(`${l.a}:${l.b}`);
       if (lights) put(hot, a, b, RECALL_COLOR, 1, seed);
-      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended ? 0.6 : 1, seed);
+      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended || l.implied ? 0.5 : 1, seed);
     }
     return { normal, hot };
   }, [stars, lines, lit]);
