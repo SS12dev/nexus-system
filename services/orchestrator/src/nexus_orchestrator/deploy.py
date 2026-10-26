@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from nexus_common.apps import app_name, deploy_args
 from nexus_common.deployer import DeployerError, DeployResult
+from nexus_common.events import Event, publish
 from nexus_common.hostnames import NoFreeName
 from nexus_common.models import Project, RoleName, User, utcnow
 from nexus_orchestrator.artifacts import save_generated
@@ -99,4 +100,9 @@ async def deploy_project(
                 row = await db.get(Project, project_id)
                 row.screenshot_file_id = shot.id
                 await db.commit()
+    await publish(
+        deps.redis,
+        row.user_id,
+        Event(type="project.updated", data={"id": str(project_id)}),
+    )
     return result

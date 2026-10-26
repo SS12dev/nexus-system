@@ -13,6 +13,7 @@ EventType = Literal[
     "message.completed",
     "message.failed",
     "chat.updated",
+    "chat.deleted",
     "tool.call",
     "tool.done",
     "file.updated",
@@ -20,6 +21,11 @@ EventType = Literal[
     # A project folder in the library was made, renamed or removed (nexus_common.folders).
     "folder.updated",
     "folder.deleted",
+    # A software project or the deployed app attached to it changed.
+    "project.updated",
+    "project.delete_requested",
+    "project.delete_failed",
+    "project.deleted",
     # Links in the library (nexus_common.links).
     "link.updated",
     "link.deleted",
@@ -37,10 +43,12 @@ EventType = Literal[
     "approval.resolved",
     "artifact.created",
     "skill.updated",
+    "skill.deleted",
     # Sent to owners and admins: how many access requests are waiting.
     "access.pending",
     # A routine was added, changed or ran (data: routine, and status after a run).
     "routine.updated",
+    "routine.deleted",
     # A notice for the main screen's toasts and bell (nexus_common.notices), and the tray
     # being read on another device.
     "notification.created",

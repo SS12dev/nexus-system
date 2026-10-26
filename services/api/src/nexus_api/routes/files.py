@@ -265,10 +265,13 @@ async def retry(file_id: uuid.UUID, user: MemberUser, db: DbDep, queue: QueueDep
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file(file_id: uuid.UUID, user: MemberUser, db: DbDep, storage: StorageDep):
+async def delete_file(
+    file_id: uuid.UUID, user: MemberUser, db: DbDep, storage: StorageDep, redis: RedisDep
+):
     """Delete the file, its text and vectors, and its attachments to messages."""
     f = await own_file(db, user, file_id)
     key = f.storage_key
     await db.delete(f)
     await db.commit()
+    await publish(redis, user.id, Event(type="file.deleted", data={"id": str(file_id)}))
     await storage.delete(key)

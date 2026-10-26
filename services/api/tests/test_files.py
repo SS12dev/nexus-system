@@ -155,7 +155,7 @@ async def test_a_screenshot_can_be_sent_without_words(owner):
     assert resp.status_code == 422
 
 
-async def test_project_folders_rename_move_and_remove(owner, app, client_for, invite):
+async def test_project_folders_rename_move_and_remove(owner, app, client_for, invite, storage):
     resp = await owner.post("/api/folders", json={"name": "  Rocket   model "})
     assert resp.status_code == 201, resp.text
     folder = resp.json()
@@ -170,6 +170,7 @@ async def test_project_folders_rename_move_and_remove(owner, app, client_for, in
             version=2,
         )  # fmt: skip
         db.add(v2)
+        file_keys = [first.storage_key, v2.storage_key]
         await db.commit()
     moved = await owner.patch(f"/api/files/{fid}", json={"folder_id": folder["id"]})
     assert moved.json()["folder_id"] == folder["id"] and moved.json()["name"] == "rocket.stl"
@@ -186,10 +187,11 @@ async def test_project_folders_rename_move_and_remove(owner, app, client_for, in
     ).status_code == 404
     mine = (await other.post("/api/folders", json={"name": "Mine"})).json()["id"]
     assert (await owner.patch(f"/api/files/{fid}", json={"folder_id": mine})).status_code == 404
-    # Taking it out, then removing the folder, keeps the files.
+    # Taking the file out and putting it back keeps both versions in the folder.
     out = await owner.patch(f"/api/files/{fid}", json={"folder_id": None})
     assert out.json()["folder_id"] is None
     await owner.patch(f"/api/files/{fid}", json={"folder_id": folder["id"]})
     assert (await owner.delete(f"/api/folders/{folder['id']}")).status_code == 204
     files = (await owner.get("/api/files")).json()
-    assert len(files) == 2 and all(f["folder_id"] is None for f in files)
+    assert files == []
+    assert all(key not in storage.objects for key in file_keys)

@@ -14,6 +14,7 @@ export function AppsPage() {
   const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const owner = isOwner(user);
+  const projectsVersion = useStore((s) => s.projectsVersion);
   const [apps, setApps] = useState<AppItem[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export function AppsPage() {
       .catch((e) => setError(e.message));
   }, []);
 
-  useEffect(load, [load]);
+  useEffect(load, [load, projectsVersion]);
   // While something deploys, check back now and then.
   useEffect(() => {
     if (!apps?.some((a) => a.state === "building")) return;

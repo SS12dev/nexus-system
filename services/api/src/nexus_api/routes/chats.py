@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_api.appsettings import refuse_during_maintenance
-from nexus_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, SettingsDep
+from nexus_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import messages_limit
 from nexus_api.schemas import (
     ChatCreateIn,
@@ -19,6 +19,7 @@ from nexus_api.schemas import (
     SendMessageIn,
     SendMessageOut,
 )
+from nexus_common.events import Event, publish
 from nexus_common.models import (
     Attachment,
     Chat,
@@ -116,10 +117,11 @@ async def rename_chat(chat_id: uuid.UUID, body: ChatUpdateIn, user: MemberUser, 
 
 
 @router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_chat(chat_id: uuid.UUID, user: MemberUser, db: DbDep):
+async def delete_chat(chat_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     chat = await own_chat(db, user, chat_id)
     await db.delete(chat)
     await db.commit()
+    await publish(redis, user.id, Event(type="chat.deleted", data={"id": str(chat_id)}))
 
 
 @router.get("/{chat_id}/messages", response_model=list[MessageOut])

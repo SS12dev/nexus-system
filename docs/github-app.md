@@ -32,7 +32,7 @@ Repository permissions, and nothing else:
 
 | Permission | Access | Why |
 | --- | --- | --- |
-| Administration | Read and write | repo settings (making `main` the default branch) and moving a repo to your account ("move it to my GitHub") |
+| Administration | Read and write | repo settings (making `main` the default branch), moving a repo to your account, and deleting managed repos with project deletion |
 | Repository creation | Read and write | create a repo per project (newer GitHub forms list this separately; on older ones Administration covers it) |
 | Contents | Read and write | push the team's branch and move `main` to it |
 | Metadata | Read-only | required by GitHub for every App |
@@ -88,6 +88,18 @@ Say "move 2048 to my GitHub, I'm SS12dev". Nexus starts a small team whose agent
 an approval card before calling `github_transfer`. GitHub then emails that account to accept
 the transfer. Only the owner can do this. Once moved, Nexus stops pushing to it; later
 changes stay in the workbench.
+
+## Deleting a software project
+
+The Library's software-project card has a separate, irreversible delete action. It removes the
+project's running app, workbench directory, associated Library files and links, project record,
+and—if the repo is still in the managed organisation—the GitHub repo. Nexus asks for confirmation
+before queuing the cleanup. If a team run or app build is active, finish or cancel it first.
+
+A repo transferred to a personal account is not deleted: Nexus no longer owns or administers it.
+The confirmation explains this before local project data is removed. Deleting a Library folder
+is a different action: it removes that folder and its files, but does not delete a software
+project or its GitHub repo. Backups are not affected.
 
 ## If something goes wrong
 

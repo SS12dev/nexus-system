@@ -13,6 +13,7 @@ class RecordingQueue:
         self.profiles: list[uuid.UUID] = []
         self.runs: list[tuple[str, uuid.UUID]] = []
         self.deploys: list[uuid.UUID] = []
+        self.project_deletes: list[uuid.UUID] = []
         self.link_previews: list[uuid.UUID] = []
         self.access_notices: list[tuple[str, uuid.UUID]] = []
         self.reviews: list[uuid.UUID] = []
@@ -40,6 +41,11 @@ class RecordingQueue:
 
     async def enqueue_deploy(self, project_id):
         self.deploys.append(project_id)
+
+    async def enqueue_project_delete(self, project_id):
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.project_deletes.append(project_id)
 
     async def enqueue_link_preview(self, link_id):
         self.link_previews.append(link_id)

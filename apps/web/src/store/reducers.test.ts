@@ -114,6 +114,20 @@ describe("phase 2 events", () => {
     expect(s.memoryVersion).toBe(1);
   });
 
+  it("refreshes project-backed screens and retains cleanup failures until retry or deletion", () => {
+    let s = applyEvent(initialState, { type: "project.updated", data: { id: "p1" } });
+    expect(s.projectsVersion).toBe(1);
+    s = applyEvent(s, {
+      type: "project.delete_failed",
+      data: { id: "p1", error: "Try again" },
+    });
+    expect(s.projectDeletionErrors.p1).toBe("Try again");
+    s = applyEvent(s, { type: "project.delete_requested", data: { id: "p1" } });
+    expect(s.projectDeletionErrors.p1).toBeUndefined();
+    s = applyEvent(s, { type: "project.deleted", data: { id: "p1" } });
+    expect(s.projectsVersion).toBe(4);
+  });
+
   it("puts what a reply remembered on it and lights it in the orb, through to the stored reply", () => {
     const recalled = { memories: ["m1"], entities: [{ id: "e1", name: "Nexus", type: "project" as const }] };
     let s = addMessages(initialState, "c1", [msg()]);
@@ -255,17 +269,21 @@ describe("orb data", () => {
   });
 
   it("adds artifacts as they are made and removes deleted files", () => {
-    let s = applyEvent(initialState, { type: "artifact.created", data: { file: file("f1") } });
+    let s = addMessages(initialState, "c1", [msg({ attachments: [file("f1")] })]);
+    s = applyEvent(s, { type: "artifact.created", data: { file: file("f1") } });
     expect(s.files.f1).toBeDefined();
     s = applyEvent(s, { type: "file.deleted", data: { id: "f1" } });
     expect(s.files.f1).toBeUndefined();
+    expect(s.messages.c1[0].attachments).toEqual([]);
   });
 
-  it("takes a removed project's files out of it and bumps the folder version", () => {
+  it("only removes files after their deletion event and bumps the folder version", () => {
     let s = applyEvent(initialState, { type: "artifact.created", data: { file: { ...file("f1"), folder_id: "d1" } } });
     s = applyEvent(s, { type: "folder.deleted", data: { id: "d1" } });
-    expect(s.files.f1.folder_id).toBeNull();
+    expect(s.files.f1.folder_id).toBe("d1");
     expect(s.foldersVersion).toBe(1);
+    s = applyEvent(s, { type: "file.deleted", data: { id: "f1" } });
+    expect(s.files.f1).toBeUndefined();
   });
 
   it("syncs files but keeps uploads still being processed", () => {

@@ -62,6 +62,18 @@ class WorkbenchClient:
             raise WorkbenchError(f"Couldn't open the project ({resp.status_code}).")
         self._ready.add((user, project))
 
+    async def delete_project(self, user: str, project: str) -> None:
+        """Delete a project without ensure(), which would recreate a missing workspace."""
+        response = await self._send("DELETE", f"/projects/{user}/{project}")
+        if response.status_code == 404 and _detail(response) == "No such project.":
+            self._ready.discard((user, project))
+            return
+        if response.status_code >= 400:
+            raise WorkbenchError(
+                _detail(response) or f"The workbench refused ({response.status_code})."
+            )
+        self._ready.discard((user, project))
+
     async def _call(self, method: str, user: str, project: str, path: str, **kw) -> dict:
         await self.ensure(user, project)
         url = f"/projects/{user}/{project}{path}"

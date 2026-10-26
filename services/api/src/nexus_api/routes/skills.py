@@ -321,10 +321,11 @@ async def rollback(
 
 
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_skill(skill_id: uuid.UUID, user: MemberUser, db: DbDep):
+async def delete_skill(skill_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     s = await editable(db, user, skill_id)
     if s.scope == SkillScope.core:
         raise HTTPException(status.HTTP_409_CONFLICT, "Core skills can be disabled, not deleted")
     db.add(AuditLog(actor_id=user.id, action="skill.delete", target=s.slug))
     await db.delete(s)
     await db.commit()
+    await publish(redis, user.id, Event(type="skill.deleted", data={"id": str(skill_id)}))

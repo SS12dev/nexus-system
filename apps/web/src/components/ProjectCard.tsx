@@ -1,4 +1,4 @@
-import { ExternalLink, FolderGit2, GitBranch, Globe } from "lucide-react";
+import { ExternalLink, FolderGit2, GitBranch, Globe, Trash2 } from "lucide-react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
@@ -19,7 +19,17 @@ export function projectWhere(p: Project): string {
 }
 
 /** A software project in the Library: its repo, stack and latest commit, never its files. */
-export function ProjectCard({ project: p }: { project: Project }) {
+export function ProjectCard({
+  project: p,
+  onDelete,
+  deleting = false,
+  deleteError,
+}: {
+  project: Project;
+  onDelete?: (project: Project) => void;
+  deleting?: boolean;
+  deleteError?: string;
+}) {
   const where = projectWhere(p);
   return (
     <div className="rounded-xl border border-edge bg-panel p-3">
@@ -73,7 +83,20 @@ export function ProjectCard({ project: p }: { project: Project }) {
             Open chat
           </Link>
         )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(p)}
+            disabled={deleting}
+            aria-label={`Delete project ${p.name}`}
+            className="ml-auto flex items-center gap-1 text-rose-300 hover:text-rose-200 disabled:opacity-50"
+          >
+            <Trash2 size={13} />
+            {deleting ? "Deleting…" : "Delete project"}
+          </button>
+        )}
       </div>
+      {deleteError && <p role="alert" className="mt-2 text-xs text-rose-400">{deleteError}</p>}
     </div>
   );
 }

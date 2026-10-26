@@ -163,6 +163,13 @@ class GitHubApp:
         }
         return _repo((await self._request("POST", f"/orgs/{self.org}/repos", json=body)).json())
 
+    async def delete_repo(self, name: str, owner: str | None = None) -> None:
+        """Permanently delete a repository the App can administer.
+
+        A missing repo is already gone.
+        """
+        await self._request("DELETE", f"/repos/{owner or self.org}/{name}", ok=(404,))
+
     async def update_main(self, repo: Repo, branch: str, sha: str) -> str:
         """Bring main to the pushed branch: create it on a new repo, fast-forward it when it can,
         otherwise merge the branch in. Returns what happened, in a few words."""

@@ -90,6 +90,9 @@ class FakeGitHub:
             rest = "/".join(parts[3:])
             if name not in self.repos:
                 return httpx.Response(404, json={"message": "Not Found"})
+            if method == "DELETE" and not rest:
+                del self.repos[name]
+                return httpx.Response(204)
             if method == "GET" and not rest:
                 return httpx.Response(200, json=self.repo_json(name))
             if method == "PATCH" and not rest:
@@ -170,6 +173,15 @@ async def test_installation_token_is_cached_until_near_expiry(gh, fake_gh):
         "repositories": ["2048"],
         "permissions": {"contents": "write"},
     }
+
+
+async def test_delete_repo_is_idempotent(gh, fake_gh):
+    await gh.create_repo("2048")
+
+    await gh.delete_repo("2048", ORG)
+    await gh.delete_repo("2048", ORG)
+
+    assert "2048" not in fake_gh.repos
 
 
 async def test_main_is_created_then_fast_forwarded_then_merged(gh, fake_gh):

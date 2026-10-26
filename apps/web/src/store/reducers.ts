@@ -26,6 +26,10 @@ export interface ChatState {
   files: Record<string, FileItem>;
   /** Bumped whenever Nexus changes a memory or the profile, so open pages can refresh. */
   memoryVersion: number;
+  /** Bumped when software projects or their deployed app state changes. */
+  projectsVersion: number;
+  /** Project removals the orchestrator could not finish, keyed by project id. */
+  projectDeletionErrors: Record<string, string>;
   /** Agent systems seen this session, with their latest run, kept live by events. */
   systems: Record<string, AgentSystem>;
   /** Approval requests seen this session, pending or decided. */
@@ -71,6 +75,8 @@ export const initialState: ChatState = {
   activity: null,
   files: {},
   memoryVersion: 0,
+  projectsVersion: 0,
+  projectDeletionErrors: {},
   systems: {},
   approvals: {},
   agentsVersion: 0,
@@ -307,7 +313,19 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         ...upsertApprovals(state, [event.data.approval]),
         agentsVersion: state.agentsVersion + 1,
       };
+    case "chat.updated":
+      return { ...state, chats: upsertChat(state.chats, event.data.chat) };
+    case "chat.deleted": {
+      const { [event.data.id]: _removed, ...messages } = state.messages;
+      return {
+        ...state,
+        chats: state.chats.filter((chat) => chat.id !== event.data.id),
+        messages,
+      };
+    }
     case "skill.updated":
+      return { ...state, skillsVersion: state.skillsVersion + 1 };
+    case "skill.deleted":
       return { ...state, skillsVersion: state.skillsVersion + 1 };
     case "link.updated":
     case "link.deleted":
@@ -315,17 +333,36 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     case "folder.updated":
       return { ...state, foldersVersion: state.foldersVersion + 1 };
     case "folder.deleted": {
-      // Its files stay, out of any folder.
-      const files: Record<string, FileItem> = {};
-      for (const [id, f] of Object.entries(state.files))
-        files[id] = f.folder_id === event.data.id ? { ...f, folder_id: null } : f;
-      return { ...state, files, foldersVersion: state.foldersVersion + 1 };
+      return { ...state, foldersVersion: state.foldersVersion + 1 };
     }
+    case "project.updated":
+    case "project.delete_requested":
+    case "project.deleted": {
+      const { [event.data.id]: _error, ...projectDeletionErrors } = state.projectDeletionErrors;
+      return { ...state, projectDeletionErrors, projectsVersion: state.projectsVersion + 1 };
+    }
+    case "project.delete_failed":
+      return {
+        ...state,
+        projectsVersion: state.projectsVersion + 1,
+        projectDeletionErrors: { ...state.projectDeletionErrors, [event.data.id]: event.data.error },
+      };
+    case "routine.deleted":
+      return { ...state, routinesVersion: state.routinesVersion + 1 };
     case "artifact.created":
       return { ...state, files: upsertFile(state.files, event.data.file) };
     case "file.deleted": {
       const { [event.data.id]: _gone, ...files } = state.files;
-      return { ...state, files };
+      const messages: Record<string, Message[]> = {};
+      for (const [chatId, list] of Object.entries(state.messages)) {
+        messages[chatId] = list.some((m) => m.attachments?.some((a) => a.id === event.data.id))
+          ? list.map((m) => ({
+              ...m,
+              attachments: m.attachments?.filter((a) => a.id !== event.data.id),
+            }))
+          : list;
+      }
+      return { ...state, files, messages };
     }
     case "file.updated": {
       const file = event.data.file;

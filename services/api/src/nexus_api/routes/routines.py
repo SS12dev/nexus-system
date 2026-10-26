@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, SettingsDep
+from nexus_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.schemas import (
     RoutineIn,
     RoutineOut,
@@ -17,6 +17,7 @@ from nexus_api.schemas import (
     SchedulePreviewIn,
     SchedulePreviewOut,
 )
+from nexus_common.events import Event, publish
 from nexus_common.models import AuditLog, Message, Routine, RoutineRun, User, utcnow
 from nexus_common.routines import (
     RoutineLimit,
@@ -142,12 +143,13 @@ async def update_routine(
 
 
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_routine(routine_id: uuid.UUID, user: MemberUser, db: DbDep):
+async def delete_routine(routine_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     """Delete the routine, its run history and the hidden chat it ran in."""
     r = await own_routine(db, user, routine_id)
     await remove_routine(db, r)
     db.add(AuditLog(actor_id=user.id, action="routine.deleted", target=str(routine_id)))
     await db.commit()
+    await publish(redis, user.id, Event(type="routine.deleted", data={"id": str(routine_id)}))
 
 
 @router.post("/{routine_id}/run", status_code=status.HTTP_202_ACCEPTED)

@@ -11,9 +11,18 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, DeployerDep, OwnerUser, QueueDep, SettingsDep
+from nexus_api.deps import (
+    CurrentUser,
+    DbDep,
+    DeployerDep,
+    OwnerUser,
+    QueueDep,
+    RedisDep,
+    SettingsDep,
+)
 from nexus_common import apps
 from nexus_common.deployer import DeployerError
+from nexus_common.events import Event, publish
 from nexus_common.models import Project, RoleName, User, utcnow
 from nexus_common.settings import Settings
 
@@ -104,6 +113,10 @@ async def deployer_call(call) -> None:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
 
+async def announce_project(redis, row: Project) -> None:
+    await publish(redis, row.user_id, Event(type="project.updated", data={"id": str(row.id)}))
+
+
 @router.get("", response_model=list[AppOut])
 async def list_apps(user: CurrentUser, db: DbDep, deployer: DeployerDep):
     q = select(Project, User).join(User, User.id == Project.user_id)
@@ -119,29 +132,43 @@ async def list_apps(user: CurrentUser, db: DbDep, deployer: DeployerDep):
 
 
 @router.post("/{app_id}/stop", response_model=AppOut)
-async def stop(app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep):
+async def stop(
+    app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep, redis: RedisDep
+):
     row, owner = await own_app(db, user, app_id)
     await deployer_call(deployer.stop(row.app_slug))
     row.app_state, row.updated_at = "stopped", utcnow()
     await db.commit()
+    await announce_project(redis, row)
     return out(row, owner, {})
 
 
 @router.post("/{app_id}/restart", response_model=AppOut)
 async def restart(
-    app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep, settings: SettingsDep
+    app_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbDep,
+    deployer: DeployerDep,
+    settings: SettingsDep,
+    redis: RedisDep,
 ):
     row, owner = await own_app(db, user, app_id)
     await check_limit(db, settings, row, owner)
     await deployer_call(deployer.restart(row.app_slug))
     row.app_state, row.updated_at = "running", utcnow()
     await db.commit()
+    await announce_project(redis, row)
     return out(row, owner, {})
 
 
 @router.post("/{app_id}/redeploy", response_model=AppOut, status_code=status.HTTP_202_ACCEPTED)
 async def redeploy(
-    app_id: uuid.UUID, user: CurrentUser, db: DbDep, queue: QueueDep, settings: SettingsDep
+    app_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbDep,
+    queue: QueueDep,
+    settings: SettingsDep,
+    redis: RedisDep,
 ):
     """Build and start the app again from its project folder."""
     row, owner = await own_app(db, user, app_id)
@@ -149,21 +176,30 @@ async def redeploy(
     row.app_state, row.updated_at = "building", utcnow()
     await db.commit()
     await queue.enqueue_deploy(row.id)
+    await announce_project(redis, row)
     return out(row, owner, {})
 
 
 @router.patch("/{app_id}", response_model=AppOut)
-async def set_internet(app_id: uuid.UUID, body: InternetIn, user: OwnerUser, db: DbDep):
+async def set_internet(
+    app_id: uuid.UUID, body: InternetIn, user: OwnerUser, db: DbDep, redis: RedisDep
+):
     """Let an app reach the internet, or not, from its next deploy. Owner only."""
     row, owner = await own_app(db, user, app_id)
     row.internet, row.updated_at = body.internet, utcnow()
     await db.commit()
+    await announce_project(redis, row)
     return out(row, owner, {})
 
 
 @router.post("/{app_id}/visibility", response_model=AppOut)
 async def set_visibility(
-    app_id: uuid.UUID, body: VisibilityIn, user: CurrentUser, db: DbDep, deployer: DeployerDep
+    app_id: uuid.UUID,
+    body: VisibilityIn,
+    user: CurrentUser,
+    db: DbDep,
+    deployer: DeployerDep,
+    redis: RedisDep,
 ):
     """Public: anyone with the link. Private: only its owner and Nexus's owner, after signing
     in. Takes effect at once; the app isn't rebuilt."""
@@ -174,11 +210,14 @@ async def set_visibility(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     if result is not None and not result.ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, result.error or "It didn't restart.")
+    await announce_project(redis, row)
     return out(row, owner, {})
 
 
 @router.delete("/{app_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete(app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep):
+async def delete(
+    app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep, redis: RedisDep
+):
     """Remove the app's containers and image. The project, its folder and repo stay, so it
     can be deployed again."""
     row, _ = await own_app(db, user, app_id)
@@ -186,3 +225,4 @@ async def delete(app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: Depl
     row.app_state = row.live_url = row.deployed_at = row.deploy_error = None
     row.app_slug, row.updated_at = None, utcnow()
     await db.commit()
+    await announce_project(redis, row)

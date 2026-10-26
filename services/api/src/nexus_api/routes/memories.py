@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, EmbedderDep, MemberUser, QueueDep
+from nexus_api.deps import CurrentUser, DbDep, EmbedderDep, MemberUser, QueueDep, RedisDep
 from nexus_api.schemas import (
     MemoryCreateIn,
     MemoryEventOut,
@@ -19,11 +19,20 @@ from nexus_api.schemas import (
     ProfileUpdateIn,
 )
 from nexus_common import graph
+from nexus_common.events import Event, publish
 from nexus_common.memory import get_profile, mark_profile_stale, record
 from nexus_common.models import Entity, Episode, Memory, MemoryEvent, User, utcnow
 from nexus_common.search import hybrid_search
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
+
+
+async def announce_change(redis, user: User, op: str, memory_id: uuid.UUID | str) -> None:
+    await publish(
+        redis,
+        user.id,
+        Event(type="memory.updated", data={"op": op, "memory": {"id": str(memory_id)}}),
+    )
 
 
 async def own_memory(db: AsyncSession, user: User, memory_id: uuid.UUID) -> Memory:
@@ -70,7 +79,9 @@ async def list_memories(
 
 
 @router.post("", response_model=MemoryOut, status_code=status.HTTP_201_CREATED)
-async def add_memory(body: MemoryCreateIn, user: MemberUser, db: DbDep, embedder: EmbedderDep):
+async def add_memory(
+    body: MemoryCreateIn, user: MemberUser, db: DbDep, embedder: EmbedderDep, redis: RedisDep
+):
     vec, model = await embedder.try_embed_one(db, body.content)
     m = Memory(
         id=uuid.uuid4(),
@@ -88,6 +99,7 @@ async def add_memory(body: MemoryCreateIn, user: MemberUser, db: DbDep, embedder
     record(db, m, "add", "user", m.content)
     await mark_profile_stale(db, user.id)
     await db.commit()
+    await announce_change(redis, user, "add", m.id)
     return m
 
 
@@ -111,7 +123,7 @@ async def rebuild_profile(user: MemberUser, queue: QueueDep):
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def forget_everything(user: MemberUser, db: DbDep):
+async def forget_everything(user: MemberUser, db: DbDep, redis: RedisDep):
     """Delete every memory, past-chat summary, connection and the profile text."""
     await db.execute(delete(Entity).where(Entity.user_id == user.id))
     await db.execute(delete(Memory).where(Memory.user_id == user.id))
@@ -119,6 +131,7 @@ async def forget_everything(user: MemberUser, db: DbDep):
     profile = await get_profile(db, user.id)
     profile.content, profile.built_at, profile.stale = "", None, False
     await db.commit()
+    await announce_change(redis, user, "forget_all", "all")
 
 
 @router.get("/graph")
@@ -128,13 +141,14 @@ async def get_graph(user: CurrentUser, db: DbDep):
 
 
 @router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_entity(entity_id: uuid.UUID, user: MemberUser, db: DbDep):
+async def delete_entity(entity_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     """Remove a person, project or topic and its connections. Memories about it stay."""
     e = await db.scalar(select(Entity).where(Entity.id == entity_id, Entity.user_id == user.id))
     if e is None or e.is_self:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     await db.delete(e)
     await db.commit()
+    await announce_change(redis, user, "delete_entity", entity_id)
 
 
 @router.get("/{memory_id}/events", response_model=list[MemoryEventOut])
@@ -148,7 +162,12 @@ async def memory_events(memory_id: uuid.UUID, user: CurrentUser, db: DbDep):
 
 @router.patch("/{memory_id}", response_model=MemoryOut)
 async def update_memory(
-    memory_id: uuid.UUID, body: MemoryUpdateIn, user: MemberUser, db: DbDep, embedder: EmbedderDep
+    memory_id: uuid.UUID,
+    body: MemoryUpdateIn,
+    user: MemberUser,
+    db: DbDep,
+    embedder: EmbedderDep,
+    redis: RedisDep,
 ):
     m = await own_memory(db, user, memory_id)
     if body.content is not None and body.content.strip() != m.content:
@@ -168,12 +187,18 @@ async def update_memory(
     m.updated_at = utcnow()
     await mark_profile_stale(db, user.id)
     await db.commit()
+    await announce_change(redis, user, "update", m.id)
     return m
 
 
 @router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(
-    memory_id: uuid.UUID, user: MemberUser, db: DbDep, queue: QueueDep, rebuild: bool = False
+    memory_id: uuid.UUID,
+    user: MemberUser,
+    db: DbDep,
+    queue: QueueDep,
+    redis: RedisDep,
+    rebuild: bool = False,
 ):
     """Delete a memory. With rebuild=true the profile is rebuilt now instead of overnight, so
     the deleted fact leaves the profile at once."""
@@ -185,3 +210,4 @@ async def delete_memory(
     await db.commit()
     if rebuild:
         await queue.enqueue_profile_rebuild(user.id)
+    await announce_change(redis, user, "delete", memory_id)

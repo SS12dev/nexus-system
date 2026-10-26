@@ -92,7 +92,13 @@ export const useStore = create<Store>((set) => ({
     set((s) => ({ messages: { ...s.messages, [chatId]: messages } })),
   mergeFetched: (chatId, messages) => set((s) => mergeFetched(s, chatId, messages)),
   addMessages: (chatId, messages) => set((s) => addMessages(s, chatId, messages)),
-  handleEvent: (event) => set((s) => applyEvent(s, event)),
+  handleEvent: (event) =>
+    set((s) => {
+      const next = applyEvent(s, event);
+      if (event.type === "file.deleted" && s.viewer?.file.id === event.data.id)
+        return { ...next, viewer: null };
+      return next;
+    }),
   upsertFile: (file) => set((s) => ({ files: upsertFile(s.files, file) })),
   syncFiles: (files) => set((s) => ({ files: syncFiles(s.files, files) })),
   upsertSystems: (systems) => set((s) => upsertSystems(s, systems)),

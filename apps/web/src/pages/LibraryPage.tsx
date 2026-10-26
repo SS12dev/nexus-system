@@ -41,6 +41,9 @@ export function LibraryPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const foldersVersion = useStore((s) => s.foldersVersion);
+  const projectsVersion = useStore((s) => s.projectsVersion);
+  const projectDeletionErrors = useStore((s) => s.projectDeletionErrors);
+  const [deletingProjects, setDeletingProjects] = useState<Set<string>>(() => new Set());
   const [params] = useSearchParams();
   const focus = params.get("folder");
   const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
@@ -70,7 +73,7 @@ export function LibraryPage() {
       .projects()
       .then(setProjects)
       .catch(() => {});
-  }, [upsertFile]);
+  }, [upsertFile, projectsVersion]);
 
   // Links reload whenever one is added, changed or removed, here or by Nexus in a chat.
   useEffect(() => {
@@ -177,18 +180,45 @@ export function LibraryPage() {
   };
 
   const removeFolder = async (d: Folder) => {
+    const folderFiles = Object.values(useStore.getState().files).filter((file) => file.folder_id === d.id);
     const ok = await confirmAction({
-      title: `Remove the project ${d.name}?`,
-      body: "Its files stay in your library, out of any project.",
-      confirmLabel: "Remove",
+      title: `Permanently delete ${d.name} and its files?`,
+      body: "This permanently deletes the folder and all files stored in it, including their stored contents. This does not delete a software project or its GitHub repository.",
+      confirmLabel: "Delete folder and files",
       danger: true,
     });
     if (!ok) return;
     run(async () => {
       await api.deleteFolder(d.id);
       setFolders((xs) => xs.filter((x) => x.id !== d.id));
+      setIds((xs) => xs.filter((id) => !folderFiles.some((file) => file.id === id)));
+      for (const file of folderFiles)
+        useStore.getState().handleEvent({ type: "file.deleted", data: { id: file.id } });
       useStore.getState().handleEvent({ type: "folder.deleted", data: { id: d.id } });
     });
+  };
+
+  const removeProject = async (p: Project) => {
+    const remoteRepoMessage = p.transferred_to
+      ? ` Its GitHub repository was transferred to ${p.transferred_to}, so Nexus cannot delete that repository.`
+      : p.repo_url
+        ? " Its managed GitHub repository will also be permanently deleted."
+        : "";
+    const ok = await confirmAction({
+      title: `Permanently delete ${p.name}?`,
+      body: `This permanently deletes the software project's workbench files, project record, associated Library files and any running app.${remoteRepoMessage} This cannot be undone.`,
+      confirmLabel: "Delete project permanently",
+      danger: true,
+    });
+    if (!ok) return;
+    setError("");
+    try {
+      await api.deleteProject(p.id);
+      setDeletingProjects((current) => new Set(current).add(p.id));
+      useStore.getState().handleEvent({ type: "project.delete_requested", data: { id: p.id } });
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const toggle = (id: string) =>
@@ -387,7 +417,13 @@ export function LibraryPage() {
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               {projects.map((p) => (
-                <ProjectCard key={p.id} project={p} />
+                <ProjectCard
+                  key={p.id}
+                  project={p}
+                  onDelete={canEdit ? removeProject : undefined}
+                  deleting={deletingProjects.has(p.id) && !projectDeletionErrors[p.id]}
+                  deleteError={projectDeletionErrors[p.id]}
+                />
               ))}
             </div>
           </section>

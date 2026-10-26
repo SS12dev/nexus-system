@@ -245,6 +245,8 @@ export const api = {
 
   files: () => request<FileItem[]>("/api/files"),
   projects: () => request<Project[]>("/api/projects"),
+  deleteProject: (id: string) =>
+    request<{ queued: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
   links: (q?: string) => request<LinkItem[]>(`/api/links${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   addLink: (url: string, title?: string, note?: string) =>
     request<LinkItem>("/api/links", { method: "POST", body: json({ url, title: title || null, note: note || null }) }),

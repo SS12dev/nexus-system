@@ -687,6 +687,7 @@ export type ServerEvent =
   | { type: "message.completed"; chat_id: string; data: { message: Message } }
   | { type: "message.failed"; chat_id: string; data: { message: Message } }
   | { type: "chat.updated"; chat_id: string; data: { chat: Chat } }
+  | { type: "chat.deleted"; chat_id?: null; data: { id: string } }
   | {
       type: "tool.call";
       chat_id: string | null;
@@ -713,13 +714,17 @@ export type ServerEvent =
   | { type: "approval.resolved"; chat_id?: string | null; data: { approval: Approval; run_continues: boolean } }
   | { type: "artifact.created"; chat_id?: string | null; data: { file: FileItem } }
   | { type: "skill.updated"; chat_id?: null; data: { skill: Skill } }
+  | { type: "skill.deleted"; chat_id?: null; data: { id: string } }
   | { type: "link.updated"; chat_id?: null; data: { link: LinkItem } }
   | { type: "link.deleted"; chat_id?: null; data: { id: string } }
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
   | { type: "folder.updated"; chat_id?: null; data: { folder: Folder } }
   | { type: "folder.deleted"; chat_id?: null; data: { id: string } }
+  | { type: "project.updated" | "project.delete_requested" | "project.deleted"; chat_id?: null; data: { id: string } }
+  | { type: "project.delete_failed"; chat_id?: null; data: { id: string; error: string } }
   | { type: "access.pending"; chat_id?: null; data: { count: number } }
   | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
+  | { type: "routine.deleted"; chat_id?: null; data: { id: string } }
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
   | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }

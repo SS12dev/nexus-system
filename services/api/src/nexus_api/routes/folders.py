@@ -1,5 +1,5 @@
 """Project folders in the library (nexus_common.folders): list them with their file counts,
-make one to move files into, rename one, or remove one (its files stay, out of any folder).
+make one to move files into, rename one, or permanently remove one and its files.
 Each belongs to one user; other users get a 404."""
 
 import uuid
@@ -8,11 +8,11 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, MemberUser, RedisDep
+from nexus_api.deps import CurrentUser, DbDep, MemberUser, RedisDep, StorageDep
 from nexus_api.schemas import FolderIn, FolderOut
 from nexus_common.events import Event, publish
 from nexus_common.folders import file_counts, folder_payload
-from nexus_common.models import Folder, User
+from nexus_common.models import File, Folder, User
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
@@ -66,9 +66,25 @@ async def rename_folder(
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_folder(folder_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
-    """Remove the folder only: its files stay in the library, out of any folder."""
+async def delete_folder(
+    folder_id: uuid.UUID,
+    user: MemberUser,
+    db: DbDep,
+    redis: RedisDep,
+    storage: StorageDep,
+):
+    """Permanently remove the folder, its files, and their stored bytes."""
     f = await own_folder(db, user, folder_id)
+    rows = await db.scalars(
+        select(File).where(File.user_id == user.id, File.folder_id == folder_id)
+    )
+    files = rows.all()
+    for file in files:
+        await db.delete(file)
     await db.delete(f)
     await db.commit()
+    for file in files:
+        await publish(redis, user.id, Event(type="file.deleted", data={"id": str(file.id)}))
     await publish(redis, user.id, Event(type="folder.deleted", data={"id": str(folder_id)}))
+    for file in files:
+        await storage.delete(file.storage_key)

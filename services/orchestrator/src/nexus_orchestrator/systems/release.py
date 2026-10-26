@@ -13,6 +13,8 @@ from datetime import datetime
 
 from sqlalchemy import select
 
+from nexus_common.events import Event
+from nexus_common.events import publish as publish_event
 from nexus_common.models import Project, RoleName, User, utcnow
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.links import keep_release_link
@@ -72,7 +74,14 @@ async def save_project(rc: RunContext, dev: dict) -> Project:
             row.last_commit, row.last_commit_message, row.last_commit_at = sha, subject, when
         row.updated_at = utcnow()
         await db.commit()
-        return row
+        project_id = row.id
+    await publish_event(
+        rc.deps.redis,
+        rc.user.id,
+        Event(type="project.updated", data={"id": str(project_id)}),
+    )
+    async with rc.deps.sessionmaker() as db:
+        return await db.get(Project, project_id)
 
 
 async def set_identity(rc: RunContext) -> None:
@@ -142,6 +151,11 @@ async def publish(rc: RunContext, dev: dict) -> dict:
         row.branch, row.merged = branch, merged
         row.updated_at = utcnow()
         await db.commit()
+    await publish_event(
+        rc.deps.redis,
+        rc.user.id,
+        Event(type="project.updated", data={"id": str(row.id)}),
+    )
     # The code lives on GitHub; the library keeps a link to it, shown on the team's answer.
     await keep_release_link(
         rc.deps,

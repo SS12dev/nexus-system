@@ -99,6 +99,7 @@ export function OrbStage({
   const [projects, setProjects] = useState<Project[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const foldersVersion = useStore((s) => s.foldersVersion);
+  const projectsVersion = useStore((s) => s.projectsVersion);
   const [packInfo, setPackInfo] = useState<Pick<Profiles, "packs" | "interests">>({
     packs: [],
     interests: [],
@@ -127,7 +128,7 @@ export function OrbStage({
   }, []);
   useEffect(() => {
     api.projects().then(setProjects).catch(() => {});
-  }, [connected, Object.keys(files).length]);
+  }, [connected, Object.keys(files).length, projectsVersion]);
   // A team saving several files announces its folder each time; take the last of the burst.
   useEffect(() => {
     const t = window.setTimeout(() => api.folders().then(setFolders).catch(() => {}), 300);

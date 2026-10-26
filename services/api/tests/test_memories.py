@@ -41,6 +41,31 @@ async def test_delete_is_real_and_can_rebuild_the_profile(owner, queue):
     assert len(queue.profiles) == 1
 
 
+async def test_memory_changes_publish_events_for_live_orb_refresh(owner, sessionmaker, monkeypatch):
+    events = []
+
+    async def capture(_redis, _user_id, event):
+        events.append(event)
+
+    monkeypatch.setattr("nexus_api.routes.memories.publish", capture)
+    m = await add(owner, "Builds Nexus on LangGraph")
+    assert events[-1].type == "memory.updated" and events[-1].data["op"] == "add"
+
+    await owner.patch(f"/api/memories/{m['id']}", json={"pinned": True})
+    assert events[-1].data["op"] == "update"
+
+    nexus_id, _lg_id = await seed_graph(sessionmaker, "owner@example.com", m["id"])
+    await owner.delete(f"/api/memories/entities/{nexus_id}")
+    assert events[-1].data["op"] == "delete_entity"
+
+    await owner.delete(f"/api/memories/{m['id']}")
+    assert events[-1].data["op"] == "delete"
+
+    await add(owner, "Works on Nexus")
+    await owner.delete("/api/memories")
+    assert events[-1].data["op"] == "forget_all"
+
+
 async def test_profile_settings_and_forget_everything(owner, queue):
     await add(owner, "Works on Jarvis")
     resp = await owner.patch("/api/memories/profile", json={"memory_enabled": False})
