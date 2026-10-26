@@ -41,6 +41,28 @@ def test_no_secret_is_ever_listed():
     assert all(o.help and o.label for o in config.OPTIONS)
 
 
+def test_every_setting_can_come_from_env():
+    """compose.yaml passes containers only the variables it names, so a setting missing there
+    would ignore .env and the Admin page would show a built-in default as the .env value."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    compose = (root / "compose.yaml").read_text()
+    block = compose[compose.index("x-nexus-env:") : compose.index("x-langfuse-env:")]
+    passed = set(re.findall(r"^\s+([A-Z][A-Z0-9_]+):", block, re.M))
+    example = set(re.findall(r"^#? ?([A-Z][A-Z0-9_]+)=", (root / ".env.example").read_text(), re.M))
+    assert [o.env for o in config.OPTIONS if o.env not in passed] == []
+    assert [o.env for o in config.OPTIONS if o.env not in example] == []
+    # The compose fallbacks are the same as the built-in defaults.
+    for o in config.OPTIONS:
+        m = re.search(rf"^\s+{o.env}: \$\{{{o.env}:?-(.*)\}}$", block, re.M)
+        if m is None or "${" in m.group(1):
+            continue
+        default = Settings.model_fields[o.name].default
+        assert config.validate(o, m.group(1) or default) == config.validate(o, default), o.env
+
+
 def test_values_are_checked():
     opt = config.BY_NAME
     assert config.validate(opt["chat_model"], "nexus-pro") == "nexus-pro"

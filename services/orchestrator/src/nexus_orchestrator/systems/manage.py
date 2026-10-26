@@ -180,14 +180,14 @@ def system_tools(
         db, system: AgentSystem, request: str, file_ids: list[uuid.UUID], budget: float | None
     ) -> str:
         """Add the run, commit, announce and queue it. Returns what Nexus tells the user."""
-        if (
-            budget is not None
-            and system.topology == "dev_project"
-            and budget < deps.settings.dev_run_budget_usd
-            and not named_a_sum(asked)
-        ):
-            # A software team works in review rounds; a small budget Nexus picked itself (the
-            # user named no sum) only stops it before the fixes are made. The default stands.
+        default = (
+            deps.settings.dev_run_budget_usd
+            if system.topology == "dev_project"
+            else deps.settings.default_run_budget_usd
+        )
+        if budget is not None and budget < default and not named_a_sum(asked):
+            # A budget under the owner's default that Nexus picked itself (the user named no
+            # sum) only cuts the team off early; the default on the Admin page stands.
             budget = None
         live = await active_run(db, system.id)
         if live is not None:
@@ -234,12 +234,22 @@ def system_tools(
         await enqueue_run(deps, "run_system", run.id)
         spec = AgentSystemSpec.model_validate(system.spec)
         where = f", workbench project {spec.project}" if spec.project else ""
+        wanted = budget or spec.budget_usd or default
+        why = (
+            "the user's figure"
+            if budget
+            else "this team's saved budget"
+            if spec.budget_usd
+            else "the default from Admin > Configuration"
+        )
+        if float(run.budget_usd) < wanted - 0.005:
+            why += ", cut to the per-run maximum or what is left this period"
         return (
             f"Started {system.name} (system {system.id}, run {run.id}{where}).\n{describe(spec)}\n"
             f"Estimated ${float(run.estimate_usd or 0):.2f} of a ${float(run.budget_usd):.2f} "
-            "budget. The result and files will be posted in this chat when it finishes; risky "
-            "steps will ask the user for approval first. The user can watch, pause or stop it "
-            "from the card in this chat or the Agents page."
+            f"budget ({why}). The result and files will be posted in this chat when it "
+            "finishes; risky steps will ask the user for approval first. The user can watch, "
+            "pause or stop it from the card in this chat or the Agents page."
         )
 
     async def build_agent_system(
@@ -264,8 +274,8 @@ def system_tools(
         deliverables: files wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's
         files to work from
         (default: this chat's files). budget_usd: the user's budget in USD, only when they
-        named a sum or agreed to one you offered; when they ask to keep a non-software task
-        cheap without a figure, pass 0.25; otherwise (always for software) leave it out. best_model:
+        named a sum or agreed to one you offered; otherwise leave it out and the owner's default
+        applies (a request to keep it cheap means a cheaper team, not a smaller budget). best_model:
         only when the user asked for the best model. keep: true only when the user said to keep
         or reuse this team; otherwise leave it out: the team is removed after the run and the
         user is asked whether to keep it. based_on: the run id of an earlier result to change

@@ -545,6 +545,45 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
     assert "already running" in again
 
 
+@pytest.mark.parametrize(
+    "asked,budget,expected",
+    [
+        # Nexus's own small figure (the user named no sum): the owner's default stands.
+        ("Make me a 3D printable rocket, keep it cheap", 0.25, "0.5000"),
+        ("Make me a 3D printable rocket for $0.20", 0.2, "0.2000"),  # the user's sum
+        ("yes, go up to 2 dollars", 2.0, "2.0000"),
+        ("go ahead", 1.0, "1.0000"),  # more than the default is never cut back
+    ],
+)
+async def test_a_team_budget_is_the_users_sum_or_the_owners_default(
+    sdeps, owner, scripts, asked, budget, expected
+):
+    user, chat_id = owner
+    spec = {
+        "name": "Rocket",
+        "goal": "A 3D printable rocket",
+        "topology": "single",
+        "agents": [agent("maker", role="maker", tools=["run_code"])],
+    }
+    scripts["nexus.design_system"] = [json.dumps({"spec": spec})]
+
+    async def emit(*a, **k):
+        pass
+
+    ctx = ToolContext(deps=sdeps, user_id=user.id, chat_id=chat_id, emit=emit)
+    tools = {t.name: t for t in system_tools(ctx, user, {"run_code"}, "trace1", asked=asked)}
+    out = await tools["build_agent_system"].ainvoke(
+        {"request": "A 3D printable rocket", "budget_usd": budget}
+    )
+    assert "Started Rocket" in out, out
+    async with sdeps.sessionmaker() as db:
+        run = await db.scalar(select(AgentRun))
+    assert run.budget_usd == Decimal(expected)
+    # Nexus is told where the figure came from, so it can say so.
+    source = "the default from Admin" if expected == "0.5000" else "the user's figure"
+    assert source in out
+
+
 def test_keeping_a_team_takes_the_users_own_words():
     from nexus_orchestrator.systems.manage import asked_to_keep
 
