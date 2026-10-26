@@ -444,10 +444,14 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
 }
 
 const QUICK_TIMERS = [1, 5, 10, 25];
+// Roughly how tall the add menu is, to decide which way it opens.
+const MENU_HEIGHT = 340;
 
 /** The + on the dock: a timer, stopwatch, alarm, clock or note by hand. */
 function AddWidget({ empty, compact, board = false }: { empty: boolean; compact: boolean; board?: boolean }) {
   const [open, setOpen] = useState(false);
+  // Opens downwards unless there isn't room below and there is more above.
+  const [up, setUp] = useState(false);
   const [minutes, setMinutes] = useState("");
   const [time, setTime] = useState("07:00");
   const [error, setError] = useState("");
@@ -475,7 +479,12 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
   return (
     <div ref={box} className="relative shrink-0">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const below = window.innerHeight - r.bottom;
+          setUp(below < MENU_HEIGHT && r.top > below);
+          setOpen((v) => !v);
+        }}
         aria-expanded={open}
         title="Add a widget"
         className={`flex items-center gap-1.5 rounded-xl border border-dashed border-edge bg-panel/60 px-3 py-2 text-xs text-slate-400 backdrop-blur hover:border-sky-400/60 hover:text-sky-200 ${
@@ -486,9 +495,9 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
       </button>
       {open && (
         <div
-          className={`absolute top-full z-30 mt-1 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl ${
-            board ? "left-0" : "right-0 lg:bottom-full lg:top-auto lg:mb-1 lg:mt-0"
-          }`}
+          className={`absolute z-30 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl ${
+            up ? "bottom-full mb-1" : "top-full mt-1"
+          } ${board ? "left-0" : "right-0"}`}
         >
           <p className="px-2 pb-1 text-[11px] text-slate-500">
             Or just ask: "set a timer for 10 minutes", "wake me at 7 on weekdays", "remind me to call mum at 6".
