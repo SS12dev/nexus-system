@@ -39,6 +39,7 @@ export const TOOL_LABEL: Record<string, string> = {
   skills_read_file: "Reading a skill",
   skills_search: "Looking for a skill",
   present_result: "Picking the result to show you",
+  view_image: "Looking at the picture",
   start_timer: "Starting a timer",
   set_alarm: "Setting an alarm",
   remind_me: "Setting a reminder",

@@ -61,3 +61,36 @@ async def test_check_reports_a_part_too_big_for_the_bed(run, b64, skill_files):
     result = await run(code, files, language="bash", timeout_s=240)
     assert result["exit_code"] == 1
     assert "PROBLEM" in result["stdout"] and "bed" in result["stdout"]
+
+
+async def test_points_and_poles_are_not_holes(run, skill_files):
+    # OpenCascade leaves sliver triangles at a cone's tip and a sphere's poles; they once made
+    # check call every nose cone "not watertight, 2 pieces", so agents dropped the nose.
+    code = (
+        "set -e\n"
+        "python -c \"from build123d import *; export_step(Cone(12, 0, 30), 'out/cone.step'); "
+        "export_stl(Sphere(10), 'out/ball.stl')\"\n"
+        f"{TOOL} check out/cone.step --one-piece\n"
+        f"{TOOL} check out/ball.stl --one-piece\n"
+    )
+    result = await run(code, skill_files("3d-modeling"), language="bash", timeout_s=240)
+    assert result["exit_code"] == 0, result["stdout"] + result["stderr"]
+    assert result["stdout"].count("RESULT: ok") == 2
+
+
+@pytest.mark.parametrize("index", [0, 1], ids=["rocket", "minion"])
+async def test_the_shaped_examples_build_as_one_piece(run, b64, skill_files, index):
+    files = skill_files("3d-modeling")
+    doc = base64.b64decode(files["skills/core/3d-modeling/references/shapes.md"]).decode()
+    example = doc.split("```python\n")[index + 1].split("```")[0]
+    code = (
+        "set -e\n"
+        "python work/model.py\n"
+        f"{TOOL} check out/*.step --one-piece\n"
+        f"{TOOL} render out/*.step out/preview.png --views iso\n"
+    )
+    result = await run(
+        code, {**files, "work/model.py": b64(example)}, language="bash", timeout_s=240
+    )
+    assert "RESULT: ok" in result["stdout"], result["stdout"] + result["stderr"]
+    assert out(result, "out/preview.png")[:4] == b"\x89PNG"

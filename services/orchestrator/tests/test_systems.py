@@ -2,6 +2,7 @@
 reject), pause/resume, cancel, budget checks, tier policy and Nexus's build tool."""
 
 import asyncio
+import base64
 import json
 import time
 import uuid
@@ -34,6 +35,7 @@ from nexus_common.models import (
 from nexus_common.notices import featured
 from nexus_common.spec import AgentSystemSpec
 from nexus_common.systems import BudgetProblem, control_run, decide_approval, new_run
+from nexus_orchestrator.artifacts import save_generated
 from nexus_orchestrator.systems import runner, runtime
 from nexus_orchestrator.systems.learn import draft_skill
 from nexus_orchestrator.systems.manage import system_tools
@@ -665,3 +667,40 @@ async def test_a_stopped_run_gets_no_notice(sdeps, owner, scripts):
     await runner.finish(sdeps, run_id, RunStatus.cancelled)
     async with sdeps.sessionmaker() as db:
         assert await db.scalar(select(Notification).where(Notification.run_id == run_id)) is None
+
+
+# --- Looking at pictures ---------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+async def test_an_agent_sees_the_render_it_asks_for(sdeps, owner, scripts, seen):
+    user, _ = owner
+    _, run_id = await make_run(sdeps, owner, "single", [agent("solo", tools=["view_image"])])
+    await save_generated(sdeps, user.id, "rocket.png", PNG, run_id=run_id)
+    await save_generated(sdeps, user.id, "notes.md", b"# not a picture", run_id=run_id)
+    scripts["solo"] = [
+        {"tool": "view_image", "args": {"name": "out/rocket.png"}},
+        {"tool": "view_image", "args": {"name": "notes.md"}},
+        {"tool": "view_image", "args": {"name": "rocket.png"}},
+        {"tool": "view_image", "args": {"name": "rocket.png"}},
+        "The nose cone is there.",
+    ]
+    await runner.run_system(sdeps, run_id)
+
+    calls = seen["solo"]
+    first = calls[1][-1]
+    assert first.name == "view_image" and first.content[0] == {
+        "type": "text",
+        "text": "rocket.png:",
+    }
+    image = first.content[1]["image_url"]["url"]
+    assert image == "data:image/png;base64," + base64.b64encode(PNG).decode()
+    # A file that isn't a picture is refused in words, and nothing is attached.
+    assert "isn't a PNG" in calls[2][-1].content and calls[2][-1].name == "view_image"
+    # Only the latest two pictures stay; earlier ones become a line of text.
+    pictures = [m for m in calls[4] if m.name == "view_image" and not isinstance(m, ToolMessage)]
+    assert [isinstance(m.content, list) for m in pictures] == [False, True, True]
+    assert "no longer shown" in pictures[0].content
+    run, _ = await load(sdeps, run_id)
+    assert run.status == RunStatus.completed

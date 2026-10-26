@@ -164,6 +164,14 @@ agents that make files, and method skills (e.g. core/literature-review, core/fac
 agents whose task they cover. When the task is about Nexus itself (how it works, comparing a \
 tool or framework with it, changing it), give every agent core/nexus-system so it works from \
 the facts instead of guessing.
+- 3D models, CAD and 3D printing: one agent (topology single, role coder) with run_code and \
+view_image, plus web_search when the subject is a thing or character it may need to look up \
+and list_documents to find an earlier version, and skill core/3d-modeling; max_steps 24. \
+Tier mini for a functional part (a bracket, a box, a mount); pro for a shaped model people \
+must recognise (a vehicle, a figurine, a character). Its deliverables are the STL, STEP, 3MF \
+and preview PNG.
+- An agent that makes something visual (a chart, a render, a slide image) gets view_image to \
+look at its own output before reporting it.
 - If the request asks for something to be emailed or a document deleted, give the agent that \
 does it send_email or delete_document; the user approves each such step on an approval card \
 in the app, so don't leave it out or plan to ask in chat.

@@ -100,8 +100,11 @@ bb = part.bounding_box()
 bb.size.X, bb.min.Z
 len(part.solids())  # 1 for a single piece
 export_step(part, "out/x.step")
-export_stl(part, "out/x.stl", tolerance=0.01, angular_tolerance=0.1)
+export_stl(part, "out/x.stl", tolerance=0.01, angular_tolerance=0.1)  # or model_tool convert
 ```
+
+Curved profiles, sweeps along splines and worked rocket and figurine models are in
+`references/shapes.md`.
 
 ## Common mistakes
 
