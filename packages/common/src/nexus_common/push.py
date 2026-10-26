@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from email.utils import parseaddr
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -70,7 +71,9 @@ def _send(settings: Settings, sub: dict, data: str) -> int | None:
             subscription_info=sub,
             data=data,
             vapid_private_key=settings.vapid_private_key,
-            vapid_claims={"sub": settings.vapid_subject or f"mailto:{settings.smtp_from}"},
+            vapid_claims={
+                "sub": settings.vapid_subject or f"mailto:{parseaddr(settings.smtp_from)[1]}"
+            },
             ttl=TTL_S,
             timeout=15,
         )

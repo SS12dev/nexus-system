@@ -412,7 +412,7 @@ reuses for similar asks (Nexus only keeps a team up front when you say so).
 
 Web search uses Tavily or Brave when `TAVILY_API_KEY` or `BRAVE_API_KEY` is set (both have free
 tiers), else DuckDuckGo's HTML page, which needs no key but is less reliable. Email needs the
-`SMTP_*` settings (Gmail works with an app password).
+`SMTP_*` settings: Nexus's own mailbox, set up as in [docs/email.md](docs/email.md).
 
 ### The sandbox
 

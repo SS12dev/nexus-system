@@ -213,18 +213,11 @@ routine and press **Run now**.
 
 ## 5. Email notices
 
-Routine emails, feedback emails to you, and access-request emails use the SMTP settings. With
-Gmail: turn on 2-step verification, create an [app password](https://myaccount.google.com/apppasswords),
-then in `.env`:
-
-```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=you@gmail.com
-SMTP_FROM=Nexus <you@gmail.com>
-```
-
-and `./scripts/secrets.sh set SMTP_PASSWORD`.
+Routine emails, feedback emails to you, access-request emails and alerts come from Nexus's own
+mailbox (`SMTP_*`), not your personal address. [docs/email.md](email.md) compares the options
+and walks through the recommended one, a free Resend account sending as `nexus@servhub.cc`,
+plus a Gmail account just for Nexus as the quick alternative. Check it with **Admin ›
+Configuration › Email › Send a test email**.
 
 ## 6. Inviting friends
 

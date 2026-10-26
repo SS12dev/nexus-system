@@ -29,6 +29,7 @@ import socket
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -727,12 +728,22 @@ OPTIONS: tuple[Option, ...] = (
         "smtp_host",
         "Email",
         "SMTP server",
-        "For agents' emails (always approved first), access-request notices and alerts. Empty "
-        "turns email off. Gmail: smtp.gmail.com with an app password. The password is a "
-        "secret: ./scripts/secrets.sh set SMTP_PASSWORD.",
+        "Nexus's own mailbox, for routine results, agents' emails (always approved first), "
+        "access requests, feedback and alerts. Empty turns email off. Resend: "
+        "smtp.resend.com; a Gmail account just for Nexus: smtp.gmail.com with an app "
+        "password (docs/email.md). The password is a secret: ./scripts/secrets.sh set "
+        "SMTP_PASSWORD.",
         "text",
     ),
-    Option("smtp_port", "Email", "SMTP port", "587 for STARTTLS.", "int", min=1, max=65535),
+    Option(
+        "smtp_port",
+        "Email",
+        "SMTP port",
+        "587 upgrades with STARTTLS; 465 is TLS from the start.",
+        "int",
+        min=1,
+        max=65535,
+    ),
     Option(
         "smtp_username",
         "Email",
@@ -744,7 +755,16 @@ OPTIONS: tuple[Option, ...] = (
         "smtp_from",
         "Email",
         "From address",
-        "Shown as the sender. Empty uses the username.",
+        "Shown as the sender, such as Nexus <nexus@servhub.cc>. A bare address is named "
+        "Nexus. Empty uses the username.",
+        "text",
+    ),
+    Option(
+        "smtp_reply_to",
+        "Email",
+        "Reply-to address",
+        "Where replies go if the From address can't receive mail. Empty: replies go to the "
+        "From address. Emails an agent sends for someone always reply to that person.",
         "text",
     ),
     Option(
@@ -916,6 +936,10 @@ def _text_checks(opt: Option, value: str) -> str:
         raise ConfigError("Use a host name such as smtp.gmail.com.")
     if opt.name in ("smtp_from", "smtp_username") and value and len(value) > 254:
         raise ConfigError("Too long.")
+    if opt.name == "smtp_from" and value and not _EMAIL.match(parseaddr(value)[1]):
+        raise ConfigError("Use an address, or a name and address such as Nexus <nexus@servhub.cc>.")
+    if opt.name == "smtp_reply_to" and value and not _EMAIL.match(value.strip()):
+        raise ConfigError("Not an email address.")
     if opt.name == "langfuse_url" and not re.match(r"^https?://\S+$", value):
         raise ConfigError("Use a full address starting with http:// or https://.")
     return value

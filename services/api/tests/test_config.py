@@ -189,3 +189,46 @@ def test_log_settings_reconfigure_logging():
         for h in [h for h in root.handlers if getattr(h, "_nexus", False)]:
             root.removeHandler(h)
         config.forget(worker)
+
+
+def test_email_addresses_are_checked():
+    opt = config.BY_NAME
+    assert (
+        config.validate(opt["smtp_from"], "Nexus <nexus@servhub.cc>") == "Nexus <nexus@servhub.cc>"
+    )
+    with pytest.raises(config.ConfigError):
+        config.validate(opt["smtp_from"], "Nexus")
+    with pytest.raises(config.ConfigError):
+        config.validate(opt["smtp_reply_to"], "not an address")
+
+
+async def test_test_email_goes_to_the_owner_with_the_saved_settings(owner, settings, monkeypatch):
+    from nexus_common import mail
+
+    sent = []
+
+    async def fake_send(s, msg):
+        sent.append(msg)
+
+    monkeypatch.setattr(mail, "send", fake_send)
+    settings.smtp_host = ""
+    assert (await owner.post("/api/admin/config/test-email")).status_code == 409
+
+    await owner.put(
+        "/api/admin/config",
+        json={"values": {"smtp_host": "smtp.resend.com", "smtp_from": "nexus@servhub.cc"}},
+    )
+    resp = await owner.post("/api/admin/config/test-email")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["from"] == "Nexus <nexus@servhub.cc>"
+    assert (
+        sent[0]["To"] == resp.json()["to"]
+        and "smtp.resend.com" in sent[0].get_body(("plain",)).get_content()
+    )
+
+    async def failing(s, msg):
+        raise mail.MailError("SMTPAuthenticationError: bad key", transient=False)
+
+    monkeypatch.setattr(mail, "send", failing)
+    resp = await owner.post("/api/admin/config/test-email")
+    assert resp.status_code == 502 and "bad key" in resp.json()["detail"]

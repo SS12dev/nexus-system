@@ -194,7 +194,10 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
+    # "Name <address>" or just the address (named Nexus then).
     smtp_from: str = ""
+    # Where replies go when not to SMTP_FROM, e.g. when that address can't receive mail.
+    smtp_reply_to: str = ""
     smtp_starttls: bool = True
 
     # WhatsApp notices for routines, through Meta's WhatsApp Business Cloud API. A message

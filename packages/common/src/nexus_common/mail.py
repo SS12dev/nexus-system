@@ -1,5 +1,7 @@
 """Email from Nexus's own account over SMTP (SMTP_* in .env), for agents' send_email and for
-notices such as access requests. smtplib blocks, so sending runs in a thread.
+notices such as routines, access requests, feedback and alerts. Any SMTP server works: a
+transactional service on your own domain (docs/email.md) or a Gmail account just for Nexus.
+smtplib blocks, so sending runs in a thread.
 
 Bodies are written in Markdown (that's what models write), so every email goes out as HTML
 with a plain-text alternative: `set_body` does that for this module and for Gmail."""
@@ -8,6 +10,7 @@ import asyncio
 import re
 import smtplib
 from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 
 from markdown_it import MarkdownIt
 
@@ -101,18 +104,57 @@ def _header(value: str) -> str:
     return " ".join(value.split())
 
 
-def message(settings: Settings, to: list[str], subject: str, body: str) -> EmailMessage:
+APP = "Nexus"
+
+
+def sender(settings: Settings, on_behalf_of: str | None = None) -> str:
+    """The From header: Nexus's own address, with "Nexus" as the name when SMTP_FROM gives
+    none. For an email an agent sends for someone, "<their name> via Nexus", as Google Forms
+    and calendar invites do, so the recipient sees who it is from."""
+    raw = settings.smtp_from or settings.smtp_username
+    name, addr = parseaddr(raw)
+    if "@" not in addr:
+        return raw
+    name = _header(name) or APP
+    if on_behalf_of and _header(on_behalf_of):
+        name = f"{_header(on_behalf_of)} via {name}"
+    return formataddr((name, addr))
+
+
+def address(settings: Settings) -> str:
+    """Just the sending address, without a name."""
+    return parseaddr(settings.smtp_from or settings.smtp_username)[1]
+
+
+def message(
+    settings: Settings,
+    to: list[str],
+    subject: str,
+    body: str,
+    *,
+    reply_to: str | None = None,
+    on_behalf_of: str | None = None,
+) -> EmailMessage:
+    """`reply_to` is where a reply should go when it isn't Nexus's mailbox: the person an
+    agent wrote for, or whoever sent the feedback. Otherwise SMTP_REPLY_TO, if set."""
     msg = EmailMessage()
-    msg["From"] = settings.smtp_from or settings.smtp_username
+    msg["From"] = sender(settings, on_behalf_of)
     msg["To"] = ", ".join(to)
     msg["Subject"] = _header(subject)
+    if reply := _header(reply_to or settings.smtp_reply_to):
+        msg["Reply-To"] = reply
     set_body(msg, body)
     return msg
 
 
 def _send(settings: Settings, msg: EmailMessage) -> None:
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-        if settings.smtp_starttls:
+    # Port 465 is TLS from the first byte; 587 (and 25) upgrade with STARTTLS.
+    if settings.smtp_port == 465:
+        smtp = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30)
+    else:
+        smtp = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
+    with smtp:
+        if settings.smtp_starttls and settings.smtp_port != 465:
             smtp.starttls()
         if settings.smtp_username:
             smtp.login(settings.smtp_username, settings.smtp_password)
