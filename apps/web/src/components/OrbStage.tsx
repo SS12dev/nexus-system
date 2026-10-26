@@ -38,7 +38,7 @@ import type { Selection } from "../orb/OrbScene";
 import { hasWebGL, usePerf } from "../orb/perf";
 import { useStore } from "../store/chat";
 import { NoticeBell } from "./Notices";
-import { WidgetDock } from "./Widgets";
+import { FloatingWidgets, WidgetDock } from "./Widgets";
 import { Orb } from "./Orb";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
@@ -325,6 +325,7 @@ export function OrbStage({
           <WidgetDock compact={chat} />
         </div>
       )}
+      {!board && <FloatingWidgets compact={chat} />}
 
       {board ? null : showOrb ? (
         <div className="pointer-events-none relative z-10 flex flex-1 flex-col justify-end px-4 pb-2">

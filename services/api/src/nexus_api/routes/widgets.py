@@ -1,5 +1,6 @@
 """Widgets on the main screen (nexus_common/widgets.py): list them, add one from the dock's
-menu, press a widget's buttons, edit a note or move a widget along the dock. A custom widget
+menu, press a widget's buttons, edit a note, move a widget along the dock or drag it anywhere
+on the main screen. A custom widget
 (nexus_common/custom_widgets.py) also has its page, the bridge its page talks through, the
 person's approvals and its versions."""
 
@@ -48,11 +49,19 @@ class ApproveIn(BaseModel):
     data: list[str] = Field(default_factory=list)
 
 
+class WidgetPos(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
 class WidgetPatch(BaseModel):
     title: str | None = Field(None, max_length=TITLE_CHARS)
     text: str | None = Field(None, max_length=NOTE_CHARS)
     # Place on the dock, 1 = first.
     slot: int | None = Field(None, ge=1)
+    # Dragged somewhere on the main screen, or back into the dock (dock: true).
+    pos: WidgetPos | None = None
+    dock: bool = False
 
 
 async def _own(db, user, widget_id: uuid.UUID) -> Widget:
@@ -116,6 +125,11 @@ async def edit_widget(
         if w.kind != "note":
             raise HTTPException(status.HTTP_409_CONFLICT, "Only a note has text to edit")
         w.state = {**(w.state or {}), "text": body.text}
+    if body.pos is not None or body.dock:
+        # Placed by hand, like a move along the dock: the assistant leaves it be for a while.
+        w.pos = None if body.dock else {"x": round(body.pos.x, 4), "y": round(body.pos.y, 4)}
+        state = await sc.load(db, user.id, lock=True)
+        sc.mark_override(state, sc.override_key("move", str(w.id)))
     if body.slot is not None:
         # Moved by hand: the assistant leaves its place alone for a while.
         state = await sc.load(db, user.id, lock=True)
