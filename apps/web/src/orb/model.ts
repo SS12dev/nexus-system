@@ -101,6 +101,9 @@ export interface StarLine {
   b: string;
   /** The relation stopped being true; drawn fainter. */
   ended: boolean;
+  /** No relation joins it to anything drawn, but your memories are about it: a faint line to
+   * you, so no star floats loose. */
+  implied?: boolean;
 }
 
 /** Everything inside the orb: who you are. You at the centre, the people, organisations,
@@ -116,6 +119,30 @@ export interface Inside {
 /** Entity types that are work rather than profile: drawn outside the orb as project moons,
  * never as stars inside it. */
 export const OUTSIDE_TYPES = new Set<EntityType>(["project"]);
+
+/** A file name or path ("out/tray.3mf", "rocket_model.py"): something a team made, never part
+ * of who you are. */
+const FILE_LIKE =
+  /[\\/]|\.(3mf|stl|stp|step|obj|glb|gltf|scad|png|jpe?g|webp|svg|gif|pdf|md|txt|csv|json|ya?ml|py|ipynb|html?|docx?|xlsx?|pptx?|zip)$/i;
+
+/** The entities that make up your profile, drawn inside the orb: what your memories are about,
+ * or what is related to you directly ("Shivam works at UST"). Things that only came up while
+ * teams worked (a library they used, a film a model was based on, the files they made) and
+ * projects stay out: they are details of the work, which is outside. */
+export function profileEntities(graph: KnowledgeGraph | null): KnowledgeGraph["entities"] {
+  if (!graph) return [];
+  const self = graph.entities.find((e) => e.is_self)?.id;
+  const near = new Set<string>();
+  for (const r of graph.relations)
+    if (!r.valid_to && self && (r.src === self || r.dst === self)) near.add(r.src === self ? r.dst : r.src);
+  return graph.entities.filter(
+    (e) =>
+      !e.is_self &&
+      !OUTSIDE_TYPES.has(e.type) &&
+      !FILE_LIKE.test(e.name.trim()) &&
+      (e.memories > 0 || near.has(e.id)),
+  );
+}
 
 // --- Deterministic randomness -----------------------------------------------------------------
 
@@ -347,7 +374,7 @@ export function inside(
   limits: { stars: number; memories: number },
   focus: Set<string> = new Set(),
 ): Inside {
-  const others = (graph?.entities ?? []).filter((e) => !e.is_self && !OUTSIDE_TYPES.has(e.type));
+  const others = profileEntities(graph);
   const self = graph?.entities.find((e) => e.is_self);
   // You are always at the centre, even before the graph has anything else (or anything at all).
   const you: StarPoint = {
@@ -402,6 +429,11 @@ export function inside(
   const lines: StarLine[] = graph.relations
     .filter((rel) => rel.src !== rel.dst && byId.has(rel.src) && byId.has(rel.dst))
     .map((rel) => ({ a: rel.src, b: rel.dst, ended: !!rel.valid_to }));
+  // A star whose relations all lead to things not drawn (a project, a team's tool) would float
+  // loose; your memories are about it, so it hangs from you.
+  const joined = new Set(lines.flatMap((l) => [l.a, l.b]));
+  for (const st of stars)
+    if (!st.self && !joined.has(st.id)) lines.push({ a: you.id, b: st.id, ended: false, implied: true });
 
   // Each memory orbits the most mentioned drawn star it is about.
   const home = new Map<string, string>();

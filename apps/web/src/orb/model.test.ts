@@ -242,7 +242,7 @@ describe("the constellation", () => {
       ent("me", { type: "person", name: "Shivam", is_self: true }),
       ent("nexus", { memories: 5, memory_ids: ["m1"], file_ids: ["f1"] }),
       ent("ana", { type: "person", memories: 1, memory_ids: ["m1", "m2"] }),
-      ent("kyoto", { type: "place", memories: 0, chats: 1 }),
+      ent("kyoto", { type: "place", memories: 1, chats: 1 }),
       ent("rocket", { type: "project", memories: 9, memory_ids: ["m3"], file_ids: ["f1"] }),
     ],
     relations: [
@@ -272,7 +272,7 @@ describe("the constellation", () => {
 
   it("draws relations as lines, fainter once they ended", () => {
     const out = inside(graph, [], limits);
-    expect(out.lines).toEqual([
+    expect(out.lines.filter((l) => !l.implied)).toEqual([
       { a: "me", b: "nexus", ended: false },
       { a: "ana", b: "nexus", ended: true },
     ]);
@@ -292,6 +292,31 @@ describe("the constellation", () => {
     const out = inside(graph, [mem("m3")], limits, new Set(["rocket"]));
     expect(out.stars.map((s) => s.id)).not.toContain("rocket");
     expect(out.memories[0].star).toBeUndefined();
+  });
+
+  it("draws only your profile: what memories are about or what relates to you, never files or work-only things", () => {
+    const work: KnowledgeGraph = {
+      entities: [
+        ...graph.entities,
+        ent("tray", { type: "other", name: "out/tray.3mf", memories: 2 }),
+        ent("script", { type: "tool", name: "rocket_model.py", memories: 1 }),
+        ent("cad", { type: "tool", name: "build123d", memories: 0, chats: 3, files: 2 }),
+        ent("node", { type: "tool", name: "Node.js", memories: 0 }),
+      ],
+      relations: [
+        ...graph.relations,
+        { id: "r3", src: "me", dst: "node", predicate: "uses", fact: "", confidence: 1, valid_from: "", valid_to: null, source_chat_id: null },
+        { id: "r4", src: "rocket", dst: "cad", predicate: "built with", fact: "", confidence: 1, valid_from: "", valid_to: null, source_chat_id: null },
+      ],
+    };
+    const ids = inside(work, [], limits).stars.map((s) => s.id).sort();
+    expect(ids).toEqual(["ana", "kyoto", "me", "nexus", "node"]);
+  });
+
+  it("hangs a star with no drawn relation from you, faintly", () => {
+    const out = inside(graph, [], limits);
+    expect(out.lines).toContainEqual({ a: "me", b: "kyoto", ended: false, implied: true });
+    expect(out.lines.filter((l) => l.implied).map((l) => l.b)).toEqual(["kyoto"]);
   });
 
   it("always draws what a reply just recalled, even past the star limit", () => {
