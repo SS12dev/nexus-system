@@ -20,6 +20,7 @@ const TOPOLOGY: Record<AgentSystem["topology"], string> = {
   parallel_map_reduce: "Parallel map-reduce",
   critic_loop: "Worker and critic",
   dev_project: "Software team",
+  flow: "Designed flow",
 };
 
 /** How each shape of team works, in the words of the design prompt (systems/prompts.py). */
@@ -34,6 +35,7 @@ const TOPOLOGY_HELP: Record<AgentSystem["topology"], string> = {
   critic_loop: "A worker drafts and a critic reviews, sending it back until it passes.",
   dev_project:
     "The team for building software in a project folder: a brief, a plan, builders working side by side, tests, and a review that sends fixes back up to three times.",
+  flow: "A flow designed for this task: research first when it needs facts or references, then the making, with independent steps side by side and checkers that send work back until it passes.",
 };
 
 const LIFETIME: Record<AgentSystem["lifetime"], { label: string; help: string }> = {

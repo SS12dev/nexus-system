@@ -14,11 +14,15 @@ from nexus_common.models import (
     AgentRun,
     AgentSystem,
     File,
+    FileStatus,
+    Link,
+    RunEvent,
     SystemLifetime,
     SystemStatus,
     User,
     utcnow,
 )
+from nexus_common.notices import featured
 from nexus_common.spec import AgentSystemSpec
 from nexus_common.systems import (
     ACTIVE_RUN,
@@ -30,7 +34,7 @@ from nexus_common.systems import (
     system_payload,
 )
 from nexus_orchestrator.systems.design import DesignFailed, describe, design
-from nexus_orchestrator.tools import CALL_ID, ToolContext, as_tools
+from nexus_orchestrator.tools import CALL_ID, ToolContext, as_tools, link_line
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +114,33 @@ async def project_run(
         if (other.spec or {}).get("project") == project:
             return other, run
     return None
+
+
+async def run_results(db, run: AgentRun) -> tuple[list[File], list[Link], File | Link | None]:
+    """A finished run's files (newest version of each name), its links, and the one to open."""
+    newest: dict[str, File] = {}
+    for f in (
+        await db.scalars(
+            select(File)
+            .where(File.run_id == run.id, File.status != FileStatus.failed)
+            .order_by(File.created_at)
+        )
+    ).all():
+        newest[f.name] = f
+    files = sorted(newest.values(), key=lambda f: f.created_at)
+    links = list(
+        (
+            await db.scalars(select(Link).where(Link.run_id == run.id).order_by(Link.created_at))
+        ).all()
+    )
+    presented = await db.scalar(
+        select(RunEvent.data)
+        .where(RunEvent.run_id == run.id, RunEvent.type == "result.presented")
+        .order_by(RunEvent.created_at.desc())
+        .limit(1)
+    )
+    pick = featured(files, links, presented)
+    return files, links, pick.file or pick.link
 
 
 def system_tools(
@@ -218,13 +249,16 @@ def system_tools(
         budget_usd: float | None = None,
         best_model: bool = False,
         keep: bool = False,
+        based_on: str | None = None,
+        fresh: bool = False,
     ) -> str:
-        """Design a team of sub-agents for a big task and start it. Use for multi-step work
-        that needs research, several documents or files made (reports, decks, spreadsheets),
-        or many items handled in parallel; answer simple things yourself. Software to build,
+        """Design a team of sub-agents for a task and start it. The team's flow is designed for
+        the task: research first when it depends on facts or references, then making, then a
+        check that sends work back, with independent parts side by side. Software to build,
         fix or extend (apps, sites, games, tools) gets a dev team that plans, builds, tests and
         reviews it in a project folder, and a follow-up to an earlier app continues that
-        project. request: the whole
+        project. When something already made is what the user asks for, nothing starts: you
+        get it back to show the user and ask what to change. request: the whole
         task in the user's words plus everything you know that matters; keep every step they
         asked for, including sending or deleting, since the user approves those in the app.
         deliverables: files wanted, e.g. ["report.docx", "data.xlsx"]. file_ids: the user's
@@ -234,7 +268,9 @@ def system_tools(
         cheap without a figure, pass 0.25; otherwise (always for software) leave it out. best_model:
         only when the user asked for the best model. keep: true only when the user said to keep
         or reuse this team; otherwise leave it out: the team is removed after the run and the
-        user is asked whether to keep it."""
+        user is asked whether to keep it. based_on: the run id of an earlier result to change
+        (the user asked for changes to it); the team starts from its files. fresh: true only
+        when the user wants a new one made even though one exists."""
         await note("build_agent_system")
         # A kept team never goes away on its own, so keeping one takes the user's own words.
         if keep and asked.strip() and not asked_to_keep(asked):
@@ -248,6 +284,22 @@ def system_tools(
         async with sessionmaker() as db:
             owner = await db.get(User, user_id)
             ids = await files_for(db, file_ids)
+            base = None
+            if based_on:
+                rid = _uuid(based_on)
+                base = rid and await db.scalar(
+                    select(AgentRun).where(AgentRun.id == rid, AgentRun.user_id == user_id)
+                )
+                if not base:
+                    return "No such run to change; check the run id, or leave based_on out."
+                earlier, _, _ = await run_results(db, base)
+                # The earlier result's files are what the team changes.
+                ids += [f.id for f in earlier if f.id not in ids]
+                request = (
+                    f"{request}\n\nThis changes an earlier result (run {base.id}): its files are "
+                    "among this task's files. Start from them and change what is asked; keep "
+                    "the rest."
+                )
             names = {}
             if ids:
                 rows = await db.execute(select(File.id, File.name).where(File.id.in_(ids)))
@@ -265,9 +317,13 @@ def system_tools(
                     trace_id=trace_id,
                     chat_id=ctx.chat_id,
                     software=software,
+                    use_existing=not fresh,
+                    based_on=str(base.id) if base else "",
                 )
             except DesignFailed as exc:
                 return str(exc)
+            if result.existing is not None:
+                return await already_made(db, result.existing)
             if result.template is not None:
                 system = await db.get(AgentSystem, result.template.id)
                 return f"Using your saved template {system.name}.\n" + await start(
@@ -297,6 +353,38 @@ def system_tools(
             db.add(system)
             await db.flush()
             return await start(db, system, request, ids, budget_usd)
+
+    async def already_made(db, run: AgentRun) -> str:
+        """What Nexus tells the user when a past result already is what they asked for: the
+        files go on its reply, and it asks what to change instead of building it again."""
+        system = await db.get(AgentSystem, run.system_id)
+        files, links, main = await run_results(db, run)
+        ctx.saved.extend(files)
+        ctx.links.extend(links)
+        when = (run.finished_at or run.created_at).strftime("%d %b %Y")
+        lines = [
+            f"Not started: {system.name} already made this on {when} (run {run.id}), so "
+            "nothing was rebuilt.",
+            f"What it was asked: {run.input.strip()[:400]}" if run.input else "",
+        ]
+        if files:
+            lines.append(
+                "Its files, now attached to your reply: "
+                + ", ".join(f"{f.name} (id {f.id})" for f in files)
+            )
+        if links:
+            lines.append("Its links:\n" + "\n".join(link_line(x) for x in links))
+        if isinstance(main, File):
+            lines.append(
+                f"Open {main.name} on the user's screen with screen op focus target {main.id} "
+                "(user_asked=true: they asked for it)."
+            )
+        lines.append(
+            "Tell the user in a line or two that it already exists and ask what they'd like "
+            "changed. If they ask for changes, call build_agent_system with those changes and "
+            f"based_on={run.id}. If they want a brand-new one anyway, call it with fresh=true."
+        )
+        return "\n".join(x for x in lines if x)
 
     async def run_agent_system(
         system_id: str,

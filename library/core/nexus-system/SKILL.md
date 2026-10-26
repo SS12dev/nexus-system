@@ -58,9 +58,13 @@ reply is stored and a memory job extracts durable facts.
 
 ## Agent teams
 
-`build_agent_system` asks a designer model for a spec (`nexus_common/spec.py`): topology
-single, pipeline, supervisor_workers, parallel_map_reduce, critic_loop or dev_project; agents
-with tools, skills and tiers; a budget. Runs compile to LangGraph graphs
+`build_agent_system` asks a designer model to plan the task's flow (research, plan, make,
+check) and write a spec (`nexus_common/spec.py`): topology single, pipeline,
+supervisor_workers, parallel_map_reduce, critic_loop, flow (agents wired by `after`, side by
+side when independent, `checks` for a checker that sends work back) or dev_project; agents
+with tools, skills and tiers; a budget. When a recent finished result already is what was
+asked, it starts nothing and hands it back to open and ask what to change (`based_on` to
+change it, `fresh` to rebuild). Runs compile to LangGraph graphs
 (`systems/compile.py`, `systems/runner.py`), each with its own budgeted LiteLLM key. Risky
 tools pause the run for an approval card. dev_project (`systems/dev.py`) is a fixed team:
 brief, plan, frontend + backend build, test (Nexus wires and runs the suites itself,

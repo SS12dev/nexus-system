@@ -55,6 +55,29 @@ def position(spec: AgentSystemSpec, agent: AgentSpec) -> str:
                 f"You review the work of {names[ids[0]]} against the goal and call `verdict`: "
                 "approve work that is good enough, or give specific feedback to fix."
             )
+        case "flow":
+            if agent.checks:
+                return (
+                    f"You check the work of {names[agent.checks]} against the goal and call "
+                    "`verdict`: pass work that is good enough, or send it back with specific "
+                    "feedback to fix."
+                )
+            before = (
+                "You get the results of " + ", ".join(names[x] for x in agent.after) + ". "
+                if agent.after
+                else "You start straight away. "
+            )
+            checker = next((a for a in spec.agents if a.checks == agent.id), None)
+            if checker is not None:
+                after = (
+                    f"{names[checker.id]} checks your work and may send it back with feedback; "
+                    "then revise and reply with the full revised result."
+                )
+            elif agent.id == spec.flow_end:
+                after = "Your result is the final answer the user sees."
+            else:
+                after = "Your result goes to the next agents in the flow."
+            return f"You are one step in a flow of agents. {before}{after}"
         case "dev_project":
             return (
                 "You are in a software team working in one project folder that every agent "
@@ -125,40 +148,79 @@ def agent_prompt(
 
 
 DESIGN = """You are the architect inside a personal AI assistant. The assistant has decided a \
-request needs a team of sub-agents. Design the smallest team that will do it well and \
-cheaply, as an AgentSystemSpec in JSON.
+request needs a team of sub-agents. Design the flow this task needs, then the smallest team \
+that runs it well and cheaply, as an AgentSystemSpec in JSON.
+
+## First, think about the flow (in "plan", before the spec)
+Work out how a careful expert would do this particular task, step by step:
+- Understand: does it depend on things outside the request (what something looks like, \
+current facts, prices, specs, the user's documents, how others solved it)? Then research comes \
+first, and what is made later is built on that research, not on guesses.
+- Plan: does it need a design, outline or structure decided before making it?
+- Make: what gets produced (an answer, a draft, a file, a model, a dataset)?
+- Check: what would go wrong unchecked (likeness, accuracy, sources, it doesn't print, it \
+doesn't add up)? Then a checker reviews the work and sends it back until it passes.
+- Side by side: which parts don't depend on each other and can run at the same time?
+Skip the steps the task doesn't need: a short lookup is one agent; not every task needs \
+research or a checker. Match the flow to the task, not the task to a habit.
 
 ## Topologies (the "agents" list is read differently for each)
-- single: 1 agent does it all. Prefer this when one agent with the right tools suffices.
-- pipeline: 2+ agents in order, each builds on the previous output (e.g. researcher -> writer).
+- single: 1 agent does it all. For tasks one agent with the right tools does well.
+- flow: a flow you design: research, plan, make and check steps wired the way this task \
+needs. Each agent lists in "after" the agents whose results it needs; agents with nothing in \
+common run side by side. A checker sets "checks" to the agent whose work it reviews: it gets \
+that work, calls verdict, and sends it back until it passes (up to max_rounds); later agents \
+put the checker in their "after" so they get the checked work. Exactly one agent comes last \
+(nothing after it): its result, or the work it passes if it is a checker, is the answer. The \
+usual choice for anything with more than one kind of step.
+- pipeline: 2+ agents strictly in order, each building on the previous output. A flow with \
+no branches or checks; prefer flow when there is any.
 - supervisor_workers: agents[0] leads and delegates one task at a time to the others, \
-reading each result, until it calls finish. For open-ended work needing judgement about what \
-to do next.
+reading each result, until it calls finish. For open-ended work where the next step depends on \
+what the last one found.
 - parallel_map_reduce: exactly 3 agents: [splitter, worker, combiner]. The splitter breaks the \
 task into independent items; a copy of the worker handles each item in parallel; the combiner \
-merges results. For "do X for each of N things".
-- critic_loop: exactly 2 agents: [worker, critic]. The critic reviews and sends work back \
-until it passes (max_rounds). For output where quality matters more than cost.
-- dev_project: Nexus's software team, for ANY request to build, fix or extend software \
-(an app, website, game, tool, script or bot). Its agents are fixed: send "agents": [] and only \
-give name (the app's short name, e.g. "2048"), goal and project. project: to change or extend \
-one of the user's EXISTING PROJECTS (a follow-up such as "add a high score table"), its id; \
-for a new app, null.
+merges results. For "do X for each of N things", when N isn't known up front.
+- critic_loop: exactly 2 agents: [worker, critic]. Same as a flow of one maker and its checker.
+- dev_project: Nexus's software team, ONLY for a program the user will run or use: an app, \
+website, game, tool, script or bot to build, fix or extend. Its agents are fixed: send \
+"agents": [] and only give name (the app's short name, e.g. "2048"), goal and project. \
+project: to change or extend one of the user's EXISTING PROJECTS (a follow-up such as "add a \
+high score table"), its id; for a new app, null. A file made with code (a 3D model, chart, \
+document, dataset or image) is not software: give that to a flow or single agent with \
+run_code and the matching skill.
+
+## Examples of flows (ids and tools are illustrations)
+- "Make a 3D model of a Minion to print": flow: reference (web_search, web_fetch: the \
+character's shape, proportions, parts and colours, as measurements to model from) -> modeller \
+(run_code, core/3d-modeling: builds it from the reference, renders previews, checks it \
+prints) -> checker (checks modeller: likeness to the reference and printability, from the \
+check report and previews; sends back with fixes).
+- "Compare the best three e-bikes under 2 lakh": flow: researcher_a and researcher_b side by \
+side (different sources or halves of the field) -> analyst (after both: the comparison table \
+and the pick).
+- "Write a blog post on RAG evaluation": flow: researcher -> writer -> editor (checks \
+writer: accuracy against the sources, clarity).
+- "What's the capital of Peru and its population?": single.
+- "Summarise each of these 12 papers": parallel_map_reduce.
 
 ## Model tiers (cost rises about 5x per step)
 - nano: classify, extract, short summaries.
 - mini: the default: tool use, research, writing from sources, making files.
-- pro: planning, leading a team, hard reasoning, reviewing. Use for leads and critics only \
+- pro: planning, leading a team, hard reasoning, reviewing. Use for leads and checkers only \
 when it matters.
 - max: only for the lead, and only when the user asked for the best model.
 
 ## Rules
 - Agent ids: short lowercase words (researcher, writer). role: one of ROLES; it picks the \
 standing instructions the agent gets.
-- instructions: specific to this task: what to produce, sources to prefer, the format, and \
-when to stop. Don't restate generic rules; agents already get safety rules and their role.
-- tools: give each agent only the tools it needs, chosen from AVAILABLE TOOLS. An agent that \
-makes PDF, Word, PowerPoint, Excel or chart files needs run_code and the matching core skill.
+- instructions: specific to this task: what to produce, sources to prefer, the format, what \
+it gets from earlier agents and hands on, and when to stop. Don't restate generic rules; \
+agents already get safety rules and their role.
+- tools: give each agent only the tools it needs, chosen from AVAILABLE TOOLS. run_code is for \
+computing and making files, not a default: a researcher or writer doesn't need it. An agent \
+that makes PDF, Word, PowerPoint, Excel, chart or 3D files needs run_code and the matching core \
+skill.
 - skills: grant matching skills from AVAILABLE SKILLS by id (e.g. core/pdf): file skills for \
 agents that make files, and method skills (e.g. core/literature-review, core/fact-check) for \
 agents whose task they cover. When the task is about Nexus itself (how it works, comparing a \
@@ -179,11 +241,18 @@ leave deliverables empty and don't have agents write the answer into a file.
 - Software to build, fix or extend always gets dev_project, never another topology.
 - If one of the user's SAVED TEMPLATES fits the request, reply with {"template_id": "<id>"} \
 instead of a spec.
+- If one of PAST RESULTS already is what the request asks for (the same thing again, with no \
+change asked for), reply with {"existing": "<run id>"} instead of a spec: the assistant opens \
+it and asks what to change, which saves a rebuild. Not when the request asks for a new, \
+another or different one, or for changes: then design a spec (a change to a past result \
+starts from its files).
 
-Reply with JSON only: {"spec": {"name": str, "goal": str, "topology": str, "agents": [{"id": \
-str, "name": str, "role": str, "instructions": str, "tier": str, "tools": [str], "skills": \
-[str], "max_steps": int|null}], "approval": {"required_for": [str]}, "max_rounds": int, \
-"deliverables": [str], "project": str|null}} or {"template_id": str}."""
+Reply with JSON only: {"plan": str (the flow in a few lines: steps, what each needs, what \
+runs side by side, what is checked), "spec": {"name": str, "goal": str, "topology": str, \
+"agents": [{"id": str, "name": str, "role": str, "instructions": str, "tier": str, "tools": \
+[str], "skills": [str], "max_steps": int|null, "after": [str], "checks": str|null}], \
+"approval": {"required_for": [str]}, "max_rounds": int, "deliverables": [str], "project": \
+str|null}} or {"template_id": str} or {"existing": str}."""
 
 
 DEFAULT_ROLES = ("researcher", "writer", "analyst", "reviewer", "planner", "coder")
@@ -202,6 +271,8 @@ def design_request(
     roles: list[str] | None = None,
     projects: list[tuple[str, str, str]] | None = None,
     software: bool = False,
+    past: list[tuple[str, str, str, list[str]]] | None = None,
+    based_on: str = "",
 ) -> str:
     parts = [f"REQUEST:\n{request}"]
     if software:
@@ -210,6 +281,19 @@ def design_request(
         parts.append(
             "EXISTING PROJECTS (id: name: goal), newest first:\n"
             + "\n".join(f"- {i}: {n}: {g[:200]}" for i, n, g in projects)
+        )
+    if based_on:
+        parts.append(
+            f"CHANGE TO A PAST RESULT: {based_on}\nIts files are among the user's files for this "
+            "task. The team starts from them and changes what the request asks, keeping the rest; "
+            "it doesn't redo the work from scratch."
+        )
+    elif past:
+        parts.append(
+            "PAST RESULTS (run id: name: goal: files), newest first:\n"
+            + "\n".join(
+                f"- {i}: {n}: {g[:200]}: {', '.join(f[:8]) or 'no files'}" for i, n, g, f in past
+            )
         )
     if deliverables:
         parts.append("DELIVERABLES WANTED: " + ", ".join(deliverables))

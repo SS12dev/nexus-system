@@ -12,6 +12,9 @@ Topologies, and how the agents list is read for each:
   back with feedback until it passes or max_rounds is reached.
 - dev_project: Nexus's fixed software team (nexus_common.devteam) working in one workbench
   project: brief, plan, build, test and review, with fixes going back to the builders.
+- flow: a flow the architect designs for the task. Each agent names the agents whose results
+  it needs (after); agents with nothing in common run side by side. A checker (checks) reviews
+  one agent's work and sends it back until it passes. One agent, the last, gives the answer.
 """
 
 import re
@@ -23,7 +26,13 @@ from nexus_common.devteam import DEV_IDS, MAX_ROUNDS, STAGES, dev_agents
 
 Tier = Literal["nano", "mini", "pro", "max"]
 Topology = Literal[
-    "single", "pipeline", "supervisor_workers", "parallel_map_reduce", "critic_loop", "dev_project"
+    "single",
+    "pipeline",
+    "supervisor_workers",
+    "parallel_map_reduce",
+    "critic_loop",
+    "dev_project",
+    "flow",
 ]
 Lifetime = Literal["ephemeral", "persistent", "template"]
 
@@ -34,6 +43,7 @@ TOPOLOGIES: tuple[str, ...] = (
     "parallel_map_reduce",
     "critic_loop",
     "dev_project",
+    "flow",
 )
 TIERS: tuple[str, ...] = ("nano", "mini", "pro", "max")
 TIER_MODEL: dict[str, str] = {t: f"nexus-{t}" for t in TIERS}
@@ -78,6 +88,10 @@ class AgentSpec(BaseModel):
     tools: list[str] = Field(default_factory=list, max_length=12)
     skills: list[str] = Field(default_factory=list, max_length=12)
     max_steps: int | None = Field(default=None, ge=1, le=40)
+    # flow only: the agents whose results this one needs before it starts.
+    after: list[str] = Field(default_factory=list, max_length=8)
+    # flow only: the agent whose work this one reviews, sending it back until it passes.
+    checks: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -96,6 +110,65 @@ class AgentSpec(BaseModel):
 class ApprovalSpec(BaseModel):
     # Tools that pause for the user before each call, besides the ones that always do.
     required_for: list[str] = Field(default_factory=list)
+
+
+def flow_problems(agents: list[AgentSpec]) -> None:
+    """Check a flow's wiring, fixing what has one obvious fix: a checker's input is the work it
+    checks. Raises ValueError in words the architect can act on."""
+    ids = [a.id for a in agents]
+    known = set(ids)
+    for a in agents:
+        if a.checks:
+            a.checks = a.checks.strip().lower()
+            if a.checks not in known or a.checks == a.id:
+                raise ValueError(f"agent {a.id} checks {a.checks!r}, which is not another agent")
+            a.after = [a.checks]
+        a.after = list(dict.fromkeys(x.strip().lower() for x in a.after))
+        bad = [x for x in a.after if x not in known or x == a.id]
+        if bad:
+            raise ValueError(f"agent {a.id}: after names unknown agents: {', '.join(bad)}")
+    checked = [a.checks for a in agents if a.checks]
+    if len(set(checked)) != len(checked):
+        raise ValueError("each agent can have only one checker")
+    by_id = {a.id: a for a in agents}
+    double = [x for x in checked if by_id[x].checks]
+    if double:
+        raise ValueError(f"{', '.join(double)} is a checker and can't be checked in turn")
+    for target in checked:
+        others = [a.id for a in agents if target in a.after and a.checks != target]
+        if others:
+            raise ValueError(
+                f"{', '.join(others)} must come after {target}'s checker, not after {target} "
+                "itself, so they get the checked work"
+            )
+    flow_levels(agents)
+    ends = [a.id for a in agents if not any(a.id in b.after for b in agents)]
+    if len(ends) != 1:
+        raise ValueError(
+            "a flow needs exactly one last agent, whose result is the answer; these have nothing "
+            f"after them: {', '.join(ends)}"
+        )
+
+
+def flow_levels(agents: list[AgentSpec]) -> dict[str, int]:
+    """How far down the flow each agent sits (0 = starts straight away). Raises on a cycle."""
+    after = {a.id: a.after for a in agents}
+    level: dict[str, int] = {}
+    visiting: set[str] = set()
+
+    def depth(x: str) -> int:
+        if x in level:
+            return level[x]
+        if x in visiting:
+            raise ValueError(f"the flow goes round in a circle at {x}; use checks for loops")
+        visiting.add(x)
+        level[x] = max((depth(y) + 1 for y in after[x]), default=0)
+        visiting.discard(x)
+        return level[x]
+
+    for a in agents:
+        depth(a.id)
+    return level
 
 
 class AgentSystemSpec(BaseModel):
@@ -153,6 +226,7 @@ class AgentSystemSpec(BaseModel):
             "parallel_map_reduce": n == 3,
             "critic_loop": n == 2,
             "dev_project": ids == list(DEV_IDS),
+            "flow": n >= 2,
         }
         if not need[self.topology]:
             rule = {
@@ -162,13 +236,21 @@ class AgentSystemSpec(BaseModel):
                 "parallel_map_reduce": "exactly 3 agents: splitter, worker, combiner",
                 "critic_loop": "exactly 2 agents: worker, critic",
                 "dev_project": "the house team: " + ", ".join(DEV_IDS),
+                "flow": "at least 2 agents (use single for 1)",
             }[self.topology]
             raise ValueError(f"{self.topology} needs {rule}, got {n}")
+        if self.topology == "flow":
+            flow_problems(self.agents)
         return self
 
     @property
     def lead(self) -> AgentSpec:
         return self.agents[0]
+
+    @property
+    def flow_end(self) -> str:
+        """flow: the last agent, whose result is the answer."""
+        return next(a.id for a in self.agents if not any(a.id in b.after for b in self.agents))
 
     def agent(self, agent_id: str) -> AgentSpec:
         return next(a for a in self.agents if a.id == agent_id)
@@ -206,6 +288,14 @@ class AgentSystemSpec(BaseModel):
                     {"from": "reviewer", "to": "frontend", "kind": "feedback"},
                     {"from": "reviewer", "to": "backend", "kind": "feedback"},
                 ]
+            case "flow":
+                out = []
+                for x in self.agents:
+                    kind = "review" if x.checks else "handoff"
+                    out += [{"from": y, "to": x.id, "kind": kind} for y in x.after]
+                    if x.checks:
+                        out.append({"from": x.id, "to": x.checks, "kind": "feedback"})
+                return out
         return []
 
     def nodes(self) -> list[dict]:
@@ -216,6 +306,14 @@ class AgentSystemSpec(BaseModel):
         if self.topology == "dev_project":
             for n in out:
                 n["stage"] = STAGES[n["id"]]
+        if self.topology == "flow":
+            levels = flow_levels(self.agents)
+            for n, x in zip(out, self.agents, strict=True):
+                n["level"] = levels[x.id]
+                # The agent whose result is the answer stands out, as a lead does elsewhere.
+                n["lead"] = x.id == self.flow_end
+                if x.checks:
+                    n["stage"] = "checks"
         return out
 
     def estimate_usd(self, default_steps: int, map_items: int) -> float:
@@ -232,6 +330,11 @@ class AgentSystemSpec(BaseModel):
                 copies = self.max_rounds
             elif self.topology == "dev_project" and i >= 2:
                 # Build, test and review run once per review round.
+                copies = self.max_rounds
+            elif self.topology == "flow" and (
+                x.checks or any(c.checks == x.id for c in self.agents)
+            ):
+                # A checker and the work it checks run once per review round.
                 copies = self.max_rounds
             elif self.topology == "supervisor_workers":
                 # The lead takes a turn after every delegation; each worker gets up to max_rounds.
