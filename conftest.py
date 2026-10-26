@@ -35,7 +35,7 @@ TABLES = (
     "skills, instructions, tool_grants, mentions, relations, entities, recall_evals, "
     "recall_questions, memory_events, memories, "
     "episodes, profiles, attachments, "
-    "file_chunks, files, backups, app_settings, access_requests, "
+    "file_chunks, files, folders, backups, app_settings, access_requests, "
     "embedding_cache, audit_log, messages, chats, budgets, google_grants, api_keys, sessions, "
     "user_roles, users"
 )

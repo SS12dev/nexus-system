@@ -110,7 +110,7 @@ export function CoreOrb({ state, still }: { state: AssistantState; still: boolea
 
   return (
     <group>
-      {/* Raycasts pass through the shell so taps reach the memories and crystals inside. */}
+      {/* Raycasts pass through the shell so taps reach the stars and memories inside. */}
       <mesh raycast={() => null} renderOrder={2}>
         <icosahedronGeometry args={[ORB_R, 48]} />
         <shaderMaterial

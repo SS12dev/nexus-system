@@ -16,6 +16,7 @@ import type {
   FeedbackItem,
   FeedbackKind,
   FileItem,
+  Folder,
   GoogleAccess,
   LinkItem,
   Grants,
@@ -272,6 +273,14 @@ export const api = {
   searchFiles: (q: string) => request<SearchHit[]>(`/api/files/search?q=${encodeURIComponent(q)}`),
   renameFile: (id: string, name: string) =>
     request<FileItem>(`/api/files/${id}`, { method: "PATCH", body: json({ name }) }),
+  /** Moves the file and its other versions; null takes them out of any folder. */
+  moveFile: (id: string, folderId: string | null) =>
+    request<FileItem>(`/api/files/${id}`, { method: "PATCH", body: json({ folder_id: folderId }) }),
+  folders: () => request<Folder[]>("/api/folders"),
+  addFolder: (name: string) => request<Folder>("/api/folders", { method: "POST", body: json({ name }) }),
+  renameFolder: (id: string, name: string) =>
+    request<Folder>(`/api/folders/${id}`, { method: "PATCH", body: json({ name }) }),
+  deleteFolder: (id: string) => request<void>(`/api/folders/${id}`, { method: "DELETE" }),
   retryFile: (id: string) => request<FileItem>(`/api/files/${id}/retry`, { method: "POST" }),
   deleteFile: (id: string) => request<void>(`/api/files/${id}`, { method: "DELETE" }),
   fileUrl: (id: string, inline = false) => `/api/files/${id}/content${inline ? "?inline=true" : ""}`,

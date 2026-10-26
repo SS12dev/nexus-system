@@ -36,6 +36,8 @@ export interface ChatState {
   skillsVersion: number;
   /** Bumped when a link is added, changed or deleted, so the Library reloads its links. */
   linksVersion: number;
+  /** Bumped when a project folder is made, renamed or removed, so the Library and orb reload. */
+  foldersVersion: number;
   /** Live activity of team runs, keyed by run id: agents starting and finishing, tool calls. */
   runFeed: Record<string, FeedItem[]>;
   /** Bumped when a routine is added, changed or runs, so the Routines page and orb reload. */
@@ -74,6 +76,7 @@ export const initialState: ChatState = {
   agentsVersion: 0,
   skillsVersion: 0,
   linksVersion: 0,
+  foldersVersion: 0,
   runFeed: {},
   routinesVersion: 0,
   pendingAccess: null,
@@ -309,6 +312,15 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     case "link.updated":
     case "link.deleted":
       return { ...state, linksVersion: state.linksVersion + 1 };
+    case "folder.updated":
+      return { ...state, foldersVersion: state.foldersVersion + 1 };
+    case "folder.deleted": {
+      // Its files stay, out of any folder.
+      const files: Record<string, FileItem> = {};
+      for (const [id, f] of Object.entries(state.files))
+        files[id] = f.folder_id === event.data.id ? { ...f, folder_id: null } : f;
+      return { ...state, files, foldersVersion: state.foldersVersion + 1 };
+    }
     case "artifact.created":
       return { ...state, files: upsertFile(state.files, event.data.file) };
     case "file.deleted": {

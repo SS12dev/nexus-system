@@ -1,6 +1,20 @@
-import { Download, ExternalLink, Eye, Link2, Pencil, RotateCw, Search, Trash2, Upload } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  Eye,
+  FolderOpen,
+  FolderPlus,
+  Link2,
+  Pencil,
+  RotateCw,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { FileIcon, StatusIcon } from "../components/FileChip";
 import { FilePreview } from "../components/FilePreview";
 import { LinkIcon, LinkPreview } from "../components/LinkChip";
@@ -9,7 +23,8 @@ import { api } from "../lib/api";
 import { ACCEPT, formatDate, formatSize } from "../lib/format";
 import { LINK_KIND_LABEL, linkSource, shortUrl } from "../lib/links";
 import { canPreview } from "../lib/preview";
-import { hasRole, type FileItem, type LinkItem, type Project, type SearchHit } from "../lib/types";
+import { hasRole, type FileItem, type Folder, type LinkItem, type Project, type SearchHit } from "../lib/types";
+import { Select } from "../components/Select";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
 import { confirmAction } from "../components/Feedback";
@@ -24,6 +39,11 @@ export function LibraryPage() {
   const upsertFile = useStore((s) => s.upsertFile);
   const [ids, setIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const foldersVersion = useStore((s) => s.foldersVersion);
+  const [params] = useSearchParams();
+  const focus = params.get("folder");
+  const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [linkHits, setLinkHits] = useState<LinkItem[]>([]);
   const [linkPreview, setLinkPreview] = useState<LinkItem | null>(null);
@@ -60,7 +80,37 @@ export function LibraryPage() {
       .catch(() => {});
   }, [linksVersion]);
 
+  // Folders reload when Nexus files something into a new one, or one is renamed or removed.
+  useEffect(() => {
+    api
+      .folders()
+      .then(setFolders)
+      .catch(() => {});
+  }, [foldersVersion]);
+
+  // A link from the orb opens its project and scrolls to it.
+  useEffect(() => {
+    if (!focus) return;
+    setOpen((o) => new Set(o).add(focus));
+    const t = window.setTimeout(
+      () => document.getElementById(`folder-${focus}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+      200,
+    );
+    return () => window.clearTimeout(t);
+  }, [focus, folders.length]);
+
   const files = useMemo(() => ids.map((id) => live[id]).filter(Boolean), [ids, live]);
+  // Files by project folder; files with no folder (uploads, mostly) are listed after them.
+  const grouped = useMemo(() => {
+    const by = new Map<string, FileItem[]>(folders.map((d) => [d.id, []]));
+    const loose: FileItem[] = [];
+    for (const f of files) {
+      const list = f.folder_id ? by.get(f.folder_id) : undefined;
+      if (list) list.push(f);
+      else loose.push(f);
+    }
+    return { by, loose };
+  }, [files, folders]);
 
   const run = async (fn: () => Promise<void>) => {
     setError("");
@@ -97,6 +147,57 @@ export function LibraryPage() {
     const name = prompt("Rename file", f.name);
     if (name && name !== f.name) run(async () => upsertFile(await api.renameFile(f.id, name)));
   };
+
+  const move = (f: FileItem, to: string) =>
+    run(async () => {
+      let folderId: string | null = to || null;
+      if (to === "new") {
+        const name = prompt("New project's name", "")?.trim();
+        if (!name) return;
+        const made = await api.addFolder(name);
+        setFolders((xs) => [made, ...xs]);
+        folderId = made.id;
+      }
+      const moved = await api.moveFile(f.id, folderId);
+      upsertFile(moved);
+      // Its other versions moved with it.
+      for (const other of Object.values(useStore.getState().files))
+        if ((other.version_of_id ?? other.id) === (f.version_of_id ?? f.id) && other.id !== f.id)
+          upsertFile({ ...other, folder_id: folderId });
+      if (folderId) setOpen((o) => new Set(o).add(folderId!));
+    });
+
+  const renameFolder = (d: Folder) => {
+    const name = prompt("Rename project", d.name)?.trim();
+    if (name && name !== d.name)
+      run(async () => {
+        const saved = await api.renameFolder(d.id, name);
+        setFolders((xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
+      });
+  };
+
+  const removeFolder = async (d: Folder) => {
+    const ok = await confirmAction({
+      title: `Remove the project ${d.name}?`,
+      body: "Its files stay in your library, out of any project.",
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    run(async () => {
+      await api.deleteFolder(d.id);
+      setFolders((xs) => xs.filter((x) => x.id !== d.id));
+      useStore.getState().handleEvent({ type: "folder.deleted", data: { id: d.id } });
+    });
+  };
+
+  const toggle = (id: string) =>
+    setOpen((o) => {
+      const next = new Set(o);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const remove = async (f: FileItem) => {
     const ok = await confirmAction({
@@ -137,6 +238,83 @@ export function LibraryPage() {
       setLinks((xs) => xs.filter((x) => x.id !== l.id));
     });
   };
+
+  const fileRow = (f: FileItem) => (
+    <div key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <FileIcon name={f.name} size={20} />
+                <div className="min-w-40 flex-1">
+                  <div className="flex items-center gap-2">
+                    {canPreview(f) ? (
+                      <button onClick={() => setPreview(f)} className="truncate text-left hover:text-sky-300">
+                        {f.name}
+                      </button>
+                    ) : (
+                      <span className="truncate">{f.name}</span>
+                    )}
+                    <StatusIcon status={f.status} />
+                  </div>
+                  <div className={`text-xs ${f.status === "failed" ? "text-rose-400" : "text-slate-500"}`}>
+                    {f.status === "failed"
+                      ? f.error
+                      : f.status === "processing"
+                        ? `${assistant} is reading it…`
+                        : `${(f.version ?? 1) > 1 ? `v${f.version} · ` : ""}${formatSize(f.size)} · ${formatDate(f.created_at)}`}
+                    {f.chat_id && f.status === "ready" && (
+                      <>
+                        {" · "}
+                        <Link to={`/c/${f.chat_id}`} className="hover:text-sky-300">
+                          from a chat
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 text-slate-400">
+                  {canPreview(f) && (
+                    <IconButton label="Preview" onClick={() => setPreview(f)}>
+                      <Eye size={16} />
+                    </IconButton>
+                  )}
+                  <a href={api.fileUrl(f.id)} className="p-2 hover:text-white" aria-label="Download" title="Download">
+                    <Download size={16} />
+                  </a>
+                  {canEdit && f.status === "failed" && (
+                    <IconButton
+                      label="Try again"
+                      onClick={() => run(async () => upsertFile(await api.retryFile(f.id)))}
+                    >
+                      <RotateCw size={16} />
+                    </IconButton>
+                  )}
+                  {canEdit && (
+                    <>
+                      <Select
+                        size="xs"
+                        value={f.folder_id ?? ""}
+                        onChange={(e) => move(f, e.target.value)}
+                        aria-label={`Project for ${f.name}`}
+                        title="Move to a project"
+                        className="mr-1 max-w-36"
+                      >
+                        <option value="">No project</option>
+                        {folders.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                        <option value="new">New project…</option>
+                      </Select>
+                      <IconButton label="Rename" onClick={() => rename(f)}>
+                        <Pencil size={16} />
+                      </IconButton>
+                      <IconButton label="Delete" onClick={() => remove(f)} danger>
+                        <Trash2 size={16} />
+                      </IconButton>
+                    </>
+                  )}
+                </div>
+              </div>
+  );
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -238,11 +416,31 @@ export function LibraryPage() {
           </section>
         )}
 
-        <h2 className="mb-2 text-sm font-medium text-slate-300">Files</h2>
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-sm font-medium text-slate-300">Files</h2>
+          {canEdit && (
+            <button
+              onClick={() =>
+                run(async () => {
+                  const name = prompt("New project's name", "")?.trim();
+                  if (!name) return;
+                  const made = await api.addFolder(name);
+                  setFolders((xs) => [made, ...xs]);
+                  setOpen((o) => new Set(o).add(made.id));
+                })
+              }
+              className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-edge/60 hover:text-white"
+            >
+              <FolderPlus size={14} /> New project
+            </button>
+          )}
+        </div>
         <p className="mb-3 text-xs text-slate-500">
-          Uploading the same file twice keeps two files, as each may belong to a different piece of work. When{" "}
-          {assistant} saves a file under a name it already used, it decides whether that is a new version of it or a
-          separate file.
+          What {assistant} and its teams make is kept by project: a rocket model's .3mf, .step and .stl sit together in
+          one, and a later fix or new version joins the same project. Pick a file's project to move it (its other
+          versions go with it); your uploads stay outside projects unless you move them in. Uploading the same file
+          twice keeps two files, as each may belong to a different piece of work. When {assistant} saves a file under a
+          name it already used, it decides whether that is a new version of it or a separate file.
         </p>
 
         <form onSubmit={search} className="mb-5 flex gap-2">
@@ -301,66 +499,53 @@ export function LibraryPage() {
           <p className="text-slate-400">No files yet. Upload one, or attach one in a chat.</p>
         ) : (
           <div className="divide-y divide-edge rounded-lg border border-edge bg-panel">
-            {files.map((f) => (
-              <div key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <FileIcon name={f.name} size={20} />
-                <div className="min-w-40 flex-1">
-                  <div className="flex items-center gap-2">
-                    {canPreview(f) ? (
-                      <button onClick={() => setPreview(f)} className="truncate text-left hover:text-sky-300">
-                        {f.name}
-                      </button>
-                    ) : (
-                      <span className="truncate">{f.name}</span>
-                    )}
-                    <StatusIcon status={f.status} />
-                  </div>
-                  <div className={`text-xs ${f.status === "failed" ? "text-rose-400" : "text-slate-500"}`}>
-                    {f.status === "failed"
-                      ? f.error
-                      : f.status === "processing"
-                        ? `${assistant} is reading it…`
-                        : `${formatSize(f.size)} · ${formatDate(f.created_at)}`}
-                    {f.chat_id && f.status === "ready" && (
-                      <>
-                        {" · "}
-                        <Link to={`/c/${f.chat_id}`} className="hover:text-sky-300">
-                          from a chat
-                        </Link>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 text-slate-400">
-                  {canPreview(f) && (
-                    <IconButton label="Preview" onClick={() => setPreview(f)}>
-                      <Eye size={16} />
-                    </IconButton>
-                  )}
-                  <a href={api.fileUrl(f.id)} className="p-2 hover:text-white" aria-label="Download" title="Download">
-                    <Download size={16} />
-                  </a>
-                  {canEdit && f.status === "failed" && (
-                    <IconButton
-                      label="Try again"
-                      onClick={() => run(async () => upsertFile(await api.retryFile(f.id)))}
+            {folders.map((d) => {
+              const list = grouped.by.get(d.id) ?? [];
+              const isOpen = open.has(d.id);
+              return (
+                <div key={d.id} id={`folder-${d.id}`} className={focus === d.id ? "bg-sky-500/5" : ""}>
+                  <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <button
+                      onClick={() => toggle(d.id)}
+                      aria-expanded={isOpen}
+                      className="flex min-w-40 flex-1 items-center gap-3 text-left"
                     >
-                      <RotateCw size={16} />
-                    </IconButton>
-                  )}
-                  {canEdit && (
-                    <>
-                      <IconButton label="Rename" onClick={() => rename(f)}>
-                        <Pencil size={16} />
-                      </IconButton>
-                      <IconButton label="Delete" onClick={() => remove(f)} danger>
-                        <Trash2 size={16} />
-                      </IconButton>
-                    </>
+                      {isOpen ? <ChevronDown size={16} className="text-slate-500" /> : <ChevronRight size={16} className="text-slate-500" />}
+                      <FolderOpen size={20} className="shrink-0 text-purple-300" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{d.name}</span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {list.length} file{list.length === 1 ? "" : "s"} · {formatDate(d.updated_at)}
+                          {!isOpen && list.length > 0 && ` · ${list.slice(0, 3).map((f) => f.name).join(", ")}`}
+                        </span>
+                      </span>
+                    </button>
+                    {canEdit && (
+                      <div className="flex items-center gap-1 text-slate-400">
+                        <IconButton label="Rename project" onClick={() => renameFolder(d)}>
+                          <Pencil size={16} />
+                        </IconButton>
+                        <IconButton label="Remove project (keeps its files)" onClick={() => removeFolder(d)} danger>
+                          <Trash2 size={16} />
+                        </IconButton>
+                      </div>
+                    )}
+                  </div>
+                  {isOpen && (
+                    <div className="divide-y divide-edge border-t border-edge bg-ink/40 pl-6">
+                      {list.length === 0 && <p className="px-4 py-3 text-sm text-slate-500">No files in it yet.</p>}
+                      {list.map(fileRow)}
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
+            {grouped.loose.length > 0 && folders.length > 0 && (
+              <p className="bg-ink/40 px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-slate-500">
+                Not in a project
+              </p>
+            )}
+            {grouped.loose.map(fileRow)}
           </div>
         )}
       </div>

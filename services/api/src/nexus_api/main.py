@@ -20,6 +20,7 @@ from nexus_api.routes import (
     chats,
     feedback,
     files,
+    folders,
     improvements,
     instructions,
     links,
@@ -129,6 +130,7 @@ def create_app(
     app.include_router(widgets.router)
     app.include_router(screen.router)
     app.include_router(projects.router)
+    app.include_router(folders.router)
     app.include_router(apps.router)
     app.include_router(app_access.router)
     app.include_router(memories.router)

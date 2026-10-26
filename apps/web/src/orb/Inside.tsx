@@ -1,13 +1,12 @@
 import { Line } from "@react-three/drei";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AdditiveBlending, Color, Group, InstancedMesh, Mesh, Object3D, Vector3 } from "three";
+import { AdditiveBlending, Color, InstancedMesh, Mesh, Object3D, Vector3 } from "three";
 import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
 import {
   curve,
   hash,
   KIND_COLOR,
-  type Crystal,
   type MemoryPoint,
   type StarLine,
   type StarPoint,
@@ -108,75 +107,6 @@ export function MemoryCloud({
   );
 }
 
-/** Artifacts (files Nexus or a team made) as small spinning crystals inside the orb. */
-export function Crystals({
-  items,
-  still,
-  selected,
-  onPick,
-}: {
-  items: Crystal[];
-  still: boolean;
-  selected: string | null;
-  onPick: (c: Crystal) => void;
-}) {
-  const group = useRef<Group>(null);
-  const born = useRef(new Map<string, number>());
-  const first = useRef(true);
-
-  useEffect(() => {
-    const now = performance.now();
-    for (const c of items) if (!born.current.has(c.id)) born.current.set(c.id, first.current ? 0 : now);
-    first.current = false;
-  }, [items]);
-
-  useFrame((_, dt) => {
-    const g = group.current;
-    if (!g) return;
-    if (!still) g.rotation.y += dt * 0.12;
-    const now = performance.now();
-    g.children.forEach((child, i) => {
-      const c = items[i];
-      if (!c) return;
-      if (!still) {
-        child.rotation.x += dt * 0.8;
-        child.rotation.y += dt * 1.1;
-      }
-      const age = (now - (born.current.get(c.id) ?? 0)) / 1000;
-      const grow = still ? 1 : Math.min(1, age / GROW_S);
-      child.scale.setScalar(grow * (c.id === selected ? 1.7 : 1));
-    });
-  });
-
-  return (
-    <group ref={group}>
-      {items.map((c) => (
-        <mesh
-          key={c.id}
-          position={c.pos}
-          onClick={(e) => {
-            e.stopPropagation();
-            onPick(c);
-          }}
-          onPointerOver={() => (document.body.style.cursor = "pointer")}
-          onPointerOut={() => (document.body.style.cursor = "")}
-        >
-          <octahedronGeometry args={[0.055, 0]} />
-          <meshStandardMaterial
-            color={c.id === selected ? "#ffffff" : "#e9d5ff"}
-            emissive="#a855f7"
-            emissiveIntensity={c.id === selected ? 2.4 : 1.2}
-            metalness={0.3}
-            roughness={0.15}
-            flatShading
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 /** The knowledge graph inside the orb: you at the centre, the people, projects, places, topics
  * and tools Nexus knows as stars tinted by type, and lines for how they relate. What a reply
  * just recalled glows in the recall colour, with a pulse when it first lights up. Names are
@@ -184,7 +114,6 @@ export function Crystals({
 export function Constellation({
   stars,
   lines,
-  crystals,
   still,
   lite,
   selected,
@@ -196,8 +125,6 @@ export function Constellation({
 }: {
   stars: StarPoint[];
   lines: StarLine[];
-  /** Artifacts with a project get a line to it. */
-  crystals: Crystal[];
   still: boolean;
   lite: boolean;
   selected: string | null;
@@ -230,7 +157,7 @@ export function Constellation({
   usePlaceLabels(order, tags, labels, always, sizeOf);
   return (
     <group>
-      <Lines stars={stars} lines={lines} crystals={crystals} lit={lit} />
+      <Lines stars={stars} lines={lines} lit={lit} />
       {stars.map((s) => (
         <Star
           key={s.id}
@@ -363,21 +290,11 @@ function Star({
   );
 }
 
-const LINE = { open: "#cbd5e1", ended: "#64748b", artifact: "#c084fc" };
+const LINE = { open: "#cbd5e1", ended: "#64748b" };
 
-/** Every relation, and each artifact's line to its project, as screen-space lines a couple of
- * pixels wide, so they stay readable at any zoom and over the glow of the shell. */
-function Lines({
-  stars,
-  lines,
-  crystals,
-  lit,
-}: {
-  stars: StarPoint[];
-  lines: StarLine[];
-  crystals: Crystal[];
-  lit: Set<string>;
-}) {
+/** Every relation as screen-space lines a couple of pixels wide, so they stay readable at any
+ * zoom and over the glow of the shell. */
+function Lines({ stars, lines, lit }: { stars: StarPoint[]; lines: StarLine[]; lit: Set<string> }) {
   const { normal, hot } = useMemo(() => {
     const at = new Map(stars.map((s) => [s.id, s.pos]));
     const self = stars.find((s) => s.self)?.id;
@@ -404,12 +321,8 @@ function Lines({
       if (lights) put(hot, a, b, RECALL_COLOR, 1, seed);
       else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended ? 0.6 : 1, seed);
     }
-    for (const cr of crystals) {
-      const a = cr.star ? at.get(cr.star) : undefined;
-      if (a) put(normal, a, cr.pos, LINE.artifact, 0.9);
-    }
     return { normal, hot };
-  }, [stars, lines, crystals, lit]);
+  }, [stars, lines, lit]);
 
   return (
     <>

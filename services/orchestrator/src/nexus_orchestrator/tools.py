@@ -31,6 +31,7 @@ from nexus_common.models import (
     File,
     FileChunk,
     FileStatus,
+    Folder,
     Link,
     Memory,
     MemoryKind,
@@ -325,6 +326,18 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 .limit(40)
             )
             files = rows.all()
+            folder_ids = {f.folder_id for f in files if f.folder_id}
+            folders = (
+                dict(
+                    (
+                        await db.execute(
+                            select(Folder.id, Folder.name).where(Folder.id.in_(folder_ids))
+                        )
+                    ).all()
+                )
+                if folder_ids
+                else {}
+            )
             links = (
                 await db.scalars(
                     select(Link)
@@ -337,7 +350,8 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             return "The user has no documents or links."
         out = [
             f"- {f.name}{f' (v{f.version})' if f.version > 1 else ''} (id {f.id}, {f.status}, "
-            f"{'generated' if f.origin == 'generated' else 'uploaded'} {f.created_at:%d %b %Y})"
+            f"{'generated' if f.origin == 'generated' else 'uploaded'} {f.created_at:%d %b %Y}"
+            f"{f', project {folders[f.folder_id]}' if f.folder_id in folders else ''})"
             for f in files
         ] or ["The user has no documents."]
         if links:

@@ -408,6 +408,10 @@ class FileBrief(BaseModel):
     status: FileStatus
     origin: str = "upload"
     version: int = 1
+    # The first version's id, for later versions of a generated file.
+    version_of_id: uuid.UUID | None = None
+    # The project folder it is filed in, if any.
+    folder_id: uuid.UUID | None = None
 
 
 class FileOut(FileBrief):
@@ -475,7 +479,27 @@ class LinkUpdateIn(BaseModel):
 
 
 class FileUpdateIn(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    # Move it (and its other versions) into this folder; null takes it out of any folder.
+    folder_id: uuid.UUID | None = None
+
+
+class FolderOut(BaseModel):
+    """A project folder in the library: the files made for one piece of work."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    project_id: uuid.UUID | None
+    chat_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    files: int = 0
+
+
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
 
 
 class FileTextOut(BaseModel):

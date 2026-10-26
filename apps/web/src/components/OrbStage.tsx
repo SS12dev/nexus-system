@@ -1,12 +1,12 @@
 import {
   Bot,
-  Box,
   Brain,
   CalendarClock,
   ChevronDown,
   ChevronUp,
   ExternalLink,
   FolderGit2,
+  FolderOpen,
   LayoutGrid,
   List,
   Maximize2,
@@ -21,7 +21,8 @@ import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
 import { ENTITY_COLOR, ENTITY_TYPES, RECALL_COLOR, relationText } from "../lib/entities";
 import { formatInZone } from "../lib/schedule";
-import type { KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
+import type { FileItem, Folder, KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
+import { formatDate } from "../lib/format";
 import {
   buildClusters,
   inside as layoutInside,
@@ -29,9 +30,13 @@ import {
   KIND_COLOR,
   liveSystems,
   NODE_COLOR,
+  OUTSIDE_TYPES,
+  plain,
   satellites,
   SATELLITE_COLOR,
+  works,
   type OrbCluster,
+  type Work,
 } from "../orb/model";
 import { StarLabels } from "../orb/StarLabels";
 import type { Selection } from "../orb/OrbScene";
@@ -58,11 +63,12 @@ const VIEWS: { id: ScreenMode; label: string; icon: ReactNode; hint: string }[] 
 /** How long what a reply recalled stays lit in the orb. */
 const LIT_MS = 15000;
 
-/** Nexus as a 3D orb with the live agent network around it and, inside it, what it knows:
- * you at the centre, the people, projects and topics you've mentioned around you, memories as
- * their satellites and the newest artifacts by their project. Just outside the shell, on a
- * ring, what it does for you: routines and software projects. Or the same as plain lists. Fills the home screen, and stays beside a chat (above it on
- * phones) so you can watch Nexus and its teams work while you talk. */
+/** Nexus as a 3D orb with the live agent network around it and, inside it, who you are: you at
+ * the centre, the people, places, interests and tools you've mentioned around you, and
+ * memories as their satellites. Just outside the shell, on a ring, what it does and has made
+ * for you: routines, and projects (an app, or a folder of files made for one piece of work,
+ * as one moon each). Or the same as plain lists. Fills the home screen, and stays beside a
+ * chat (above it on phones) so you can watch Nexus and its teams work while you talk. */
 export function OrbStage({
   mode,
   collapsed = false,
@@ -90,6 +96,8 @@ export function OrbStage({
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const foldersVersion = useStore((s) => s.foldersVersion);
   const [packInfo, setPackInfo] = useState<Pick<Profiles, "packs" | "interests">>({
     packs: [],
     interests: [],
@@ -119,6 +127,11 @@ export function OrbStage({
   useEffect(() => {
     api.projects().then(setProjects).catch(() => {});
   }, [connected, Object.keys(files).length]);
+  // A team saving several files announces its folder each time; take the last of the burst.
+  useEffect(() => {
+    const t = window.setTimeout(() => api.folders().then(setFolders).catch(() => {}), 300);
+    return () => window.clearTimeout(t);
+  }, [connected, foldersVersion]);
 
   // Memories change in bursts after a chat; wait for the burst to settle.
   useEffect(() => {
@@ -146,21 +159,17 @@ export function OrbStage({
     () => buildClusters(live, Object.values(approvals), perf.portrait),
     [live, approvals, perf.portrait],
   );
-  const artifactList = useMemo(() => Object.values(files).filter(isArtifact), [files]);
+  const fileList = useMemo(() => Object.values(files), [files]);
+  const artifactCount = useMemo(() => fileList.filter(isArtifact).length, [fileList]);
   const insideData = useMemo(
-    () =>
-      layoutInside(
-        graph,
-        memories,
-        artifactList,
-        { stars: perf.maxStars, memories: perf.maxMemories, crystals: perf.maxCrystals },
-        litIds,
-      ),
-    [graph, memories, artifactList, perf.maxStars, perf.maxMemories, perf.maxCrystals, litIds],
+    () => layoutInside(graph, memories, { stars: perf.maxStars, memories: perf.maxMemories }, litIds),
+    [graph, memories, perf.maxStars, perf.maxMemories, litIds],
   );
-  const known = graph?.entities.filter((e) => !e.is_self).length ?? 0;
+  const known = graph?.entities.filter((e) => !e.is_self && !OUTSIDE_TYPES.has(e.type)).length ?? 0;
+  const projectList = useMemo(() => works(projects, folders, fileList), [projects, folders, fileList]);
   // Each moon's thread goes to its topic: a routine from a profile pack to that pack's
-  // profession or interest, a project to the project Nexus knows by that name.
+  // profession or interest; a project to what the project Nexus knows by that name relates
+  // to (the rocket model to 3D printing, say).
   const homes = useMemo(() => {
     const labels = new Map<string, string[]>();
     const interest = new Map(packInfo.interests.map((i) => [i.id, i.label]));
@@ -168,11 +177,21 @@ export function OrbStage({
       const names = [p.label, ...[p.id, ...p.match].flatMap((id) => interest.get(id) ?? [])];
       labels.set(`pack:${p.id}`, names);
     }
-    return (key: string) => labels.get(key) ?? [];
-  }, [packInfo]);
+    const byId = new Map(graph?.entities.map((e) => [e.id, e]) ?? []);
+    for (const e of graph?.entities ?? []) {
+      if (!OUTSIDE_TYPES.has(e.type)) continue;
+      const near = (graph?.relations ?? [])
+        .filter((r) => !r.valid_to && (r.src === e.id || r.dst === e.id))
+        .map((r) => byId.get(r.src === e.id ? r.dst : r.src))
+        .filter((x) => x && !x.is_self && !OUTSIDE_TYPES.has(x.type))
+        .map((x) => x!.name);
+      if (near.length) labels.set(`work:${plain(e.name)}`, near);
+    }
+    return (key: string) => labels.get(key) ?? labels.get(`work:${plain(key)}`) ?? [];
+  }, [packInfo, graph]);
   const sats = useMemo(
-    () => satellites(routines, projects, insideData.stars, homes, perf.lite ? 12 : 24),
-    [routines, projects, insideData.stars, homes, perf.lite],
+    () => satellites(routines, projectList, insideData.stars, homes, perf.lite ? 12 : 24),
+    [routines, projectList, insideData.stars, homes, perf.lite],
   );
 
   // Drop a selection whose object went away.
@@ -196,7 +215,7 @@ export function OrbStage({
       ? (activity ?? (state === "thinking" ? "Thinking…" : "Answering…"))
       : lit
         ? remembered(lit)
-        : summary(clusters.length, agentCount, working, memories.length, known, artifactList.length, routines.length);
+        : summary(clusters.length, agentCount, working, memories.length, known, projectList.length, artifactCount, routines.length);
 
   if (chat && collapsed) {
     return (
@@ -333,7 +352,7 @@ export function OrbStage({
           {!chat && <Legend />}
         </div>
       ) : (
-        <ListView clusters={clusters} memories={memories} known={known} artifacts={artifactList} />
+        <ListView clusters={clusters} memories={memories} known={known} projects={projectList} />
       )}
 
       {selected && (
@@ -344,6 +363,7 @@ export function OrbStage({
             graph={graph}
             routines={routines}
             projects={projects}
+            files={fileList}
             onClose={() => setSelected(null)}
           />
         </div>
@@ -358,6 +378,7 @@ function summary(
   working: number,
   memories: number,
   known: number,
+  projects: number,
   artifacts: number,
   routines = 0,
 ) {
@@ -366,7 +387,9 @@ function summary(
     ...(routines ? [`${routines} routine${routines === 1 ? "" : "s"}`] : []),
     `${memories} memor${memories === 1 ? "y" : "ies"}`,
     ...(known ? [`${known} connection${known === 1 ? "" : "s"}`] : []),
-    `${artifacts} artifact${artifacts === 1 ? "" : "s"}`,
+    projects
+      ? `${projects} project${projects === 1 ? "" : "s"}`
+      : `${artifacts} artifact${artifacts === 1 ? "" : "s"}`,
   ];
   return parts.join(" · ");
 }
@@ -394,20 +417,21 @@ function Legend() {
         <span className={item}>{dot(NODE_COLOR.waiting)} needs approval</span>
         <span className={item}>{dot(SATELLITE_COLOR.routine)} routines</span>
         <span className={item}>
-          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.project }} /> projects
+          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.files }} /> projects
+          and their files
+        </span>
+        <span className={item}>
+          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.project }} /> apps
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className={group}>Inside</span>
         <span className={item}>{dot("#f8fafc")} you</span>
-        <span className={item}>{dot(ENTITY_COLOR.project)} people, projects and topics</span>
+        <span className={item}>{dot(ENTITY_COLOR.person)} people, places and interests</span>
         <span className={item}>
           <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
         </span>
         <span className={item}>{dot(KIND_COLOR.preference)} memories</span>
-        <span className={item}>
-          <span className="inline-block size-2 rotate-45 bg-purple-400" /> artifacts
-        </span>
         <span className={item}>{dot(RECALL_COLOR)} just remembered</span>
       </div>
     </div>
@@ -420,6 +444,7 @@ function SelectionCard({
   graph,
   routines,
   projects,
+  files,
   onClose,
 }: {
   selection: Selection;
@@ -427,6 +452,7 @@ function SelectionCard({
   graph: KnowledgeGraph | null;
   routines: Routine[];
   projects: Project[];
+  files: FileItem[];
   onClose: () => void;
 }) {
   let body: ReactNode;
@@ -506,12 +532,13 @@ function SelectionCard({
   } else if (selection.type === "satellite") {
     const sat = selection.sat;
     const r = sat.kind === "routine" ? routines.find((x) => x.id === sat.id) : undefined;
-    const p = sat.kind === "project" ? projects.find((x) => x.id === sat.id) : undefined;
+    const p = sat.kind === "project" && sat.app ? projects.find((x) => x.id === sat.id) : undefined;
+    const inside = latestVersions(files.filter((f) => f.folder_id && sat.folderIds.includes(f.folder_id)));
     body = (
       <>
         <div className="flex items-center gap-2 text-xs" style={{ color: sat.color }}>
-          {sat.kind === "routine" ? <CalendarClock size={14} /> : <FolderGit2 size={14} />}
-          {sat.kind === "routine" ? (r?.enabled === false ? "Routine · paused" : "Routine") : "Project"}
+          {sat.kind === "routine" ? <CalendarClock size={14} /> : sat.app ? <FolderGit2 size={14} /> : <FolderOpen size={14} />}
+          {sat.kind === "routine" ? (r?.enabled === false ? "Routine · paused" : "Routine") : sat.app ? "App" : "Project"}
         </div>
         <div className="mt-1 font-medium">{sat.name}</div>
         <p className="mt-0.5 text-sm text-slate-400">
@@ -519,6 +546,26 @@ function SelectionCard({
           {r?.next_run_at && ` · next ${formatInZone(r.next_run_at, r.timezone)}`}
           {p?.app_state === "running" && " · live"}
         </p>
+        {inside.length > 0 && (
+          <ul className="mt-1.5 max-h-36 space-y-0.5 overflow-y-auto text-sm">
+            {inside.slice(0, 8).map((f) => (
+              <li key={f.id} className="flex items-center gap-2">
+                <a
+                  href={api.fileUrl(f.id, true)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate text-slate-200 hover:text-sky-300"
+                  title={f.name}
+                >
+                  {f.name}
+                  {(f.version ?? 1) > 1 && <span className="text-slate-500"> v{f.version}</span>}
+                </a>
+                <span className="shrink-0 text-xs text-slate-500">{formatDate(f.created_at)}</span>
+              </li>
+            ))}
+            {inside.length > 8 && <li className="text-xs text-slate-500">and {inside.length - 8} more</li>}
+          </ul>
+        )}
         <div className="mt-2 flex gap-4 text-sm">
           {r?.chat_id && (
             <Link to={`/c/${r.chat_id}`} className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
@@ -535,32 +582,14 @@ function SelectionCard({
               Open app <ExternalLink size={13} />
             </a>
           )}
-          {p && (
-            <Link to="/library" className="text-slate-300 hover:text-white">
-              Library
+          {sat.kind === "project" && (
+            <Link
+              to={sat.folderIds.length ? `/library?folder=${sat.folderIds[0]}` : "/library"}
+              className="text-slate-300 hover:text-white"
+            >
+              Open in Library
             </Link>
           )}
-        </div>
-      </>
-    );
-  } else {
-    const c = selection.crystal;
-    body = (
-      <>
-        <div className="flex items-center gap-2 text-xs text-purple-300">
-          <Box size={14} /> Artifact
-        </div>
-        <p className="mt-1 truncate text-sm font-medium text-slate-200">{c.name}</p>
-        <div className="mt-2 flex gap-4 text-sm">
-          <a href={api.fileUrl(c.id, true)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
-            Open <ExternalLink size={13} />
-          </a>
-          <a href={api.fileUrl(c.id)} className="text-slate-300 hover:text-white">
-            Download
-          </a>
-          <Link to="/library" className="text-slate-300 hover:text-white">
-            Library
-          </Link>
         </div>
       </>
     );
@@ -575,24 +604,24 @@ function SelectionCard({
   );
 }
 
-/** The 2D alternative: the same teams, memories and artifacts as plain lists. Also the
+/** The 2D alternative: the same teams, memories and projects as plain lists. Also the
  * fallback when the device can't draw WebGL. */
 function ListView({
   clusters,
   memories,
   known,
-  artifacts,
+  projects,
 }: {
   clusters: OrbCluster[];
   memories: Memory[];
   known: number;
-  artifacts: { id: string; name: string; created_at: string }[];
+  projects: Work[];
 }) {
   const assistant = useAssistantName();
   const kinds = Object.entries(
     memories.reduce<Record<string, number>>((acc, m) => ({ ...acc, [m.kind]: (acc[m.kind] ?? 0) + 1 }), {}),
   );
-  const newest = [...artifacts].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 8);
+  const newest = projects.slice(0, 8);
   return (
     <div className="relative z-10 min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-4">
@@ -638,24 +667,34 @@ function ListView({
               to="/knowledge"
               className="mt-2 block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40"
             >
-              {known} thing{known === 1 ? "" : "s"} known: the people, projects, places and topics, and how they link
+              {known} thing{known === 1 ? "" : "s"} known about you: the people, places and interests, and how they link
             </Link>
           )}
         </section>
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
-            <Box size={15} /> Artifacts
+            <FolderOpen size={15} /> Projects
           </h2>
-          {newest.length === 0 && <p className="text-sm text-slate-500">Files {assistant} and its teams make show here.</p>}
+          {newest.length === 0 && (
+            <p className="text-sm text-slate-500">
+              What {assistant} and its teams make shows here, each piece of work as one project with its files.
+            </p>
+          )}
           <div className="space-y-1">
-            {newest.map((f) => (
-              <a key={f.id} href={api.fileUrl(f.id, true)} target="_blank" rel="noreferrer" className="block truncate rounded-md px-2 py-1.5 text-sm text-slate-300 hover:bg-edge/50">
-                {f.name}
-              </a>
+            {newest.map((w) => (
+              <Link
+                key={w.id}
+                to={w.folderIds.length ? `/library?folder=${w.folderIds[0]}` : "/library"}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-300 hover:bg-edge/50"
+              >
+                {w.app ? <FolderGit2 size={14} className="shrink-0" /> : <FolderOpen size={14} className="shrink-0" />}
+                <span className="min-w-0 flex-1 truncate">{w.name}</span>
+                <span className="shrink-0 text-xs text-slate-500">{w.detail}</span>
+              </Link>
             ))}
-            {artifacts.length > newest.length && (
+            {projects.length > newest.length && (
               <Link to="/library" className="block px-2 py-1 text-sm text-sky-300">
-                All {artifacts.length} in the Library
+                All {projects.length} in the Library
               </Link>
             )}
           </div>
@@ -678,4 +717,16 @@ class SceneBoundary extends Component<{ children: ReactNode; onError: () => void
   render() {
     return this.state.failed ? null : this.props.children;
   }
+}
+
+/** The newest version of each file, newest first: a project lists rocket.stl once, not once
+ * per version. */
+export function latestVersions(files: FileItem[]): FileItem[] {
+  const best = new Map<string, FileItem>();
+  for (const f of files) {
+    const key = f.version_of_id ?? f.id;
+    const had = best.get(key);
+    if (!had || (f.version ?? 1) > (had.version ?? 1)) best.set(key, f);
+  }
+  return [...best.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
