@@ -23,7 +23,16 @@ from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
-from nexus_orchestrator import deploy, improve, links, memory, notify, recall_eval, routines
+from nexus_orchestrator import (
+    accounts,
+    deploy,
+    improve,
+    links,
+    memory,
+    notify,
+    recall_eval,
+    routines,
+)
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.llm import chat_model
 from nexus_orchestrator.project_cleanup import delete_project as _delete_project
@@ -170,6 +179,20 @@ async def expire_trash(ctx: dict) -> None:
 
 
 @traced_job
+async def purge_deleted_account(ctx: dict, user_id: str) -> None:
+    """Permanently remove an expired or explicitly reset account."""
+    await accounts.purge_deleted_account(ctx["deps"], uuid.UUID(user_id))
+
+
+@traced_job
+async def expire_deleted_accounts(ctx: dict) -> None:
+    """Queue expired account deletion and retry any purge that is still pending."""
+    count = await accounts.expire_deleted_accounts(ctx["deps"])
+    if count:
+        log.info("Queued %d deleted accounts for permanent removal", count)
+
+
+@traced_job
 @retry_transient
 async def link_preview(ctx: dict, link_id: str) -> None:
     """Fetch the preview of a link the user added in the Library."""
@@ -180,6 +203,20 @@ async def link_preview(ctx: dict, link_id: str) -> None:
 async def notify_access(ctx: dict, kind: str, request_id: str) -> None:
     """Email admins about a new access request, or the person about their approval."""
     await notify.access(ctx["deps"], kind, uuid.UUID(request_id), attempt=ctx.get("job_try", 1))
+
+
+@traced_job
+async def notify_account_recovery(ctx: dict, kind: str, request_id: str) -> None:
+    """Email admins about a recovery request, or the person after approval."""
+    await notify.account_recovery(
+        ctx["deps"], kind, uuid.UUID(request_id), attempt=ctx.get("job_try", 1)
+    )
+
+
+@traced_job
+async def notify_invite(ctx: dict, user_id: str) -> None:
+    """Email the address of a newly invited person."""
+    await notify.invite(ctx["deps"], uuid.UUID(user_id), attempt=ctx.get("job_try", 1))
 
 
 @traced_job
@@ -276,8 +313,11 @@ class WorkerSettings:
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
         func(delete_project, timeout=600, keep_result=0),
         func(purge_trash_item, timeout=600, keep_result=0, max_tries=TRIES),
+        func(purge_deleted_account, timeout=1800, keep_result=0, max_tries=TRIES),
         # Emails are safe to retry: the job checks the request is still in the state it's about.
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
+        func(notify_account_recovery, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
+        func(notify_invite, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(notify_feedback, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
         func(proposal_pr, timeout=120, keep_result=0),
@@ -289,6 +329,7 @@ class WorkerSettings:
         cron(routines_due, second=5, unique=True, timeout=60),
         cron(widgets_due, second={0, 15, 30, 45}, unique=True, timeout=30),
         cron(expire_trash, hour=3, minute=10, unique=True, timeout=60),
+        cron(expire_deleted_accounts, hour=3, minute=20, unique=True, timeout=60),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
         cron(
             nightly,

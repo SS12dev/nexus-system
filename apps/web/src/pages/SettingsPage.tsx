@@ -290,8 +290,8 @@ function Privacy({ onError }: { onError: (msg: string) => void }) {
   const remove = async () => {
     const ok = await confirmAction({
       title: "Delete your account?",
-      body: "Your chats, files, memories and routines go for good. There's no undo.",
-      confirmLabel: "Delete everything",
+      body: "You'll be signed out immediately. Your account and data will be retained for 30 days, during which you can request admin-approved recovery. After 30 days the account and its files are permanently deleted.",
+      confirmLabel: "Delete account",
       danger: true,
     });
     if (!ok) return;

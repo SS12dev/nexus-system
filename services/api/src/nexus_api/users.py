@@ -100,6 +100,8 @@ async def resolve_sign_in(
                 data={"email": email, "role": role},
             )
         )
+    elif user.account_deleted_at is not None:
+        raise SignInRefused("account_deleted")
     elif user.status == UserStatus.disabled:
         raise SignInRefused("disabled")
     elif sub and user.oidc_sub and user.oidc_sub != sub:

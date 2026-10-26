@@ -5,7 +5,7 @@ import uuid
 import zipfile
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 
 from nexus_api.appsettings import maintenance_notice
 from nexus_api.cache import cached_spend
@@ -17,7 +17,6 @@ from nexus_api.deps import (
     QueueDep,
     RedisDep,
     SettingsDep,
-    StorageDep,
 )
 from nexus_api.onboarding import apply as apply_onboarding
 from nexus_api.schemas import (
@@ -40,19 +39,24 @@ from nexus_api.schemas import (
 from nexus_api.sessions import hash_token, revoke_all
 from nexus_common import google
 from nexus_common.access import pending_count
+from nexus_common.account import ACCOUNT_RECOVERY_RETENTION
 from nexus_common.litellm import active_key, get_budget
 from nexus_common.models import (
     TERMS_VERSION,
+    AccountRecoveryRequest,
+    AccountRecoveryStatus,
     AuditLog,
     Chat,
     File,
     Memory,
     Message,
     Project,
+    PushSubscription,
     RoleName,
     Routine,
     Session,
     User,
+    UserStatus,
     utcnow,
 )
 from nexus_common.profiles import INTERESTS, Pack, load_packs, suggested_prompts
@@ -92,6 +96,18 @@ async def me(
         budget=BudgetOut(max_usd=budget.max_usd, duration=budget.duration, spend_usd=spend),
         notice=await maintenance_notice(db),
         pending_access=await pending_count(db) if user.has_role(RoleName.admin) else None,
+        pending_recovery=(
+            await db.scalar(
+                select(func.count())
+                .select_from(AccountRecoveryRequest)
+                .where(
+                    AccountRecoveryRequest.status == AccountRecoveryStatus.pending,
+                    AccountRecoveryRequest.expires_at > utcnow(),
+                )
+            )
+            if user.has_role(RoleName.admin)
+            else None
+        ),
         onboarded_at=user.onboarded_at,
         timezone=user.timezone,
         profile=user.profile or {},
@@ -421,11 +437,8 @@ async def delete_account(
     db: DbDep,
     settings: SettingsDep,
     gateway: GatewayDep,
-    storage: StorageDep,
 ) -> None:
-    """Delete the person's account and everything in it: chats, memories, files, routines,
-    teams, their model key and their Google connection. Owners can't (the instance needs
-    them); live apps must be deleted on the Apps page first, since they run outside Nexus."""
+    """Sign the person out and retain their account for a 30-day admin-approved recovery."""
     if body.confirm.strip().lower() != user.email.lower():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Type your email to confirm")
     if user.role == RoleName.owner:
@@ -437,30 +450,28 @@ async def delete_account(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Delete your apps on the Apps page first, then try again"
         )
-    keys = [f.storage_key for f in (await db.scalars(select(File).where(File.user_id == user.id)))]
-    for key in keys:
-        try:
-            await storage.delete(key)
-        except Exception:
-            log.warning("Could not delete %s from storage", key, exc_info=True)
+    key = await active_key(db, user.id)
+    if key:
+        await gateway.set_blocked(key.secret, True)
     try:
         await google.disconnect(db, settings, user.id, http=request.app.state.google_http)
     except Exception:
-        log.warning("Could not revoke Google access for a deleted account", exc_info=True)
-    if key := await active_key(db, user.id):
-        try:
-            await gateway.delete_key(key.secret)
-        except Exception:
-            log.warning("Could not delete a deleted account's gateway key", exc_info=True)
-    await db.execute(update(User).where(User.invited_by == user.id).values(invited_by=None))
+        log.warning("account.google_revoke_failed", exc_info=True, extra={"user_id": str(user.id)})
+    await revoke_all(db, user)
+    now = utcnow()
+    user.account_deleted_at = now
+    user.account_delete_expires_at = now + ACCOUNT_RECOVERY_RETENTION
+    user.account_purge_started_at = None
+    user.account_reset_requested_at = None
+    user.status = UserStatus.disabled
+    await db.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
     db.add(
         AuditLog(
             actor_id=None,
-            action="user.deleted_self",
+            action="user.account_deletion_requested",
             target=str(user.id),
-            data={"files": len(keys)},
+            data={"expires_at": user.account_delete_expires_at.isoformat()},
         )
     )
-    await db.execute(delete(User).where(User.id == user.id))
     await db.commit()
     response.delete_cookie(settings.session_cookie_name)

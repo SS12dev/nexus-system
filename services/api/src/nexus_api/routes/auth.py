@@ -7,11 +7,12 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api import access
+from nexus_api import access, account_recovery
 from nexus_api.deps import CurrentUser, DbDep, QueueDep, RedisDep, SettingsDep
 from nexus_api.schemas import (
     AccessRequestIn,
     AccessStateOut,
+    AccountRecoveryIn,
     AuthConfigOut,
     DevLoginIn,
     UserOut,
@@ -127,9 +128,10 @@ async def callback(request: Request, db: DbDep, settings: SettingsDep):
     except SignInRefused as exc:
         await db.rollback()
         log.info("auth.refused", extra={"reason": exc.reason, "method": "oidc"})
-        if exc.reason == "not_invited":
-            # Google just proved this browser owns the address: let it ask for an invite.
-            access.remember_identity(request, info["email"], info.get("name"), info.get("picture"))
+        if exc.reason in ("not_invited", "account_deleted"):
+            access.remember_identity(
+                request, info["email"], info.get("name"), info.get("picture"), info.get("sub")
+            )
         return RedirectResponse(f"/login?error={exc.reason}", status.HTTP_303_SEE_OTHER)
     access.forget_identity(request)
     complete = True
@@ -179,7 +181,7 @@ async def dev_login(
     except SignInRefused as exc:
         await db.rollback()
         log.info("auth.refused", extra={"reason": exc.reason, "method": "dev"})
-        if exc.reason == "not_invited":
+        if exc.reason in ("not_invited", "account_deleted"):
             access.remember_identity(request, body.email)
         raise HTTPException(status.HTTP_403_FORBIDDEN, exc.reason) from exc
     access.forget_identity(request)
@@ -199,8 +201,6 @@ async def logout(request: Request, response: Response, db: DbDep, settings: Sett
 
 
 def _identity_or_404(request: Request, settings: Settings) -> dict:
-    if not settings.access_requests_open:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Access requests are turned off")
     who = access.identity(request)
     if who is None:
         raise HTTPException(
@@ -226,6 +226,8 @@ async def request_access(
     queue: QueueDep,
 ):
     """Ask for an invite, as the address the identity provider just verified."""
+    if not settings.access_requests_open:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Access requests are turned off")
     who = _identity_or_404(request, settings)
     try:
         out, created = await access.submit(db, settings, request, who, body.note)
@@ -237,5 +239,23 @@ async def request_access(
         ) from exc
     if created is not None:
         log.info("access.requested", extra={"access_request_id": str(created.id)})
-        await access.announce(db, redis, queue, "requested", created.id)
+        await access.announce(db, redis, queue, "requested", created.id, settings)
     return out
+
+
+@router.post("/account-recovery", response_model=AccessStateOut)
+async def request_account_recovery(
+    body: AccountRecoveryIn,
+    request: Request,
+    db: DbDep,
+    settings: SettingsDep,
+    redis: RedisDep,
+    queue: QueueDep,
+):
+    who = access.identity(request)
+    if who is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Sign in with the account you deleted to request recovery.",
+        )
+    return await account_recovery.submit(db, settings, request, redis, queue, who, body.action)

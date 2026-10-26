@@ -1,11 +1,20 @@
-import { Check, Clock, Copy, History, Inbox, Mail, Search, UserPlus, X } from "lucide-react";
+import { Check, Clock, Copy, History, Inbox, Mail, Search, ShieldCheck, UserPlus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { confirmAction, toast } from "../components/Feedback";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { APP_NAME } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDateTime } from "../lib/format";
-import { ROLE_RANK, type AccessRequest, type AccessRequestList, type Role, type User, type UserStatus } from "../lib/types";
+import {
+  ROLE_RANK,
+  type AccessRequest,
+  type AccessRequestList,
+  type AccountRecoveryList,
+  type AccountRecoveryRequest,
+  type Role,
+  type User,
+  type UserStatus,
+} from "../lib/types";
 import { useStore } from "../store/chat";
 
 const ROLES: Role[] = ["owner", "admin", "member", "viewer"];
@@ -85,6 +94,10 @@ export function PeoplePage() {
         </p>
 
         <AccessRequests grantable={grantable} onApproved={add} />
+        <RecoveryRequests
+          grantable={grantable}
+          onChanged={() => api.users().then(setUsers).catch((e) => toast(e.message, "error"))}
+        />
 
         <InviteForm grantable={grantable} onInvited={add} />
 
@@ -185,6 +198,8 @@ function InviteForm({ grantable, onInvited }: { grantable: Role[]; onInvited: (u
   const [role, setRole] = useState<Role>("member");
   const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState(false);
+  const [retryId, setRetryId] = useState<string | null>(null);
+  const [retryBusy, setRetryBusy] = useState(false);
 
   const invite = async (e: FormEvent) => {
     e.preventDefault();
@@ -192,7 +207,15 @@ function InviteForm({ grantable, onInvited }: { grantable: Role[]; onInvited: (u
     try {
       const u = await api.invite(email, role, budget || undefined);
       onInvited(u);
-      toast(`Invited ${u.email}. They join the first time they sign in with Google.`);
+      setRetryId(!u.invite_email_queued && u.invite_email_enabled ? u.id : null);
+      toast(
+        u.invite_email_queued
+          ? `Invited ${u.email}; the invitation email was queued.`
+          : u.invite_email_enabled
+            ? `Invited ${u.email}, but the email could not be queued. Retry it below.`
+            : `Invited ${u.email}, but SMTP email is not configured.`,
+        u.invite_email_queued ? "info" : "error",
+      );
       setEmail("");
       setBudget("");
     } catch (err) {
@@ -202,14 +225,28 @@ function InviteForm({ grantable, onInvited }: { grantable: Role[]; onInvited: (u
     }
   };
 
+  const retryEmail = async () => {
+    if (!retryId) return;
+    setRetryBusy(true);
+    try {
+      await api.retryInviteNotice(retryId);
+      setRetryId(null);
+      toast("Invitation email queued.");
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setRetryBusy(false);
+    }
+  };
+
   return (
     <form onSubmit={invite} className="mb-8 rounded-lg border border-edge bg-panel p-4">
       <h2 className="mb-1 flex items-center gap-2 font-medium">
         <UserPlus size={16} className="text-sky-400" aria-hidden /> Invite someone
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Use the Google address they'll sign in with. There's no invite email: tell them to open{" "}
-        {location.origin} and sign in.
+        Use the Google address they'll sign in with. If SMTP is configured, we'll email them a
+        sign-in link; otherwise, tell them to open {location.origin} and sign in.
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-56 flex-1 flex-col gap-1 text-xs text-slate-400">
@@ -247,6 +284,19 @@ function InviteForm({ grantable, onInvited }: { grantable: Role[]; onInvited: (u
           {busy ? "Inviting…" : "Invite"}
         </button>
       </div>
+      {retryId && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-amber-300">
+          <span className="mr-auto">The account was created, but its invitation email is still pending.</span>
+          <button
+            type="button"
+            onClick={retryEmail}
+            disabled={retryBusy}
+            className="rounded-md border border-amber-800/60 px-3 py-1.5 hover:bg-amber-500/10 disabled:opacity-50"
+          >
+            {retryBusy ? "Retrying…" : "Retry email"}
+          </button>
+        </div>
+      )}
     </form>
   );
 }
@@ -344,6 +394,186 @@ function AccessRequests({ grantable, onApproved }: { grantable: Role[]; onApprov
         </ul>
       )}
     </section>
+  );
+}
+
+/** Deleted accounts stay recoverable for 30 days; only a person who can manage the old role
+ * can approve restoring them. */
+function RecoveryRequests({
+  grantable,
+  onChanged,
+}: {
+  grantable: Role[];
+  onChanged: () => void;
+}) {
+  const pendingCount = useStore((s) => s.pendingRecovery);
+  const setPendingRecovery = useStore((s) => s.setPendingRecovery);
+  const [list, setList] = useState<AccountRecoveryList | null>(null);
+  const [history, setHistory] = useState<AccountRecoveryRequest[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const load = useCallback(() => {
+    api
+      .accountRecoveryRequests()
+      .then((value) => {
+        setList(value);
+        setPendingRecovery(value.pending);
+      })
+      .catch((e) => toast(e.message, "error"));
+  }, [setPendingRecovery]);
+
+  const shownPending = list?.pending;
+  useEffect(() => {
+    if (shownPending === undefined || pendingCount !== shownPending) load();
+  }, [pendingCount, shownPending, load]);
+
+  useEffect(() => {
+    if (showHistory)
+      api
+        .accountRecoveryRequests("decided")
+        .then((value) => setHistory(value.requests))
+        .catch((e) => toast(e.message, "error"));
+  }, [showHistory, list?.pending]);
+
+  if (!list) return null;
+  const done = (id: string) => {
+    const pending = Math.max(0, list.pending - 1);
+    setList({ ...list, requests: list.requests.filter((request) => request.id !== id), pending });
+    setPendingRecovery(pending);
+  };
+
+  return (
+    <section aria-labelledby="recovery-heading" className="mb-8">
+      <div className="mb-3 flex items-center gap-2">
+        <h2 id="recovery-heading" className="flex items-center gap-2 font-medium">
+          <ShieldCheck size={16} className="text-sky-400" aria-hidden /> Account recovery
+          {list.pending > 0 && <span className="rounded-full bg-rose-500 px-1.5 text-xs text-white">{list.pending}</span>}
+        </h2>
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-400 hover:bg-edge/50 hover:text-slate-200"
+          aria-expanded={showHistory}
+        >
+          <History size={14} /> {showHistory ? "Hide decided" : "Decided"}
+        </button>
+      </div>
+      {list.requests.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-edge px-4 py-5 text-center text-sm text-slate-500">
+          No account recovery requests are waiting.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {list.requests.map((request) => (
+            <RecoveryCard
+              key={request.id}
+              request={request}
+              canDecide={grantable.includes(request.role)}
+              onDone={done}
+              onChanged={onChanged}
+            />
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500">
+        <Mail size={12} className="mt-0.5 shrink-0" aria-hidden />
+        {list.email_notifications
+          ? "People requesting recovery are emailed to owners and admins; approved people are emailed."
+          : "Recovery requests appear here and as a notification. Configure SMTP to also email people."}
+      </p>
+      {showHistory && (
+        <ul className="mt-3 divide-y divide-edge rounded-lg border border-edge bg-panel/60 text-sm">
+          {history === null && <li className="px-4 py-3 text-slate-500">Loading…</li>}
+          {history?.length === 0 && <li className="px-4 py-3 text-slate-500">Nothing decided yet.</li>}
+          {history?.map((request) => (
+            <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
+              <span className="min-w-0 flex-1 truncate">{request.name || request.email}</span>
+              <span className={request.status === "approved" ? "text-emerald-400" : "text-rose-400"}>{request.status}</span>
+              <span className="text-xs text-slate-500">
+                {request.decided_by_name ? `by ${request.decided_by_name}, ` : ""}
+                {request.decided_at ? formatAgo(request.decided_at) : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RecoveryCard({
+  request,
+  canDecide,
+  onDone,
+  onChanged,
+}: {
+  request: AccountRecoveryRequest;
+  canDecide: boolean;
+  onDone: (id: string) => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
+
+  const approve = async () => {
+    setBusy("approve");
+    try {
+      await api.approveAccountRecovery(request.id);
+      onDone(request.id);
+      onChanged();
+      toast(`Restored ${request.name || request.email}'s account.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+      setBusy(null);
+    }
+  };
+  const deny = async () => {
+    const ok = await confirmAction({
+      title: `Deny recovery for ${request.name || request.email}?`,
+      body: "They will not be able to restore this account, but can still choose to permanently remove it and start fresh.",
+      confirmLabel: "Deny recovery",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy("deny");
+    try {
+      await api.denyAccountRecovery(request.id);
+      onDone(request.id);
+      toast("Recovery request denied.", "info");
+    } catch (e) {
+      toast((e as Error).message, "error");
+      setBusy(null);
+    }
+  };
+
+  return (
+    <li className="flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-panel px-4 py-3">
+      <Avatar person={request} size={36} />
+      <div className="min-w-48 flex-1">
+        <div className="font-medium">{personName(request)}</div>
+        <div className="text-xs text-slate-500">
+          {ROLE_LABEL[request.role]} · requested {formatAgo(request.created_at)} · expires {formatDateTime(request.expires_at)}
+        </div>
+      </div>
+      {!canDecide ? (
+        <span className="text-xs text-slate-500">You can't manage this role.</span>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={approve}
+            disabled={busy !== null}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {busy === "approve" ? "Restoring…" : "Approve"}
+          </button>
+          <button
+            onClick={deny}
+            disabled={busy !== null}
+            className="rounded-md border border-rose-900/60 px-3 py-1.5 text-sm text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+          >
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 

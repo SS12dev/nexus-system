@@ -3,6 +3,8 @@ import type {
   AccessRequest,
   AccessRequestList,
   AccessState,
+  AccountRecoveryList,
+  AccountRecoveryRequest,
   AuthConfig,
   AppItem,
   AgentSystem,
@@ -132,6 +134,11 @@ export const api = {
     request<AccessState>("/auth/access-request", {
       method: "POST",
       body: json({ note: note.trim() || null }),
+    }),
+  accountRecovery: (action: "recover" | "new") =>
+    request<AccessState>("/auth/account-recovery", {
+      method: "POST",
+      body: json({ action }),
     }),
   devLogin: (email: string, token: string) =>
     request<User>("/auth/dev-login", { method: "POST", body: json({ email, token }) }),
@@ -384,6 +391,8 @@ export const api = {
       method: "POST",
       body: json({ email, role, ...(budget_usd ? { budget_usd } : {}) }),
     }),
+  retryInviteNotice: (id: string) =>
+    request<void>(`/api/admin/users/${id}/invite-email`, { method: "POST" }),
   revokeInvite: (id: string) => request<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
   accessRequests: (status: "pending" | "decided" = "pending") =>
     request<AccessRequestList>(`/api/admin/access-requests?status=${status}`),
@@ -394,6 +403,12 @@ export const api = {
     }),
   denyAccess: (id: string) =>
     request<AccessRequest>(`/api/admin/access-requests/${id}/deny`, { method: "POST" }),
+  accountRecoveryRequests: (status: "pending" | "decided" = "pending") =>
+    request<AccountRecoveryList>(`/api/admin/account-recovery?status=${status}`),
+  approveAccountRecovery: (id: string) =>
+    request<AccountRecoveryRequest>(`/api/admin/account-recovery/${id}/approve`, { method: "POST" }),
+  denyAccountRecovery: (id: string) =>
+    request<AccountRecoveryRequest>(`/api/admin/account-recovery/${id}/deny`, { method: "POST" }),
   signOutUser: (id: string) =>
     request<void>(`/api/admin/users/${id}/sign-out`, { method: "POST" }),
   systemStatus: (userIds: string[] = []) =>

@@ -71,7 +71,9 @@ async def due(deps) -> int:
         rows = (
             await db.scalars(
                 select(Routine)
+                .join(User, User.id == Routine.user_id)
                 .where(Routine.enabled.is_(True), Routine.next_run_at <= now)
+                .where(User.status == UserStatus.active, User.account_deleted_at.is_(None))
                 .order_by(Routine.next_run_at)
                 .limit(CLAIM_BATCH)
                 .with_for_update(skip_locked=True)
@@ -161,7 +163,7 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
         ):
             return None
         user = await db.get(User, r.user_id)
-        if user is None or user.status != UserStatus.active:
+        if user is None or user.status != UserStatus.active or user.account_deleted_at is not None:
             return None
         run = RoutineRun(
             routine_id=r.id, scheduled_for=scheduled_for, status=RoutineRunStatus.running

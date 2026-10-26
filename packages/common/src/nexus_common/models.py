@@ -37,7 +37,7 @@ DEFAULT_ASSISTANT_NAME = "Jarvis"
 ASSISTANT_NAME_MAX = 24
 # The version of the Terms of Service and Privacy Policy (apps/web/public/terms.html and
 # privacy.html, which show the same date). Changing it asks everyone but owners to agree again.
-TERMS_VERSION = "2026-10-24"
+TERMS_VERSION = "2026-10-27"
 
 
 def utcnow() -> datetime:
@@ -178,6 +178,13 @@ class AccessRequestStatus(enum.StrEnum):
     denied = "denied"
 
 
+class AccountRecoveryStatus(enum.StrEnum):
+    pending = "pending"
+    approved = "approved"
+    denied = "denied"
+    cancelled = "cancelled"
+
+
 def _enum(cls: type[enum.Enum], name: str, length: int = 16) -> Enum:
     return Enum(
         cls,
@@ -217,8 +224,20 @@ class User(Base):
     # The Terms of Service and Privacy Policy version they agreed to (TERMS_VERSION), and when.
     terms_version: Mapped[str | None] = mapped_column(String(20))
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    account_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    account_delete_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    account_purge_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    account_reset_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     roles: Mapped[list["Role"]] = relationship(secondary="user_roles", lazy="selectin")
+
+    __table_args__ = (
+        Index(
+            "ix_users_account_delete_expiry",
+            "account_delete_expires_at",
+            postgresql_where=text("account_deleted_at IS NOT NULL"),
+        ),
+    )
 
     @property
     def assistant(self) -> str:
@@ -275,6 +294,42 @@ class AccessRequest(Base):
         ),
         Index("ix_access_requests_email_created", "email", "created_at"),
         Index("ix_access_requests_status_created", "status", "created_at"),
+    )
+
+
+class AccountRecoveryRequest(Base):
+    """A verified account owner asking an admin to restore a soft-deleted account."""
+
+    __tablename__ = "account_recovery_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    email: Mapped[str] = mapped_column(String(320))
+    name: Mapped[str | None] = mapped_column(String(200))
+    avatar_url: Mapped[str | None] = mapped_column(String(1000))
+    role: Mapped[RoleName] = mapped_column(_enum(RoleName, "account_recovery_role_name"))
+    status: Mapped[AccountRecoveryStatus] = mapped_column(
+        _enum(AccountRecoveryStatus, "account_recovery_status")
+    )
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    email_queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_email_queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "uq_account_recovery_pending_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_account_recovery_status_created", "status", "created_at"),
     )
 
 
@@ -1511,6 +1566,9 @@ class NotificationKind(enum.StrEnum):
     reminder = "reminder"
     # Something the assistant put on the main screen with its screen tool.
     info = "info"
+    access_request = "access_request"
+    account_recovery = "account_recovery"
+    invite_sent = "invite_sent"
 
 
 class Notification(Base):

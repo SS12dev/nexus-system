@@ -22,12 +22,16 @@ from nexus_api.queue import JobQueue
 from nexus_api.schemas import AccessStateOut
 from nexus_api.sessions import client_ip
 from nexus_api.users import normalize_email
+from nexus_common import notices
 from nexus_common.access import deciders, pending_count
 from nexus_common.events import Event, publish
 from nexus_common.models import (
     AccessRequest,
     AccessRequestStatus,
+    AccountRecoveryRequest,
+    AccountRecoveryStatus,
     AuditLog,
+    NotificationKind,
     User,
     UserStatus,
     utcnow,
@@ -47,13 +51,18 @@ class RequestsFull(Exception):
 
 
 def remember_identity(
-    request: Request, email: str, name: str | None = None, avatar_url: str | None = None
+    request: Request,
+    email: str,
+    name: str | None = None,
+    avatar_url: str | None = None,
+    sub: str | None = None,
 ) -> None:
     """Note, in the signed session cookie, the verified address whose sign-in was just refused."""
     request.session[SESSION_KEY] = {
         "email": normalize_email(email),
         "name": (name or "")[:200] or None,
         "avatar_url": (avatar_url or "")[:1000] or None,
+        "sub": (sub or "")[:255] or None,
         "at": int(time.time()),
     }
 
@@ -92,6 +101,31 @@ async def state(db: AsyncSession, settings: Settings, who: dict) -> AccessStateO
         email_on_approval=settings.smtp_enabled,
     )
     user = await db.scalar(select(User).where(User.email == email))
+    if user is not None and user.account_deleted_at is not None:
+        recovery = await db.scalar(
+            select(AccountRecoveryRequest)
+            .where(AccountRecoveryRequest.user_id == user.id)
+            .order_by(AccountRecoveryRequest.created_at.desc())
+            .limit(1)
+        )
+        out.account_delete_expires_at = user.account_delete_expires_at
+        if user.account_reset_requested_at is not None:
+            out.status = "account_resetting"
+        elif (
+            user.account_purge_started_at is not None
+            or user.account_delete_expires_at is None
+            or user.account_delete_expires_at <= utcnow()
+        ):
+            out.status = "account_expired"
+        elif recovery is not None and recovery.status == AccountRecoveryStatus.pending:
+            out.status = "recovery_pending"
+            out.recovery_requested_at = recovery.created_at
+        elif recovery is not None and recovery.status == AccountRecoveryStatus.denied:
+            out.status = "recovery_denied"
+            out.recovery_requested_at = recovery.created_at
+        else:
+            out.status = "account_deleted"
+        return out
     if user is not None and user.status != UserStatus.disabled:
         out.status = "approved"
         return out
@@ -161,7 +195,12 @@ async def submit(
 
 
 async def announce(
-    db: AsyncSession, redis: Redis, queue: JobQueue | None, kind: str | None, request_id: uuid.UUID
+    db: AsyncSession,
+    redis: Redis,
+    queue: JobQueue | None,
+    kind: str | None,
+    request_id: uuid.UUID,
+    settings: Settings,
 ) -> None:
     """After a commit: update every decider's badge live, and queue the email for `kind`.
     Neither may fail the request that caused it; a lost badge update is fixed by the next page
@@ -172,6 +211,29 @@ async def announce(
             await queue.enqueue_access_notice(kind, request_id)
         except Exception:
             log.exception("access.enqueue_failed", extra=fields)
+    if kind == "requested":
+        req = await db.get(AccessRequest, request_id)
+        title = (
+            f"{req.name or req.email} requested access" if req is not None else "New access request"
+        )
+        for decider in await deciders(db):
+            try:
+                await notices.notify(
+                    db,
+                    redis,
+                    settings,
+                    decider.id,
+                    NotificationKind.access_request,
+                    title,
+                    "Review the request on the People page.",
+                    url="/people",
+                    tag=f"access-request:{request_id}",
+                )
+            except Exception:
+                log.exception(
+                    "access.notification_failed",
+                    extra={**fields, "user_id": str(decider.id)},
+                )
     try:
         count = await pending_count(db)
         event = Event(type="access.pending", data={"count": count})

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import delete, select
 
 from nexus_api.cache import cached_spend
-from nexus_api.deps import AdminUser, DbDep, GatewayDep, RedisDep, SettingsDep
+from nexus_api.deps import AdminUser, DbDep, GatewayDep, QueueDep, RedisDep, SettingsDep
 from nexus_api.schemas import (
     AdminUserOut,
     BudgetOut,
@@ -24,8 +24,17 @@ from nexus_api.users import (
     owner_count,
     set_role,
 )
+from nexus_common import notices
 from nexus_common.litellm import GatewayError, LiteLLMAdmin, active_key, get_budget
-from nexus_common.models import AuditLog, Capability, RoleName, ToolGrant, User, UserStatus
+from nexus_common.models import (
+    AuditLog,
+    Capability,
+    NotificationKind,
+    RoleName,
+    ToolGrant,
+    User,
+    UserStatus,
+)
 from nexus_common.settings import Settings
 from nexus_common.systems import granted_capabilities
 from nexus_common.toolinfo import capabilities
@@ -49,7 +58,11 @@ async def admin_view(db, settings: Settings, gateway: LiteLLMAdmin, user: User) 
 async def list_users(
     actor: AdminUser, db: DbDep, settings: SettingsDep, gateway: GatewayDep, redis: RedisDep
 ):
-    users = (await db.scalars(select(User).order_by(User.created_at))).all()
+    users = (
+        await db.scalars(
+            select(User).where(User.account_deleted_at.is_(None)).order_by(User.created_at)
+        )
+    ).all()
     budgets = [await get_budget(db, settings, u) for u in users]
     await db.commit()
     keys = [await active_key(db, u.id) for u in users]
@@ -71,7 +84,13 @@ async def _none() -> None:
 
 @router.post("/users", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
 async def invite_user(
-    body: InviteIn, actor: AdminUser, db: DbDep, settings: SettingsDep, gateway: GatewayDep
+    body: InviteIn,
+    actor: AdminUser,
+    db: DbDep,
+    settings: SettingsDep,
+    gateway: GatewayDep,
+    redis: RedisDep,
+    queue: QueueDep,
 ):
     """Invite someone by email. They join the first time they sign in with that address."""
     if not can_assign(actor, body.role):
@@ -94,7 +113,70 @@ async def invite_user(
         )
     )
     await db.commit()
-    return await admin_view(db, settings, gateway, user)
+    email_queued = False
+    if settings.smtp_enabled:
+        try:
+            await queue.enqueue_invite_notice(user.id)
+            email_queued = True
+        except Exception:
+            log.exception(
+                "invite.email_enqueue_failed",
+                extra={"user_id": str(user.id), "actor_id": str(actor.id)},
+            )
+    try:
+        await notices.notify(
+            db,
+            redis,
+            settings,
+            actor.id,
+            NotificationKind.invite_sent,
+            f"Invitation created for {email}",
+            (
+                "The invitation email was queued."
+                if email_queued
+                else "The invitation email could not be queued. Check SMTP and retry it from "
+                "People."
+                if settings.smtp_enabled
+                else "SMTP is not configured, so no invitation email was sent."
+            ),
+            url="/people",
+            tag=f"invite:{user.id}",
+        )
+    except Exception:
+        log.exception(
+            "invite.notification_failed",
+            extra={"user_id": str(user.id), "actor_id": str(actor.id)},
+        )
+    out = await admin_view(db, settings, gateway, user)
+    out.invite_email_queued = email_queued
+    out.invite_email_enabled = settings.smtp_enabled
+    return out
+
+
+@router.post("/users/{user_id}/invite-email", status_code=status.HTTP_204_NO_CONTENT)
+async def retry_invite_email(
+    user_id: uuid.UUID,
+    actor: AdminUser,
+    db: DbDep,
+    settings: SettingsDep,
+    queue: QueueDep,
+) -> None:
+    user = await db.get(User, user_id)
+    if user is None or not can_manage(actor, user) or user.status != UserStatus.invited:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitation not found")
+    if not settings.smtp_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "SMTP email is not configured")
+    try:
+        await queue.enqueue_invite_notice(user.id)
+    except Exception as exc:
+        log.exception(
+            "invite.email_enqueue_failed",
+            extra={"user_id": str(user.id), "actor_id": str(actor.id)},
+        )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "The invitation email could not be queued"
+        ) from exc
+    log.info("invite.email_queued", extra={"user_id": str(user.id), "actor_id": str(actor.id)})
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)

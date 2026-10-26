@@ -19,14 +19,18 @@ async def test_tray_lists_own_notices_and_marks_them_read(owner, client_for, inv
     await _add(sessionmaker, "friend@example.com", "Friend's team finished")
 
     tray = (await owner.get("/api/notifications")).json()
-    assert tray["unread"] == 2
-    assert {n["title"] for n in tray["items"]} == {"Rocket team finished", "Essay team finished"}
+    assert tray["unread"] == 3
+    assert {n["title"] for n in tray["items"]} == {
+        "Rocket team finished",
+        "Essay team finished",
+        "Invitation created for friend@example.com",
+    }
     first = tray["items"][0]["id"]
 
     assert (await owner.post("/api/notifications/read", json={"ids": [first]})).status_code == 204
-    assert (await owner.get("/api/notifications")).json()["unread"] == 1
+    assert (await owner.get("/api/notifications")).json()["unread"] == 2
     # Someone else's ids are ignored; "all" only reaches the caller's own.
     await friend.post("/api/notifications/read", json={})
-    assert (await owner.get("/api/notifications")).json()["unread"] == 1
+    assert (await owner.get("/api/notifications")).json()["unread"] == 2
     await owner.post("/api/notifications/read", json={})
     assert (await owner.get("/api/notifications")).json()["unread"] == 0

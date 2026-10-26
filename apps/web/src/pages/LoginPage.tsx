@@ -14,6 +14,7 @@ const ERRORS: Record<string, string> = {
   // Requests are on, but the proof of the address expired (it lasts 30 minutes).
   not_invited_retry: "That Google account hasn't been invited yet. Sign in with it again to ask for access.",
   disabled: "This account has been disabled.",
+  account_deleted: "This account was deleted. You can request recovery or start with a clean account.",
   identity_mismatch: "That email is linked to a different sign-in identity.",
   email_unverified: "Your identity provider didn't confirm that email address.",
   oidc_failed: "Sign-in didn't complete. Try again.",
@@ -47,8 +48,11 @@ export function LoginPage() {
   const [access, setAccess] = useState<AccessState | null>(null);
 
   // Refused for lack of an invite: offer to ask for one, if this Nexus takes requests.
-  const checkAccess = async (cfg: AuthConfig) => {
-    if (!cfg.access_requests) return;
+  const checkAccess = async (
+    cfg: AuthConfig,
+    deletedAccount = params.get("error") === "account_deleted",
+  ) => {
+    if (!cfg.access_requests && !deletedAccount) return;
     try {
       setAccess(await api.accessState());
       setError("");
@@ -62,7 +66,8 @@ export function LoginPage() {
       .authConfig()
       .then((cfg) => {
         setConfig(cfg);
-        if (params.get("error") === "not_invited") checkAccess(cfg);
+        if (params.get("error") === "not_invited" || params.get("error") === "account_deleted")
+          checkAccess(cfg);
       })
       .catch(() => setError(`${APP_NAME}'s API is not reachable. Try again in a moment.`));
     // Read once on arrival; the query string doesn't change while this page is open.
@@ -77,7 +82,8 @@ export function LoginPage() {
     } catch (err) {
       const reason = (err as Error).message;
       setError(ERRORS[reason] ?? reason);
-      if (reason === "not_invited" && config) checkAccess(config);
+      if ((reason === "not_invited" || reason === "account_deleted") && config)
+        checkAccess(config, reason === "account_deleted");
     }
   };
 
@@ -233,6 +239,7 @@ function AccessPanel({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirmNew, setConfirmNew] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -240,6 +247,19 @@ function AccessPanel({
     setError("");
     try {
       onChange(await api.requestAccess(note));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chooseRecoveryAction = async (action: "recover" | "new") => {
+    setBusy(true);
+    setError("");
+    try {
+      onChange(await api.accountRecovery(action));
+      setConfirmNew(false);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -267,6 +287,113 @@ function AccessPanel({
       Use a different Google account
     </a>
   );
+
+  if (
+    state.status === "account_deleted" ||
+    state.status === "recovery_pending" ||
+    state.status === "recovery_denied" ||
+    state.status === "account_expired" ||
+    state.status === "account_resetting"
+  ) {
+    const canRecover =
+      state.status === "account_deleted" || state.status === "recovery_denied";
+    const resetInProgress = state.status === "account_resetting";
+    return (
+      <div>
+        <StatusIcon
+          icon={resetInProgress ? Clock : state.status === "recovery_denied" ? XCircle : ShieldCheck}
+          tone={resetInProgress ? "text-amber-300 bg-amber-500/10" : "text-sky-300 bg-sky-500/10"}
+        />
+        <h2 className="mt-4 text-xl font-semibold">
+          {state.status === "recovery_pending"
+            ? "Recovery request sent"
+            : state.status === "recovery_denied"
+              ? "Recovery wasn't approved"
+              : state.status === "account_expired"
+                ? "Recovery period ended"
+                : resetInProgress
+                  ? "Starting fresh"
+                  : "This account was deleted"}
+        </h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+          {state.status === "recovery_pending"
+            ? `An admin must approve recovery. You asked ${state.recovery_requested_at ? formatAgo(state.recovery_requested_at) : "recently"}.`
+            : state.status === "recovery_denied"
+              ? "An admin declined the recovery request. You may request recovery again before the retention period ends."
+              : state.status === "account_expired"
+                ? "The 30-day recovery period has ended, so this account can no longer be restored."
+                : resetInProgress
+                  ? "Your old account data is being permanently removed. Your clean account will be ready as soon as that finishes."
+                  : "An admin can restore this account for 30 days. Or permanently remove its old data and create a clean account."}
+          {state.account_delete_expires_at &&
+            state.status !== "account_expired" &&
+            ` Recovery is available until ${formatDate(state.account_delete_expires_at)}.`}
+        </p>
+        {who}
+        {error && (
+          <p role="alert" className="mt-3 rounded-lg border border-rose-900/60 bg-rose-950/50 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </p>
+        )}
+        {canRecover && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => chooseRecoveryAction("recover")}
+            className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-full bg-sky-500 font-medium text-ink hover:bg-sky-400 disabled:opacity-60"
+          >
+            {busy ? "Sending…" : "Request account recovery"}
+          </button>
+        )}
+        {resetInProgress && oidc && (
+          <div className="mt-4">
+            <GoogleButton />
+          </div>
+        )}
+        {(state.status === "account_deleted" ||
+          state.status === "recovery_pending" ||
+          state.status === "recovery_denied") && (
+          <div className="mt-3">
+            {confirmNew ? (
+              <div className="rounded-lg border border-rose-900/60 bg-rose-950/30 p-3">
+                <p className="text-sm text-rose-200">
+                  This permanently deletes the old account and its files. It cannot be undone.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => chooseRecoveryAction("new")}
+                    className="flex-1 rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-60"
+                  >
+                    {busy ? "Deleting…" : "Permanently delete and start fresh"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setConfirmNew(false)}
+                    className="rounded-md border border-edge px-3 py-2 text-sm text-slate-300 hover:bg-edge/60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmNew(true)}
+                className="w-full rounded-full border border-edge px-3 py-2 text-sm text-slate-300 hover:bg-edge/60 disabled:opacity-60"
+              >
+                Start with a clean account instead
+              </button>
+            )}
+          </div>
+        )}
+        {switchAccount}
+      </div>
+    );
+  }
 
   if (state.status === "can_request")
     return (
@@ -395,4 +522,3 @@ function GoogleButton() {
     </a>
   );
 }
-

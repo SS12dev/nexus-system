@@ -117,7 +117,7 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
                 return
         system = await db.get(AgentSystem, run.system_id)
         user = await db.get(User, run.user_id)
-        if user is None or user.status != UserStatus.active:
+        if user is None or user.status != UserStatus.active or user.account_deleted_at is not None:
             await db.commit()
             await finish(deps, run_id, RunStatus.failed, error="The account is not active.")
             return

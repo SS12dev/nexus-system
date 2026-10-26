@@ -11,7 +11,16 @@ from arq import Retry
 
 from nexus_common import mail
 from nexus_common.access import deciders
-from nexus_common.models import AccessRequest, AccessRequestStatus, Feedback, RoleName, User
+from nexus_common.models import (
+    AccessRequest,
+    AccessRequestStatus,
+    AccountRecoveryRequest,
+    AccountRecoveryStatus,
+    Feedback,
+    RoleName,
+    User,
+    UserStatus,
+)
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -83,6 +92,99 @@ async def access(deps, kind: str, request_id: uuid.UUID, *, attempt: int = 1) ->
         log.error("access.notify_failed: %s", exc, extra=fields)
         return
     log.info("access.notified", extra={**fields, "recipients": len(msg["To"].split(","))})
+
+
+async def account_recovery(deps, kind: str, request_id: uuid.UUID, *, attempt: int = 1) -> None:
+    """Email admins about a recovery request, or the person after approval."""
+    settings: Settings = deps.settings
+    fields = {"kind": kind, "request_id": str(request_id), "attempt": attempt}
+    if not settings.smtp_enabled:
+        log.info("account_recovery.notify_skipped: SMTP is not configured", extra=fields)
+        return
+    async with deps.sessionmaker() as db:
+        req = await db.get(AccountRecoveryRequest, request_id)
+        if req is None:
+            return
+        if kind == "requested" and req.status == AccountRecoveryStatus.pending:
+            recipients = settings.access_request_notify_list or sorted(
+                user.email for user in await deciders(db)
+            )
+            body = (
+                f"{req.name or req.email} requested recovery of a deleted {APP} account.\n\n"
+                f"Review or deny the request on the People page:\n"
+                f"{settings.nexus_url.rstrip('/')}/people\n\n"
+                "The account is retained for 30 days after deletion; recovery requires admin "
+                "approval."
+            )
+            msg = (
+                mail.message(
+                    settings,
+                    recipients,
+                    f"{req.name or req.email} requested account recovery",
+                    body,
+                    reply_to=req.email,
+                )
+                if recipients
+                else None
+            )
+        elif kind == "approved" and req.status == AccountRecoveryStatus.approved:
+            body = (
+                f"Hi{' ' + req.name.split()[0] if req.name else ''},\n\n"
+                f"Your {APP} account recovery request was approved. You can sign in again here:\n"
+                f"{settings.nexus_url.rstrip('/')}/login"
+            )
+            msg = mail.message(settings, [req.email], f"Your {APP} account was restored", body)
+        else:
+            log.info("account_recovery.notify_dropped", extra=fields)
+            return
+    if msg is None:
+        log.warning("account_recovery.notify_skipped: nobody to tell", extra=fields)
+        return
+    try:
+        await mail.send(settings, msg)
+    except mail.MailError as exc:
+        if exc.transient and attempt < MAX_TRIES:
+            delay = 30 * 2 ** (attempt - 1)
+            log.warning("account_recovery.notify_retry in %ds: %s", delay, exc, extra=fields)
+            raise Retry(defer=delay) from exc
+        log.error("account_recovery.notify_failed: %s", exc, extra=fields)
+        return
+    log.info("account_recovery.notified", extra={**fields, "recipients": len(msg["To"].split(","))})
+
+
+async def invite(deps, user_id: uuid.UUID, *, attempt: int = 1) -> None:
+    """Email a newly invited person; the job drops the message if they already joined."""
+    settings: Settings = deps.settings
+    fields = {"user_id": str(user_id), "attempt": attempt}
+    if not settings.smtp_enabled:
+        log.info("invite.notify_skipped: SMTP is not configured", extra=fields)
+        return
+    async with deps.sessionmaker() as db:
+        user = await db.get(User, user_id)
+        if user is None or user.status != UserStatus.invited:
+            log.info("invite.notify_dropped: invitation is no longer pending", extra=fields)
+            return
+        inviter = await db.get(User, user.invited_by) if user.invited_by else None
+        inviter_name = inviter.name if inviter else None
+        name = user.name
+        email = user.email
+    body = (
+        f"Hi{' ' + name.split()[0] if name else ''},\n\n"
+        f"{inviter_name or 'An administrator'} invited you to {APP}. Sign in with Google as "
+        f"{email} here:\n{settings.nexus_url.rstrip('/')}/login\n\n"
+        "If you weren't expecting this invitation, you can ignore this message."
+    )
+    msg = mail.message(settings, [email], f"You're invited to {APP}", body)
+    try:
+        await mail.send(settings, msg)
+    except mail.MailError as exc:
+        if exc.transient and attempt < MAX_TRIES:
+            delay = 30 * 2 ** (attempt - 1)
+            log.warning("invite.notify_retry in %ds: %s", delay, exc, extra=fields)
+            raise Retry(defer=delay) from exc
+        log.error("invite.notify_failed: %s", exc, extra=fields)
+        return
+    log.info("invite.notified", extra=fields)
 
 
 FEEDBACK_KIND = {"problem": "a problem", "idea": "an idea", "praise": "some praise"}

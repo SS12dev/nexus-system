@@ -66,7 +66,11 @@ async def user_for_token(session: AsyncSession, token: str | None) -> User | Non
             Session.expires_at > utcnow(),
         )
     )
-    if row is None or row.user.status != UserStatus.active:
+    if (
+        row is None
+        or row.user.status != UserStatus.active
+        or row.user.account_deleted_at is not None
+    ):
         return None
     return row.user
 

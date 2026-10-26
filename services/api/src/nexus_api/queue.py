@@ -23,6 +23,9 @@ class JobQueue(Protocol):
     async def enqueue_routine(self, routine_id: uuid.UUID, scheduled_for: datetime) -> None: ...
     async def enqueue_feedback_notice(self, feedback_id: uuid.UUID) -> None: ...
     async def enqueue_trash_purge(self, item_id: uuid.UUID) -> None: ...
+    async def enqueue_account_recovery_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
+    async def enqueue_invite_notice(self, user_id: uuid.UUID) -> None: ...
+    async def enqueue_account_purge(self, user_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -105,4 +108,20 @@ class ArqJobQueue:
         """Permanently delete one item from Trash, including its external resources."""
         await self.enqueue_job(
             "purge_trash_item", str(item_id), True, _job_id=f"trash-purge:{item_id}"
+        )
+
+    async def enqueue_account_recovery_notice(self, kind: str, request_id: uuid.UUID) -> None:
+        await self.enqueue_job(
+            "notify_account_recovery",
+            kind,
+            str(request_id),
+            _job_id=f"account-recovery:{kind}:{request_id}",
+        )
+
+    async def enqueue_invite_notice(self, user_id: uuid.UUID) -> None:
+        await self.enqueue_job("notify_invite", str(user_id), _job_id=f"invite:{user_id}")
+
+    async def enqueue_account_purge(self, user_id: uuid.UUID) -> None:
+        await self.enqueue_job(
+            "purge_deleted_account", str(user_id), _job_id=f"account-purge:{user_id}"
         )

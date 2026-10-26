@@ -22,6 +22,9 @@ class RecordingQueue:
         self.routines: list[tuple[uuid.UUID, object]] = []
         self.feedback: list[uuid.UUID] = []
         self.trash_purges: list[uuid.UUID] = []
+        self.account_recovery_notices: list[tuple[str, uuid.UUID]] = []
+        self.invite_notices: list[uuid.UUID] = []
+        self.account_purges: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
@@ -75,6 +78,21 @@ class RecordingQueue:
         if self.fail:
             raise ConnectionError("redis down")
         self.trash_purges.append(item_id)
+
+    async def enqueue_account_recovery_notice(self, kind, request_id):
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.account_recovery_notices.append((kind, request_id))
+
+    async def enqueue_invite_notice(self, user_id):
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.invite_notices.append(user_id)
+
+    async def enqueue_account_purge(self, user_id):
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.account_purges.append(user_id)
 
 
 @pytest.fixture(autouse=True)

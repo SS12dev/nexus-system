@@ -37,6 +37,7 @@ interface Store extends ChatState {
   setUser: (user: User | null) => void;
   setConnected: (connected: boolean) => void;
   setPendingAccess: (count: number) => void;
+  setPendingRecovery: (count: number) => void;
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat) => void;
   removeChat: (id: string) => void;
@@ -78,9 +79,15 @@ export const useStore = create<Store>((set) => ({
   screen: { ...initialState.screen, mode: cachedMode() ?? initialState.screen.mode },
   user: null,
   connected: false,
-  setUser: (user) => set({ user, pendingAccess: user?.pending_access ?? null }),
+  setUser: (user) =>
+    set({
+      user,
+      pendingAccess: user?.pending_access ?? null,
+      pendingRecovery: user?.pending_recovery ?? null,
+    }),
   setConnected: (connected) => set({ connected }),
   setPendingAccess: (pendingAccess) => set({ pendingAccess }),
+  setPendingRecovery: (pendingRecovery) => set({ pendingRecovery }),
   setChats: (chats) => set({ chats }),
   upsertChat: (chat) => set((s) => ({ chats: upsertChat(s.chats, chat) })),
   removeChat: (id) =>

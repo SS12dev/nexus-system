@@ -9,6 +9,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, mod
 from nexus_common.models import (
     ASSISTANT_NAME_MAX,
     AccessRequestStatus,
+    AccountRecoveryStatus,
     FileStatus,
     MemoryKind,
     MessageRole,
@@ -49,6 +50,7 @@ class MeOut(UserOut):
     notice: str | None = None
     # Owners and admins: access requests waiting for a decision. None for everyone else.
     pending_access: int | None = None
+    pending_recovery: int | None = None
     # None until they finish or skip the setup interview, which the app shows until then.
     onboarded_at: datetime | None = None
     timezone: str | None = None
@@ -277,6 +279,8 @@ class SessionOut(BaseModel):
 
 class AdminUserOut(UserOut):
     budget: BudgetOut
+    invite_email_queued: bool | None = None
+    invite_email_enabled: bool | None = None
 
 
 class InviteIn(BaseModel):
@@ -331,9 +335,21 @@ class AccessStateOut(BaseModel):
     email: str
     name: str | None
     avatar_url: str | None
-    status: Literal["can_request", "pending", "approved", "denied"]
+    status: Literal[
+        "can_request",
+        "pending",
+        "approved",
+        "denied",
+        "account_deleted",
+        "recovery_pending",
+        "recovery_denied",
+        "account_expired",
+        "account_resetting",
+    ]
     requested_at: datetime | None = None
     retry_after: datetime | None = None
+    account_delete_expires_at: datetime | None = None
+    recovery_requested_at: datetime | None = None
     # Whether they'll be emailed when approved (SMTP is set up).
     email_on_approval: bool = False
 
@@ -364,6 +380,32 @@ class AccessRequestListOut(BaseModel):
     email_notifications: bool
     # Whether the login page offers requests at all.
     enabled: bool
+
+
+class AccountRecoveryIn(BaseModel):
+    action: Literal["recover", "new"]
+
+
+class AccountRecoveryRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    name: str | None
+    avatar_url: str | None
+    role: RoleName
+    status: AccountRecoveryStatus
+    created_at: datetime
+    expires_at: datetime
+    decided_by: uuid.UUID | None
+    decided_at: datetime | None
+    decided_by_name: str | None = None
+
+
+class AccountRecoveryListOut(BaseModel):
+    requests: list[AccountRecoveryRequestOut]
+    pending: int
+    email_notifications: bool
 
 
 class ApproveIn(BaseModel):

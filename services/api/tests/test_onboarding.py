@@ -4,7 +4,7 @@ import zipfile
 
 from sqlalchemy import select
 
-from nexus_common.models import TERMS_VERSION, Memory, Routine, User
+from nexus_common.models import TERMS_VERSION, Memory, Routine, User, UserStatus, utcnow
 
 
 async def test_new_user_is_not_onboarded_and_existing_answers_are_offered(owner):
@@ -194,8 +194,11 @@ async def test_delete_account(owner, client_for, invite, sessionmaker):
     ).status_code == 204
     assert (await friend.get("/api/me")).status_code == 401
     async with sessionmaker() as db:
-        assert await db.scalar(select(User).where(User.email == "friend@example.com")) is None
-        assert not (await db.scalars(select(Routine))).all()
+        deleted = await db.scalar(select(User).where(User.email == "friend@example.com"))
+        assert deleted.status == UserStatus.disabled
+        assert deleted.account_deleted_at is not None
+        assert deleted.account_delete_expires_at > utcnow()
+        assert (await db.scalars(select(Routine).where(Routine.user_id == deleted.id))).all()
     resp = await owner.post("/api/me/delete", json={"confirm": "owner@example.com"})
     assert resp.status_code == 403
 

@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 import pytest
 from arq import Retry
@@ -8,10 +9,14 @@ from nexus_common import mail
 from nexus_common.models import (
     AccessRequest,
     AccessRequestStatus,
+    AccountRecoveryRequest,
+    AccountRecoveryStatus,
     Feedback,
     FeedbackKind,
     RoleName,
+    User,
     UserStatus,
+    utcnow,
 )
 from nexus_common.storage import feedback_shot_key
 from nexus_orchestrator import notify
@@ -108,6 +113,65 @@ async def test_transient_failures_retry_then_give_up(smtp_deps, sessionmaker, mo
     assert exc.value.defer_score == 60_000
     # The last try logs and stops rather than failing the job.
     await notify.access(smtp_deps, "requested", req.id, attempt=notify.MAX_TRIES)
+
+
+async def test_recovery_request_emails_deciders_and_approval_emails_person(
+    smtp_deps, sessionmaker, sent
+):
+    async with sessionmaker() as db:
+        await create_user(
+            db, email="owner@example.com", role=RoleName.owner, status=UserStatus.active
+        )
+        await create_user(
+            db, email="admin@example.com", role=RoleName.admin, status=UserStatus.active
+        )
+        recovery = AccountRecoveryRequest(
+            email="person@example.com",
+            name="Sam",
+            role=RoleName.member,
+            status=AccountRecoveryStatus.pending,
+            expires_at=utcnow() + timedelta(days=30),
+        )
+        db.add(recovery)
+        await db.commit()
+        recovery_id = recovery.id
+
+    await notify.account_recovery(smtp_deps, "requested", recovery_id)
+    assert sent[0]["To"] == "admin@example.com, owner@example.com"
+    assert "/people" in sent[0].get_body(("plain",)).get_content()
+    async with sessionmaker() as db:
+        recovery = await db.get(AccountRecoveryRequest, recovery_id)
+        recovery.status = AccountRecoveryStatus.approved
+        await db.commit()
+    await notify.account_recovery(smtp_deps, "approved", recovery_id)
+    assert sent[1]["To"] == "person@example.com"
+    assert "/login" in sent[1].get_body(("plain",)).get_content()
+
+
+async def test_invitation_email_only_sends_for_pending_invite(smtp_deps, sessionmaker, sent):
+    async with sessionmaker() as db:
+        inviter = await create_user(
+            db, email="owner@example.com", role=RoleName.owner, status=UserStatus.active
+        )
+        user = await create_user(
+            db,
+            email="new@example.com",
+            role=RoleName.member,
+            status=UserStatus.invited,
+            invited_by=inviter,
+        )
+        await db.commit()
+        user_id = user.id
+    await notify.invite(smtp_deps, user_id)
+    assert sent[0]["To"] == "new@example.com"
+    assert "/login" in sent[0].get_body(("plain",)).get_content()
+
+    async with sessionmaker() as db:
+        user = await db.get(User, user_id)
+        user.status = UserStatus.active
+        await db.commit()
+    await notify.invite(smtp_deps, user_id)
+    assert len(sent) == 1
 
 
 async def test_feedback_email_carries_its_screenshots(smtp_deps, sessionmaker, sent, storage):

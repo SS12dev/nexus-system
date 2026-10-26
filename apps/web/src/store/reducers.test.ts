@@ -334,6 +334,17 @@ describe("access requests", () => {
     expect(state.pendingAccess).toBe(3);
     expect(applyEvent(state, { type: "access.pending", data: { count: 0 } }).pendingAccess).toBe(0);
   });
+
+  it("keeps the deleted-account recovery count from the live event", () => {
+    const state = applyEvent(initialState, {
+      type: "account.recovery.pending",
+      data: { count: 2 },
+    });
+    expect(state.pendingRecovery).toBe(2);
+    expect(
+      applyEvent(state, { type: "account.recovery.pending", data: { count: 0 } }).pendingRecovery,
+    ).toBe(0);
+  });
 });
 
 describe("notices", () => {

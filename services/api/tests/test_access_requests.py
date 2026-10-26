@@ -183,8 +183,10 @@ async def test_pending_count_on_me_and_live_to_admins(owner, client_for, redis, 
         for _ in range(20):
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.2)
             if msg:
-                event = json.loads(msg["data"])
-                break
+                candidate = json.loads(msg["data"])
+                if candidate["type"] == "access.pending":
+                    event = candidate
+                    break
             await asyncio.sleep(0.05)
     finally:
         await pubsub.aclose()

@@ -143,14 +143,20 @@ async def approve(
         "access.approved",
         extra={"access_request_id": str(req.id), "actor_id": str(actor.id), "role": user.role},
     )
-    await access.announce(db, redis, queue, "approved", req.id)
+    await access.announce(db, redis, queue, "approved", req.id, settings)
     return ApproveOut(
         request=(await _out(db, [req]))[0], user=await admin_view(db, settings, gateway, user)
     )
 
 
 @router.post("/{request_id}/deny", response_model=AccessRequestOut)
-async def deny(request_id: uuid.UUID, actor: AdminUser, db: DbDep, redis: RedisDep):
+async def deny(
+    request_id: uuid.UUID,
+    actor: AdminUser,
+    db: DbDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+):
     """Turn the request down. The person isn't emailed; the login page tells them if they look,
     and they may ask again after ACCESS_REQUEST_COOLDOWN_DAYS."""
     req = await _pending(db, request_id)
@@ -167,5 +173,5 @@ async def deny(request_id: uuid.UUID, actor: AdminUser, db: DbDep, redis: RedisD
     )
     await db.commit()
     log.info("access.denied", extra={"access_request_id": str(req.id), "actor_id": str(actor.id)})
-    await access.announce(db, redis, None, None, req.id)
+    await access.announce(db, redis, None, None, req.id, settings)
     return (await _out(db, [req]))[0]

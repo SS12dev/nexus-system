@@ -50,6 +50,8 @@ export interface ChatState {
   routinesVersion: number;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;
+  /** Owners and admins: recovery requests waiting for a decision; null for everyone else. */
+  pendingRecovery: number | null;
   /** What the orb lights up: the latest reply's recall, or one whose chips were tapped.
    * seq changes each time, so lighting the same recall again replays it. */
   recall: (Recalled & { seq: number }) | null;
@@ -89,6 +91,7 @@ export const initialState: ChatState = {
   runFeed: {},
   routinesVersion: 0,
   pendingAccess: null,
+  pendingRecovery: null,
   recall: null,
   notices: [],
   unread: 0,
@@ -251,6 +254,8 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
   switch (event.type) {
     case "access.pending":
       return { ...state, pendingAccess: event.data.count };
+    case "account.recovery.pending":
+      return { ...state, pendingRecovery: event.data.count };
     case "assistant.state":
       return {
         ...state,

@@ -26,6 +26,11 @@ export interface User {
   notice?: string | null;
   /** Owners and admins: access requests waiting for a decision (only on /api/me). */
   pending_access?: number | null;
+  /** Owners and admins: deleted-account recovery requests waiting for a decision. */
+  pending_recovery?: number | null;
+  /** Invite-specific delivery status returned when a person is invited. */
+  invite_email_queued?: boolean | null;
+  invite_email_enabled?: boolean | null;
   /** Null until they finish or skip the setup interview (only on /api/me). */
   onboarded_at?: string | null;
   timezone?: string | null;
@@ -198,10 +203,43 @@ export interface AccessState {
   email: string;
   name: string | null;
   avatar_url: string | null;
-  status: "can_request" | "pending" | "approved" | "denied";
+  status:
+    | "can_request"
+    | "pending"
+    | "approved"
+    | "denied"
+    | "account_deleted"
+    | "recovery_pending"
+    | "recovery_denied"
+    | "account_expired"
+    | "account_resetting";
   requested_at: string | null;
   retry_after: string | null;
+  account_delete_expires_at: string | null;
+  recovery_requested_at: string | null;
   email_on_approval: boolean;
+}
+
+export type AccountRecoveryStatus = "pending" | "approved" | "denied" | "cancelled";
+
+export interface AccountRecoveryRequest {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  role: Role;
+  status: AccountRecoveryStatus;
+  created_at: string;
+  expires_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decided_by_name: string | null;
+}
+
+export interface AccountRecoveryList {
+  requests: AccountRecoveryRequest[];
+  pending: number;
+  email_notifications: boolean;
 }
 
 export interface AccessRequest {
@@ -723,6 +761,7 @@ export type ServerEvent =
   | { type: "project.updated" | "project.delete_requested" | "project.deleted"; chat_id?: null; data: { id: string } }
   | { type: "project.delete_failed"; chat_id?: null; data: { id: string; error: string } }
   | { type: "access.pending"; chat_id?: null; data: { count: number } }
+  | { type: "account.recovery.pending"; chat_id?: null; data: { count: number } }
   | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
   | { type: "routine.deleted"; chat_id?: null; data: { id: string } }
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }

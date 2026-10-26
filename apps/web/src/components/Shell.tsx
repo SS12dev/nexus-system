@@ -59,6 +59,7 @@ export function Shell() {
   );
   const upsertApprovals = useStore((s) => s.upsertApprovals);
   const pendingAccess = useStore((s) => s.pendingAccess) ?? 0;
+  const pendingRecovery = useStore((s) => s.pendingRecovery) ?? 0;
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState(false);
   // Laptop only: fold the sidebar down to a rail of icons. On phones it is a drawer anyway.
@@ -237,9 +238,12 @@ export function Shell() {
           {hasRole(user, "admin") && (
             <NavLink to="/people" className={(p) => `relative ${navClass(p)}`} title={tip("People")}>
               <Users size={16} className="shrink-0" /> <span className={label}>People</span>
-              {pendingAccess > 0 && (
-                <Badge collapsed={collapsed} title={`${pendingAccess} waiting for access`}>
-                  {pendingAccess}
+              {pendingAccess + pendingRecovery > 0 && (
+                <Badge
+                  collapsed={collapsed}
+                  title={`${pendingAccess} access requests, ${pendingRecovery} recovery requests waiting`}
+                >
+                  {pendingAccess + pendingRecovery}
                 </Badge>
               )}
             </NavLink>
@@ -289,12 +293,12 @@ export function Shell() {
         <header className="flex items-center gap-3 border-b border-edge px-4 py-3 md:hidden">
           <button
             onClick={() => setOpen(true)}
-            aria-label={waiting + pendingAccess > 0 ? "Open menu, items need your attention" : "Open menu"}
+            aria-label={waiting + pendingAccess + pendingRecovery > 0 ? "Open menu, items need your attention" : "Open menu"}
             data-tour="menu"
             className="relative"
           >
             <Menu size={20} />
-            {waiting + pendingAccess > 0 && (
+            {waiting + pendingAccess + pendingRecovery > 0 && (
               <span className="absolute -right-1 -top-1 size-2 rounded-full bg-rose-500 ring-2 ring-ink" />
             )}
           </button>

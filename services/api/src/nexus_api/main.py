@@ -13,6 +13,7 @@ from nexus_api.middleware import GuardMiddleware, RequestContextMiddleware
 from nexus_api.queue import ArqJobQueue, JobQueue
 from nexus_api.routes import (
     access_requests,
+    account_recovery,
     admin,
     app_access,
     apps,
@@ -141,6 +142,7 @@ def create_app(
     app.include_router(admin.router)
     app.include_router(config_routes.router)
     app.include_router(access_requests.router)
+    app.include_router(account_recovery.router)
     app.include_router(ops.router)
     app.include_router(improvements.router)
     app.include_router(recall.router)
