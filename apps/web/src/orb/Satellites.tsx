@@ -2,13 +2,15 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useState } from "react";
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, type Group } from "three";
-import { curve, hash, orbitPos, type Satellite, type StarPoint, type Vec3 } from "./model";
+import { curve, hash, orbitPos, type Satellite, type StarPoint } from "./model";
 
 const THREAD_STEPS = 12;
 
 /** Routines and projects as small moons outside the orb, each drifting on an orbit of its own,
- * with a faint curved thread back to what it is about inside (its topic, its project, or you).
- * Routines are soft violet moons, projects small amber crystals; names show on hover. */
+ * with a faint curved thread back to what it is about inside (a routine's topic or you; a
+ * project's topic, when it has one). Routines are soft violet moons, apps small amber
+ * crystals, and a project's files one violet crystal that grows with how many it holds, in
+ * place of a crystal per file; names show on hover. */
 export function Satellites({
   items,
   stars,
@@ -54,8 +56,9 @@ export function Satellites({
         moon.scale.setScalar(on ? 1.6 : 1);
         if (!still) moon.rotation.y += dt * 0.6;
       }
-      const home: Vec3 = (s.home && at.get(s.home)) || [0, 0, 0];
-      const pts = curve(p, home, hash(s.id), 0.22, THREAD_STEPS);
+      const home = s.home ? at.get(s.home) : undefined;
+      // No home, no thread: its segments collapse onto the moon.
+      const pts = home ? curve(p, home, hash(s.id), 0.22, THREAD_STEPS) : Array(THREAD_STEPS + 1).fill(p);
       for (let k = 0; k < THREAD_STEPS; k++) {
         const o = (i * THREAD_STEPS + k) * 2;
         pos.setXYZ(o, pts[k][0], pts[k][1], pts[k][2]);
@@ -99,6 +102,19 @@ export function Satellites({
                 <sphereGeometry args={[0.045, 20, 20]} />
                 <meshStandardMaterial color={s.color} emissive={s.color} emissiveIntensity={s.active ? 0.75 : 0.2} roughness={0.7} />
               </mesh>
+            ) : !s.app ? (
+              <mesh>
+                <octahedronGeometry args={[0.05 * (1 + Math.min(s.files, 12) * 0.05), 0]} />
+                <meshStandardMaterial
+                  color="#e9d5ff"
+                  emissive={s.color}
+                  emissiveIntensity={on ? 2 : 1.1}
+                  metalness={0.3}
+                  roughness={0.15}
+                  flatShading
+                  toneMapped={false}
+                />
+              </mesh>
             ) : (
               <mesh>
                 <icosahedronGeometry args={[0.05, 0]} />
@@ -120,6 +136,12 @@ export function Satellites({
               <Html center position={[0, 0.17, 0]} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
                 <div className="orb-label" style={{ borderColor: s.color }}>
                   {s.name}
+                  {s.kind === "project" && s.files > 0 && (
+                    <span className="text-slate-400">
+                      {" "}
+                      · {s.files} file{s.files === 1 ? "" : "s"}
+                    </span>
+                  )}
                 </div>
               </Html>
             )}

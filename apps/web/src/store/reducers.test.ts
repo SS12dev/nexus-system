@@ -261,6 +261,13 @@ describe("orb data", () => {
     expect(s.files.f1).toBeUndefined();
   });
 
+  it("takes a removed project's files out of it and bumps the folder version", () => {
+    let s = applyEvent(initialState, { type: "artifact.created", data: { file: { ...file("f1"), folder_id: "d1" } } });
+    s = applyEvent(s, { type: "folder.deleted", data: { id: "d1" } });
+    expect(s.files.f1.folder_id).toBeNull();
+    expect(s.foldersVersion).toBe(1);
+  });
+
   it("syncs files but keeps uploads still being processed", () => {
     const current = { up: file("up", "processing"), gone: file("gone") };
     expect(Object.keys(syncFiles(current, [file("new")])).sort()).toEqual(["new", "up"]);

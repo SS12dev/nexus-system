@@ -4,10 +4,9 @@ import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useEffect, useRef } from "react";
 import type { AssistantState } from "../lib/types";
 import { CoreOrb } from "./CoreOrb";
-import { Constellation, Crystals, MemoryCloud } from "./Inside";
+import { Constellation, MemoryCloud } from "./Inside";
 import {
   cameraDistance,
-  type Crystal,
   type Inside,
   type MemoryPoint,
   type OrbCluster,
@@ -22,7 +21,6 @@ import type { Perf } from "./perf";
 export type Selection =
   | { type: "agent"; node: OrbNode }
   | { type: "memory"; point: MemoryPoint }
-  | { type: "artifact"; crystal: Crystal }
   | { type: "entity"; star: StarPoint }
   | { type: "satellite"; sat: Satellite };
 
@@ -31,8 +29,7 @@ export function selectionId(s: Selection | null): string | null {
   if (s.type === "agent") return s.node.key;
   if (s.type === "memory") return s.point.id;
   if (s.type === "entity") return s.star.id;
-  if (s.type === "satellite") return s.sat.id;
-  return s.crystal.id;
+  return s.sat.id;
 }
 
 /** The whole 3D home scene. Lazy-loaded, so three.js only downloads on the orb page. */
@@ -54,9 +51,9 @@ export default function OrbScene({
   /** What Nexus is doing right now, shown under the orb while it works. */
   activity?: string | null;
   clusters: OrbCluster[];
-  /** The constellation, memories and artifacts inside the orb. */
+  /** The constellation and memories inside the orb: who you are. */
   inside: Inside;
-  /** Routines and projects on the ring outside it. */
+  /** Routines and projects (with their files) on the ring outside it. */
   sats?: Satellite[];
   /** What the latest reply recalled; seq changes each time it lights up. */
   lit: Set<string>;
@@ -95,7 +92,6 @@ export default function OrbScene({
       <Constellation
         stars={inside.stars}
         lines={inside.lines}
-        crystals={inside.crystals}
         still={still}
         lite={perf.lite}
         selected={selId}
@@ -112,12 +108,6 @@ export default function OrbScene({
         selected={selId}
         lit={lit}
         onPick={(point) => onSelect({ type: "memory", point })}
-      />
-      <Crystals
-        items={inside.crystals}
-        still={still}
-        selected={selId}
-        onPick={(crystal) => onSelect({ type: "artifact", crystal })}
       />
       <Satellites
         items={sats}

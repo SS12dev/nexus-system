@@ -249,6 +249,16 @@ and sheet, embedded and indexed; see [services/doc-worker](services/doc-worker/R
 Library page lists, searches inside, previews the extracted text, renames, downloads and deletes
 files.
 
+Files Nexus and its teams make are kept in **projects** (project folders, `nexus_common.folders`,
+`GET/POST/PATCH/DELETE /api/folders`): a team's files go into its work's project, so a rocket
+model's .3mf, .step and .stl sit together. A later change to that work (a run that starts from
+its files, `based_on`), a new version of one of its files, or a kept team's next run joins the
+same project instead of starting another; a dev team's files go with its software project; a
+file Nexus saves itself in a chat joins that chat's latest project. Projects are named after the
+work (the team's name without "team"), and you can rename one, make one, move a file in or out
+(its other versions move with it) or remove one (its files stay). Uploads stay outside projects
+unless you move them in. Migration 0029 filed what teams had already made the same way.
+
 Embeddings go through LiteLLM under the `nexus-embed` alias, which points at bge-m3 in Ollama
 on the Mac (Docker on macOS can't use the GPU, so Ollama runs natively). Vectors are cached by
 text hash, and every stored vector records its model, so swapping the embedder (for example to
@@ -530,22 +540,24 @@ box docked underneath; sending a message opens the chat.
   team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
   springs, so nothing jumps.
 - **Just outside the shell**, like moons, is what Nexus does and has made for you: routines as
-  soft violet moons (grey when paused, red after a failed run) and software projects as small
-  amber crystals (bright while running as an app). Each drifts on an orbit of its own, at its
-  own distance, tilt and speed, with a faint curved thread to what it is about inside: a
-  routine from a profile pack to that profession or interest, a project to the project Nexus
-  knows by that name, anything else to you. Tapping one opens its chat, the Routines page or
-  the app. Inside is what it knows; outside, what it does.
-- **Inside it** is what Nexus knows, as a constellation: you at the centre, and around you the
-  people, projects, organisations, places, topics and tools from your memories, chats and
-  files (the Knowledge page), spread loosely around you with each type
-  kept together and tinted by type, joined by gently curved lines. The more something is mentioned, the bigger and nearer the
-  centre it sits. You are at the centre from the first minute, before anything is connected.
-  Lines are relations ("Nexus uses LangGraph"), fainter once they stopped being true. Memories
-  are small dots circling what they're about; memories only about you circle the centre. The
-  newest artifacts (12, or 6 on a phone) are crystals beside their project, with a line to it;
-  the rest are in the Library. Before anything is connected, memories cluster by kind and
-  artifacts sit on a ring.
+  soft violet moons (grey when paused, red after a failed run), software projects as small
+  amber crystals (bright while running as an app), and each project of files as one violet
+  crystal that grows with how many files it holds: a rocket model's .3mf, .step and .stl are
+  one moon, not three. Each drifts on an orbit of its own, at its own distance, tilt and speed.
+  A routine has a faint curved thread to what it is about inside (its profile pack's profession
+  or interest, else you); a project has one only when Nexus knows what it relates to (the rocket
+  model to 3D printing), so many projects never crowd the centre with lines. Tapping a moon
+  opens a card: a routine's chat, a project's files (newest version of each) with a link to it
+  in the Library, or the app. Inside is who you are; outside, what Nexus does and has made.
+- **Inside it** is who you are, as a constellation: you at the centre, and around you the
+  people, organisations, places, interests (topics) and tools from your memories, chats and
+  files (the Knowledge page), spread loosely around you with each type kept together and
+  tinted by type, joined by gently curved lines. Projects and files are never inside: they are
+  the moons. The more something is mentioned, the bigger and nearer the centre it sits. You
+  are at the centre from the first minute, before anything is connected. Lines are relations
+  ("Shivam works at UST"), fainter once they stopped being true. Memories are small dots
+  circling what they're about; memories only about you (or a project) circle the centre.
+  Before anything is connected, memories cluster by kind.
   Names show for the most mentioned first, more as you zoom in, and never on top of each
   other; hovering a star shows its name. Zoomed in close, the orb's shell fades back so the
   lines and names stay readable.
@@ -554,17 +566,18 @@ box docked underneath; sending a message opens the chat.
   status line says it in words ("Remembered Nexus, LangGraph and 2 memories"). The reply keeps
   a **Remembered** row of chips (stored on the message as `recalled`); tapping it lights them
   again.
-- **Tap** an agent, star, memory or crystal for a card: a team opens on the Agents page, a
+- **Tap** an agent, star, memory or moon for a card: a team opens on the Agents page, a
   star shows what it is, how it relates to the rest and how often it comes up, a memory opens
-  on the Memory page, and an artifact opens or downloads. Drag to turn, pinch or scroll to zoom.
+  on the Memory page, and a project lists its files to open. Drag to turn, pinch or scroll to zoom.
 - **Phones** get fewer particles, no bloom, a lower pixel ratio and a 30 fps cap, and teams sit
   on a tighter band on portrait screens. **List** (top right) shows the same teams, memories and
-  artifacts as plain lists; it is also what shows when the device has no WebGL. With
+  projects as plain lists; it is also what shows when the device has no WebGL. With
   reduced motion turned on in the OS, nothing spins or pulses and objects snap into place.
 
 Everything is driven by the existing WebSocket events (`assistant.state`, `system.*`, `run.updated`,
-`agent.status`, `approval.*`, `memory.updated`, `memory.recalled`, `artifact.created`, `file.*`), with
-the knowledge graph from `GET /api/memories/graph`, and a fresh fetch
+`agent.status`, `approval.*`, `memory.updated`, `memory.recalled`, `artifact.created`, `file.*`,
+`folder.*`), with the knowledge graph from `GET /api/memories/graph` and project folders from
+`GET /api/folders`, and a fresh fetch
 on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
 
 ## The main screen

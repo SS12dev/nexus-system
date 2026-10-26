@@ -17,6 +17,9 @@ EventType = Literal[
     "tool.done",
     "file.updated",
     "file.deleted",
+    # A project folder in the library was made, renamed or removed (nexus_common.folders).
+    "folder.updated",
+    "folder.deleted",
     # Links in the library (nexus_common.links).
     "link.updated",
     "link.deleted",

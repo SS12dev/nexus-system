@@ -252,6 +252,24 @@ export interface FileBrief {
   status: FileStatus;
   origin?: "upload" | "generated";
   version?: number;
+  /** The first version's id, for later versions of a generated file. */
+  version_of_id?: string | null;
+  /** The project folder it is filed in, if any. */
+  folder_id?: string | null;
+}
+
+/** A project folder in the Library: the files made for one piece of work (a rocket model's
+ * .3mf, .step and .stl), filed together on their own. Outside the orb it is one moon. */
+export interface Folder {
+  id: string;
+  name: string;
+  /** The software project its files belong to, if any. */
+  project_id: string | null;
+  chat_id: string | null;
+  created_at: string;
+  updated_at: string;
+  /** How many files are in it (from the list; events may leave it out). */
+  files?: number;
 }
 
 /** A running app a software team built, on the Apps page. */
@@ -698,6 +716,8 @@ export type ServerEvent =
   | { type: "link.updated"; chat_id?: null; data: { link: LinkItem } }
   | { type: "link.deleted"; chat_id?: null; data: { id: string } }
   | { type: "file.deleted"; chat_id?: null; data: { id: string } }
+  | { type: "folder.updated"; chat_id?: null; data: { folder: Folder } }
+  | { type: "folder.deleted"; chat_id?: null; data: { id: string } }
   | { type: "access.pending"; chat_id?: null; data: { count: number } }
   | { type: "routine.updated"; chat_id?: string | null; data: { routine: Routine; status?: RoutineRunStatus } }
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }

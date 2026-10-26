@@ -3,6 +3,7 @@ import type {
   AgentSystem,
   Approval,
   FileItem,
+  Folder,
   GraphEntity,
   KnowledgeGraph,
   Memory,
@@ -15,7 +16,6 @@ import {
   buildClusters,
   cameraDistance,
   clusterAnchor,
-  crystals,
   inside,
   liveSystems,
   memoryPoints,
@@ -27,6 +27,7 @@ import {
   SATELLITE_COLOR,
   satellites,
   shellFade,
+  works,
   type StarPoint,
 } from "./model";
 
@@ -214,20 +215,12 @@ describe("inside the orb", () => {
     const list = [mem("a"), mem("b", { pinned: true }), mem("c")];
     expect(memoryPoints(list, 1).map((p) => p.id)).toEqual(["b"]);
   });
-
-  it("shows only ready generated files as crystals", () => {
-    const f = (id: string, over: Partial<FileItem>) =>
-      ({ id, name: id, content_type: "x", status: "ready", origin: "generated", created_at: "2026-10-20T00:00:00Z", ...over }) as FileItem;
-    const out = crystals([f("a", {}), f("b", { origin: "upload" }), f("c", { status: "processing" })], 10);
-    expect(out.map((c) => c.id)).toEqual(["a"]);
-    expect(dist(out[0].pos)).toBeLessThan(ORB_R);
-  });
 });
 
 describe("the constellation", () => {
   const ent = (id: string, over: Partial<GraphEntity> = {}): GraphEntity => ({
     id,
-    type: "project",
+    type: "topic",
     name: id,
     aliases: [],
     summary: "",
@@ -243,15 +236,14 @@ describe("the constellation", () => {
     chat_ids: [],
     ...over,
   });
-  const file = (id: string, created_at = "2026-10-20T00:00:00Z") =>
-    ({ id, name: id, content_type: "x", status: "ready", origin: "generated", created_at }) as FileItem;
-  const limits = { stars: 40, memories: 600, crystals: 12 };
+  const limits = { stars: 40, memories: 600 };
   const graph: KnowledgeGraph = {
     entities: [
       ent("me", { type: "person", name: "Shivam", is_self: true }),
       ent("nexus", { memories: 5, memory_ids: ["m1"], file_ids: ["f1"] }),
       ent("ana", { type: "person", memories: 1, memory_ids: ["m1", "m2"] }),
       ent("kyoto", { type: "place", memories: 0, chats: 1 }),
+      ent("rocket", { type: "project", memories: 9, memory_ids: ["m3"], file_ids: ["f1"] }),
     ],
     relations: [
       { id: "r1", src: "me", dst: "nexus", predicate: "builds", fact: "", confidence: 1, valid_from: "", valid_to: null, source_chat_id: null },
@@ -259,27 +251,27 @@ describe("the constellation", () => {
     ],
   };
 
-  it("falls back to memories by kind and an artifact ring before anything is connected", () => {
-    const out = inside(null, [mem("m1")], [file("f1")], limits);
+  it("falls back to memories by kind before anything is connected", () => {
+    const out = inside(null, [mem("m1")], limits);
     // You are at the centre from the very start.
     expect(out.stars).toEqual([
       { id: "you", name: "You", type: "person", summary: "", self: true, weight: 0, pos: [0, 0, 0] },
     ]);
     expect(out.memories).toEqual(memoryPoints([mem("m1")], 600));
-    expect(out.crystals).toEqual(crystals([file("f1")], 12));
+    expect(Object.keys(out)).toEqual(["stars", "lines", "memories"]);
   });
 
   it("puts you at the centre with the most mentioned stars nearest, inside the orb", () => {
-    const out = inside(graph, [], [], limits);
+    const out = inside(graph, [], limits);
     expect(out.stars[0]).toMatchObject({ id: "me", self: true, pos: [0, 0, 0] });
     const at = Object.fromEntries(out.stars.map((s) => [s.id, dist(s.pos)]));
     expect(at.nexus).toBeLessThan(at.kyoto);
     for (const s of out.stars) expect(dist(s.pos)).toBeLessThan(0.8 * ORB_R);
-    expect(inside(graph, [], [], limits)).toEqual(out);
+    expect(inside(graph, [], limits)).toEqual(out);
   });
 
   it("draws relations as lines, fainter once they ended", () => {
-    const out = inside(graph, [], [], limits);
+    const out = inside(graph, [], limits);
     expect(out.lines).toEqual([
       { a: "me", b: "nexus", ended: false },
       { a: "ana", b: "nexus", ended: true },
@@ -287,7 +279,7 @@ describe("the constellation", () => {
   });
 
   it("hangs a memory off the most mentioned thing it is about, and the rest round the centre", () => {
-    const out = inside(graph, [mem("m1"), mem("m2"), mem("m3")], [], limits);
+    const out = inside(graph, [mem("m1"), mem("m2"), mem("m3")], limits);
     const star = Object.fromEntries(out.memories.map((m) => [m.id, m.star]));
     expect(star).toEqual({ m1: "nexus", m2: "ana", m3: undefined });
     const nexus = out.stars.find((s) => s.id === "nexus")!;
@@ -295,17 +287,15 @@ describe("the constellation", () => {
     expect(dist(m1.pos.map((v, i) => v - nexus.pos[i]))).toBeLessThan(0.13);
   });
 
-  it("shows only the newest artifacts, each beside its project", () => {
-    const files = [file("f1", "2026-10-22T00:00:00Z"), file("f2", "2026-10-21T00:00:00Z"), file("old", "2026-01-01T00:00:00Z")];
-    const out = inside(graph, [], files, { ...limits, crystals: 2 });
-    expect(out.crystals.map((c) => [c.id, c.star])).toEqual([
-      ["f1", "nexus"],
-      ["f2", undefined],
-    ]);
+  it("keeps projects out: inside is who you are, what was made is outside", () => {
+    // A project is out, however much it is mentioned or recalled; its memory circles you.
+    const out = inside(graph, [mem("m3")], limits, new Set(["rocket"]));
+    expect(out.stars.map((s) => s.id)).not.toContain("rocket");
+    expect(out.memories[0].star).toBeUndefined();
   });
 
   it("always draws what a reply just recalled, even past the star limit", () => {
-    const out = inside(graph, [], [], { ...limits, stars: 1 }, new Set(["kyoto"]));
+    const out = inside(graph, [], { ...limits, stars: 1 }, new Set(["kyoto"]));
     expect(out.stars.map((s) => s.id)).toEqual(["me", "kyoto"]);
   });
 });
@@ -348,8 +338,20 @@ describe("moons outside the orb", () => {
     last_status: null,
     ...extra,
   });
-  const project = (id: string, name = id, app_state: string | null = null) =>
+  const app = (id: string, name = id, app_state: string | null = null) =>
     ({ id, name, stack: "static", app_state, updated_at: "2026-10-01T00:00:00Z" }) as Project;
+  const project = (id: string, name = id, app_state: string | null = null) => works([app(id, name, app_state)], []);
+  const folder = (id: string, over: Partial<Folder> = {}): Folder => ({
+    id,
+    name: id,
+    project_id: null,
+    chat_id: null,
+    created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-02T00:00:00Z",
+    ...over,
+  });
+  const file = (id: string, folder_id: string | null) =>
+    ({ id, name: id, content_type: "x", status: "ready", origin: "generated", folder_id, created_at: "" }) as FileItem;
   const star = (id: string, name: string, self = false): StarPoint => ({
     id,
     name,
@@ -361,7 +363,7 @@ describe("moons outside the orb", () => {
   });
 
   it("puts each on its own orbit outside the shell, inside the teams' band", () => {
-    const out = satellites([routine("r1"), routine("r2", { enabled: false })], [project("p1", "p1", "running")]);
+    const out = satellites([routine("r1"), routine("r2", { enabled: false })], project("p1", "p1", "running"));
     expect(out.map((s) => s.id)).toEqual(["r1", "r2", "p1"]);
     for (const s of out)
       for (const t of [0, 7, 40]) {
@@ -377,21 +379,40 @@ describe("moons outside the orb", () => {
     expect(satellites([routine("r1")], [])).toEqual(satellites([routine("r1")], []));
   });
 
-  it("threads each to its topic or project inside, else to you", () => {
-    const stars = [star("me", "You", true), star("t1", "Cooking"), star("t2", "My App")];
-    const homes = (key: string) => (key === "pack:cooking" ? ["Cooking"] : []);
+  it("threads routines to their topic or you, and projects only to what they are about", () => {
+    const stars = [star("me", "You", true), star("t1", "Cooking"), star("t2", "3D printing")];
+    const homes = (key: string) => (key === "pack:cooking" ? ["Cooking"] : key === "rocket" ? ["3D printing"] : []);
     const out = satellites(
       [routine("r1", { source: "pack:cooking" }), routine("r2", { source: "user" })],
-      [project("p1", "my-app")],
+      [...project("p1", "rocket"), ...project("p2", "my-app")],
       [...stars],
       homes,
     );
-    expect(out.map((s) => s.home)).toEqual(["t1", "me", "t2"]);
+    expect(out.map((s) => s.home)).toEqual(["t1", "me", "t2", undefined]);
+  });
+
+  it("makes each folder of files one project moon, and an app's folders part of the app", () => {
+    const folders = [
+      folder("rocket", { updated_at: "2026-10-05T00:00:00Z" }),
+      folder("empty"),
+      folder("shots", { project_id: "solitaire" }),
+    ];
+    const files = [file("a", "rocket"), file("b", "rocket"), file("c", "rocket"), file("d", "shots"), file("e", null)];
+    const list = works([app("solitaire", "Solitaire", "running")], folders, files);
+    expect(list.map((w) => [w.id, w.files, w.folderIds])).toEqual([
+      ["rocket", 3, ["rocket"]],
+      ["solitaire", 1, ["shots"]],
+    ]);
+    const [rocket, solitaire] = satellites([], list);
+    expect(rocket).toMatchObject({ kind: "project", app: false, detail: "3 files", color: SATELLITE_COLOR.files });
+    expect(solitaire).toMatchObject({ app: true, active: true, color: SATELLITE_COLOR.project });
+    // Before its files load, a folder counts what the folder list says.
+    expect(works([], [folder("x", { files: 4 })])[0].files).toBe(4);
   });
 
   it("keeps to the limit", () => {
     const many = Array.from({ length: 9 }, (_, i) => routine(`r${i}`));
-    expect(satellites(many, [project("p1")], [], () => [], 6)).toHaveLength(6);
+    expect(satellites(many, project("p1"), [], () => [], 6)).toHaveLength(6);
   });
 
   it("bows lines, each its own way, from end to end", () => {

@@ -10,6 +10,7 @@ import type {
   Approval,
   EntityType,
   FileItem,
+  Folder,
   KnowledgeGraph,
   Memory,
   MemoryKind,
@@ -83,15 +84,6 @@ export interface MemoryPoint {
   star?: string;
 }
 
-export interface Crystal {
-  id: string;
-  name: string;
-  contentType: string;
-  pos: Vec3;
-  /** The project (or other star) it belongs to, drawn as a line to it. */
-  star?: string;
-}
-
 /** A person, project, place, topic or tool Nexus knows about, or the user at the centre. */
 export interface StarPoint {
   id: string;
@@ -111,14 +103,19 @@ export interface StarLine {
   ended: boolean;
 }
 
-/** Everything inside the orb. Without a knowledge graph yet, memories cluster by kind and
- * artifacts sit on a ring, as before. */
+/** Everything inside the orb: who you are. You at the centre, the people, organisations,
+ * places, interests and tools Nexus knows about you, and your memories. Without a knowledge
+ * graph yet, memories cluster by kind. What has been made (projects and their files) is
+ * outside, as moons (see satellites). */
 export interface Inside {
   stars: StarPoint[];
   lines: StarLine[];
   memories: MemoryPoint[];
-  crystals: Crystal[];
 }
+
+/** Entity types that are work rather than profile: drawn outside the orb as project moons,
+ * never as stars inside it. */
+export const OUTSIDE_TYPES = new Set<EntityType>(["project"]);
 
 // --- Deterministic randomness -----------------------------------------------------------------
 
@@ -316,20 +313,6 @@ export function isArtifact(f: FileItem) {
   return f.origin === "generated" && f.status === "ready";
 }
 
-/** Generated files as crystals on a tilted ring inside the orb, newest first. */
-export function crystals(files: FileItem[], max: number): Crystal[] {
-  const list = files
-    .filter(isArtifact)
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-    .slice(0, max);
-  return list.map((f, i) => {
-    const a = (i / Math.max(list.length, 1)) * Math.PI * 2;
-    const y = (rng(hash(f.id))() - 0.5) * 0.35;
-    const r = 0.58 * ORB_R;
-    return { id: f.id, name: f.name, contentType: f.content_type, pos: [Math.cos(a) * r, y, Math.sin(a) * r] };
-  });
-}
-
 // --- The constellation: the knowledge graph inside the orb -----------------------------------
 
 
@@ -354,17 +337,17 @@ const STAR_FAR = 0.74;
 
 const weightOf = (e: KnowledgeGraph["entities"][number]) => e.memories + e.files + e.chats + e.past_chats;
 
-/** Lay out the knowledge graph: the user at the centre, the most mentioned entities around
- * them grouped by type, memories as satellites of what they're about, and the newest
- * artifacts beside their project. `focus` ids (what a reply just recalled) are always drawn. */
+/** Lay out the user's profile from the knowledge graph: the user at the centre, the most
+ * mentioned people, places, interests and tools around them grouped by type, and memories as
+ * satellites of what they're about. Projects stay out (they are moons outside). `focus` ids
+ * (what a reply just recalled) are always drawn. */
 export function inside(
   graph: KnowledgeGraph | null,
   memories: Memory[],
-  files: FileItem[],
-  limits: { stars: number; memories: number; crystals: number },
+  limits: { stars: number; memories: number },
   focus: Set<string> = new Set(),
 ): Inside {
-  const others = (graph?.entities ?? []).filter((e) => !e.is_self);
+  const others = (graph?.entities ?? []).filter((e) => !e.is_self && !OUTSIDE_TYPES.has(e.type));
   const self = graph?.entities.find((e) => e.is_self);
   // You are always at the centre, even before the graph has anything else (or anything at all).
   const you: StarPoint = {
@@ -377,12 +360,7 @@ export function inside(
     pos: [0, 0, 0],
   };
   if (!graph || others.length === 0)
-    return {
-      stars: [you],
-      lines: [],
-      memories: memoryPoints(memories, limits.memories),
-      crystals: crystals(files, limits.crystals),
-    };
+    return { stars: [you], lines: [], memories: memoryPoints(memories, limits.memories) };
 
   const ranked = [...others].sort(
     (a, b) =>
@@ -445,46 +423,36 @@ export function inside(
     return { ...base, pos: add(centre, scale(offset, 0.05 + r() * 0.1)) };
   });
 
-  // The newest artifacts, each beside the project it belongs to (or what else it is about).
-  const project = new Map<string, string>();
-  for (const pass of [true, false])
-    for (const e of chosen)
-      if ((e.type === "project") === pass) for (const id of e.file_ids) if (!project.has(id)) project.set(id, e.id);
-  const ring = crystals(files, limits.crystals);
-  const placed = ring.map((c, i): Crystal => {
-    const star = project.get(c.id);
-    if (!star) return c;
-    const at = byId.get(star)!.pos;
-    // Fan a project's artifacts out just beyond it, away from the centre.
-    const a = (hash(c.id) % 360) * (Math.PI / 180) + i;
-    const out = norm(at);
-    const side = norm(cross(out, Math.abs(out[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0]));
-    const pos = add(add(at, scale(out, 0.12)), scale(side, Math.sin(a) * 0.07));
-    return { ...c, star, pos: len(pos) > 0.9 * ORB_R ? scale(pos, (0.9 * ORB_R) / len(pos)) : pos };
-  });
-
-  return { stars, lines, memories: points, crystals: placed };
+  return { stars, lines, memories: points };
 }
 
 // --- Outside the orb: what Nexus does and has made --------------------------------------------
 
-/** A routine or a software project as a small moon outside the shell: inside is what Nexus
- * knows, outside what it does for you (teams float further out while they work). Each moon
- * has an orbit of its own, so they drift like a natural system rather than sit on a rail, and
- * a thread to what it is about inside the orb. */
+/** A routine or a project as a small moon outside the shell: inside is who you are, outside
+ * what Nexus does and has made for you (teams float further out while they work). A project is
+ * a software project or a folder of files made for one piece of work, so a rocket model's
+ * .3mf, .step and .stl are one moon, not three. Each moon has an orbit of its own, so they
+ * drift like a natural system rather than sit on a rail, and may have a thread to what it is
+ * about inside the orb. */
 export interface Satellite {
   id: string;
   kind: "routine" | "project";
   name: string;
-  /** "Every day at 08:00", or the project's stack. */
+  /** "Every day at 08:00", the project's stack, or how many files it holds. */
   detail: string;
   color: string;
   /** A routine that is on, or a project running as an app. */
   active: boolean;
+  /** A software project (an app); otherwise a folder of files. */
+  app: boolean;
+  /** The project's folders and how many files they hold. */
+  folderIds: string[];
+  files: number;
   orbit: Orbit;
   /** Where it is at time 0 (orbitPos(orbit, 0)). */
   pos: Vec3;
-  /** The star inside the orb its thread goes to: its topic, its project, or you. */
+  /** The star inside the orb its thread goes to: a routine's topic (or you), or what a
+   * project is about. A project about nothing drawn inside has no thread. */
   home?: string;
 }
 
@@ -508,6 +476,8 @@ export const SATELLITE_COLOR = {
   paused: "#64748b",
   project: "#fcd34d",
   projectIdle: "#cbd5e1",
+  /** A folder of files: the colour artifacts always had. */
+  files: "#c084fc",
 };
 
 export function orbitPos(o: Orbit, t: number): Vec3 {
@@ -533,14 +503,75 @@ function orbitFor(id: string): Orbit {
   };
 }
 
-const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+export const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** How many files each folder holds: the live files Nexus has seen, or the folder list's
+ * count when none of its files are loaded. */
+export function folderCounts(folders: Folder[], files: FileItem[]): Map<string, number> {
+  const live = new Map<string, number>();
+  for (const f of files) if (f.folder_id) live.set(f.folder_id, (live.get(f.folder_id) ?? 0) + 1);
+  return new Map(folders.map((d) => [d.id, live.get(d.id) ?? d.files ?? 0]));
+}
+
+/** A project: a software project or a folder of files, before it becomes a moon. */
+export interface Work {
+  id: string;
+  name: string;
+  detail: string;
+  app: boolean;
+  live: boolean;
+  folderIds: string[];
+  files: number;
+  updated: string;
+}
+
+/** Software projects and folders of files as one list of projects, newest first. A folder
+ * that belongs to a software project joins it; an empty folder is left out. */
+export function works(projects: Project[], folders: Folder[], files: FileItem[] = []): Work[] {
+  const counts = folderCounts(folders, files);
+  const out = new Map<string, Work>();
+  for (const p of projects)
+    out.set(p.id, {
+      id: p.id,
+      name: p.name,
+      detail: p.stack ?? "project",
+      app: true,
+      live: p.app_state === "running",
+      folderIds: [],
+      files: 0,
+      updated: p.updated_at,
+    });
+  for (const d of folders) {
+    const n = counts.get(d.id) ?? 0;
+    const app = d.project_id ? out.get(d.project_id) : undefined;
+    if (app) {
+      app.folderIds.push(d.id);
+      app.files += n;
+      if (d.updated_at > app.updated) app.updated = d.updated_at;
+    } else if (n > 0) {
+      out.set(d.id, {
+        id: d.id,
+        name: d.name,
+        detail: `${n} file${n === 1 ? "" : "s"}`,
+        app: false,
+        live: false,
+        folderIds: [d.id],
+        files: n,
+        updated: d.updated_at,
+      });
+    }
+  }
+  return [...out.values()].sort((a, b) => (a.updated < b.updated ? 1 : a.updated > b.updated ? -1 : 0));
+}
 
 /** Routines and projects as moons, newest projects and oldest routines first, at most `max`.
  * `homes` maps a routine's source pack ("pack:cooking") or a project's name to the names of
- * stars it belongs to; the first drawn star with one of those names is its home, else you. */
+ * stars it belongs to; the first drawn star with one of those names is its home. A routine
+ * with none hangs from you; a project with none has no thread, so a long list of projects
+ * doesn't crowd the centre with lines. */
 export function satellites(
   routines: Routine[],
-  projects: Project[],
+  projects: Work[],
   stars: StarPoint[] = [],
   homes: (key: string) => string[] = () => [],
   max = 24,
@@ -553,12 +584,11 @@ export function satellites(
       const id = byName.get(plain(k));
       if (id) return id;
     }
-    return you;
+    return undefined;
   };
   const rs = [...routines].sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? -1 : 1));
-  const ps = [...projects].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
   // Projects get up to half the slots when there are routines too; routines take the rest.
-  const shownP = ps.slice(0, rs.length ? Math.floor(max / 2) : max);
+  const shownP = projects.slice(0, rs.length ? Math.floor(max / 2) : max);
   const shownR = rs.slice(0, max - shownP.length);
   const out: Satellite[] = shownR.map((r) => {
     const orbit = orbitFor(r.id);
@@ -573,21 +603,26 @@ export function satellites(
           ? SATELLITE_COLOR.routineFailed
           : SATELLITE_COLOR.routine,
       active: r.enabled,
+      app: false,
+      folderIds: [],
+      files: 0,
       orbit,
       pos: orbitPos(orbit, 0),
-      home: homeOf(homes(r.source)),
+      home: homeOf(homes(r.source)) ?? you,
     };
   });
   for (const p of shownP) {
     const orbit = orbitFor(p.id);
-    const live = p.app_state === "running";
     out.push({
       id: p.id,
       kind: "project",
       name: p.name,
-      detail: p.stack ?? "project",
-      color: live ? SATELLITE_COLOR.project : SATELLITE_COLOR.projectIdle,
-      active: live,
+      detail: p.detail,
+      color: !p.app ? SATELLITE_COLOR.files : p.live ? SATELLITE_COLOR.project : SATELLITE_COLOR.projectIdle,
+      active: p.live,
+      app: p.app,
+      folderIds: p.folderIds,
+      files: p.files,
       orbit,
       pos: orbitPos(orbit, 0),
       home: homeOf([p.name, ...homes(p.name)]),

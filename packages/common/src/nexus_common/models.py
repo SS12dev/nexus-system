@@ -434,6 +434,34 @@ def _tsv(column: str = "content"):
 # --- Library -----------------------------------------------------------------------------------
 
 
+class Folder(Base):
+    """A project's folder in the library: the files made for one piece of work, such as a
+    rocket model's .3mf, .step and .stl. Files Nexus and its teams make are filed into one on
+    their own (nexus_common.folders); the user can rename it and move files in or out. Outside
+    the orb each folder is one moon instead of a crystal per file."""
+
+    __tablename__ = "folders"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200))
+    # The software project its files belong to (a dev team's screenshots), if any.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL")
+    )
+    # The team that started it: a kept team's later runs file into the same folder.
+    system_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_systems.id", ondelete="SET NULL")
+    )
+    # The chat it started in.
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Last time a file went in.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_folders_user", "user_id", "updated_at"),)
+
+
 class File(Base):
     """An upload. The bytes live in object storage; the parsed text lives in file_chunks."""
 
@@ -466,6 +494,10 @@ class File(Base):
         ForeignKey("files.id", ondelete="SET NULL")
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # The project folder it is filed in; uploads and loose files have none.
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL")
+    )
     graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -475,6 +507,7 @@ class File(Base):
     __table_args__ = (
         Index("ix_files_user_created", "user_id", "created_at"),
         Index("ix_files_user_sha", "user_id", "sha256"),
+        Index("ix_files_folder", "folder_id"),
     )
 
 

@@ -1,5 +1,5 @@
-"""The document library: upload, list, search, read, download, rename and delete files. Every
-file belongs to one user; other users get a 404."""
+"""The document library: upload, list, search, read, download, rename, file into a project
+folder and delete files. Every file belongs to one user; other users get a 404."""
 
 import hashlib
 import logging
@@ -18,19 +18,23 @@ from nexus_api.deps import (
     EmbedderDep,
     MemberUser,
     QueueDep,
+    RedisDep,
     SettingsDep,
     StorageDep,
 )
 from nexus_api.ratelimit import uploads_limit
 from nexus_api.routes.chats import own_chat
+from nexus_api.routes.folders import own_folder
 from nexus_api.schemas import FileBrief, FileOut, FileTextOut, FileUpdateIn, SearchHitOut
+from nexus_common.events import Event, publish
 from nexus_common.library import (
     MODEL_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     content_type_for,
     document_text,
+    file_payload,
 )
-from nexus_common.models import File, FileChunk, FileStatus, User
+from nexus_common.models import File, FileChunk, FileStatus, User, utcnow
 from nexus_common.search import hybrid_search
 from nexus_common.storage import file_key
 
@@ -208,15 +212,44 @@ async def download(
 
 
 @router.patch("/{file_id}", response_model=FileOut)
-async def rename(file_id: uuid.UUID, body: FileUpdateIn, user: MemberUser, db: DbDep):
+async def update_file(
+    file_id: uuid.UUID, body: FileUpdateIn, user: MemberUser, db: DbDep, redis: RedisDep
+):
+    """Rename a file, or move it into a project folder (folder_id null takes it out). A move
+    takes the file's other versions along, so a project never splits its versions."""
     f = await own_file(db, user, file_id)
-    new_name = clean_name(body.name)
-    # Keep the extension: the parser and the download type depend on it.
-    old_ext = PurePath(f.name).suffix
-    if PurePath(new_name).suffix.lower() != old_ext.lower():
-        new_name += old_ext
-    f.name = new_name[:255]
+    if body.name is not None:
+        new_name = clean_name(body.name)
+        # Keep the extension: the parser and the download type depend on it.
+        old_ext = PurePath(f.name).suffix
+        if PurePath(new_name).suffix.lower() != old_ext.lower():
+            new_name += old_ext
+        f.name = new_name[:255]
+    moved: list[File] = []
+    if "folder_id" in body.model_fields_set:
+        folder = None
+        if body.folder_id is not None:
+            folder = await own_folder(db, user, body.folder_id)
+            folder.updated_at = utcnow()
+        first = f.version_of_id or f.id
+        moved = list(
+            (
+                await db.scalars(
+                    select(File).where(
+                        File.user_id == user.id,
+                        (File.id == first) | (File.version_of_id == first),
+                    )
+                )
+            ).all()
+        )
+        for v in moved:
+            v.folder_id = folder.id if folder else None
     await db.commit()
+    for v in moved:
+        if v.id != f.id:
+            await publish(
+                redis, user.id, Event(type="file.updated", data={"file": file_payload(v)})
+            )
     return f
 
 

@@ -153,3 +153,43 @@ async def test_a_screenshot_can_be_sent_without_words(owner):
     # Nothing at all is still refused.
     resp = await owner.post(f"/api/chats/{chat}/messages", json={"content": "  "})
     assert resp.status_code == 422
+
+
+async def test_project_folders_rename_move_and_remove(owner, app, client_for, invite):
+    resp = await owner.post("/api/folders", json={"name": "  Rocket   model "})
+    assert resp.status_code == 201, resp.text
+    folder = resp.json()
+    assert folder["name"] == "Rocket model" and folder["files"] == 0
+    # A file and its newer version move together.
+    fid = (await upload(owner, name="rocket.stl", data=b"solid r\nendsolid r\n")).json()["id"]
+    async with app.state.sessionmaker() as db:
+        first = await db.get(File, uuid.UUID(fid))
+        v2 = File(
+            user_id=first.user_id, name="rocket.stl", content_type="model/stl", size=1,
+            sha256="x", storage_key="k", status=FileStatus.ready, version_of_id=first.id,
+            version=2,
+        )  # fmt: skip
+        db.add(v2)
+        await db.commit()
+    moved = await owner.patch(f"/api/files/{fid}", json={"folder_id": folder["id"]})
+    assert moved.json()["folder_id"] == folder["id"] and moved.json()["name"] == "rocket.stl"
+    listed = (await owner.get("/api/folders")).json()
+    assert [(f["name"], f["files"]) for f in listed] == [("Rocket model", 2)]
+    renamed = await owner.patch(f"/api/folders/{folder['id']}", json={"name": "Rocket"})
+    assert renamed.json()["name"] == "Rocket" and renamed.json()["files"] == 2
+    # Folders are private.
+    await invite(owner, "admin@example.com", "admin")
+    other = await client_for("admin@example.com")
+    assert (await other.get("/api/folders")).json() == []
+    assert (
+        await other.patch(f"/api/folders/{folder['id']}", json={"name": "x"})
+    ).status_code == 404
+    mine = (await other.post("/api/folders", json={"name": "Mine"})).json()["id"]
+    assert (await owner.patch(f"/api/files/{fid}", json={"folder_id": mine})).status_code == 404
+    # Taking it out, then removing the folder, keeps the files.
+    out = await owner.patch(f"/api/files/{fid}", json={"folder_id": None})
+    assert out.json()["folder_id"] is None
+    await owner.patch(f"/api/files/{fid}", json={"folder_id": folder["id"]})
+    assert (await owner.delete(f"/api/folders/{folder['id']}")).status_code == 204
+    files = (await owner.get("/api/files")).json()
+    assert len(files) == 2 and all(f["folder_id"] is None for f in files)

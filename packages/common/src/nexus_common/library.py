@@ -67,6 +67,7 @@ def file_payload(f: File) -> dict:
         "run_id": str(f.run_id) if f.run_id else None,
         "version": f.version,
         "version_of_id": str(f.version_of_id) if f.version_of_id else None,
+        "folder_id": str(f.folder_id) if f.folder_id else None,
         "created_at": f.created_at.isoformat(),
     }
 

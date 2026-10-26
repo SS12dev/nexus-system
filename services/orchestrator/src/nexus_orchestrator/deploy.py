@@ -90,6 +90,7 @@ async def deploy_project(
                 base64.b64decode(result.screenshot),
                 chat_id=chat_id,
                 run_id=run_id,
+                project_id=project_id,
             )
         except (binascii.Error, ValueError):
             log.warning("Bad screenshot for %s", slug)
