@@ -33,7 +33,9 @@ def requested_email(settings: Settings, req: AccessRequest, to: list[str]) -> Em
         f"Nothing happens until you decide. You get this email because you are an owner or "
         f"admin of {APP}."
     )
-    return mail.message(settings, to, f"{req.name or req.email} asked to join {APP}", body)
+    return mail.message(
+        settings, to, f"{req.name or req.email} asked to join {APP}", body, reply_to=req.email
+    )
 
 
 def approved_email(settings: Settings, req: AccessRequest) -> EmailMessage:
@@ -112,7 +114,9 @@ async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
         f"All feedback: {settings.nexus_url.rstrip('/')}/admin?tab=feedback"
     )
     first = (f.message.splitlines() or [""])[0][:60]
-    msg = mail.message(settings, to, f"Nexus feedback: {first}", body)
+    msg = mail.message(
+        settings, to, f"Nexus feedback: {first}", body, reply_to=sender.email if sender else None
+    )
     try:
         await mail.send(settings, msg)
     except mail.MailError as exc:

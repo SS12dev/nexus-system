@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Copy, KeyRound, RotateCcw, Search, Server } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, KeyRound, Mail, RotateCcw, Search, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { confirmAction, toast } from "../components/Feedback";
 import { Select } from "../components/Select";
@@ -214,6 +214,12 @@ export function ConfigPanel({ onError }: { onError: (msg: string) => void }) {
                 />
               ))}
             </ul>
+            {g === "Email" && (
+              <TestEmail
+                unsaved={changes.some(([n]) => byName[n]?.group === "Email")}
+                enabled={Boolean(byName.smtp_host?.value && (byName.smtp_from?.value || byName.smtp_username?.value))}
+              />
+            )}
           </section>
         );
       })}
@@ -241,6 +247,40 @@ export function ConfigPanel({ onError }: { onError: (msg: string) => void }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Sends the owner a short email with the saved Email settings, to check a new mailbox. */
+function TestEmail({ unsaved, enabled }: { unsaved: boolean; enabled: boolean }) {
+  const [sending, setSending] = useState(false);
+  const send = async () => {
+    setSending(true);
+    try {
+      const r = await api.testEmail();
+      toast(`Test email sent to ${r.to} from ${r.from}. Check the inbox (and spam).`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+      <button
+        onClick={send}
+        disabled={sending || unsaved || !enabled}
+        className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 hover:bg-edge/60 disabled:opacity-50"
+      >
+        <Mail size={14} /> {sending ? "Sending…" : "Send a test email"}
+      </button>
+      <span className="text-xs text-slate-500">
+        {unsaved
+          ? "Save your email changes first; the test uses the saved settings."
+          : enabled
+            ? "Goes to you, from the address above, so you can see what people receive."
+            : "Set the SMTP server and From address to turn email on."}
+      </span>
     </div>
   );
 }

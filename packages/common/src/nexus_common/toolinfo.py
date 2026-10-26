@@ -206,8 +206,9 @@ TOOLS: list[ToolInfo] = [
         "send_email",
         "Send email",
         "outbound",
-        "Send an email from Nexus's own mail account (SMTP), optionally with library files "
-        "attached. Prefer gmail_send when the user has Gmail connected. Asks the user first.",
+        "Send an email from Nexus's own mail account (SMTP), shown as '<user> via Nexus' with "
+        "replies going to the user, optionally with library files attached. Prefer gmail_send "
+        "when the user has Gmail connected. Asks the user first.",
         assistant=False,
     ),
     ToolInfo(
