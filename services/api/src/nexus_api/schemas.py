@@ -658,10 +658,10 @@ class PushStateOut(BaseModel):
     devices: int = 0
 
 
-class FeedbackIn(BaseModel):
-    kind: Literal["problem", "idea", "praise"] = "idea"
-    message: str = Field(min_length=3, max_length=4000)
-    page: str = Field(default="", max_length=300)
+class FeedbackShotOut(BaseModel):
+    name: str
+    content_type: str
+    size: int
 
 
 class FeedbackOut(BaseModel):
@@ -673,6 +673,8 @@ class FeedbackOut(BaseModel):
     page: str | None
     done_at: datetime | None
     created_at: datetime
+    # Read from /api/admin/feedback/{id}/screenshots/{index}.
+    screenshots: list[FeedbackShotOut] = []
     # Who sent it (owners only see this on the Admin page).
     email: str | None = None
     name: str | None = None

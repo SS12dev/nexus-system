@@ -349,7 +349,9 @@ message Nexus back on WhatsApp.
   The light theme swaps the colour tokens and the slate scale in `index.css`; the 3D orb's
   stage stays dark (`data-theme="dark"` on it).
 - **Send feedback** (in the menu) sends a problem, an idea or praise, with the page it came
-  from, to the owners: by email and on **Admin › Feedback**, where it can be marked handled.
+  from and up to three screenshots (picked, pasted or dropped on the box), to the owners: by
+  email (screenshots attached) and on **Admin › Feedback**, where it can be marked handled.
+  Screenshots are stored under `feedback/<id>/` in the bucket and only owners can open them.
   The self-review reads it too (kind, page and text, never who sent it).
 
 ### Terms and privacy

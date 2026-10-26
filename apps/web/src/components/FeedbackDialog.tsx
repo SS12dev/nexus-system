@@ -1,5 +1,5 @@
-import { AlertTriangle, Heart, Lightbulb, X, type LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Heart, ImagePlus, Lightbulb, X, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { api } from "../lib/api";
 import type { FeedbackKind } from "../lib/types";
@@ -39,6 +39,11 @@ const TONE: Record<FeedbackKind, { on: string; off: string; box: string; send: s
   },
 };
 
+/** Screenshots one piece of feedback can carry, and how big each may be (the server checks too). */
+const MAX_SHOTS = 3;
+const MAX_SHOT_MB = 10;
+const SHOT_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
 /** Send feedback, from the menu: straight to the owner (Admin › Feedback, and by email). */
 export function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const { pathname } = useLocation();
@@ -46,12 +51,53 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [shots, setShots] = useState<{ file: File; url: string }[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+
+  // Free the thumbnails' object URLs when they go.
+  const urls = useRef<string[]>([]);
+  urls.current = shots.map((s) => s.url);
+  useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), []);
+
+  const addShots = (files: Iterable<File>) => {
+    const pictures = [...files].filter((f) => SHOT_TYPES.includes(f.type));
+    if (pictures.length === 0) return false;
+    const tooBig = pictures.filter((f) => f.size > MAX_SHOT_MB * 1024 * 1024);
+    const room = MAX_SHOTS - shots.length;
+    const fit = pictures.filter((f) => !tooBig.includes(f)).slice(0, Math.max(room, 0));
+    setError(
+      tooBig.length
+        ? `Screenshots can be up to ${MAX_SHOT_MB} MB each.`
+        : pictures.length > room
+          ? `Up to ${MAX_SHOTS} screenshots, please.`
+          : "",
+    );
+    // A pasted screenshot is called "image.png"; number them so the owner can tell them apart.
+    const named = fit.map((f, i) =>
+      f.name && f.name !== "image.png"
+        ? f
+        : new File([f], `screenshot-${shots.length + i + 1}.${f.type.split("/")[1]}`, { type: f.type }),
+    );
+    setShots((s) => [...s, ...named.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+    return true;
+  };
+
+  const removeShot = (url: string) => {
+    URL.revokeObjectURL(url);
+    setShots((s) => s.filter((x) => x.url !== url));
+  };
 
   const send = async () => {
     setSending(true);
     setError("");
     try {
-      await api.sendFeedback({ kind, message: message.trim(), page: pathname });
+      await api.sendFeedback({
+        kind,
+        message: message.trim(),
+        page: pathname,
+        screenshots: shots.map((s) => s.file),
+      });
       toast("Thanks! The owner will see it.");
       onClose();
     } catch (e) {
@@ -102,10 +148,73 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
           rows={5}
           maxLength={4000}
           onChange={(e) => setMessage(e.target.value)}
-          className={`w-full rounded-md border bg-ink px-3 py-2 text-sm transition-colors ${TONE[kind].box}`}
+          onPaste={(e) => {
+            if (addShots(e.clipboardData.files)) e.preventDefault();
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("Files")) {
+              e.preventDefault();
+              setDragging(true);
+            }
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            setDragging(false);
+            if (e.dataTransfer.files.length) {
+              e.preventDefault();
+              addShots(e.dataTransfer.files);
+            }
+          }}
+          className={`w-full rounded-md border bg-ink px-3 py-2 text-sm transition-colors ${TONE[kind].box} ${
+            dragging ? "border-dashed" : ""
+          }`}
         />
-        <p className="mt-1 text-xs text-slate-500">
-          Goes to the owner with your name and the page you're on. Never your chats.
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {shots.map((s) => (
+            <div key={s.url} className="group relative">
+              <img
+                src={s.url}
+                alt={s.file.name}
+                title={s.file.name}
+                className="h-14 w-20 rounded-md border border-edge object-cover object-top"
+              />
+              <button
+                type="button"
+                onClick={() => removeShot(s.url)}
+                aria-label={`Remove ${s.file.name}`}
+                className="absolute -right-1.5 -top-1.5 rounded-full border border-edge bg-panel p-0.5 text-slate-300 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          {shots.length < MAX_SHOTS && (
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              className={`flex items-center gap-1.5 rounded-md border border-dashed border-edge px-2.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200 ${
+                shots.length ? "h-14" : "py-1.5"
+              }`}
+            >
+              <ImagePlus size={14} aria-hidden />
+              {shots.length ? "Add" : "Attach screenshots"}
+            </button>
+          )}
+          <input
+            ref={picker}
+            type="file"
+            accept={SHOT_TYPES.join(",")}
+            multiple
+            hidden
+            onChange={(e) => {
+              addShots(e.target.files ?? []);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Up to {MAX_SHOTS} screenshots: pick them, paste one into the box, or drop them on it. Goes to the
+          owner with your name and the page you're on. Never your chats.
         </p>
         {error && <p className="mt-2 text-sm text-rose-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
@@ -117,7 +226,7 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
             disabled={sending || message.trim().length < 3}
             className={`rounded-md px-4 py-1.5 text-sm font-medium text-ink transition-colors disabled:opacity-50 ${TONE[kind].send}`}
           >
-            Send
+            {sending ? "Sending…" : "Send"}
           </button>
         </div>
       </div>

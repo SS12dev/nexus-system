@@ -245,7 +245,10 @@ export function Shell() {
             </NavLink>
           )}
           <button
-            onClick={() => setFeedback(true)}
+            onClick={() => {
+              setOpen(false);
+              setFeedback(true);
+            }}
             className={`w-full text-left ${navClass({ isActive: false })}`}
             title={tip("Send feedback")}
             data-tour="feedback"

@@ -189,8 +189,15 @@ export const api = {
   pushUnsubscribe: (endpoint: string) =>
     request<void>("/api/push/unsubscribe", { method: "POST", body: json({ endpoint }) }),
   pushTest: () => request<{ sent: number }>("/api/push/test", { method: "POST" }),
-  sendFeedback: (body: { kind: FeedbackKind; message: string; page: string }) =>
-    request<FeedbackItem>("/api/feedback", { method: "POST", body: json(body) }),
+  sendFeedback: (body: { kind: FeedbackKind; message: string; page: string; screenshots?: File[] }) => {
+    const form = new FormData();
+    form.append("kind", body.kind);
+    form.append("message", body.message);
+    form.append("page", body.page);
+    for (const shot of body.screenshots ?? []) form.append("screenshots", shot);
+    return request<FeedbackItem>("/api/feedback", { method: "POST", body: form });
+  },
+  feedbackShotUrl: (id: string, n: number) => `/api/admin/feedback/${id}/screenshots/${n}`,
   feedbackList: (openOnly = false) =>
     request<FeedbackItem[]>(`/api/admin/feedback${openOnly ? "?open_only=true" : ""}`),
   markFeedback: (id: string, done: boolean) =>

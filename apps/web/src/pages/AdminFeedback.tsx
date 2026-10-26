@@ -63,6 +63,27 @@ export function FeedbackPanel({ onError }: { onError: (msg: string) => void }) {
                 </button>
               </div>
               <p className="whitespace-pre-wrap text-sm">{f.message}</p>
+              {!!f.screenshots?.length && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {f.screenshots.map((s, n) => (
+                    <a
+                      key={n}
+                      href={api.feedbackShotUrl(f.id, n)}
+                      target="_blank"
+                      rel="noopener"
+                      title={`${s.name} (opens in a new tab)`}
+                      className="block overflow-hidden rounded-md border border-edge hover:border-sky-400"
+                    >
+                      <img
+                        src={api.feedbackShotUrl(f.id, n)}
+                        alt={`Screenshot ${n + 1}: ${s.name}`}
+                        loading="lazy"
+                        className="h-24 w-36 object-cover object-top"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -246,7 +246,7 @@ export function LibraryPage() {
         </p>
 
         <form onSubmit={search} className="mb-5 flex gap-2">
-          <div className="flex flex-1 items-center gap-2 rounded-md border border-edge bg-panel px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-edge bg-panel px-3">
             <Search size={16} className="text-slate-500" />
             <input
               value={query}
@@ -255,10 +255,10 @@ export function LibraryPage() {
                 if (!e.target.value) setHits(null);
               }}
               placeholder="Search inside your documents and links"
-              className="flex-1 bg-transparent py-2 outline-none"
+              className="min-w-0 flex-1 bg-transparent py-2 outline-none"
             />
           </div>
-          <button className="rounded-md border border-edge px-4 py-2 text-sm hover:bg-edge/60">
+          <button className="shrink-0 rounded-md border border-edge px-4 py-2 text-sm hover:bg-edge/60">
             Search
           </button>
         </form>

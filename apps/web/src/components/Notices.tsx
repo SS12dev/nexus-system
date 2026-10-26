@@ -159,7 +159,9 @@ export function NoticeBell({ className = "" }: { className?: string }) {
         )}
       </button>
       {show && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-edge bg-panel shadow-xl">
+        // On a phone the bell isn't at the screen's edge, so the tray spans the screen instead of
+        // hanging off its left side.
+        <div className="fixed inset-x-3 top-28 z-50 overflow-hidden rounded-xl border border-edge bg-panel shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80">
           <div className="flex items-center justify-between border-b border-edge px-3 py-2">
             <span className="text-sm font-medium">Notices</span>
             {unread > 0 && (
@@ -174,7 +176,7 @@ export function NoticeBell({ className = "" }: { className?: string }) {
               its result opens on your screen.
             </p>
           ) : (
-            <ul className="max-h-96 overflow-y-auto">
+            <ul className="max-h-[min(24rem,60vh)] overflow-y-auto">
               {notices.map((n) => (
                 <li key={n.id}>
                   <button

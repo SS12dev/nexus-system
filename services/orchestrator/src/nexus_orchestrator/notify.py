@@ -86,6 +86,12 @@ async def access(deps, kind: str, request_id: uuid.UUID, *, attempt: int = 1) ->
 FEEDBACK_KIND = {"problem": "a problem", "idea": "an idea", "praise": "some praise"}
 
 
+def _shots_line(n: int) -> str:
+    if not n:
+        return ""
+    return f"{n} screenshot{'s' if n > 1 else ''} attached.\n\n"
+
+
 async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
     """Email active owners about feedback someone sent from the app."""
     settings: Settings = deps.settings
@@ -109,10 +115,22 @@ async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
     body = (
         f"{who} sent {FEEDBACK_KIND.get(f.kind, 'feedback')}"
         f"{f' from {f.page}' if f.page else ''}:\n\n{f.message}\n\n"
+        f"{_shots_line(len(f.screenshots or []))}"
         f"All feedback: {settings.nexus_url.rstrip('/')}/admin?tab=feedback"
     )
     first = (f.message.splitlines() or [""])[0][:60]
     msg = mail.message(settings, to, f"Nexus feedback: {first}", body)
+    # Screenshots go along as attachments; one that can't be read is left out, not fatal.
+    for shot in f.screenshots or []:
+        if deps.storage is None:
+            break
+        try:
+            data = await deps.storage.get(shot["key"])
+        except Exception:
+            log.warning("feedback.screenshot_missing", extra={**fields, "key": shot["key"]})
+            continue
+        maintype, _, subtype = shot["content_type"].partition("/")
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=shot["name"])
     try:
         await mail.send(settings, msg)
     except mail.MailError as exc:

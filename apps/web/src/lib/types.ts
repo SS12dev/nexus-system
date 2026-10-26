@@ -52,6 +52,7 @@ export interface FeedbackItem {
   page: string | null;
   done_at: string | null;
   created_at: string;
+  screenshots?: { name: string; content_type: string; size: number }[];
   email?: string | null;
   name?: string | null;
 }
