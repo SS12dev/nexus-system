@@ -165,7 +165,7 @@ async def test_delivery_by_email_and_whatsapp(deps, routine, sessionmaker, monke
         deps.settings.smtp_host = deps.settings.smtp_from = ""
         deps.settings.whatsapp_token = deps.settings.whatsapp_phone_number_id = ""
     assert sent["email"]["Subject"] == "Morning brief"
-    assert "Hello there, Shivam." in sent["email"].get_content()
+    assert "Hello there, Shivam." in sent["email"].get_body(("plain",)).get_content()
     assert sent["whatsapp"] == ("+919812345678", ["Morning brief", "Hello there, Shivam."])
     async with sessionmaker() as db:
         run = await db.scalar(select(RoutineRun))

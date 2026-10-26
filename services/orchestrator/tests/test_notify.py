@@ -53,7 +53,7 @@ async def test_new_request_emails_active_owners_and_admins(smtp_deps, sessionmak
     assert msg["To"] == "admin@example.com, owner@example.com"
     # A line break in the name can't add headers.
     assert "\n" not in msg["Subject"] and msg["Bcc"] is None
-    body = msg.get_content()
+    body = msg.get_body(("plain",)).get_content()
     assert "Research team" in body and "/people" in body
 
 
@@ -69,7 +69,8 @@ async def test_notify_list_overrides_recipients(smtp_deps, sessionmaker, sent):
 async def test_approval_emails_the_person(smtp_deps, sessionmaker, sent):
     req = await make_request(sessionmaker, AccessRequestStatus.approved)
     await notify.access(smtp_deps, "approved", req.id)
-    assert sent[0]["To"] == "new@example.com" and "/login" in sent[0].get_content()
+    assert sent[0]["To"] == "new@example.com"
+    assert "/login" in sent[0].get_body(("plain",)).get_content()
 
 
 async def test_decided_requests_are_not_announced(smtp_deps, sessionmaker, sent):

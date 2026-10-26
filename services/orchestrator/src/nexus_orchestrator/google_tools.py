@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from sqlalchemy import select
 
+from nexus_common import mail
 from nexus_common.google import GoogleNotConnected, access_token
 from nexus_common.models import File
 
@@ -256,7 +257,7 @@ def build_google_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
                 if not subject.lower().startswith("re:"):
                     subject = f"Re: {subject}"
         msg["Subject"] = subject
-        msg.set_content(body)
+        mail.set_body(msg, body)
         ids = [u for u in (_uuid(x) for x in (file_ids or [])) if u]
         if ids:
             async with deps.sessionmaker() as db:

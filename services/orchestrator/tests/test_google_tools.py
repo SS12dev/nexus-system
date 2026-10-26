@@ -223,7 +223,7 @@ async def test_gmail_reply_threads_and_refreshes_token(deps, user, sessionmaker,
     assert payload["threadId"] == "t1"
     msg = email.message_from_bytes(base64.urlsafe_b64decode(payload["raw"]), policy=policy.default)
     assert msg["Subject"] == "Re: Lunch?" and msg["In-Reply-To"] == "<abc@mail>"
-    assert msg.get_content().strip() == "Yes!"
+    assert msg.get_body(("plain",)).get_content().strip() == "Yes!"
 
 
 async def test_labels_cannot_trash(deps, user, sessionmaker, settings):
