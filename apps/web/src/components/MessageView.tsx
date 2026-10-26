@@ -6,6 +6,7 @@ import { Markdown } from "./Markdown";
 import { RecallChips } from "./RecallChips";
 import { ToolSteps } from "./ToolSteps";
 import { useAssistantName } from "../lib/assistant";
+import { parseClarification } from "../lib/clarification";
 
 export function MessageView({ message, activity }: { message: Message; activity?: string | null }) {
   const assistant = useAssistantName();
@@ -39,6 +40,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
   }
   const streaming = message.status === "streaming";
   const waiting = streaming && !message.content;
+  const clarification = parseClarification(message.content);
   return (
     <div className="max-w-full">
       {!!message.steps?.length && <ToolSteps steps={message.steps} live={streaming} />}
@@ -57,7 +59,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
           {activity && !message.steps?.length && <span className="text-sm text-slate-400">{activity}…</span>}
         </div>
       ) : (
-        <Markdown>{message.content}</Markdown>
+        <Markdown>{clarification?.content ?? message.content}</Markdown>
       )}
       {/* Files Nexus made for this reply, and links it saved (a repo, an app, a Google Doc). */}
       {(!!message.attachments?.length || !!message.links?.length) && (

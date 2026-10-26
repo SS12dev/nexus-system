@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef } from "react";
 import { ApprovalCard } from "../components/ApprovalCard";
+import { ClarificationCard } from "../components/ClarificationCard";
 import { SystemCard } from "../components/SystemCard";
 import { useNavigate, useParams } from "react-router";
 import { Composer } from "../components/Composer";
@@ -8,6 +9,7 @@ import { api } from "../lib/api";
 import { useSend } from "../lib/useSend";
 import { hasRole, type AgentSystem, type Message } from "../lib/types";
 import { useStore } from "../store/chat";
+import { parseClarification } from "../lib/clarification";
 
 const EMPTY: Message[] = [];
 
@@ -81,13 +83,28 @@ export function ChatPage() {
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-5 px-4 py-5">
-            {timeline.map((item) =>
-              "message" in item ? (
-                <MessageView key={item.message.id} message={item.message} activity={activity} />
-              ) : (
-                <SystemCard key={item.system.id} system={item.system} />
-              ),
-            )}
+            {timeline.map((item) => {
+              if (!("message" in item)) return <SystemCard key={item.system.id} system={item.system} />;
+              const clarification = parseClarification(item.message.content);
+              const messageIndex = messages.findIndex((message) => message.id === item.message.id);
+              const answered = messages
+                .slice(messageIndex + 1)
+                .some((message) => message.role === "user");
+              return (
+                <Fragment key={item.message.id}>
+                  <MessageView message={item.message} activity={activity} />
+                  {item.message.role === "assistant" &&
+                    item.message.status === "complete" &&
+                    clarification?.questions.length ? (
+                    <ClarificationCard
+                      questions={clarification.questions}
+                      disabled={busy || answered}
+                      onSubmit={(answers) => send(answers.join("\n\n"), [])}
+                    />
+                  ) : null}
+                </Fragment>
+              );
+            })}
             {approvals.map((a) => (
               <ApprovalCard key={a.id} approval={a} systemName={allSystems[a.system_id]?.name} />
             ))}

@@ -171,7 +171,8 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 LiteLLM runs in Compose with an exact-match Redis cache and sends every generation to Langfuse.
 To use another LiteLLM (for example on a server later), set `LITELLM_BASE_URL` and its
 `LITELLM_MASTER_KEY`. Each turn is one Langfuse trace (named `nexus.turn`) grouped into a session
-per chat and attributed to the user's id.
+per chat and attributed to the user's id. See [model selection](docs/model-selection.md) for
+candidate research and the evaluation criteria required before changing aliases.
 
 ## How a message flows
 
