@@ -33,11 +33,7 @@ async function registration(): Promise<ServiceWorkerRegistration> {
 /** This device's subscription, if it has one. */
 export async function currentSubscription(): Promise<PushSubscription | null> {
   if (pushSupport() !== "ok") return null;
-  try {
-    return await (await registration()).pushManager.getSubscription();
-  } catch {
-    return null;
-  }
+  return await (await registration()).pushManager.getSubscription();
 }
 
 /** Ask for permission (must follow a tap) and subscribe this device. Throws with a message
@@ -63,6 +59,6 @@ export async function enablePush(publicKey: string): Promise<void> {
 export async function disablePush(): Promise<void> {
   const sub = await currentSubscription();
   if (!sub) return;
-  await api.pushUnsubscribe(sub.endpoint).catch(() => {});
+  await api.pushUnsubscribe(sub.endpoint);
   await sub.unsubscribe();
 }

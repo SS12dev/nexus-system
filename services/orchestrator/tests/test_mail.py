@@ -53,7 +53,7 @@ def test_sender_is_nexus_and_agent_mail_replies_to_the_person():
         == "ServHub <nexus@servhub.cc>"
     )
     # Resend signs in as "resend", which isn't an address; From must not become that name.
-    assert mail.sender(Settings(smtp_username="resend")) == "resend"
+    assert mail.sender(Settings(_env_file=None, smtp_username="resend")) == "resend"
 
     msg = mail.message(s, ["a@test"], "Hi", "x")
     assert msg["From"] == "Nexus <nexus@servhub.cc>" and msg["Reply-To"] is None

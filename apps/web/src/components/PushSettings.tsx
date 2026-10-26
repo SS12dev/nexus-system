@@ -25,8 +25,6 @@ export function PushSettings({ onError }: { onError: (msg: string) => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!state?.enabled) return null;
-
   const run = async (fn: () => Promise<void>, done: string) => {
     setBusy(true);
     try {
@@ -48,8 +46,17 @@ export function PushSettings({ onError }: { onError: (msg: string) => void }) {
       <p className="mb-3 text-xs text-slate-500">
         Get a notification on this phone or computer when a routine has something for you (tick
         Push on the routine) and when a team is waiting for your approval.{" "}
-        {state.devices > 0 && `On for ${state.devices} device${state.devices === 1 ? "" : "s"}.`}
+        {state?.enabled &&
+          state.devices > 0 &&
+          `On for ${state.devices} device${state.devices === 1 ? "" : "s"}.`}
       </p>
+      {state && !state.enabled && (
+        <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+          Background notifications are not configured on this Nexus yet. The server
+          administrator must set its VAPID keys and contact address, then restart the services.
+          In-app notices still work.
+        </p>
+      )}
       {support === "ios-needs-install" && (
         <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
           On iPhone and iPad (iOS 16.4 or later): tap Share, then <em>Add to Home Screen</em>, open
@@ -60,7 +67,7 @@ export function PushSettings({ onError }: { onError: (msg: string) => void }) {
         <p className="mb-3 text-xs text-slate-400">This browser can't show notifications.</p>
       )}
       <div className="flex flex-wrap gap-2 text-sm">
-        {support === "ok" && !here && (
+        {state?.enabled && support === "ok" && !here && (
           <button
             disabled={busy}
             onClick={() => run(() => enablePush(state.public_key!), "Notifications are on")}
@@ -69,7 +76,7 @@ export function PushSettings({ onError }: { onError: (msg: string) => void }) {
             Turn on for this device
           </button>
         )}
-        {here && (
+        {state?.enabled && here && (
           <>
             <button
               disabled={busy}
