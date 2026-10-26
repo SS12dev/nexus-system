@@ -51,6 +51,7 @@ import type {
   SkillDetail,
   SkillVersion,
   SystemDetail,
+  TrashItem,
   ToolEntry,
   Alerts,
   Improvements,
@@ -232,6 +233,11 @@ export const api = {
     }),
 
   chats: () => request<Chat[]>("/api/chats"),
+  trash: () => request<TrashItem[]>("/api/trash"),
+  restoreTrash: (id: string) =>
+    request<TrashItem>(`/api/trash/${id}/restore`, { method: "POST" }),
+  permanentlyDeleteTrash: (id: string) =>
+    request<{ queued: boolean }>(`/api/trash/${id}`, { method: "DELETE" }),
   createChat: () => request<Chat>("/api/chats", { method: "POST", body: json({}) }),
   renameChat: (id: string, title: string) =>
     request<Chat>(`/api/chats/${id}`, { method: "PATCH", body: json({ title }) }),

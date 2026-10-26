@@ -8,17 +8,23 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_api.deps import CurrentUser, DbDep, MemberUser, RedisDep, StorageDep
+from nexus_api.deps import CurrentUser, DbDep, MemberUser, RedisDep
 from nexus_api.schemas import FolderIn, FolderOut
 from nexus_common.events import Event, publish
 from nexus_common.folders import file_counts, folder_payload
 from nexus_common.models import File, Folder, User
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
 
 async def own_folder(db: AsyncSession, user: User, folder_id: uuid.UUID) -> Folder:
-    f = await db.scalar(select(Folder).where(Folder.id == folder_id, Folder.user_id == user.id))
+    f = await db.scalar(
+        select(Folder).where(
+            Folder.id == folder_id, Folder.user_id == user.id, visible("folder", Folder.id)
+        )
+    )
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found")
     return f
@@ -35,7 +41,14 @@ async def announce(redis, folder: Folder, files: int) -> None:
 @router.get("", response_model=list[FolderOut])
 async def list_folders(user: CurrentUser, db: DbDep):
     rows = await db.scalars(
-        select(Folder).where(Folder.user_id == user.id).order_by(Folder.updated_at.desc())
+        select(Folder)
+        .where(
+            Folder.user_id == user.id,
+            visible("folder", Folder.id),
+            visible("project", Folder.project_id),
+            visible("system", Folder.system_id),
+        )
+        .order_by(Folder.updated_at.desc())
     )
     counts = await file_counts(db, user.id)
     return [
@@ -71,20 +84,25 @@ async def delete_folder(
     user: MemberUser,
     db: DbDep,
     redis: RedisDep,
-    storage: StorageDep,
 ):
-    """Permanently remove the folder, its files, and their stored bytes."""
+    """Move a folder and all its files to Trash together."""
     f = await own_folder(db, user, folder_id)
     rows = await db.scalars(
         select(File).where(File.user_id == user.id, File.folder_id == folder_id)
     )
     files = rows.all()
+    folder_item = await add_to_trash(db, user.id, "folder", f.id, f.name)
+    await db.flush()
     for file in files:
-        await db.delete(file)
-    await db.delete(f)
+        await add_to_trash(
+            db,
+            user.id,
+            "file",
+            file.id,
+            file.name,
+            parent_id=folder_item.id,
+        )
     await db.commit()
     for file in files:
         await publish(redis, user.id, Event(type="file.deleted", data={"id": str(file.id)}))
     await publish(redis, user.id, Event(type="folder.deleted", data={"id": str(folder_id)}))
-    for file in files:
-        await storage.delete(file.storage_key)

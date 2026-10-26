@@ -16,13 +16,22 @@ from nexus_api.schemas import LinkIn, LinkOut, LinkUpdateIn
 from nexus_common.events import Event, publish
 from nexus_common.links import GITHUB_KINDS, LinkError, announce, save_link
 from nexus_common.models import Link, User, utcnow
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/links", tags=["links"])
 
 
 async def own_link(db: AsyncSession, user: User, link_id: uuid.UUID) -> Link:
-    link = await db.scalar(select(Link).where(Link.id == link_id, Link.user_id == user.id))
+    link = await db.scalar(
+        select(Link).where(
+            Link.id == link_id,
+            Link.user_id == user.id,
+            visible("link", Link.id),
+            visible("project", Link.project_id),
+        )
+    )
     if link is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Link not found")
     return link
@@ -46,7 +55,11 @@ async def list_links(
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=200, le=1000),
 ):
-    query = select(Link).where(Link.user_id == user.id)
+    query = select(Link).where(
+        Link.user_id == user.id,
+        visible("link", Link.id),
+        visible("project", Link.project_id),
+    )
     if chat_id is not None:
         query = query.where(Link.chat_id == chat_id)
     if project_id is not None:
@@ -112,6 +125,6 @@ async def refresh_link(link_id: uuid.UUID, user: MemberUser, db: DbDep, queue: Q
 async def delete_link(link_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     """Remove the link from the library. What it points to is left alone."""
     link = await own_link(db, user, link_id)
-    await db.delete(link)
+    await add_to_trash(db, user.id, "link", link.id, link.title or link.url)
     await db.commit()
     await publish(redis, user.id, Event(type="link.deleted", data={"id": str(link_id)}))

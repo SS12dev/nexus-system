@@ -55,6 +55,7 @@ from nexus_common.systems import (
     system_payload,
 )
 from nexus_common.toolinfo import BY_NAME, allowed_tools
+from nexus_common.trash import visible_file
 from nexus_orchestrator.systems.compile import compile_system
 from nexus_orchestrator.systems.prompts import agent_prompt
 from nexus_orchestrator.systems.runtime import RunCancelled, RunContext
@@ -150,7 +151,11 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
         files = []
         if file_ids:
             rows = await db.scalars(
-                select(File).where(File.id.in_(file_ids), File.user_id == user.id)
+                select(File).where(
+                    File.id.in_(file_ids),
+                    File.user_id == user.id,
+                    visible_file(File.id, File.folder_id),
+                )
             )
             files = [(str(f.id), f.name) for f in rows.all()]
         library = Path(settings.library_path)

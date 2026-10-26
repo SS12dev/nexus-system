@@ -702,3 +702,15 @@ class FeedbackOut(BaseModel):
     # Who sent it (owners only see this on the Admin page).
     email: str | None = None
     name: str | None = None
+
+
+class TrashItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    entity_id: uuid.UUID
+    parent_id: uuid.UUID | None
+    title: str
+    created_at: datetime
+    expires_at: datetime

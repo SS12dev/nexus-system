@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from nexus_common.apps import app_name
 from nexus_common.deployer import DeployerError, DeployResult
-from nexus_common.models import Project, User
+from nexus_common.models import Project, TrashItem, User
 
 
 class FakeDeployer:
@@ -104,13 +104,32 @@ async def test_stop_restart_redeploy_and_delete(owner, people, sessionmaker, dep
     resp = await owner.post(f"/api/apps/{app_id}/redeploy")
     assert resp.status_code == 202 and resp.json()["state"] == "building"
     assert queue.deploys == [app_id]
+    assert (await owner.delete(f"/api/apps/{app_id}")).status_code == 409
+    async with sessionmaker() as db:
+        project = await db.get(Project, app_id)
+        project.app_state = "stopped"
+        await db.commit()
     assert (await owner.delete(f"/api/apps/{app_id}")).status_code == 204
-    assert deployer.calls == [("stop", "2048"), ("restart", "2048"), ("delete", "2048")]
+    assert deployer.calls == [("stop", "2048"), ("restart", "2048")]
     async with sessionmaker() as db:
         p = await db.get(Project, app_id)
-    # The project stays, so it can be deployed again; the app is gone from the page.
-    assert p is not None and p.app_slug is None and p.live_url is None
+        item = await db.scalar(
+            select(TrashItem).where(TrashItem.kind == "app", TrashItem.entity_id == app_id)
+        )
+    # The deployment metadata stays available during the restore window.
+    assert p is not None and p.app_slug == "2048" and item is not None
     assert (await owner.get("/api/apps")).json() == []
+
+
+async def test_restore_app_restarts_its_deployment(owner, people, sessionmaker, deployer):
+    owner_id, _, _ = people
+    app_id = await add_app(sessionmaker, owner_id, "2048", state="running")
+    assert (await owner.delete(f"/api/apps/{app_id}")).status_code == 204
+    assert deployer.calls == [("stop", "2048")]
+    item = next(row for row in (await owner.get("/api/trash")).json() if row["kind"] == "app")
+    assert (await owner.post(f"/api/trash/{item['id']}/restore")).status_code == 200
+    assert deployer.calls == [("stop", "2048"), ("restart", "2048")]
+    assert len((await owner.get("/api/apps")).json()) == 1
 
 
 async def test_members_get_three_running_apps(people, sessionmaker, deployer, queue):
@@ -175,7 +194,9 @@ async def test_public_and_private(owner, people, sessionmaker, deployer):
     assert resp.status_code == 502
 
 
-async def test_delete_frees_the_name(owner, people, sessionmaker, deployer, settings):
+async def test_deleted_app_keeps_its_name_reserved_during_restore_period(
+    owner, people, sessionmaker, deployer, settings
+):
     owner_id, _, _ = people
     app_id = await add_app(sessionmaker, owner_id, "2048")
     async with sessionmaker() as db:
@@ -186,4 +207,4 @@ async def test_delete_frees_the_name(owner, people, sessionmaker, deployer, sett
         assert (await app_name(db, settings, other, me)) != "2048"
     assert (await owner.delete(f"/api/apps/{app_id}")).status_code == 204
     async with sessionmaker() as db:
-        assert (await app_name(db, settings, other, me)) == "2048"
+        assert (await app_name(db, settings, other, me)) != "2048"

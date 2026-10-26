@@ -22,6 +22,7 @@ class JobQueue(Protocol):
     async def enqueue_recall_check(self, eval_id: uuid.UUID) -> None: ...
     async def enqueue_routine(self, routine_id: uuid.UUID, scheduled_for: datetime) -> None: ...
     async def enqueue_feedback_notice(self, feedback_id: uuid.UUID) -> None: ...
+    async def enqueue_trash_purge(self, item_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -98,4 +99,10 @@ class ArqJobQueue:
         """Email the owners about feedback someone sent from the app."""
         await self.enqueue_job(
             "notify_feedback", str(feedback_id), _job_id=f"feedback:{feedback_id}"
+        )
+
+    async def enqueue_trash_purge(self, item_id: uuid.UUID) -> None:
+        """Permanently delete one item from Trash, including its external resources."""
+        await self.enqueue_job(
+            "purge_trash_item", str(item_id), True, _job_id=f"trash-purge:{item_id}"
         )

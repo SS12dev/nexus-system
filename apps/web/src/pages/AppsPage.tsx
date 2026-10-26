@@ -49,9 +49,9 @@ export function AppsPage() {
 
   const remove = async (a: AppItem) => {
     const ok = await confirmAction({
-      title: `Delete ${a.name}?`,
-      body: "Its container and image go; the project and its repo stay.",
-      confirmLabel: "Delete app",
+      title: `Move ${a.name} to Trash?`,
+      body: "The app will stop now. You can restore it for seven days; after that, its container and image are permanently deleted. The project and its repository stay.",
+      confirmLabel: "Move to Trash",
       danger: true,
     });
     if (!ok) return;

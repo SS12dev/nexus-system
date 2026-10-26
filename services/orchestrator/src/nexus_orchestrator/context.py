@@ -28,6 +28,7 @@ from nexus_common.models import (
 )
 from nexus_common.search import hybrid_search
 from nexus_common.settings import Settings
+from nexus_common.trash import visible, visible_episode, visible_file
 
 # Past chats further than this (cosine distance) from the question are left out.
 EPISODE_MAX_DISTANCE = 0.5
@@ -109,6 +110,7 @@ async def chat_files(db: AsyncSession, chat: Chat) -> list[File]:
         select(File)
         .where(
             File.user_id == chat.user_id,
+            visible_file(File.id, File.folder_id),
             or_(
                 File.chat_id == chat.id,
                 File.id.in_(attached.where(Message.chat_id == chat.id)),
@@ -145,7 +147,12 @@ async def recall(
     found = Recall()
     hits = await hybrid_search(db, "memories", user_id, question, vec, settings.memory_top_k)
     if hits:
-        rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
+        rows = await db.scalars(
+            select(Memory).where(
+                Memory.id.in_([h.id for h in hits]),
+                visible("memory", Memory.id, user_id),
+            )
+        )
         by_id = {m.id: m for m in rows.all()}
         found.memories = [
             by_id[h.id]
@@ -167,7 +174,12 @@ async def recall(
             h.id for h in hits if h.distance is not None and h.distance < EPISODE_MAX_DISTANCE
         ][: settings.episode_top_k]
         if close:
-            rows = await db.scalars(select(Episode).where(Episode.id.in_(close)))
+            rows = await db.scalars(
+                select(Episode).where(
+                    Episode.id.in_(close),
+                    visible_episode(Episode.id, Episode.chat_id, user_id),
+                )
+            )
             by_id = {e.id: e for e in rows.all()}
             found.episodes = [by_id[i] for i in close if i in by_id]
     if settings.graph_recall_enabled if through_graph is None else through_graph:
@@ -223,7 +235,14 @@ async def _through_graph(
         if memory_id not in have:
             best[memory_id] = max(best.get(memory_id, 0.0), scores[entity_id])
     if best and settings.graph_extra_memories:
-        mems = (await db.scalars(select(Memory).where(Memory.id.in_(list(best))))).all()
+        mems = (
+            await db.scalars(
+                select(Memory).where(
+                    Memory.id.in_(list(best)),
+                    visible("memory", Memory.id, user_id),
+                )
+            )
+        ).all()
         ranked = sorted(mems, key=lambda m: best[m.id] * m.confidence, reverse=True)
         found.memories += ranked[: settings.graph_extra_memories]
 

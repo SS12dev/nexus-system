@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from nexus_common.embeddings import CachedEmbedder, EmbeddingError
-from nexus_common.models import Entity, Mention, Relation, User, utcnow
+from nexus_common.models import Entity, Mention, Relation, TrashItem, User, utcnow
 from nexus_common.search import vector_literal
 
 log = logging.getLogger(__name__)
@@ -344,6 +344,14 @@ async def walk(
             with recursive walk(id, depth, score) as (
                 select s.id, 0, s.score
                 from unnest(cast(:ids as uuid[]), cast(:scores as float[])) as s(id, score)
+                where not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'entity' and t.entity_id = s.id and t.user_id = :user_id
+                )
+                  and not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'memories_all' and t.user_id = :user_id
+                )
                 union all
                 select case when r.src_id = w.id then r.dst_id else r.src_id end,
                        w.depth + 1, w.score * 0.5 * r.confidence
@@ -353,6 +361,14 @@ async def walk(
                   on e.id = case when r.src_id = w.id then r.dst_id else r.src_id end
                 where w.depth < :hops and r.user_id = :user_id and r.valid_to is null
                   and not e.is_self
+                  and not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'entity' and t.entity_id = e.id and t.user_id = :user_id
+                  )
+                  and not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'memories_all' and t.user_id = :user_id
+                  )
             )
             select id, max(score) as score from walk group by id"""
         ),
@@ -381,10 +397,64 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
                    coalesce(array_agg(distinct coalesce(m.chat_id, ep.chat_id))
                             filter (where coalesce(m.chat_id, ep.chat_id) is not null),
                             '{}') as chat_ids
-            from entities e left join mentions m on m.entity_id = e.id
+            from entities e left join mentions m
+                 on m.entity_id = e.id
+                and not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'memories_all' and t.user_id = e.user_id
+                )
+                and (
+                    m.memory_id is null or not exists (
+                        select 1 from trash_items t
+                        where t.kind = 'memory' and t.entity_id = m.memory_id
+                          and t.user_id = e.user_id
+                    )
+                )
+                and (
+                    m.file_id is null or not exists (
+                        select 1 from files f
+                        where f.id = m.file_id and (
+                            exists (
+                                select 1 from trash_items t
+                                where t.kind = 'file' and t.entity_id = f.id
+                                  and t.user_id = e.user_id
+                            )
+                            or exists (
+                                select 1 from trash_items t
+                                where t.kind = 'folder' and t.entity_id = f.folder_id
+                                  and t.user_id = e.user_id
+                            )
+                            or exists (
+                                select 1 from folders d
+                                join trash_items t on t.kind = 'project'
+                                    and t.entity_id = d.project_id
+                                where d.id = f.folder_id and t.user_id = e.user_id
+                            )
+                        )
+                    )
+                )
+                and (
+                    m.chat_id is null or not exists (
+                        select 1 from trash_items t
+                        where t.kind = 'chat' and t.entity_id = m.chat_id
+                          and t.user_id = e.user_id
+                    )
+                )
+                and (
+                    m.episode_id is null or not exists (
+                        select 1 from episodes hidden_ep
+                        join trash_items t on t.kind = 'chat' and t.entity_id = hidden_ep.chat_id
+                        where hidden_ep.id = m.episode_id and t.user_id = e.user_id
+                    )
+                )
                  left join episodes ep on ep.id = m.episode_id
             where e.user_id = :user_id
+              and not exists (
+                  select 1 from trash_items t
+                  where t.kind = 'entity' and t.entity_id = e.id and t.user_id = :user_id
+              )
             group by e.id
+            having e.is_self or count(m.id) > 0
             order by e.is_self desc, count(m.id) desc, e.seen_at desc"""
         ),
         {"user_id": user_id},
@@ -410,10 +480,22 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
         }
         for r in counts
     ]
+    visible_entity_ids = {uuid.UUID(entity["id"]) for entity in entities}
     rels = (
         await db.scalars(
             select(Relation)
-            .where(Relation.user_id == user_id)
+            .where(
+                Relation.user_id == user_id,
+                Relation.src_id.in_(visible_entity_ids),
+                Relation.dst_id.in_(visible_entity_ids),
+                ~select(TrashItem.id)
+                .where(
+                    TrashItem.kind == "entity",
+                    TrashItem.user_id == user_id,
+                    TrashItem.entity_id.in_([Relation.src_id, Relation.dst_id]),
+                )
+                .exists(),
+            )
             .order_by(Relation.valid_to.is_not(None), Relation.updated_at.desc())
         )
     ).all()

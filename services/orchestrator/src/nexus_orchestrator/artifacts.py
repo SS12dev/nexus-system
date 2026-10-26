@@ -16,6 +16,7 @@ from nexus_common.library import SUPPORTED_EXTENSIONS, content_type_for, file_pa
 from nexus_common.models import File, FileOrigin, FileStatus
 from nexus_common.queues import DOCS_QUEUE
 from nexus_common.storage import file_key
+from nexus_common.trash import visible_file
 
 
 def clean_name(name: str) -> str:
@@ -50,6 +51,7 @@ async def save_generated(
                     File.name == name,
                     File.origin == FileOrigin.generated,
                     File.version_of_id.is_(None),
+                    visible_file(File.id, File.folder_id),
                 )
                 .order_by(File.created_at.desc())
                 .limit(1)

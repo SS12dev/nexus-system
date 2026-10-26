@@ -128,7 +128,7 @@ async def test_connections_follow_their_memories(owner, sessionmaker):
     assert all(e["memories"] == 0 for e in g["entities"])
 
 
-async def test_deleting_a_memory_prunes_what_only_it_mentioned(owner, sessionmaker):
+async def test_trashed_memory_is_hidden_from_the_graph_until_purged(owner, sessionmaker):
     keep = await add(owner, "Uses LangGraph at work")
     gone = await add(owner, "Builds Nexus on LangGraph")
     # LangGraph is also mentioned by another memory, so it survives.

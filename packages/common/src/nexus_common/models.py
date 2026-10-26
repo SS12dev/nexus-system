@@ -425,6 +425,27 @@ class AuditLog(Base):
     __table_args__ = (Index("ix_audit_log_created", "created_at"),)
 
 
+class TrashItem(Base):
+    """A restorable user-owned item. The original row stays intact during its retention window."""
+
+    __tablename__ = "trash_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(32))
+    entity_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    title: Mapped[str] = mapped_column(String(255))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("kind", "entity_id", name="uq_trash_items_kind_entity"),
+        Index("ix_trash_items_user_expiry", "user_id", "expires_at"),
+    )
+
+
 def _tsv(column: str = "content"):
     return mapped_column(
         TSVECTOR, Computed(f"to_tsvector('english', {column})", persisted=True), deferred=True

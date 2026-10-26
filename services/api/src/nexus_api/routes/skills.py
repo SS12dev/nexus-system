@@ -36,6 +36,8 @@ from nexus_common.skills import (
     skill_payload,
 )
 from nexus_common.skills import slug as skill_slug
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -53,7 +55,7 @@ def listed(user: User):
     shared = Skill.owner_id.is_(None)
     if not user.has_role(RoleName.admin):
         shared = shared & (Skill.status == SkillStatus.active)
-    return or_(shared, Skill.owner_id == user.id)
+    return or_(shared, Skill.owner_id == user.id) & visible("skill", Skill.id)
 
 
 async def get_skill(db: AsyncSession, user: User, skill_id: uuid.UUID) -> Skill:
@@ -138,7 +140,9 @@ async def list_skills(
     if q:
         vec, _ = await embedder.try_embed_one(db, q)
         hits = await hybrid_search(db, "skills", user.id, q, vec, 30)
-        rows = await db.scalars(select(Skill).where(Skill.id.in_([h.id for h in hits])))
+        rows = await db.scalars(
+            select(Skill).where(Skill.id.in_([h.id for h in hits]), listed(user))
+        )
         by_id = {s.id: s for s in rows.all()}
         return [out(by_id[h.id], user) for h in hits if h.id in by_id]
     query = select(Skill).where(listed(user))
@@ -326,6 +330,6 @@ async def delete_skill(skill_id: uuid.UUID, user: MemberUser, db: DbDep, redis: 
     if s.scope == SkillScope.core:
         raise HTTPException(status.HTTP_409_CONFLICT, "Core skills can be disabled, not deleted")
     db.add(AuditLog(actor_id=user.id, action="skill.delete", target=s.slug))
-    await db.delete(s)
+    await add_to_trash(db, user.id, "skill", s.id, s.name)
     await db.commit()
     await publish(redis, user.id, Event(type="skill.deleted", data={"id": str(skill_id)}))

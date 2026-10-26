@@ -40,6 +40,7 @@ from nexus_common.models import (
     Routine,
     RoutineRun,
     RoutineRunStatus,
+    TrashItem,
     User,
     UserStatus,
     utcnow,
@@ -152,6 +153,12 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
     async with deps.sessionmaker() as db:
         r = await db.get(Routine, routine_id)
         if r is None:
+            return None
+        if await db.scalar(
+            select(TrashItem.id).where(
+                TrashItem.kind == "routine", TrashItem.entity_id == routine_id
+            )
+        ):
             return None
         user = await db.get(User, r.user_id)
         if user is None or user.status != UserStatus.active:

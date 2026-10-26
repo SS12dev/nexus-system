@@ -32,6 +32,8 @@ from nexus_common.models import (
     User,
     utcnow,
 )
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible, visible_file
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -40,7 +42,9 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 async def own_chat(db: AsyncSession, user: User, chat_id: uuid.UUID) -> Chat:
     """Load a chat only if it belongs to the user. Other users' chats look like they don't exist,
     admins included: each user's conversations are private to them."""
-    chat = await db.scalar(select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id))
+    chat = await db.scalar(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id, visible("chat", Chat.id))
+    )
     if chat is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Chat not found")
     return chat
@@ -54,7 +58,7 @@ async def attachments_for(
     rows = await db.execute(
         select(Attachment.message_id, File)
         .join(File, File.id == Attachment.file_id)
-        .where(Attachment.message_id.in_(message_ids))
+        .where(Attachment.message_id.in_(message_ids), visible_file(File.id, File.folder_id))
         .order_by(File.created_at)
     )
     out: dict[uuid.UUID, list[File]] = {}
@@ -69,7 +73,11 @@ async def links_for(db: AsyncSession, message_ids: list[uuid.UUID]) -> dict[uuid
     rows = await db.execute(
         select(MessageLink.message_id, Link)
         .join(Link, Link.id == MessageLink.link_id)
-        .where(MessageLink.message_id.in_(message_ids))
+        .where(
+            MessageLink.message_id.in_(message_ids),
+            visible("link", Link.id),
+            visible("project", Link.project_id),
+        )
         .order_by(Link.created_at)
     )
     out: dict[uuid.UUID, list[Link]] = {}
@@ -93,7 +101,7 @@ async def list_chats(user: CurrentUser, db: DbDep):
     their runs are on the Routines page."""
     rows = await db.scalars(
         select(Chat)
-        .where(Chat.user_id == user.id, Chat.kind == "chat")
+        .where(Chat.user_id == user.id, Chat.kind == "chat", visible("chat", Chat.id))
         .order_by(Chat.updated_at.desc())
         .limit(200)
     )
@@ -119,7 +127,7 @@ async def rename_chat(chat_id: uuid.UUID, body: ChatUpdateIn, user: MemberUser, 
 @router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat(chat_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     chat = await own_chat(db, user, chat_id)
-    await db.delete(chat)
+    await add_to_trash(db, user.id, "chat", chat.id, chat.title or "New chat")
     await db.commit()
     await publish(redis, user.id, Event(type="chat.deleted", data={"id": str(chat_id)}))
 
@@ -169,7 +177,11 @@ async def send_message(
         files = list(
             (
                 await db.scalars(
-                    select(File).where(File.id.in_(body.file_ids), File.user_id == user.id)
+                    select(File).where(
+                        File.id.in_(body.file_ids),
+                        File.user_id == user.id,
+                        visible_file(File.id, File.folder_id),
+                    )
                 )
             ).all()
         )

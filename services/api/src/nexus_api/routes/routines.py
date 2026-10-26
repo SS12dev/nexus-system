@@ -18,7 +18,15 @@ from nexus_api.schemas import (
     SchedulePreviewOut,
 )
 from nexus_common.events import Event, publish
-from nexus_common.models import AuditLog, Message, Routine, RoutineRun, User, utcnow
+from nexus_common.models import (
+    AuditLog,
+    Chat,
+    Message,
+    Routine,
+    RoutineRun,
+    User,
+    utcnow,
+)
 from nexus_common.routines import (
     RoutineLimit,
     ScheduleError,
@@ -26,18 +34,25 @@ from nexus_common.routines import (
     check_timezone,
     clean_delivery,
     describe,
-    remove_routine,
     reschedule,
     routine_payload,
     upcoming,
     validate,
 )
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/routines", tags=["routines"])
 
 
 async def own_routine(db: AsyncSession, user: User, routine_id: uuid.UUID) -> Routine:
-    r = await db.scalar(select(Routine).where(Routine.id == routine_id, Routine.user_id == user.id))
+    r = await db.scalar(
+        select(Routine).where(
+            Routine.id == routine_id,
+            Routine.user_id == user.id,
+            visible("routine", Routine.id),
+        )
+    )
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Routine not found")
     return r
@@ -61,7 +76,9 @@ def _bad(exc: Exception) -> HTTPException:
 async def list_routines(user: CurrentUser, db: DbDep):
     rows = (
         await db.scalars(
-            select(Routine).where(Routine.user_id == user.id).order_by(Routine.created_at)
+            select(Routine)
+            .where(Routine.user_id == user.id, visible("routine", Routine.id))
+            .order_by(Routine.created_at)
         )
     ).all()
     return [await routine_out(db, r) for r in rows]
@@ -144,9 +161,24 @@ async def update_routine(
 
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_routine(routine_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
-    """Delete the routine, its run history and the hidden chat it ran in."""
+    """Pause the routine and keep its history in Trash for seven days."""
     r = await own_routine(db, user, routine_id)
-    await remove_routine(db, r)
+    routine_item = await add_to_trash(
+        db, user.id, "routine", r.id, r.name, data={"enabled": r.enabled}
+    )
+    if r.chat_id is not None:
+        chat = await db.get(Chat, r.chat_id)
+        if chat is not None:
+            await db.flush()
+            await add_to_trash(
+                db,
+                user.id,
+                "chat",
+                chat.id,
+                chat.title or r.name,
+                parent_id=routine_item.id,
+            )
+    r.enabled, r.next_run_at = False, None
     db.add(AuditLog(actor_id=user.id, action="routine.deleted", target=str(routine_id)))
     await db.commit()
     await publish(redis, user.id, Event(type="routine.deleted", data={"id": str(routine_id)}))

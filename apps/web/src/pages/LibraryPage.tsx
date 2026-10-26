@@ -182,9 +182,9 @@ export function LibraryPage() {
   const removeFolder = async (d: Folder) => {
     const folderFiles = Object.values(useStore.getState().files).filter((file) => file.folder_id === d.id);
     const ok = await confirmAction({
-      title: `Permanently delete ${d.name} and its files?`,
-      body: "This permanently deletes the folder and all files stored in it, including their stored contents. This does not delete a software project or its GitHub repository.",
-      confirmLabel: "Delete folder and files",
+      title: `Move ${d.name} and its files to Trash?`,
+      body: "The folder and its files can be restored for seven days. After that, their stored contents are permanently deleted. This does not delete a software project or its GitHub repository.",
+      confirmLabel: "Move to Trash",
       danger: true,
     });
     if (!ok) return;
@@ -202,12 +202,12 @@ export function LibraryPage() {
     const remoteRepoMessage = p.transferred_to
       ? ` Its GitHub repository was transferred to ${p.transferred_to}, so Nexus cannot delete that repository.`
       : p.repo_url
-        ? " Its managed GitHub repository will also be permanently deleted."
+        ? " Its managed GitHub repository will be permanently deleted after the seven-day restore period."
         : "";
     const ok = await confirmAction({
-      title: `Permanently delete ${p.name}?`,
-      body: `This permanently deletes the software project's workbench files, project record, associated Library files and any running app.${remoteRepoMessage} This cannot be undone.`,
-      confirmLabel: "Delete project permanently",
+      title: `Move ${p.name} to Trash?`,
+      body: `The software project, workbench files, associated Library files and running app will be removed after seven days. You can restore the project during that period.${remoteRepoMessage}`,
+      confirmLabel: "Move to Trash",
       danger: true,
     });
     if (!ok) return;
@@ -231,9 +231,9 @@ export function LibraryPage() {
 
   const remove = async (f: FileItem) => {
     const ok = await confirmAction({
-      title: `Delete ${f.name}?`,
-      body: `${assistant} will no longer be able to read it.`,
-      confirmLabel: "Delete",
+      title: `Move ${f.name} to Trash?`,
+      body: `${assistant} will no longer be able to read it. You can restore the file for seven days before it is permanently deleted.`,
+      confirmLabel: "Move to Trash",
       danger: true,
     });
     if (!ok) return;

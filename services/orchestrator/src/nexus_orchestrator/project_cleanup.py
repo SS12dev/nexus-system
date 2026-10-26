@@ -2,10 +2,10 @@
 
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 
 from nexus_common.events import Event, publish
-from nexus_common.models import AgentRun, File, Folder, Link, Project, RunStatus
+from nexus_common.models import AgentRun, File, Folder, Link, Project, RunStatus, TrashItem
 from nexus_orchestrator.turn import TurnDeps
 
 FAILURE_MESSAGE = (
@@ -107,6 +107,13 @@ async def delete_project(deps: TurnDeps, project_id: uuid.UUID) -> None:
                 folder = await db.get(Folder, folder_id)
                 if folder is not None:
                     await db.delete(folder)
+            await db.execute(
+                delete(TrashItem).where(
+                    TrashItem.user_id == user_id,
+                    TrashItem.kind.in_(("project", "app", "folder", "file", "link")),
+                    TrashItem.entity_id.in_([project_id, *folder_ids, *file_ids, *link_ids]),
+                )
+            )
             await db.delete(project)
             await db.commit()
     except Exception:

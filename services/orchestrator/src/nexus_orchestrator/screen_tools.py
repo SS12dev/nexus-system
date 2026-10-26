@@ -15,6 +15,7 @@ from nexus_common import screen as sc
 from nexus_common.library import file_payload
 from nexus_common.models import Entity, File, NotificationKind, Widget, utcnow
 from nexus_common.notices import notify
+from nexus_common.trash import visible_file
 
 Op = Literal["pin", "move", "focus", "mode", "highlight", "notice", "clear"]
 MAX_HIGHLIGHT = 8
@@ -168,11 +169,19 @@ def build_screen_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
 async def _find_file(db, user_id: uuid.UUID, target: str) -> File | None:
     fid = _uuid(target)
     if fid is not None:
-        return await db.scalar(select(File).where(File.id == fid, File.user_id == user_id))
+        return await db.scalar(
+            select(File).where(
+                File.id == fid, File.user_id == user_id, visible_file(File.id, File.folder_id)
+            )
+        )
     # By name: the newest version of that name.
     return await db.scalar(
         select(File)
-        .where(File.user_id == user_id, File.name == target.strip())
+        .where(
+            File.user_id == user_id,
+            File.name == target.strip(),
+            visible_file(File.id, File.folder_id),
+        )
         .order_by(File.created_at.desc())
         .limit(1)
     )

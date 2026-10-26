@@ -11,6 +11,7 @@ from nexus_api.deps import CurrentUser, DbDep, RedisDep
 from nexus_common.events import Event, publish
 from nexus_common.models import File, Link, Notification, utcnow
 from nexus_common.notices import TRAY_SIZE, notification_payload
+from nexus_common.trash import visible_file
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -32,7 +33,14 @@ async def tray(user: CurrentUser, db: DbDep) -> dict:
     ).all()
     file_ids = {n.file_id for n in rows if n.file_id}
     link_ids = {n.link_id for n in rows if n.link_id}
-    files = {f.id: f for f in (await db.scalars(select(File).where(File.id.in_(file_ids)))).all()}
+    files = {
+        f.id: f
+        for f in (
+            await db.scalars(
+                select(File).where(File.id.in_(file_ids), visible_file(File.id, File.folder_id))
+            )
+        ).all()
+    }
     links = {x.id: x for x in (await db.scalars(select(Link).where(Link.id.in_(link_ids)))).all()}
     unread = await db.scalar(
         select(func.count()).where(Notification.user_id == user.id, Notification.read_at.is_(None))

@@ -30,6 +30,7 @@ from nexus_orchestrator.project_cleanup import delete_project as _delete_project
 from nexus_orchestrator.retry import TRIES, retry_transient
 from nexus_orchestrator.sandbox import SandboxClient
 from nexus_orchestrator.systems import learn, runner
+from nexus_orchestrator.trash import enqueue_expired, purge_item
 from nexus_orchestrator.turn import TurnDeps
 from nexus_orchestrator.turn import run_turn as _run_turn
 from nexus_orchestrator.web import WebClient
@@ -155,6 +156,20 @@ async def delete_project(ctx: dict, project_id: str) -> None:
 
 
 @traced_job
+async def purge_trash_item(ctx: dict, item_id: str, force: bool = False) -> None:
+    """Permanently remove a Trash item after expiry or an explicit purge request."""
+    await purge_item(ctx["deps"], uuid.UUID(item_id), force=force)
+
+
+@traced_job
+async def expire_trash(ctx: dict) -> None:
+    """Queue seven-day Trash entries for permanent deletion."""
+    count = await enqueue_expired(ctx["deps"])
+    if count:
+        log.info("Queued %d expired Trash items for permanent deletion", count)
+
+
+@traced_job
 @retry_transient
 async def link_preview(ctx: dict, link_id: str) -> None:
     """Fetch the preview of a link the user added in the Library."""
@@ -260,6 +275,7 @@ class WorkerSettings:
         func(continue_run, timeout=settings.run_job_timeout_s, keep_result=0),
         func(deploy_app, timeout=settings.deploy_timeout_s + 60, keep_result=0),
         func(delete_project, timeout=600, keep_result=0),
+        func(purge_trash_item, timeout=600, keep_result=0, max_tries=TRIES),
         # Emails are safe to retry: the job checks the request is still in the state it's about.
         func(notify_access, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
         func(notify_feedback, timeout=90, keep_result=0, max_tries=notify.MAX_TRIES),
@@ -272,6 +288,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
         cron(widgets_due, second={0, 15, 30, 45}, unique=True, timeout=30),
+        cron(expire_trash, hour=3, minute=10, unique=True, timeout=60),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
         cron(
             nightly,

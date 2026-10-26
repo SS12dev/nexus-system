@@ -35,8 +35,11 @@ async def test_create_list_update_and_delete(owner):
 
     assert (await owner.delete(f"/api/routines/{r['id']}")).status_code == 204
     assert (await owner.get("/api/routines")).json() == []
-    # Its hidden chat goes with it.
+    # Its hidden chat is inaccessible until the routine is restored.
     assert (await owner.get(f"/api/chats/{r['chat_id']}/messages")).status_code == 404
+    item = next(row for row in (await owner.get("/api/trash")).json() if row["kind"] == "routine")
+    assert (await owner.post(f"/api/trash/{item['id']}/restore")).status_code == 200
+    assert (await owner.get(f"/api/chats/{r['chat_id']}/messages")).status_code == 200
 
 
 async def test_routine_chats_stay_out_of_the_chat_list(owner, sessionmaker):

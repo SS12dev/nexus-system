@@ -35,6 +35,7 @@ from nexus_api.routes import (
     screen,
     skills,
     systems,
+    trash,
     widgets,
 )
 from nexus_api.routes import (
@@ -145,6 +146,7 @@ def create_app(
     app.include_router(recall.router)
     app.include_router(routines.router)
     app.include_router(push.router)
+    app.include_router(trash.router)
     app.include_router(feedback.router)
     app.include_router(ws.router)
 

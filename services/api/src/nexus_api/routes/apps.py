@@ -25,6 +25,8 @@ from nexus_common.deployer import DeployerError
 from nexus_common.events import Event, publish
 from nexus_common.models import Project, RoleName, User, utcnow
 from nexus_common.settings import Settings
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/apps", tags=["apps"])
 
@@ -80,12 +82,15 @@ def out(p: Project, owner: User, live: dict[str, str]) -> AppOut:
 
 
 async def own_app(db: AsyncSession, user: User, app_id: uuid.UUID) -> tuple[Project, User]:
-    row = await db.get(Project, app_id)
-    if (
-        row is None
-        or row.app_slug is None
-        or (row.user_id != user.id and user.role != RoleName.owner)
-    ):
+    row = await db.scalar(
+        select(Project).where(
+            Project.id == app_id,
+            Project.app_slug.is_not(None),
+            visible("app", Project.id),
+            visible("project", Project.id),
+        )
+    )
+    if row is None or (row.user_id != user.id and user.role != RoleName.owner):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "App not found")
     return row, await db.get(User, row.user_id)
 
@@ -96,7 +101,11 @@ async def check_limit(db: AsyncSession, settings: Settings, row: Project, owner:
         return
     running = await db.scalar(
         select(func.count()).where(
-            Project.user_id == owner.id, Project.app_state.in_(LIVE), Project.id != row.id
+            Project.user_id == owner.id,
+            Project.app_state.in_(LIVE),
+            Project.id != row.id,
+            visible("app", Project.id),
+            visible("project", Project.id),
         )
     )
     if running >= settings.member_app_limit:
@@ -120,7 +129,11 @@ async def announce_project(redis, row: Project) -> None:
 @router.get("", response_model=list[AppOut])
 async def list_apps(user: CurrentUser, db: DbDep, deployer: DeployerDep):
     q = select(Project, User).join(User, User.id == Project.user_id)
-    q = q.where(Project.app_slug.is_not(None))
+    q = q.where(
+        Project.app_slug.is_not(None),
+        visible("app", Project.id),
+        visible("project", Project.id),
+    )
     if user.role != RoleName.owner:
         q = q.where(Project.user_id == user.id)
     rows = (await db.execute(q.order_by(Project.updated_at.desc()))).all()
@@ -218,11 +231,22 @@ async def set_visibility(
 async def delete(
     app_id: uuid.UUID, user: CurrentUser, db: DbDep, deployer: DeployerDep, redis: RedisDep
 ):
-    """Remove the app's containers and image. The project, its folder and repo stay, so it
-    can be deployed again."""
+    """Move the app to Trash. It is stopped now and permanently removed after seven days."""
     row, _ = await own_app(db, user, app_id)
-    await deployer_call(deployer.delete(row.app_slug))
-    row.app_state = row.live_url = row.deployed_at = row.deploy_error = None
-    row.app_slug, row.updated_at = None, utcnow()
+    if row.app_state == "building":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the app build to finish first.")
+    app_state = row.app_state
+    if row.app_state == "running":
+        await deployer_call(deployer.stop(row.app_slug))
+        row.app_state = "stopped"
+    row.updated_at = utcnow()
+    await add_to_trash(
+        db,
+        row.user_id,
+        "app",
+        row.id,
+        row.name,
+        data={"app_state": app_state},
+    )
     await db.commit()
     await announce_project(redis, row)

@@ -37,6 +37,8 @@ from nexus_common.library import (
 from nexus_common.models import File, FileChunk, FileStatus, User, utcnow
 from nexus_common.search import hybrid_search
 from nexus_common.storage import file_key
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible_file
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -47,7 +49,13 @@ INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 
 
 async def own_file(db: AsyncSession, user: User, file_id: uuid.UUID) -> File:
-    f = await db.scalar(select(File).where(File.id == file_id, File.user_id == user.id))
+    f = await db.scalar(
+        select(File).where(
+            File.id == file_id,
+            File.user_id == user.id,
+            visible_file(File.id, File.folder_id),
+        )
+    )
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
     return f
@@ -130,7 +138,10 @@ async def list_files(
     chat_id: uuid.UUID | None = None,
     limit: int = Query(default=200, le=1000),
 ):
-    q = select(File).where(File.user_id == user.id)
+    q = select(File).where(
+        File.user_id == user.id,
+        visible_file(File.id, File.folder_id),
+    )
     if chat_id is not None:
         q = q.where(File.chat_id == chat_id)
     rows = await db.scalars(q.order_by(File.created_at.desc()).limit(limit))
@@ -152,7 +163,11 @@ async def search(
     rows = await db.execute(
         select(FileChunk, File)
         .join(File, File.id == FileChunk.file_id)
-        .where(FileChunk.id.in_([h.id for h in hits]), File.user_id == user.id)
+        .where(
+            FileChunk.id.in_([h.id for h in hits]),
+            File.user_id == user.id,
+            visible_file(File.id, File.folder_id),
+        )
     )
     by_id = {c.id: (c, f) for c, f in rows.all()}
     out = []
@@ -265,13 +280,9 @@ async def retry(file_id: uuid.UUID, user: MemberUser, db: DbDep, queue: QueueDep
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file(
-    file_id: uuid.UUID, user: MemberUser, db: DbDep, storage: StorageDep, redis: RedisDep
-):
-    """Delete the file, its text and vectors, and its attachments to messages."""
+async def delete_file(file_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
+    """Move the file to Trash for seven days before permanent removal."""
     f = await own_file(db, user, file_id)
-    key = f.storage_key
-    await db.delete(f)
+    await add_to_trash(db, user.id, "file", f.id, f.name)
     await db.commit()
     await publish(redis, user.id, Event(type="file.deleted", data={"id": str(file_id)}))
-    await storage.delete(key)

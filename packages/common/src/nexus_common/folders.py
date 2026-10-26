@@ -21,6 +21,7 @@ from nexus_common.models import (
     Project,
     utcnow,
 )
+from nexus_common.trash import visible_file
 
 # Words a team's name ends with that say nothing about the work ("Rocket model team").
 _TEAM_WORDS = re.compile(r"[\s:\-–]*\b(team|crew|squad|pipeline|flow|agents?)\s*$", re.I)
@@ -216,7 +217,11 @@ def touch(folder: Folder) -> None:
 async def file_counts(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
     rows = await db.execute(
         select(File.folder_id, func.count())
-        .where(File.user_id == user_id, File.folder_id.is_not(None))
+        .where(
+            File.user_id == user_id,
+            File.folder_id.is_not(None),
+            visible_file(File.id, File.folder_id),
+        )
         .group_by(File.folder_id)
     )
     return {fid: n for fid, n in rows.all()}

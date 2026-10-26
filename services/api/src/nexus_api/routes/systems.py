@@ -48,13 +48,19 @@ from nexus_common.systems import (
     system_payload,
 )
 from nexus_common.toolinfo import TOOLS, allowed_tools, needs_approval
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api", tags=["agents"])
 
 
 async def own_system(db: AsyncSession, user: User, system_id: uuid.UUID) -> AgentSystem:
     s = await db.scalar(
-        select(AgentSystem).where(AgentSystem.id == system_id, AgentSystem.user_id == user.id)
+        select(AgentSystem).where(
+            AgentSystem.id == system_id,
+            AgentSystem.user_id == user.id,
+            visible("system", AgentSystem.id),
+        )
     )
     if s is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent system not found")
@@ -106,7 +112,7 @@ async def list_systems(
     chat_id: uuid.UUID | None = None,
     archived: bool = Query(default=False),
 ):
-    q = select(AgentSystem).where(AgentSystem.user_id == user.id)
+    q = select(AgentSystem).where(AgentSystem.user_id == user.id, visible("system", AgentSystem.id))
     if chat_id is not None:
         # Systems that ran in this chat, archived or not, for the chat's cards.
         ran_here = select(AgentRun.system_id).where(AgentRun.chat_id == chat_id)
@@ -219,7 +225,7 @@ async def delete_system(system_id: uuid.UUID, user: MemberUser, db: DbDep, redis
         select(AgentRun.id).where(AgentRun.system_id == s.id, AgentRun.status.in_(ACTIVE_RUN))
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Stop the running run first")
-    await db.delete(s)
+    await add_to_trash(db, user.id, "system", s.id, s.name)
     await db.commit()
     await publish(
         redis, user.id, Event(type="system.deleted", data={"system": {"id": str(system_id)}})

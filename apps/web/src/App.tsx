@@ -23,6 +23,7 @@ import { PeoplePage } from "./pages/PeoplePage";
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { TermsPage } from "./pages/TermsPage";
+import { TrashPage } from "./pages/TrashPage";
 import { useStore } from "./store/chat";
 
 export function App() {
@@ -95,6 +96,7 @@ export function App() {
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />
         <Route path="skills" element={<SkillsPage />} />
+        <Route path="trash" element={<TrashPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="connections" element={<Navigate to="/settings" replace />} />
         {hasRole(user, "admin") && <Route path="people" element={<PeoplePage />} />}

@@ -727,6 +727,7 @@ export type ServerEvent =
   | { type: "routine.deleted"; chat_id?: null; data: { id: string } }
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
+  | { type: "trash.changed"; chat_id?: null; data: { kind: string } }
   | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }
   | { type: "widget.deleted"; chat_id?: null; data: { id: string } }
   | { type: "screen.op"; chat_id?: string | null; data: ScreenOpData }
@@ -756,6 +757,16 @@ export interface ServiceHealth {
   name: string;
   ok: boolean;
   detail: string;
+}
+
+export interface TrashItem {
+  id: string;
+  kind: string;
+  entity_id: string;
+  parent_id: string | null;
+  title: string;
+  created_at: string;
+  expires_at: string;
 }
 
 export interface Backup {

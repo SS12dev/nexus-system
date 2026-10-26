@@ -2,7 +2,9 @@
 
 import uuid
 
-from nexus_common.models import Project
+from sqlalchemy import select
+
+from nexus_common.models import Project, TrashItem
 
 
 async def add_project(sessionmaker, user_id: str, **changes) -> uuid.UUID:
@@ -18,7 +20,7 @@ async def add_project(sessionmaker, user_id: str, **changes) -> uuid.UUID:
         return project.id
 
 
-async def test_delete_queues_managed_project_cleanup(owner, sessionmaker, queue):
+async def test_delete_moves_project_to_trash_without_removing_resources(owner, sessionmaker, queue):
     user_id = (await owner.get("/api/me")).json()["id"]
     project_id = await add_project(sessionmaker, user_id)
 
@@ -26,9 +28,13 @@ async def test_delete_queues_managed_project_cleanup(owner, sessionmaker, queue)
 
     assert response.status_code == 202
     assert response.json() == {"queued": True}
-    assert queue.project_deletes == [project_id]
+    assert queue.project_deletes == []
     async with sessionmaker() as db:
         assert await db.get(Project, project_id) is not None
+        item = await db.scalar(
+            select(TrashItem).where(TrashItem.kind == "project", TrashItem.entity_id == project_id)
+        )
+        assert item is not None
 
 
 async def test_delete_rejects_another_users_project(owner, client_for, invite, sessionmaker):

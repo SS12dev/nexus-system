@@ -44,6 +44,7 @@ EventType = Literal[
     "artifact.created",
     "skill.updated",
     "skill.deleted",
+    "trash.changed",
     # Sent to owners and admins: how many access requests are waiting.
     "access.pending",
     # A routine was added, changed or ran (data: routine, and status after a run).

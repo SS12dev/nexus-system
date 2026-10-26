@@ -56,6 +56,20 @@ describe("applyEvent", () => {
     const s = applyEvent(initialState, { type: "assistant.state", chat_id: "c1", data: { state: "thinking" } });
     expect(s.assistantState).toBe("thinking");
   });
+
+  it("refreshes affected views after a Trash restore", () => {
+    const s = applyEvent(initialState, { type: "trash.changed", data: { kind: "file" } });
+    expect(s).toMatchObject({
+      chatsVersion: 1,
+      memoryVersion: 1,
+      projectsVersion: 1,
+      agentsVersion: 1,
+      skillsVersion: 1,
+      linksVersion: 1,
+      foldersVersion: 1,
+      routinesVersion: 1,
+    });
+  });
 });
 
 describe("mergeFetched", () => {

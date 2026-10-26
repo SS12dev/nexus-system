@@ -38,11 +38,13 @@ from nexus_common.models import (
     MessageStatus,
     Profile,
     Skill,
+    TrashItem,
     User,
     UserStatus,
     utcnow,
 )
 from nexus_common.search import hybrid_search
+from nexus_common.trash import visible, visible_file
 from nexus_orchestrator.llm import parse_json, private
 from nexus_orchestrator.prompts import (
     EPISODE,
@@ -232,7 +234,12 @@ async def apply_candidates(
     ]:
         hits = await hybrid_search(db, "memories", user.id, query, vec, NEIGHBOURS)
         if hits:
-            rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
+            rows = await db.scalars(
+                select(Memory).where(
+                    Memory.id.in_([h.id for h in hits]),
+                    visible("memory", Memory.id, user.id),
+                )
+            )
             for m in rows.all():
                 existing[m.id] = m
     numbered = list(existing.values())
@@ -527,7 +534,11 @@ async def _link_batch(deps: TurnDeps, user_id: uuid.UUID) -> int:
         for m in (
             await db.scalars(
                 select(Memory)
-                .where(Memory.user_id == user_id, Memory.graph_at.is_(None))
+                .where(
+                    Memory.user_id == user_id,
+                    Memory.graph_at.is_(None),
+                    visible("memory", Memory.id, user_id),
+                )
                 .limit(GRAPH_BATCH)
             )
         ).all():
@@ -535,7 +546,13 @@ async def _link_batch(deps: TurnDeps, user_id: uuid.UUID) -> int:
         for e in (
             await db.scalars(
                 select(Episode)
-                .where(Episode.user_id == user_id, Episode.graph_at.is_(None))
+                .where(
+                    Episode.user_id == user_id,
+                    Episode.graph_at.is_(None),
+                    ~select(TrashItem.id)
+                    .where(TrashItem.kind == "memories_all", TrashItem.user_id == user_id)
+                    .exists(),
+                )
                 .limit(max(0, GRAPH_BATCH - len(items)))
             )
         ).all():
@@ -547,6 +564,7 @@ async def _link_batch(deps: TurnDeps, user_id: uuid.UUID) -> int:
                     File.user_id == user_id,
                     File.graph_at.is_(None),
                     File.status == FileStatus.ready,
+                    visible_file(File.id, File.folder_id),
                 )
                 .limit(max(0, GRAPH_BATCH - len(items)))
             )
@@ -589,7 +607,10 @@ async def rebuild_profile(deps: TurnDeps, user_id: uuid.UUID) -> None:
         memories = (
             await db.scalars(
                 select(Memory)
-                .where(Memory.user_id == user_id)
+                .where(
+                    Memory.user_id == user_id,
+                    visible("memory", Memory.id, user_id),
+                )
                 .order_by(Memory.pinned.desc(), Memory.confidence.desc(), Memory.updated_at.desc())
                 .limit(PROFILE_MEMORIES)
             )
@@ -631,12 +652,20 @@ async def nightly(deps: TurnDeps) -> None:
         now = utcnow()
         await db.execute(
             update(Memory)
-            .where(Memory.pinned.is_(False), Memory.reinforced_at < now - DECAY_AFTER)
+            .where(
+                Memory.pinned.is_(False),
+                Memory.reinforced_at < now - DECAY_AFTER,
+                visible("memory", Memory.id, Memory.user_id),
+            )
             .values(confidence=Memory.confidence * DECAY_FACTOR)
         )
         faded = (
             await db.scalars(
-                select(Memory).where(Memory.pinned.is_(False), Memory.confidence < MIN_CONFIDENCE)
+                select(Memory).where(
+                    Memory.pinned.is_(False),
+                    Memory.confidence < MIN_CONFIDENCE,
+                    visible("memory", Memory.id, Memory.user_id),
+                )
             )
         ).all()
         for m in faded:
@@ -652,10 +681,24 @@ async def nightly(deps: TurnDeps) -> None:
                     select b.id, b.embedding <=> a.embedding as d
                     from memories b
                     where b.user_id = a.user_id and b.id <> a.id and b.embedding is not null
+                      and not exists (
+                        select 1 from trash_items t where t.kind = 'memory' and t.entity_id = b.id
+                      )
+                      and not exists (
+                        select 1 from trash_items t
+                        where t.kind = 'memories_all' and t.user_id = b.user_id
+                      )
                     order by b.embedding <=> a.embedding
                     limit 1
                 ) n
                 where a.embedding is not null and n.d < :max_d
+                  and not exists (
+                    select 1 from trash_items t where t.kind = 'memory' and t.entity_id = a.id
+                  )
+                  and not exists (
+                    select 1 from trash_items t
+                    where t.kind = 'memories_all' and t.user_id = a.user_id
+                  )
                 """
             ),
             {"max_d": DUPLICATE_DISTANCE},

@@ -6,10 +6,13 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from nexus_api.deps import CurrentUser, DbDep, MemberUser, QueueDep, RedisDep, SettingsDep
+from nexus_api.deps import CurrentUser, DbDep, DeployerDep, MemberUser, RedisDep, SettingsDep
 from nexus_api.schemas import ProjectOut
+from nexus_common.deployer import DeployerError
 from nexus_common.events import Event, publish
-from nexus_common.models import AgentRun, Project, RoleName, RunStatus
+from nexus_common.models import AgentRun, Project, RoleName, RunStatus, TrashItem
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -17,7 +20,9 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(user: CurrentUser, db: DbDep):
     rows = await db.scalars(
-        select(Project).where(Project.user_id == user.id).order_by(Project.updated_at.desc())
+        select(Project)
+        .where(Project.user_id == user.id, visible("project", Project.id))
+        .order_by(Project.updated_at.desc())
     )
     return rows.all()
 
@@ -27,13 +32,21 @@ async def delete_project(
     project_id: uuid.UUID,
     user: MemberUser,
     db: DbDep,
-    queue: QueueDep,
+    deployer: DeployerDep,
     redis: RedisDep,
     settings: SettingsDep,
 ) -> dict[str, bool]:
-    """Queue a permanent deletion of the software project and its managed resources."""
+    """Keep a project restorable for seven days before removing its managed resources."""
     project = await db.get(Project, project_id)
-    if project is None or (project.user_id != user.id and user.role != RoleName.owner):
+    if (
+        project is None
+        or (project.user_id != user.id and user.role != RoleName.owner)
+        or await db.scalar(
+            select(TrashItem.id).where(
+                TrashItem.kind == "project", TrashItem.entity_id == project_id
+            )
+        )
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     if project.app_state == "building":
         raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the app build to finish first.")
@@ -70,10 +83,25 @@ async def delete_project(
                 "This repository is outside Nexus's managed GitHub organization "
                 "and was not deleted.",
             )
-    await queue.enqueue_project_delete(project.id)
+    app_state = project.app_state
+    if project.app_slug and project.app_state == "running":
+        try:
+            await deployer.stop(project.app_slug)
+        except DeployerError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+        project.app_state = "stopped"
+    await add_to_trash(
+        db,
+        project.user_id,
+        "project",
+        project.id,
+        project.name,
+        data={"app_state": app_state},
+    )
+    await db.commit()
     await publish(
         redis,
         project.user_id,
-        Event(type="project.delete_requested", data={"id": str(project.id)}),
+        Event(type="project.deleted", data={"id": str(project.id)}),
     )
     return {"queued": True}

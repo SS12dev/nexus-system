@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   AppWindow,
+  Archive,
   Bot,
   Brain,
   CalendarClock,
@@ -48,6 +49,7 @@ export function Shell() {
   const user = useStore((s) => s.user)!;
   const assistant = useAssistantName();
   const chats = useStore((s) => s.chats);
+  const chatsVersion = useStore((s) => s.chatsVersion);
   const setChats = useStore((s) => s.setChats);
   const removeChat = useStore((s) => s.removeChat);
   const state = useStore((s) => s.assistantState);
@@ -67,7 +69,7 @@ export function Shell() {
 
   useEffect(() => {
     api.chats().then(setChats).catch(console.error);
-  }, [setChats]);
+  }, [setChats, chatsVersion]);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -225,6 +227,9 @@ export function Shell() {
           </NavLink>
           <NavLink to="/skills" className={navClass} title={tip("Skills")}>
             <Sparkles size={16} className="shrink-0" /> <span className={label}>Skills</span>
+          </NavLink>
+          <NavLink to="/trash" className={navClass} title={tip("Trash")}>
+            <Archive size={16} className="shrink-0" /> <span className={label}>Trash</span>
           </NavLink>
           <NavLink to="/settings" className={navClass} title={tip("Settings")} data-tour="settings">
             <Settings size={16} className="shrink-0" /> <span className={label}>Settings</span>

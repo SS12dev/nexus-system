@@ -18,6 +18,8 @@ import type {
 
 export interface ChatState {
   chats: Chat[];
+  /** Bumped when a chat is restored from Trash so every open sidebar reloads it. */
+  chatsVersion: number;
   messages: Record<string, Message[]>;
   assistantState: AssistantState;
   /** What Nexus is doing right now, such as searching documents, while it works. */
@@ -70,6 +72,7 @@ export interface ChatState {
 
 export const initialState: ChatState = {
   chats: [],
+  chatsVersion: 0,
   messages: {},
   assistantState: "idle",
   activity: null,
@@ -319,10 +322,23 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
       const { [event.data.id]: _removed, ...messages } = state.messages;
       return {
         ...state,
+        chatsVersion: state.chatsVersion + 1,
         chats: state.chats.filter((chat) => chat.id !== event.data.id),
         messages,
       };
     }
+    case "trash.changed":
+      return {
+        ...state,
+        chatsVersion: state.chatsVersion + 1,
+        memoryVersion: state.memoryVersion + 1,
+        projectsVersion: state.projectsVersion + 1,
+        agentsVersion: state.agentsVersion + 1,
+        skillsVersion: state.skillsVersion + 1,
+        linksVersion: state.linksVersion + 1,
+        foldersVersion: state.foldersVersion + 1,
+        routinesVersion: state.routinesVersion + 1,
+      };
     case "skill.updated":
       return { ...state, skillsVersion: state.skillsVersion + 1 };
     case "skill.deleted":

@@ -6,7 +6,7 @@ anything the graph learned only from it."""
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_api.deps import CurrentUser, DbDep, EmbedderDep, MemberUser, QueueDep, RedisDep
@@ -21,8 +21,10 @@ from nexus_api.schemas import (
 from nexus_common import graph
 from nexus_common.events import Event, publish
 from nexus_common.memory import get_profile, mark_profile_stale, record
-from nexus_common.models import Entity, Episode, Memory, MemoryEvent, User, utcnow
+from nexus_common.models import Entity, Memory, MemoryEvent, TrashItem, User, utcnow
 from nexus_common.search import hybrid_search
+from nexus_common.trash import add as add_to_trash
+from nexus_common.trash import visible
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
@@ -36,7 +38,13 @@ async def announce_change(redis, user: User, op: str, memory_id: uuid.UUID | str
 
 
 async def own_memory(db: AsyncSession, user: User, memory_id: uuid.UUID) -> Memory:
-    m = await db.scalar(select(Memory).where(Memory.id == memory_id, Memory.user_id == user.id))
+    m = await db.scalar(
+        select(Memory).where(
+            Memory.id == memory_id,
+            Memory.user_id == user.id,
+            visible("memory", Memory.id, user.id),
+        )
+    )
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Memory not found")
     return m
@@ -44,7 +52,9 @@ async def own_memory(db: AsyncSession, user: User, memory_id: uuid.UUID) -> Memo
 
 async def profile_out(db: AsyncSession, user: User) -> ProfileOut:
     profile = await get_profile(db, user.id)
-    count = await db.scalar(select(func.count()).where(Memory.user_id == user.id))
+    count = await db.scalar(
+        select(func.count()).where(Memory.user_id == user.id, visible("memory", Memory.id, user.id))
+    )
     await db.commit()
     return ProfileOut(
         content=profile.content,
@@ -66,12 +76,21 @@ async def list_memories(
     if q:
         vec, _model = await embedder.try_embed_one(db, q)
         hits = await hybrid_search(db, "memories", user.id, q, vec, min(limit, 50))
-        rows = await db.scalars(select(Memory).where(Memory.id.in_([h.id for h in hits])))
+        rows = await db.scalars(
+            select(Memory).where(
+                Memory.id.in_([h.id for h in hits]),
+                Memory.user_id == user.id,
+                visible("memory", Memory.id, user.id),
+            )
+        )
         by_id = {m.id: m for m in rows.all()}
         return [by_id[h.id] for h in hits if h.id in by_id]
     rows = await db.scalars(
         select(Memory)
-        .where(Memory.user_id == user.id)
+        .where(
+            Memory.user_id == user.id,
+            visible("memory", Memory.id, user.id),
+        )
         .order_by(Memory.pinned.desc(), Memory.updated_at.desc())
         .limit(limit)
     )
@@ -124,12 +143,27 @@ async def rebuild_profile(user: MemberUser, queue: QueueDep):
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def forget_everything(user: MemberUser, db: DbDep, redis: RedisDep):
-    """Delete every memory, past-chat summary, connection and the profile text."""
-    await db.execute(delete(Entity).where(Entity.user_id == user.id))
-    await db.execute(delete(Memory).where(Memory.user_id == user.id))
-    await db.execute(delete(Episode).where(Episode.user_id == user.id))
+    """Move the memory archive to Trash and stop recalling it during the retention period."""
     profile = await get_profile(db, user.id)
-    profile.content, profile.built_at, profile.stale = "", None, False
+    await add_to_trash(
+        db,
+        user.id,
+        "memories_all",
+        user.id,
+        "All memories and knowledge",
+        data={
+            "content": profile.content,
+            "built_at": profile.built_at.isoformat() if profile.built_at else None,
+            "stale": profile.stale,
+            "memory_enabled": profile.memory_enabled,
+        },
+    )
+    profile.content, profile.built_at, profile.stale, profile.memory_enabled = (
+        "",
+        None,
+        False,
+        False,
+    )
     await db.commit()
     await announce_change(redis, user, "forget_all", "all")
 
@@ -137,16 +171,24 @@ async def forget_everything(user: MemberUser, db: DbDep, redis: RedisDep):
 @router.get("/graph")
 async def get_graph(user: CurrentUser, db: DbDep):
     """Every entity with what mentions it, and every relation, current and ended."""
+    if await db.scalar(
+        select(TrashItem.id).where(TrashItem.user_id == user.id, TrashItem.kind == "memories_all")
+    ):
+        return {"entities": [], "relations": []}
     return await graph.graph_payload(db, user.id)
 
 
 @router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entity(entity_id: uuid.UUID, user: MemberUser, db: DbDep, redis: RedisDep):
     """Remove a person, project or topic and its connections. Memories about it stay."""
-    e = await db.scalar(select(Entity).where(Entity.id == entity_id, Entity.user_id == user.id))
+    e = await db.scalar(
+        select(Entity).where(
+            Entity.id == entity_id, Entity.user_id == user.id, visible("entity", Entity.id)
+        )
+    )
     if e is None or e.is_self:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    await db.delete(e)
+    await add_to_trash(db, user.id, "entity", e.id, e.name)
     await db.commit()
     await announce_change(redis, user, "delete_entity", entity_id)
 
@@ -200,14 +242,10 @@ async def delete_memory(
     redis: RedisDep,
     rebuild: bool = False,
 ):
-    """Delete a memory. With rebuild=true the profile is rebuilt now instead of overnight, so
-    the deleted fact leaves the profile at once."""
+    """Move a memory to Trash and refresh the profile without it."""
     m = await own_memory(db, user, memory_id)
-    await db.delete(m)
-    await db.flush()
-    await graph.prune(db, user.id)
+    await add_to_trash(db, user.id, "memory", m.id, m.content[:255])
     await mark_profile_stale(db, user.id)
     await db.commit()
-    if rebuild:
-        await queue.enqueue_profile_rebuild(user.id)
+    await queue.enqueue_profile_rebuild(user.id)
     await announce_change(redis, user, "delete", memory_id)

@@ -110,13 +110,35 @@ async def test_rename_keeps_the_extension(owner):
     assert resp.json()["name"] == "Q3 numbers.csv"
 
 
-async def test_delete_removes_file_text_and_bytes(owner, app, storage):
+async def test_delete_moves_file_to_trash_and_restore_preserves_bytes(owner, app, storage):
     fid = (await upload(owner)).json()["id"]
     await make_ready(app, fid, ["Quarterly revenue grew 12 percent."])
     assert (await owner.delete(f"/api/files/{fid}")).status_code == 204
-    assert storage.objects == {}
+    assert storage.objects
     assert (await owner.get(f"/api/files/{fid}")).status_code == 404
     assert (await owner.get("/api/files/search", params={"q": "revenue"})).json() == []
+    item = (await owner.get("/api/trash")).json()[0]
+    assert item["kind"] == "file" and item["entity_id"] == fid
+    restored = await owner.post(f"/api/trash/{item['id']}/restore")
+    assert restored.status_code == 200
+    assert (await owner.get(f"/api/files/{fid}/content")).content.startswith(b"Quarterly")
+    assert (await owner.get("/api/trash")).json() == []
+
+
+async def test_permanent_delete_requires_a_successful_queue(owner, queue):
+    fid = (await upload(owner)).json()["id"]
+    assert (await owner.delete(f"/api/files/{fid}")).status_code == 204
+    item = (await owner.get("/api/trash")).json()[0]
+
+    queue.fail = True
+    response = await owner.delete(f"/api/trash/{item['id']}")
+    assert response.status_code == 503
+    assert (await owner.get("/api/trash")).json()[0]["id"] == item["id"]
+
+    queue.fail = False
+    response = await owner.delete(f"/api/trash/{item['id']}")
+    assert response.status_code == 202 and response.json() == {"queued": True}
+    assert queue.trash_purges == [uuid.UUID(item["id"])]
 
 
 async def test_retry_failed_file(owner, queue):
@@ -194,4 +216,9 @@ async def test_project_folders_rename_move_and_remove(owner, app, client_for, in
     assert (await owner.delete(f"/api/folders/{folder['id']}")).status_code == 204
     files = (await owner.get("/api/files")).json()
     assert files == []
-    assert all(key not in storage.objects for key in file_keys)
+    assert file_keys[0] in storage.objects and "k" not in storage.objects
+    trash = (await owner.get("/api/trash")).json()
+    folder_item = next(item for item in trash if item["kind"] == "folder")
+    assert (await owner.post(f"/api/trash/{folder_item['id']}/restore")).status_code == 200
+    assert len((await owner.get("/api/files")).json()) == 2
+    assert (await owner.get("/api/folders")).json()[0]["id"] == folder["id"]
