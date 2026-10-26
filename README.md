@@ -485,7 +485,9 @@ LLM evaluation), productivity (inbox triage, scheduling, comparing options), wor
 planning, study plans, meeting prep, proposals and invoices, creative briefs, clinical evidence,
 job applications, sales outreach), life (meal planning, trip planning, training plans,
 budgeting), agents (prompt writing) and engineering (code review, 3D models for printing). Every script is tested in the sandbox; see
-[library/README.md](library/README.md).
+[library/README.md](library/README.md). Agents that make something visual (a 3D model's
+render, a chart) get `view_image`, which shows them the picture so they can check it against
+the request before reporting; a 3D modeller looks at its render and fixes what's missing.
 
 The **Skills** page lists core, shared, your own and learned skills, with editing, version
 history, rollback, enable/disable and import (a `SKILL.md` or a `.zip`). Imported skills, and

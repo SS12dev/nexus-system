@@ -8,7 +8,9 @@ When the user decides, a new job resumes the graph and the node reads the decisi
 """
 
 import asyncio
+import base64
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
@@ -75,6 +77,58 @@ class AgentState(TypedDict, total=False):
     done: dict | None
     # Retried one tier up after an empty answer or a model error.
     escalated: bool
+
+
+IMAGE_KEY = re.compile(r"\[image ([0-9a-f]{8})\]")
+# How many of the latest images an agent keeps seeing; older ones become a line of text, so a
+# long review loop doesn't pay for every earlier picture on every call.
+KEEP_IMAGES = 2
+
+
+def show_images(ctx: ToolContext | None, results: list[ToolMessage]) -> list[HumanMessage]:
+    """The pictures view_image fetched in this batch, as one message after the tool results:
+    tool results can only hold text, a user message can hold images."""
+    if ctx is None:
+        return []
+    parts: list[dict] = []
+    for m in results:
+        if m is None or m.name != "view_image" or not isinstance(m.content, str):
+            continue
+        for key in IMAGE_KEY.findall(m.content):
+            found = ctx.images.pop(key, None)
+            if found is None:
+                continue
+            name, kind, data = found
+            parts += [
+                {"type": "text", "text": f"{name}:"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{kind};base64,{base64.b64encode(data).decode()}",
+                        "detail": "high",
+                    },
+                },
+            ]
+    if not parts:
+        return []
+    return [HumanMessage(parts, name="view_image")]
+
+
+def older_images_as_text(messages: list[AnyMessage]) -> list[AnyMessage]:
+    seen = 0
+    out: list[AnyMessage] = []
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage) and m.name == "view_image" and isinstance(m.content, list):
+            seen += 1
+            if seen > KEEP_IMAGES:
+                names = [p["text"].rstrip(":") for p in m.content if p.get("type") == "text"]
+                m = HumanMessage(
+                    f"(Earlier picture{'s' if len(names) > 1 else ''} {', '.join(names)} no "
+                    "longer shown; call view_image again to look.)",
+                    name="view_image",
+                )
+        out.append(m)
+    return out[::-1]
 
 
 def text_of(message: AnyMessage) -> str:
@@ -365,6 +419,7 @@ def build_agent(
     terminal = terminal or []
     terminal_names = {t.name for t in terminal}
     tools = rc.tools_for(agent)
+    tools_ctx = rc.tool_contexts.get(agent.id)
     by_name = {t.name: t for t in tools}
     max_steps = agent.max_steps or rc.deps.settings.agent_max_steps
     approval_extra = set(rc.spec.approval.required_for)
@@ -376,7 +431,7 @@ def build_agent(
         last = steps + 1 >= max_steps
         tier = await rc.tier_for(agent, state.get("escalated", False))
         available = terminal if last else [*tools, *terminal]
-        messages = [SystemMessage(rc.prompts[agent.id]), *state["messages"]]
+        messages = [SystemMessage(rc.prompts[agent.id]), *older_images_as_text(state["messages"])]
         if last:
             messages.append(
                 HumanMessage(
@@ -486,7 +541,8 @@ def build_agent(
             await flush_reads()
             out[i] = ToolMessage(await run_one(tool, args, name, a), tool_call_id=cid, name=name)
         await flush_reads()
-        return {"messages": out, "done": done}
+        shown = show_images(tools_ctx, out)
+        return {"messages": [*out, *shown], "done": done}
 
     def after_model(state: AgentState) -> str:
         last = state["messages"][-1]

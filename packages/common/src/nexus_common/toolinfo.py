@@ -127,6 +127,14 @@ TOOLS: list[ToolInfo] = [
         "Run Python or shell in the sandbox (no network) with document libraries and skill "
         "scripts; files written to out/ are saved to the library.",
     ),
+    ToolInfo(
+        "view_image",
+        "Look at an image",
+        "read",
+        "Look at a render, chart or picture in the library, to check visual work such as a 3D "
+        "model's preview before reporting it.",
+        assistant=False,
+    ),
     # The workbench: a dev team's project folder, kept for the whole run (agents only).
     ToolInfo(
         "ws_tree",

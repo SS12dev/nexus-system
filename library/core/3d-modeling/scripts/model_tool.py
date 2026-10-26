@@ -45,7 +45,17 @@ def load(path: str):
         mesh = trimesh.load(str(p), force="mesh")
     if mesh.is_empty:
         raise SystemExit(f"{path}: no geometry in this file")
-    return mesh, exact
+    return tidy(mesh), exact
+
+
+def tidy(mesh):
+    """Weld duplicate vertices and drop zero-area triangles. OpenCascade writes sliver
+    triangles at every point where a surface closes on itself (a cone's tip, a sphere's poles,
+    a revolve that meets its axis); left in, they make a sound solid look open and in pieces."""
+    mesh.merge_vertices(digits_vertex=5)
+    mesh.update_faces(mesh.nondegenerate_faces(height=1e-6))
+    mesh.remove_unreferenced_vertices()
+    return mesh
 
 
 def parse_bed(text: str) -> tuple[float, float, float]:
@@ -172,19 +182,33 @@ def render(args) -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
+    import trimesh
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     mesh, _ = load(args.model)
     views = [v.strip() for v in args.views.split(",") if v.strip() in VIEWS] or ["iso"]
+    # Matplotlib paints whole triangles back to front, so one big flat triangle can be drawn
+    # over the small ones in front of it. Cutting big triangles down keeps the views honest.
+    edge = float(mesh.extents.max()) / 60
+    if len(mesh.faces) < 150_000 and mesh.edges_unique_length.max() > edge:
+        try:
+            v, f = trimesh.remesh.subdivide_to_size(mesh.vertices, mesh.faces, edge, max_iter=6)
+            if len(f) < 400_000:
+                mesh = trimesh.Trimesh(v, f, process=False)
+        except ValueError:
+            pass
     light = np.array([0.35, -0.55, 0.75])
     light /= np.linalg.norm(light)
     shade = 0.3 + 0.7 * np.clip(mesh.face_normals @ light, 0, 1)
     colors = plt.cm.Blues(0.35 + 0.6 * shade)
     lo, hi = mesh.bounds
     centre, radius = (lo + hi) / 2, float((hi - lo).max()) / 2 or 1.0
-    fig = plt.figure(figsize=(3.4 * len(views), 3.6), dpi=args.dpi)
+    # A grid of large views: big enough to judge the shape, for the user and the model alike.
+    cols = 2 if len(views) == 4 else len(views)
+    rows = math.ceil(len(views) / cols)
+    fig = plt.figure(figsize=(4.6 * cols, 4.6 * rows + 0.4), dpi=args.dpi)
     for i, name in enumerate(views):
-        ax = fig.add_subplot(1, len(views), i + 1, projection="3d")
+        ax = fig.add_subplot(rows, cols, i + 1, projection="3d")
         ax.add_collection3d(Poly3DCollection(mesh.triangles, facecolors=colors, edgecolor="none"))
         for set_lim, c in zip((ax.set_xlim, ax.set_ylim, ax.set_zlim), centre, strict=True):
             set_lim(c - radius, c + radius)

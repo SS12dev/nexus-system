@@ -62,6 +62,9 @@ TOOL_OUTPUT_CHARS = 8000
 MAX_INPUT_FILES = 10
 GITHUB_USER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 SAVE_FILE_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".html", ".xml", ".yaml", ".yml"}
+# Images view_image shows a model: the formats vision models read, and the largest file.
+IMAGE_TYPES = {b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg", b"GIF8": "image/gif"}
+MAX_IMAGE_BYTES = 8_000_000
 # Lines ws_read returns per call unless asked for fewer, and characters per line.
 WS_READ_LINES = 400
 WS_LINE_CHARS = 2000
@@ -96,6 +99,9 @@ class ToolContext:
     links: list[Link] = field(default_factory=list)
     # The workbench project the ws_* tools work in; an agent run uses its own id by default.
     project: str | None = None
+    # Pictures view_image fetched, by the key in its result, until the run shows them to the
+    # agent: (file name, media type, bytes).
+    images: dict[str, tuple[str, str, bytes]] = field(default_factory=dict)
 
     @property
     def workbench_project(self) -> str | None:
@@ -113,6 +119,12 @@ def _uuid(value: str) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except ValueError:
         return None
+
+
+def image_type(data: bytes) -> str | None:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((t for magic, t in IMAGE_TYPES.items() if data.startswith(magic)), None)
 
 
 def link_line(link: Link) -> str:
@@ -516,6 +528,44 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             parts.append("too large or too many, not saved: " + ", ".join(result.skipped_files))
         return "\n\n".join(parts)
 
+    async def view_image(name: str) -> str:
+        """Look at an image: a render or preview this run made (e.g. out/rocket.png saved as
+        rocket.png), a chart, or a picture the user gave, by file name or id. The picture is
+        shown to you right after this call. Use it to check your own visual output against the
+        request before you report it: missing, misplaced, wrongly sized or ugly parts."""
+        await note("view_image", file=name)
+        wanted = PurePath(name.strip()).name
+        fid = _uuid(name)
+        async with sessionmaker() as db:
+            mine = File.user_id == user_id
+            if fid is not None:
+                f = await db.scalar(select(File).where(File.id == fid, mine))
+            else:
+                # This run's own files first, then the user's library, newest version first.
+                found = select(File).where(File.name == wanted, mine)
+                f = None
+                if ctx.run_id is not None:
+                    f = await db.scalar(
+                        found.where(File.run_id == ctx.run_id)
+                        .order_by(File.created_at.desc())
+                        .limit(1)
+                    )
+                if f is None:
+                    f = await db.scalar(found.order_by(File.created_at.desc()).limit(1))
+        if f is None:
+            return f"No image called {name}. Save it to out/ with run_code first."
+        if f.size > MAX_IMAGE_BYTES:
+            return f"{f.name} is too large to look at; render a smaller PNG."
+        data = await deps.storage.get(f.storage_key)
+        kind = image_type(data)
+        if kind is None:
+            return f"{f.name} isn't a PNG, JPEG, GIF or WebP image; render one to look at."
+        if len(data) > MAX_IMAGE_BYTES:
+            return f"{f.name} is too large to look at; render a smaller PNG."
+        key = uuid.uuid4().hex[:8]
+        ctx.images[key] = (f.name, kind, data)
+        return f"{f.name} is shown to you below. [image {key}]"
+
     # --- Workbench -------------------------------------------------------------------------
 
     async def workbench(tool: str, call: Callable[..., Awaitable[str]], **data) -> str:
@@ -844,6 +894,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         "web_search": web_search,
         "web_fetch": web_fetch,
         "run_code": run_code,
+        "view_image": view_image,
         "ws_tree": ws_tree,
         "ws_read": ws_read,
         "ws_write": ws_write,
