@@ -27,6 +27,7 @@ from nexus_common.models import (
     AgentSystem,
     Attachment,
     Chat,
+    File,
     Message,
     MessageLink,
     MessageRole,
@@ -43,7 +44,7 @@ from nexus_common.skills import catalogue, instruction_layers, shelf_index, usab
 from nexus_common.storage import Storage
 from nexus_common.systems import ACTIVE_RUN, granted_capabilities
 from nexus_common.toolinfo import TOOLS, allowed_tools, connected_only
-from nexus_orchestrator.context import assemble
+from nexus_orchestrator.context import PICTURE_TYPES, assemble
 from nexus_orchestrator.github import GitHubApp
 from nexus_orchestrator.graph import RECURSION_LIMIT, build_graph
 from nexus_orchestrator.llm import private
@@ -51,7 +52,13 @@ from nexus_orchestrator.prompts import system_prompt
 from nexus_orchestrator.route import Route, route
 from nexus_orchestrator.sandbox import SandboxClient
 from nexus_orchestrator.systems.manage import system_tools
-from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.tools import (
+    MAX_IMAGE_BYTES,
+    ToolContext,
+    build_tools,
+    image_part,
+    image_type,
+)
 from nexus_orchestrator.web import WebClient
 from nexus_orchestrator.workbench import WorkbenchClient
 
@@ -65,6 +72,11 @@ RELEVANT_SKILLS = 6
 
 # How a routine run's message starts (routines.turn_prompt); such turns skip the team router.
 ROUTINE_PREFIX = '[Routine "'
+
+# Pictures on the user's latest few messages are shown to the model; the latest messages with
+# pictures, and the pictures per message, it sees.
+SHOW_IMAGE_MESSAGES = 3
+MAX_IMAGES_PER_MESSAGE = 6
 
 # Puts a job on the orchestrator queue: enqueue(function_name, *args, **arq_options).
 Enqueue = Callable[..., Awaitable[object]]
@@ -188,11 +200,69 @@ def finished(steps: list[dict]) -> list[dict]:
     return [s if s.get("status") != "running" else {**s, "status": "failed"} for s in steps]
 
 
-def to_langchain(messages: list[Message]) -> list[BaseMessage]:
+async def user_images(deps, db, history: list[Message]) -> tuple[dict, dict]:
+    """Pictures attached to the user's messages: the ones on the latest SHOW_IMAGE_MESSAGES
+    messages with pictures, as (name, media type, bytes) by message id, to show the model
+    (every Nexus tier reads images), and the names of older ones, by message id, so a long chat
+    doesn't pay for every earlier screenshot on every turn."""
+    users = [m.id for m in history if m.role == MessageRole.user]
+    if not users or deps.storage is None:
+        return {}, {}
+    rows = await db.execute(
+        select(Attachment.message_id, File)
+        .join(File, File.id == Attachment.file_id)
+        .where(Attachment.message_id.in_(users), File.content_type.in_(PICTURE_TYPES))
+        .order_by(File.created_at)
+    )
+    by_message: dict[uuid.UUID, list[File]] = {}
+    for message_id, f in rows:
+        by_message.setdefault(message_id, []).append(f)
+    recent = [i for i in reversed(users) if i in by_message][:SHOW_IMAGE_MESSAGES]
+    shown: dict[uuid.UUID, list[tuple[str, str, bytes]]] = {}
+    older: dict[uuid.UUID, list[str]] = {}
+    for message_id, files in by_message.items():
+        if message_id not in recent:
+            older[message_id] = [f.name for f in files]
+            continue
+        for i, f in enumerate(files):
+            data = b""
+            if i < MAX_IMAGES_PER_MESSAGE and f.size <= MAX_IMAGE_BYTES:
+                try:
+                    data = await deps.storage.get(f.storage_key)
+                except Exception:
+                    log.warning("Couldn't load picture %s for the model", f.id, exc_info=True)
+            kind = image_type(data)
+            if kind is None or len(data) > MAX_IMAGE_BYTES:
+                # Named instead, like an older picture.
+                older.setdefault(message_id, []).append(f.name)
+                continue
+            shown.setdefault(message_id, []).append((f.name, kind, data))
+    return shown, older
+
+
+def to_langchain(
+    messages: list[Message],
+    images: dict[uuid.UUID, list[tuple[str, str, bytes]]] | None = None,
+    older: dict[uuid.UUID, list[str]] | None = None,
+) -> list[BaseMessage]:
+    images, older = images or {}, older or {}
     out: list[BaseMessage] = []
     for m in messages:
         if m.role == MessageRole.user:
-            out.append(HumanMessage(m.content))
+            text = m.content
+            if names := older.get(m.id):
+                text += (
+                    f"\n\n(Picture{'s' if len(names) > 1 else ''} attached here, no longer shown: "
+                    f"{', '.join(names)}. Call view_image to look again.)"
+                )
+            if pictures := images.get(m.id):
+                parts: list = [{"type": "text", "text": text}]
+                for name, kind, data in pictures:
+                    parts += [{"type": "text", "text": f"Attached picture {name}:"}]
+                    parts.append(image_part(kind, data))
+                out.append(HumanMessage(parts))
+            else:
+                out.append(HumanMessage(text))
         elif m.role == MessageRole.assistant:
             out.append(AIMessage(m.content))
     return out
@@ -371,7 +441,11 @@ async def _generate(
     )
     history = list(reversed(rows.all()))
     truncated = len(history) >= deps.settings.chat_history_limit
-    question = next((m.content for m in reversed(history) if m.role == MessageRole.user), "")
+    # The latest message with words: a screenshot sent on its own is about the one before it.
+    question = next(
+        (m.content for m in reversed(history) if m.role == MessageRole.user and m.content.strip()),
+        "",
+    )
     try:
         api_key = await ensure_user_key(db, deps.settings, deps.gateway, user)
     except GatewayError as exc:
@@ -423,6 +497,7 @@ async def _generate(
         if allowed:
             extra.append(await systems_context(db, user.id, chat.id))
         rendered = "\n\n".join(x for x in [context.render(), *extra] if x)
+        images, older = await user_images(deps, db, history)
         # Release the connection while the model runs; tools open their own sessions.
         await db.commit()
         ctx = ToolContext(
@@ -444,12 +519,12 @@ async def _generate(
             ctx, user, allowed, msg.trace_id, asked=question, software=decision.software
         )
     force_tool = "build_agent_system" if decision.team else None
-    graph = build_graph(model, tools)
+    graph = build_graph(model, tools, ctx)
     content = ""
     usage = {"input_tokens": 0, "output_tokens": 0}
     async for chunk, meta in graph.astream(
         {
-            "messages": to_langchain(history),
+            "messages": to_langchain(history, images, older),
             "system_prompt": system_prompt(user.name, user.assistant, rendered),
             "force_tool": force_tool,
         },

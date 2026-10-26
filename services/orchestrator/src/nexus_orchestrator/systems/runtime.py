@@ -8,9 +8,7 @@ When the user decides, a new job resumes the graph and the node reads the decisi
 """
 
 import asyncio
-import base64
 import logging
-import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
@@ -51,7 +49,7 @@ from nexus_common.spec import TIER_MODEL, AgentSpec, AgentSystemSpec, tier_down,
 from nexus_common.systems import approval_payload, money
 from nexus_common.toolinfo import BY_NAME, needs_approval
 from nexus_orchestrator.llm import private
-from nexus_orchestrator.tools import ToolContext, build_tools
+from nexus_orchestrator.tools import ToolContext, build_tools, older_images_as_text, show_images
 
 log = logging.getLogger(__name__)
 
@@ -77,58 +75,6 @@ class AgentState(TypedDict, total=False):
     done: dict | None
     # Retried one tier up after an empty answer or a model error.
     escalated: bool
-
-
-IMAGE_KEY = re.compile(r"\[image ([0-9a-f]{8})\]")
-# How many of the latest images an agent keeps seeing; older ones become a line of text, so a
-# long review loop doesn't pay for every earlier picture on every call.
-KEEP_IMAGES = 2
-
-
-def show_images(ctx: ToolContext | None, results: list[ToolMessage]) -> list[HumanMessage]:
-    """The pictures view_image fetched in this batch, as one message after the tool results:
-    tool results can only hold text, a user message can hold images."""
-    if ctx is None:
-        return []
-    parts: list[dict] = []
-    for m in results:
-        if m is None or m.name != "view_image" or not isinstance(m.content, str):
-            continue
-        for key in IMAGE_KEY.findall(m.content):
-            found = ctx.images.pop(key, None)
-            if found is None:
-                continue
-            name, kind, data = found
-            parts += [
-                {"type": "text", "text": f"{name}:"},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{kind};base64,{base64.b64encode(data).decode()}",
-                        "detail": "high",
-                    },
-                },
-            ]
-    if not parts:
-        return []
-    return [HumanMessage(parts, name="view_image")]
-
-
-def older_images_as_text(messages: list[AnyMessage]) -> list[AnyMessage]:
-    seen = 0
-    out: list[AnyMessage] = []
-    for m in reversed(messages):
-        if isinstance(m, HumanMessage) and m.name == "view_image" and isinstance(m.content, list):
-            seen += 1
-            if seen > KEEP_IMAGES:
-                names = [p["text"].rstrip(":") for p in m.content if p.get("type") == "text"]
-                m = HumanMessage(
-                    f"(Earlier picture{'s' if len(names) > 1 else ''} {', '.join(names)} no "
-                    "longer shown; call view_image again to look.)",
-                    name="view_image",
-                )
-        out.append(m)
-    return out[::-1]
 
 
 def text_of(message: AnyMessage) -> str:

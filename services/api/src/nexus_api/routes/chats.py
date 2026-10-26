@@ -188,7 +188,8 @@ async def send_message(
         created_at=now + timedelta(microseconds=1),
     )
     if not chat.title:
-        chat.title = body.content.strip().splitlines()[0][:80] or "New chat"
+        first = body.content.strip().splitlines()
+        chat.title = (first[0][:80] if first else "") or (files[0].name if files else "New chat")
     chat.updated_at = now
     db.add_all([user_msg, assistant_msg])
     await db.flush()

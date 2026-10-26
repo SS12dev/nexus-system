@@ -233,7 +233,8 @@ Tier mini for a functional part (a bracket, a box, a mount); pro for a shaped mo
 must recognise (a vehicle, a figurine, a character). Its deliverables are the STL, STEP, 3MF \
 and preview PNG.
 - An agent that makes something visual (a chart, a render, a slide image) gets view_image to \
-look at its own output before reporting it.
+look at its own output before reporting it. So does any agent that must see a picture or \
+screenshot the user gave (a bug on screen, a design to match, a photo to describe).
 - If the request asks for something to be emailed or a document deleted, give the agent that \
 does it send_email or delete_document; the user approves each such step on an approval card \
 in the app, so don't leave it out or plan to ask in chat.
