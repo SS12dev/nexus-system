@@ -128,3 +128,56 @@ async def test_a_widget_dragged_anywhere_keeps_its_place(owner, client_for, invi
     friend = await client_for("friend@example.com")
     moved = await friend.patch(f"/api/widgets/{w['id']}", json={"pos": {"x": 0, "y": 0}})
     assert moved.status_code == 404
+
+
+async def test_a_widget_dropped_from_the_menu_lands_where_it_was_dropped(owner):
+    resp = await owner.post(
+        "/api/widgets", json={"kind": "stopwatch", "pos": {"x": 0.4, "y": 0.12345678}}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["pos"] == {"x": 0.4, "y": 0.1235}
+    off = await owner.post("/api/widgets", json={"kind": "note", "pos": {"x": 2, "y": 0}})
+    assert off.status_code == 422
+
+
+async def test_alarms_ring_with_a_tune_and_can_be_moved_to_a_new_time(owner):
+    alarm = await owner.post(
+        "/api/widgets", json={"kind": "alarm", "time": "07:00", "tune": "birdsong"}
+    )
+    w = alarm.json()
+    assert w["state"]["tune"] == "birdsong" and w["title"] == "Alarm 07:00"
+    bad = await owner.post("/api/widgets", json={"kind": "alarm", "time": "07:00", "tune": "kazoo"})
+    assert bad.status_code == 422
+
+    retuned = await owner.patch(f"/api/widgets/{w['id']}", json={"tune": "harp"})
+    assert retuned.json()["state"]["tune"] == "harp"
+    await owner.post(f"/api/widgets/{w['id']}/action", json={"action": "pause"})
+    moved = await owner.patch(
+        f"/api/widgets/{w['id']}", json={"time": "06:30", "days": ["MO", "WE", "FR"]}
+    )
+    got = moved.json()
+    assert got["title"] == "Alarm 06:30" and got["state"]["status"] == "set"
+    assert got["state"]["repeat"] == "FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=6;BYMINUTE=30"
+    assert got["fires_at"] is not None
+    once = await owner.patch(f"/api/widgets/{w['id']}", json={"time": "06:45", "days": None})
+    assert once.json()["state"]["repeat"] is None
+    assert (await owner.patch(f"/api/widgets/{w['id']}", json={"time": "6pm"})).status_code == 422
+
+    note = (await owner.post("/api/widgets", json={"kind": "note"})).json()
+    assert (
+        await owner.patch(f"/api/widgets/{note['id']}", json={"tune": "bell"})
+    ).status_code == 409
+    assert (
+        await owner.patch(f"/api/widgets/{note['id']}", json={"time": "07:00"})
+    ).status_code == 422
+
+
+def test_the_app_and_the_server_know_the_same_tunes():
+    import re
+    from pathlib import Path
+
+    from nexus_common.widgets import DEFAULT_TUNE, TUNES
+
+    web = Path(__file__).parents[3] / "apps/web/src/lib/tunes.ts"
+    ids = re.findall(r'\{ id: "(\w+)"', web.read_text())
+    assert tuple(ids) == TUNES and DEFAULT_TUNE == TUNES[0]

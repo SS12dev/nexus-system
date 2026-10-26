@@ -114,3 +114,22 @@ export function placeIn(
     span <= 0 ? 0 : Math.round(Math.min(Math.max(at / span, 0), 1) * 1e4) / 1e4;
   return { x: part(left, room.width - card.width), y: part(top, room.height - card.height) };
 }
+
+export const WEEK = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
+
+/** The days an alarm repeats on, as day codes (all seven for every day); empty when it rings
+ * once. Monthly rules aren't made by the app, so they read as once. */
+export function ruleDays(rule: string | null | undefined): string[] {
+  if (!rule) return [];
+  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=") as [string, string]));
+  if (parts.FREQ === "DAILY") return [...WEEK];
+  const days = (parts.BYDAY ?? "").split(",").filter(Boolean);
+  return WEEK.filter((d) => days.includes(d));
+}
+
+/** Day codes picked in the app as the server takes them: none is once, all seven is daily. */
+export function daysFor(days: string[]): string | string[] | null {
+  if (days.length === 0) return null;
+  if (days.length === WEEK.length) return "daily";
+  return WEEK.filter((d) => days.includes(d));
+}

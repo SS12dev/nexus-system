@@ -16,9 +16,27 @@ from nexus_common import custom_widgets as cw
 from nexus_common import screen as sc
 from nexus_common.models import AuditLog, NotificationKind, Widget, utcnow
 from nexus_common.notices import notify
-from nexus_common.widgets import NOTE_CHARS, TITLE_CHARS, WidgetError, act, add, announce, payload
+from nexus_common.widgets import (
+    NOTE_CHARS,
+    RINGS,
+    TITLE_CHARS,
+    TUNES,
+    WidgetError,
+    act,
+    add,
+    announce,
+    payload,
+    retime,
+)
 
 router = APIRouter(prefix="/api/widgets", tags=["widgets"])
+
+Tune = Literal[TUNES]
+
+
+class WidgetPos(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
 
 
 class WidgetIn(BaseModel):
@@ -30,6 +48,9 @@ class WidgetIn(BaseModel):
     when: str | None = None
     text: str | None = Field(None, max_length=NOTE_CHARS)
     zones: list[str] | None = None
+    tune: Tune | None = None
+    # Dropped onto the main screen from the add menu, rather than added to the dock.
+    pos: WidgetPos | None = None
 
 
 class ActionIn(BaseModel):
@@ -49,11 +70,6 @@ class ApproveIn(BaseModel):
     data: list[str] = Field(default_factory=list)
 
 
-class WidgetPos(BaseModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-
-
 class WidgetPatch(BaseModel):
     title: str | None = Field(None, max_length=TITLE_CHARS)
     text: str | None = Field(None, max_length=NOTE_CHARS)
@@ -62,6 +78,11 @@ class WidgetPatch(BaseModel):
     # Dragged somewhere on the main screen, or back into the dock (dock: true).
     pos: WidgetPos | None = None
     dock: bool = False
+    # What a timer, alarm or reminder rings with.
+    tune: Tune | None = None
+    # An alarm's new time, HH:MM, and its repeat (none = once); days only goes with a time.
+    time: str | None = None
+    days: str | list[str] | None = None
 
 
 async def _own(db, user, widget_id: uuid.UUID) -> Widget:
@@ -82,7 +103,10 @@ async def list_widgets(user: CurrentUser, db: DbDep) -> list[dict]:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def add_widget(body: WidgetIn, user: CurrentUser, db: DbDep, redis: RedisDep) -> dict:
     try:
-        w = await add(db, user, **body.model_dump())
+        opts = body.model_dump()
+        if body.pos is not None:
+            opts["pos"] = {"x": round(body.pos.x, 4), "y": round(body.pos.y, 4)}
+        w = await add(db, user, **opts)
     except WidgetError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     await db.commit()
@@ -125,6 +149,15 @@ async def edit_widget(
         if w.kind != "note":
             raise HTTPException(status.HTTP_409_CONFLICT, "Only a note has text to edit")
         w.state = {**(w.state or {}), "text": body.text}
+    if body.tune is not None:
+        if w.kind not in RINGS:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Only a timer, alarm or reminder rings")
+        w.state = {**(w.state or {}), "tune": body.tune}
+    if body.time is not None:
+        try:
+            retime(w, body.time, body.days)
+        except WidgetError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     if body.pos is not None or body.dock:
         # Placed by hand, like a move along the dock: the assistant leaves it be for a while.
         w.pos = None if body.dock else {"x": round(body.pos.x, 4), "y": round(body.pos.y, 4)}

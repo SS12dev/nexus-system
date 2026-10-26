@@ -1,3 +1,4 @@
+import type { TuneId } from "./tunes";
 import type {
   AccessRequest,
   AccessRequestList,
@@ -162,7 +163,16 @@ export const api = {
     request<Widget | null>(`/api/widgets/${id}/action`, { method: "POST", body: json({ action, minutes }) }),
   editWidget: (
     id: string,
-    body: { title?: string; text?: string; slot?: number; pos?: WidgetPos; dock?: boolean },
+    body: {
+      title?: string;
+      text?: string;
+      slot?: number;
+      pos?: WidgetPos;
+      dock?: boolean;
+      tune?: TuneId;
+      time?: string;
+      days?: string | string[] | null;
+    },
   ) =>
     request<Widget>(`/api/widgets/${id}`, { method: "PATCH", body: json(body) }),
   /** Mark these notices read, or every one when ids is left out. */
