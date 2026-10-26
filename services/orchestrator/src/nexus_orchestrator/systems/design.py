@@ -1,5 +1,6 @@
-"""Design an agent system: the architect model (nexus-pro by default) turns a request into an
-AgentSystemSpec, or picks one of the user's saved templates. The spec is validated twice: by its
+"""Design an agent system: the architect model (nexus-pro by default) plans the flow a request
+needs and turns it into an AgentSystemSpec, picks one of the user's saved templates, or points
+at a past result that already is what was asked for. The spec is validated twice: by its
 Pydantic shape, then against what this user may actually use (tools, skills). One failed attempt
 is sent back with the problems for a fix."""
 
@@ -17,7 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexus_common.devteam import NEEDED_TOOLS
 from nexus_common.litellm import ensure_user_key
 from nexus_common.memory import get_profile
-from nexus_common.models import AgentSystem, SystemLifetime, SystemStatus, User
+from nexus_common.models import (
+    AgentRun,
+    AgentSystem,
+    File,
+    RunStatus,
+    SystemLifetime,
+    SystemStatus,
+    User,
+)
 from nexus_common.skills import role_names, usable_skills
 from nexus_common.spec import AgentSystemSpec, check_spec
 from nexus_common.toolinfo import TOOLS
@@ -37,6 +46,52 @@ class DesignFailed(Exception):
 class Design:
     spec: AgentSystemSpec | None = None
     template: AgentSystem | None = None
+    # A finished run whose result already is what the request asks for.
+    existing: AgentRun | None = None
+    # The architect's flow in words, for the logs.
+    plan: str = ""
+
+
+PAST_RESULTS = 15
+
+
+async def past_results(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[list[tuple[str, str, str, list[str]]], dict[str, AgentRun]]:
+    """The user's finished runs, newest first, as (run id, name, goal, file names), and the runs
+    by id. One per system: a project's latest result stands for it."""
+    rows = await db.execute(
+        select(AgentRun, AgentSystem)
+        .join(AgentSystem, AgentSystem.id == AgentRun.system_id)
+        .where(AgentRun.user_id == user_id, AgentRun.status == RunStatus.completed)
+        .order_by(AgentRun.finished_at.desc().nulls_last())
+        .limit(PAST_RESULTS * 3)
+    )
+    out: list[tuple[str, str, str, list[str]]] = []
+    runs: dict[str, AgentRun] = {}
+    seen: set[str] = set()
+    for run, system in rows.all():
+        key = (system.spec or {}).get("project") or str(system.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        runs[str(run.id)] = run
+        out.append((str(run.id), system.name, system.goal, []))
+        if len(out) >= PAST_RESULTS:
+            break
+    if runs:
+        files = await db.execute(
+            select(File.run_id, File.name)
+            .where(File.run_id.in_([r.id for r in runs.values()]))
+            .order_by(File.created_at)
+        )
+        names: dict[str, list[str]] = {}
+        for rid, name in files.all():
+            listed = names.setdefault(str(rid), [])
+            if name not in listed:
+                listed.append(name)
+        out = [(i, n, g, names.get(i, [])) for i, n, g, _ in out]
+    return out, runs
 
 
 async def templates(db: AsyncSession, user_id: uuid.UUID) -> list[AgentSystem]:
@@ -81,7 +136,11 @@ def _problems(
 ) -> tuple[AgentSystemSpec | None, str]:
     data = raw.get("spec")
     if not isinstance(data, dict):
-        return None, 'Reply with {"spec": {...}} or {"template_id": "..."}.'
+        return (
+            None,
+            'Reply with {"plan": "...", "spec": {...}}, {"template_id": "..."} or '
+            '{"existing": "..."}.',
+        )
     try:
         spec = AgentSystemSpec.model_validate(data)
     except ValidationError as exc:
@@ -115,6 +174,8 @@ async def design(
     chat_id: uuid.UUID | None = None,
     use_templates: bool = True,
     software: bool = False,
+    use_existing: bool = True,
+    based_on: str = "",
 ) -> Design:
     """Billed to the user's own key, like the rest of their chat turn."""
     settings = deps.settings
@@ -126,6 +187,13 @@ async def design(
         await templates(db, user.id) if use_templates and current is None and not software else []
     )
     known = await projects(db, user.id)
+    # Something already made is opened and changed rather than built again; not when this is
+    # already a change to one (based_on) or to a saved system (current).
+    past, past_runs = (
+        await past_results(db, user.id)
+        if use_existing and current is None and not based_on
+        else ([], {})
+    )
     profile = await get_profile(db, user.id)
     prompt = design_request(
         request,
@@ -140,6 +208,8 @@ async def design(
         role_names(Path(settings.library_path)),
         known,
         software,
+        past,
+        based_on,
     )
     api_key = await ensure_user_key(db, settings, deps.gateway, user)
     model = deps.model_factory(
@@ -166,7 +236,13 @@ async def design(
         reply = await model.ainvoke(messages)
         text = reply.text if isinstance(reply.text, str) else reply.text()
         raw = parse_json(text)
-        if raw.get("template_id"):
+        plan = str(raw.get("plan") or "")[:2000]
+        if raw.get("existing"):
+            run = past_runs.get(str(raw["existing"]).strip())
+            if run is not None:
+                return Design(existing=run, plan=plan)
+            problem = "That run id isn't in PAST RESULTS; design a spec instead."
+        elif raw.get("template_id"):
             template = by_id.get(str(raw["template_id"]))
             if template is not None:
                 return Design(template=template)
@@ -179,7 +255,9 @@ async def design(
                     spec.project = None
                 if spec.lead.tier == "max" and not best_model:
                     spec.lead.tier = "pro"
-                return Design(spec=spec)
+                if plan:
+                    log.info("Designed %s (%s): %s", spec.name, spec.topology, plan)
+                return Design(spec=spec, plan=plan)
         log.info("Design attempt %d rejected: %s", attempt + 1, problem)
         messages += [AIMessage(text), HumanMessage(f"{problem}\nReply with corrected JSON only.")]
     raise DesignFailed(f"Couldn't design a working team for this: {problem}")
@@ -190,7 +268,11 @@ def describe(spec: AgentSystemSpec) -> str:
     lines = [f"{spec.name} ({spec.topology.replace('_', ' ')})"]
     for a in spec.agents:
         extras = ", ".join([*a.tools, *a.skills]) or "no tools"
-        lines.append(f"- {a.name} [{a.id}, {a.role}, {a.tier}]: {extras}")
+        wiring = ""
+        if spec.topology == "flow":
+            wiring = f", checks {a.checks}" if a.checks else ""
+            wiring = wiring or (f", after {', '.join(a.after)}" if a.after else ", starts")
+        lines.append(f"- {a.name} [{a.id}, {a.role}, {a.tier}{wiring}]: {extras}")
     if spec.deliverables:
         lines.append("Deliverables: " + ", ".join(spec.deliverables))
     return "\n".join(lines)

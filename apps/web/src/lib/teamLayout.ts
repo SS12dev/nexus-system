@@ -4,19 +4,23 @@ import type { AgentNode, Topology } from "./types";
 export const TEAM_W = 520;
 
 /** Where each agent sits in a team's diagram: the lead above its workers for a supervisor, a
- * software team's stages left to right with its two builders stacked, otherwise in a row.
+ * software team's stages or a flow's steps left to right with agents working side by side
+ * stacked, otherwise in a row.
  * Shared by the chat card's diagram and the orb, so both show the same shape. */
 export function teamLayout(nodes: AgentNode[], topology: Topology) {
   const W = TEAM_W;
   const pos: Record<string, { x: number; y: number }> = {};
-  if (topology === "dev_project") {
-    const stages = [...new Set(nodes.map((n) => n.stage ?? n.id))];
+  if (topology === "dev_project" || topology === "flow") {
+    const column = (n: AgentNode) => (topology === "flow" ? String(n.level ?? 0) : (n.stage ?? n.id));
+    const stages = [...new Set(nodes.map(column))].sort((a, b) =>
+      topology === "flow" ? Number(a) - Number(b) : 0,
+    );
     stages.forEach((st, col) => {
-      const here = nodes.filter((n) => (n.stage ?? n.id) === st);
+      const here = nodes.filter((n) => column(n) === st);
       here.forEach((n, row) => {
         pos[n.id] = {
           x: ((col + 1) * W) / (stages.length + 1),
-          y: here.length > 1 ? 50 + row * 90 : 95,
+          y: here.length > 1 ? 50 + row * Math.min(90, 120 / (here.length - 1)) : 95,
         };
       });
     });

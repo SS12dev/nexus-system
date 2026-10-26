@@ -42,7 +42,8 @@ things, and anything with more than one step. When unsure, answer "team".
 "software" is true when the work is to build, fix or extend a program: an app, website, game, \
 tool, script or bot, including a follow-up that changes one built earlier ("add a high score \
 table"). It is false for explaining code, answering a programming question, or anything that \
-isn't a program.
+isn't a program. Making a file is not software even when code is used to make it: a 3D model \
+or printable part, a chart, a document, a deck, a spreadsheet, an image or a dataset.
 
 Reply with JSON only: {"route": "team"|"self", "software": bool, "reason": str}"""
 

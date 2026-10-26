@@ -31,6 +31,8 @@ class SystemState(TypedDict, total=False):
     items: list[str]
     results: Annotated[list, operator.add]
     final: str
+    # flow: per checker, whether its last verdict sent the work back.
+    sent_back: Annotated[dict, _merge]
     # dev_project: the stack, review rounds, test counts, the reviewer's verdict and so on.
     dev: Annotated[dict, _merge]
 
@@ -64,6 +66,14 @@ def terminal(name: str, description: str, schema: type[BaseModel]) -> BaseTool:
     return StructuredTool.from_function(
         coroutine=_noop, name=name, description=description, args_schema=schema
     )
+
+
+LAST_STAGE = (
+    "\n\nYou are the last stage: your reply is the only thing the user reads. Give the complete "
+    "answer: every part the user asked for, including the earlier stages' results above (tidied, "
+    'not summarised away), then your own part. Don\'t refer to anything "above": the user never '
+    "sees the earlier stages."
+)
 
 
 # --- Helpers -----------------------------------------------------------------------------
@@ -135,13 +145,7 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
                     if handed and i == len(ids) - 1:
                         # Only the last stage's reply reaches the chat, so it must carry every
                         # part the user asked for, not just its own (the packing list alone).
-                        text += (
-                            "\n\nYou are the last stage: your reply is the only thing the user "
-                            "reads. Give the complete answer: every part the user asked for, "
-                            "including the earlier stages' results above (tidied, not "
-                            "summarised away), then your own part. Don't refer to anything "
-                            '"above": the user never sees the earlier stages.'
-                        )
+                        text += LAST_STAGE
                     st = await run_agent(rc, graphs, me.id, [HumanMessage(text)])
                     out = final_text(st)
                     update = {"outputs": {me.id: out}}
@@ -414,6 +418,9 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             g.add_edge(doer.id, critic.id)
             g.add_conditional_edges(critic.id, after_review, [doer.id, END])
 
+        case "flow":
+            add_flow(rc, g, graphs, task)
+
         case "dev_project":
             # dev.py builds on this module's helpers, so it is imported here.
             from nexus_orchestrator.systems.dev import add_dev_project
@@ -421,3 +428,131 @@ def compile_system(rc: RunContext, files: list[tuple[str, str]], request: str) -
             add_dev_project(rc, g, task, request)
 
     return g
+
+
+def passed(agent_id: str) -> str:
+    """The node a flow goes through once a checker passes the work. Agent ids have no dots."""
+    return f"{agent_id}.passed"
+
+
+def add_flow(rc: RunContext, g: StateGraph, graphs: dict, task: str) -> None:
+    """A flow the architect designed: each agent starts once the agents it needs are done, so
+    independent ones run side by side; a checker sends the work it checks back until it passes.
+    The last agent's result (or, for a checker, the work it passed) is the answer."""
+    spec = rc.spec
+    by_id = {a.id: a for a in spec.agents}
+    checker_of = {a.checks: a.id for a in spec.agents if a.checks}
+    end = spec.flow_end
+
+    def work_of(x: str) -> str:
+        """The agent whose output stands for x's result: a checker hands on the checked work."""
+        return by_id[x].checks or x
+
+    def source(x: str) -> str:
+        """The node the next agents wait for: a checker's pass node, so a rejected round
+        doesn't start them early."""
+        return passed(x) if by_id[x].checks else x
+
+    for a in spec.agents:
+        if a.checks:
+            graphs[a.id] = build_agent(
+                rc,
+                a,
+                [terminal("verdict", "Pass the work, or send it back with feedback.", _Verdict)],
+                final_hint="Call verdict.",
+            )
+        else:
+            graphs[a.id] = build_agent(rc, a)
+
+    def maker(me):
+        async def node(state: SystemState) -> dict:
+            outputs = state.get("outputs") or {}
+            transcript = (state.get("transcripts") or {}).get(me.id)
+            if not transcript:
+                handed = "\n\n".join(
+                    f'<output from="{work_of(x)}">\n{outputs[work_of(x)]}\n</output>'
+                    for x in me.after
+                    if work_of(x) in outputs
+                )
+                text = task + (f"\n\nWork so far:\n{handed}" if handed else "")
+                if me.id == end and handed:
+                    text += LAST_STAGE
+                transcript = [HumanMessage(text)]
+            async with rc.parallel:
+                st = await run_agent(rc, graphs, me.id, transcript)
+            out = final_text(st)
+            update: dict = {"outputs": {me.id: out}}
+            if me.id in checker_of:
+                # Kept so a revision continues the same conversation, with the feedback.
+                update["transcripts"] = {me.id: st["messages"]}
+            if me.id == end:
+                update["final"] = out
+            return update
+
+        return node
+
+    def checker(me):
+        async def node(state: SystemState) -> dict:
+            rounds = (state.get("counts") or {}).get(me.id, 0) + 1
+            work = (state.get("outputs") or {}).get(me.checks, "")
+            async with rc.parallel:
+                st = await run_agent(
+                    rc,
+                    graphs,
+                    me.id,
+                    [
+                        HumanMessage(
+                            f'{task}\n\n<work round="{rounds}" by="{me.checks}">\n{work}\n'
+                            "</work>\n\nCheck it against the goal and call verdict."
+                        )
+                    ],
+                )
+            done = st.get("done") or {}
+            args = done.get("args") or {}
+            approved = bool(args.get("approved", done.get("tool") != "verdict"))
+            feedback = str(args.get("feedback") or final_text(st))
+            update: dict = {"counts": {me.id: rounds}, "outputs": {me.id: feedback}}
+            if approved or rounds >= spec.max_rounds:
+                update["sent_back"] = {me.id: False}
+                if me.id == end:
+                    update["final"] = work
+            else:
+                transcript = (state.get("transcripts") or {}).get(me.checks, [])
+                update["transcripts"] = {
+                    me.checks: [
+                        *transcript,
+                        HumanMessage(
+                            f'<review by="{me.id}">\n{feedback}\n</review>\n\n'
+                            "Revise your work to address this and reply with the full revised "
+                            "result."
+                        ),
+                    ]
+                }
+                update["sent_back"] = {me.id: True}
+            return update
+
+        return node
+
+    async def through(state: SystemState) -> dict:
+        return {}
+
+    for a in spec.agents:
+        g.add_node(a.id, checker(a) if a.checks else maker(a))
+        if a.checks:
+            g.add_node(passed(a.id), through)
+
+            def after_check(state: SystemState, me=a) -> str:
+                back = (state.get("sent_back") or {}).get(me.id)
+                return me.checks if back else passed(me.id)
+
+            g.add_conditional_edges(a.id, after_check, [a.checks, passed(a.id)])
+    for a in spec.agents:
+        sources = [source(x) for x in a.after]
+        if not sources:
+            g.add_edge(START, a.id)
+        elif len(sources) == 1:
+            g.add_edge(sources[0], a.id)
+        else:
+            # Waits for all of them.
+            g.add_edge(sources, a.id)
+    g.add_edge(source(end), END)

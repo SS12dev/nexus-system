@@ -376,8 +376,16 @@ files are posted in the chat when it finishes. One-off teams are archived after 
 the orb only shows teams with a run in progress; "keep it" saves one as a template Nexus
 reuses for similar asks (Nexus only keeps a team up front when you say so).
 
-- **Topologies:** single agent, pipeline, lead and workers (`supervisor_workers`), parallel
-  map-reduce, and worker with critic.
+- **Flows:** the architect first plans the flow the task needs (research when it depends on
+  facts or references, a plan, the making, a check) and then picks a shape: single agent,
+  pipeline, lead and workers (`supervisor_workers`), parallel map-reduce, worker with critic,
+  or a designed `flow`, where each agent lists the agents it needs (`after`), independent ones
+  run side by side, and a checker (`checks`) sends work back until it passes. A file made with
+  code (a 3D model, chart, document) gets a flow, not the software team.
+- **Reuse before rebuilding:** the architect sees your recent finished results. When one
+  already is what you asked for, nothing starts: Nexus opens it, attaches its files and asks
+  what to change. A change starts a team from the earlier files (`based_on`); asking for a
+  new one anyway builds afresh (`fresh`).
 - **Model tiers:** the spec picks nano, mini or pro per agent. nexus-max is only for a team's
   lead, and only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
   tier up; non-lead agents drop a tier once 80% of the run's budget is spent.

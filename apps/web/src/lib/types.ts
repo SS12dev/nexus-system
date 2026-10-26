@@ -510,7 +510,8 @@ export type Topology =
   | "supervisor_workers"
   | "parallel_map_reduce"
   | "critic_loop"
-  | "dev_project";
+  | "dev_project"
+  | "flow";
 export type Tier = "nano" | "mini" | "pro" | "max";
 export type SystemStatus = "idle" | "running" | "awaiting_approval" | "paused" | "archived";
 export type RunStatus =
@@ -528,8 +529,10 @@ export interface AgentNode {
   role: string;
   tier: Tier;
   lead: boolean;
-  /** dev_project only: Brief, Plan, Build, Test or Review. */
+  /** dev_project: Brief, Plan, Build, Test or Review; flow: "checks" for a checker. */
   stage?: string;
+  /** flow only: how far down the flow the agent sits (0 starts straight away). */
+  level?: number;
 }
 
 export interface AgentEdge {

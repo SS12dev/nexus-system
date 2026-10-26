@@ -30,8 +30,8 @@ export function TeamGraph({
 }) {
   const { pos, height } = teamLayout(nodes, topology);
   const curved = topology === "critic_loop";
-  // A software team's fixes loop back from the reviewer to the builders, under the row.
-  const loops = topology === "dev_project";
+  // A software team's fixes, and a flow checker's, loop back to the work under the row.
+  const loops = topology === "dev_project" || topology === "flow";
   return (
     <svg
       viewBox={`0 0 ${W} ${height}`}

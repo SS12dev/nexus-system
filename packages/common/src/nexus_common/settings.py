@@ -126,7 +126,8 @@ class Settings(BaseSettings):
     # Software teams (dev_project) plan, build, test and review in rounds, so they get more.
     dev_run_budget_usd: float = 3.00
     max_run_budget_usd: float = 5.00
-    # Agents working at once in a parallel_map_reduce system, and items it may fan out to.
+    # Agents working at once in a parallel_map_reduce system or a flow, and items a map may fan
+    # out to.
     max_parallel_agents: int = 4
     max_map_items: int = 8
     # Model calls one agent may make in one turn of a run before it has to stop.
