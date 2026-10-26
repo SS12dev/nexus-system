@@ -387,6 +387,12 @@ reuses for similar asks (Nexus only keeps a team up front when you say so).
   already is what you asked for, nothing starts: Nexus opens it, attaches its files and asks
   what to change. A change starts a team from the earlier files (`based_on`); asking for a
   new one anyway builds afresh (`fresh`).
+- **Fixing older work from chat:** results and projects whose name or goal match your words
+  are shown to the architect first, however old and from whichever chat, so "the minion model
+  is wrong" or "the solitaire app doesn't work" is enough. The architect points the new team at
+  the earlier result (`based_on`; its first agent looks at the old files and lists what is
+  wrong before changing anything) or continues the software project. Nexus can also look
+  things up itself with `find_past_work`.
 - **Model tiers:** the spec picks nano, mini or pro per agent. nexus-max is only for a team's
   lead, and only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
   tier up; non-lead agents drop a tier once 80% of the run's budget is spent.
@@ -449,6 +455,15 @@ the review rounds. A follow-up such as "add a high score table" continues the sa
 updates `BRIEF.md` (no web research), a static app that gains a back end has its front end moved
 into `web/` first, and only one team works on a project at a time (a second request while one is
 running is refused, so Nexus offers to wait or to stop the running one).
+Before a follow-up changes anything, Nexus checks the app as it is (`systems/checkup.py`): edits
+an earlier run left uncommitted, the project's suites run on the current code, and the live app
+opened in a browser by the deployer (`POST /apps/{slug}/check`: running or not, title, text,
+console errors, container logs). The researcher reproduces what you report and writes a
+"Problems found" section into `BRIEF.md`; the architect plans a fix for each and the reviewer
+sends back any still broken. When the live app was found broken, a green fix replaces it even
+with open review points. A static app a builder made in its own subfolder is moved to the
+project root, and the deployer also finds it there and refuses a build with no `index.html`
+(that once served nginx's welcome page as the app).
 Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($3), still
 capped by `MAX_RUN_BUDGET_USD`; a lower budget Nexus picks itself, without the user naming a sum,
 is ignored, so the team always has room for its three review rounds and the deploy. It needs the Run code (exec) permission.

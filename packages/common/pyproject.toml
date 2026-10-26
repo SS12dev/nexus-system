@@ -17,6 +17,7 @@ dependencies = [
     "python-dateutil>=2.9",
     "pywebpush>=2.0",
     "tzdata>=2025.2",
+    "markdown-it-py[linkify]>=3.0",
 ]
 
 [build-system]

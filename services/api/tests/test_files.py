@@ -141,3 +141,15 @@ async def test_messages_carry_attachments(owner):
     assert messages[1]["attachments"] == []
     # The file now belongs to the chat it was sent in.
     assert (await owner.get("/api/files", params={"chat_id": chat})).json()[0]["id"] == fid
+
+
+async def test_a_screenshot_can_be_sent_without_words(owner):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    fid = (await upload(owner, "screenshot.png", png)).json()["id"]
+    chat = (await owner.post("/api/chats", json={})).json()["id"]
+    resp = await owner.post(f"/api/chats/{chat}/messages", json={"file_ids": [fid]})
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["chat"]["title"] == "screenshot.png"
+    # Nothing at all is still refused.
+    resp = await owner.post(f"/api/chats/{chat}/messages", json={"content": "  "})
+    assert resp.status_code == 422

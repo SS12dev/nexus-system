@@ -31,6 +31,7 @@ from nexus_orchestrator.deploy import deploy_project
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.systems import release as releasing
 from nexus_orchestrator.systems import suites
+from nexus_orchestrator.systems.checkup import checkup, uncommitted
 from nexus_orchestrator.systems.compile import SystemState, run_agent, terminal
 from nexus_orchestrator.systems.runtime import RunContext, build_agent, final_text
 from nexus_orchestrator.workbench import WorkbenchError
@@ -148,6 +149,36 @@ def answer(name: str, dev: dict) -> str:
 ROOT_KEEP = ".git .gitignore .nexus BRIEF.md PLAN.md README.md TEST_REPORT.md web api server"
 
 
+# A static app a builder made in a folder of its own (npm create vite@latest my-app) instead of
+# at the project root, where the test setup and the deploy look for it.
+HOIST = (
+    "test -f package.json || test -f index.html || { "
+    'set -- $(for d in */; do d=${d%/}; case "$d" in node_modules|web|api|server|dist|tests) ;; '
+    '*) if test -f "$d/package.json" || test -f "$d/index.html"; then echo "$d"; fi ;; '
+    "esac; done); test $# -eq 1 && sub=$1 && "
+    'ls -A "$sub" | while IFS= read -r f; do case "$f" in '
+    ".git|.nexus|BRIEF.md|PLAN.md|TEST_REPORT.md) ;; "
+    '*) if test -e "$f"; then git rm -rq --cached "$f" >/dev/null 2>&1; rm -rf "$f"; fi; '
+    'if git ls-files --error-unmatch "$sub/$f" >/dev/null 2>&1; then git mv "$sub/$f" "$f"; '
+    'else mv "$sub/$f" "$f"; fi ;; esac; done && rm -rf "$sub" && echo "NEXUS_HOISTED $sub"; }'
+)
+
+
+async def hoist(wb, user: str, project: str) -> str | None:
+    """Move a static app out of its own subfolder to the project root, where the builders,
+    the test setup and the deploy all look. The folder it came from, when it moved."""
+    try:
+        out = await wb.run(user, project, HOIST)
+        if "NEXUS_HOISTED" not in out.stdout:
+            return None
+        sub = out.stdout.split("NEXUS_HOISTED", 1)[1].strip()
+        await wb.commit(user, project, f"Move the app from {sub}/ to the project root")
+    except WorkbenchError as exc:
+        log.warning("Couldn't move the app of %s to the project root: %s", project, exc)
+        return None
+    return sub
+
+
 async def relayout(wb, user: str, project: str, stack: str) -> bool:
     """A static app that gains a back end has its front end at the root, where the new stack's
     builders, test setup and deploy template don't look. Move it into the stack's front-end
@@ -191,7 +222,10 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             rc,
             spec.agent("researcher").model_copy(
                 update={
-                    "tools": [t for t in spec.agent("researcher").tools if not t.startswith("web_")]
+                    "tools": [
+                        *[t for t in spec.agent("researcher").tools if not t.startswith("web_")],
+                        "ws_run",
+                    ]
                 }
             ),
             [terminal("submit_brief", "Hand over the brief once BRIEF.md is written.", _Brief)],
@@ -231,12 +265,25 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         head = await wb.run(user, project, "git rev-parse --short HEAD")
         found = await wb.run(user, project, "test -f BRIEF.md && echo NEXUS_CHANGE")
         change = "NEXUS_CHANGE" in found.stdout
-        todo = (
-            "This app exists already: bring BRIEF.md up to date for this change only, and keep "
-            "the stack unless the change needs a back end. No web research."
-            if change
-            else "Write BRIEF.md and pick the stack."
-        )
+        live_broken = False
+        if change:
+            left = await uncommitted(wb, user, project)
+            moved = await hoist(wb, user, project)
+            # What is broken now, measured, before anyone changes anything.
+            now = await checkup(rc, left)
+            live_broken = now.live_broken
+            todo = (
+                "This app exists already. First, how it is now, as Nexus found it:\n"
+                + (f"(Nexus moved the app from {moved}/ to the project root.)\n" if moved else "")
+                + f"{now.report}\n\n"
+                "Look at the code and reproduce what the user says is wrong (ws_run: build it, "
+                "run its tests). Then bring BRIEF.md up to date for this change only, with a "
+                "section 'Problems found' listing what is broken now and must work after this "
+                "run, each with its cause when you found it. Keep the stack unless the change "
+                "needs a back end. No web research."
+            )
+        else:
+            todo = "Write BRIEF.md and pick the stack."
         researcher = {"researcher": graphs["researcher_change" if change else "researcher"]}
         st = await run_agent(rc, researcher, "researcher", stage(1, "Brief", todo))
         args = _args(st)
@@ -246,7 +293,13 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             summary += f"\n(Nexus moved the existing front end into {FOLDERS[stack][0]}.)"
         return {
             "outputs": {"researcher": summary},
-            "dev": {"stack": stack, "brief": summary, "base": head.stdout.strip() or "HEAD"},
+            "dev": {
+                "stack": stack,
+                "brief": summary,
+                "base": head.stdout.strip() or "HEAD",
+                "change": change,
+                "live_broken": live_broken,
+            },
         }
 
     async def plan(state: SystemState) -> dict:
@@ -332,6 +385,8 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             for a in ("frontend", "backend")
             if (state.get("outputs") or {}).get(a)
         )
+        if dev["stack"] == "static":
+            await hoist(wb, user, project)
         # The house test setup first, so the tester writes tests rather than fixing runners.
         wired = await suites.wire(wb, user, project, dev["stack"])
         setup = (
@@ -384,7 +439,13 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 "Review",
                 f"Review round {rounds} of {spec.max_rounds}. See the changes with "
                 f'ws_diff(ref="{dev.get("base", "HEAD")}"). Test report: {tests.get("passed", 0)} '
-                f"passed, {tests.get('failed', 0)} failed. {tests.get('summary', '')}",
+                f"passed, {tests.get('failed', 0)} failed. {tests.get('summary', '')}"
+                + (
+                    "\nThis run changes an existing app: every item under 'Problems found' in "
+                    "BRIEF.md must work now; send back any that doesn't."
+                    if dev.get("change")
+                    else ""
+                ),
             ),
             item=f"round {rounds}",
         )
@@ -444,7 +505,8 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
         facts = dict(dev.get("release") or {})
         # Green tests put the app up: every suite Nexus expects ran and passed. Work the reviewer
         # hasn't approved only gets here after the last round; it goes up so the user can try
-        # it, but never over an app that's already live, which keeps the last good version.
+        # it, but never over an app that's already live and working, which keeps the last good
+        # version. A live app the checkup found broken is no good version to keep.
         # main still moves only on approval (release.py).
         tests = dev.get("tests") or {}
         missing = list(tests.get("missing") or [])
@@ -458,8 +520,10 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
             )
         elif missing:
             facts["live_note"] = f"not deployed, as these tests didn't run: {', '.join(missing)}"
-        elif not dev.get("approved") and await releasing.is_live(
-            rc, uuid.UUID(facts["project_id"])
+        elif (
+            not dev.get("approved")
+            and not dev.get("live_broken")
+            and await releasing.is_live(rc, uuid.UUID(facts["project_id"]))
         ):
             facts["live_note"] = (
                 "not updated: the live app keeps the last version, since this one still has "

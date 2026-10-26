@@ -60,9 +60,43 @@ def detect_stack(root: Path, hint: str | None = None) -> str:
     return "static"
 
 
+# Folders that are never a static app's own folder.
+NOT_APP = {"node_modules", "web", "api", "server", "dist", "tests"}
+
+
+def static_folder(root: Path) -> str:
+    """Where a static app is: the project root, or the one subfolder holding it when a builder
+    made it in its own folder (npm create vite@latest my-app) and left the root empty. Serving
+    the root then would put up the web server's own welcome page, not the app."""
+    if (root / "package.json").is_file() or (root / "index.html").is_file():
+        return "."
+    found = sorted(
+        d.name
+        for d in root.iterdir()
+        if d.is_dir()
+        and not d.is_symlink()
+        and not d.name.startswith(".")
+        and d.name not in NOT_APP
+        and ((d / "package.json").is_file() or (d / "index.html").is_file())
+    )
+    if len(found) == 1:
+        return found[0]
+    if (root / "web" / "package.json").is_file() or (root / "web" / "index.html").is_file():
+        return "web"
+    if found:
+        raise BuildProblem(
+            f"There is more than one app folder ({', '.join(found)}): a static app goes at the "
+            "project root, with its package.json or index.html there."
+        )
+    raise BuildProblem(
+        "There is no app to serve: a static app needs a package.json with a build script, or an "
+        "index.html, at the project root."
+    )
+
+
 def parts(root: Path, stack: str) -> list[Part]:
     if stack == "static":
-        return [Part("web", ".", "static", 8080, "/")]
+        return [Part("web", static_folder(root), "static", 8080, "/")]
     front = Part("web", "web", "static", 8080, "/")
     if stack == "node":
         return [front, Part("api", "server", "node", 3000, "/api/health", "/api")]

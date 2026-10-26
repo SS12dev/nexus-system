@@ -52,6 +52,7 @@ export const TOOL_LABEL: Record<string, string> = {
   update_agent_system: "Redesigning the team",
   run_agent_system: "Starting the team",
   list_agent_systems: "Checking your teams",
+  find_past_work: "Looking for earlier work",
   save_as_template: "Saving the team as a template",
   delete_agent_system: "Removing a team",
   control_agent_run: "Steering a team",

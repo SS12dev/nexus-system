@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from nexus_common.models import (
     ASSISTANT_NAME_MAX,
@@ -513,8 +513,15 @@ class MessageOut(BaseModel):
 
 
 class SendMessageIn(BaseModel):
-    content: str = Field(min_length=1, max_length=20000)
+    # May be empty when files are attached (a screenshot on its own).
+    content: str = Field(default="", max_length=20000)
     file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _something_to_send(self) -> "SendMessageIn":
+        if not self.content.strip() and not self.file_ids:
+            raise ValueError("Write a message or attach a file")
+        return self
 
 
 class SendMessageOut(BaseModel):

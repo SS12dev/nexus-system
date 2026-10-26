@@ -224,7 +224,16 @@ async def _drive(deps, run_id: uuid.UUID, resume: bool) -> None:
         return
     except openai.APIStatusError as exc:
         text = str(exc).lower()
-        if "budget" in text or "exceeded" in text:
+        if "no credits" in text or "insufficient_quota" in text or "billing" in text:
+            log.error("Run %s stopped: the model provider account is out of credits", run_id)
+            await finish(
+                deps,
+                run_id,
+                RunStatus.failed,
+                error="The OpenAI account is out of credits, so no model could answer. Top it "
+                "up, then ask again: the next team carries on from what is in the project.",
+            )
+        elif "budget" in text or "exceeded" in text:
             await finish(
                 deps, run_id, RunStatus.failed, error="The run reached its budget before finishing."
             )

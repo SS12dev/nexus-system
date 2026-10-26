@@ -111,3 +111,20 @@ async def test_dock_api_and_isolation(owner, client_for, invite):
     assert stolen.status_code == 404
     await owner.post(f"/api/widgets/{w['id']}/action", json={"action": "remove"})
     assert [x["kind"] for x in (await owner.get("/api/widgets")).json()] == ["note"]
+
+
+async def test_a_widget_dragged_anywhere_keeps_its_place(owner, client_for, invite):
+    w = (await owner.post("/api/widgets", json={"kind": "note", "text": "milk"})).json()
+    assert w["pos"] is None
+    placed = await owner.patch(f"/api/widgets/{w['id']}", json={"pos": {"x": 0.25, "y": 1}})
+    assert placed.json()["pos"] == {"x": 0.25, "y": 1}
+    assert (await owner.get("/api/widgets")).json()[0]["pos"] == {"x": 0.25, "y": 1}
+    off = await owner.patch(f"/api/widgets/{w['id']}", json={"pos": {"x": 1.5, "y": 0}})
+    assert off.status_code == 422
+    docked = await owner.patch(f"/api/widgets/{w['id']}", json={"dock": True})
+    assert docked.json()["pos"] is None
+
+    await invite(owner, "friend@example.com")
+    friend = await client_for("friend@example.com")
+    moved = await friend.patch(f"/api/widgets/{w['id']}", json={"pos": {"x": 0, "y": 0}})
+    assert moved.status_code == 404

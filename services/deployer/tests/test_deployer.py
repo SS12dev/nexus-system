@@ -194,3 +194,30 @@ async def test_making_public_or_private_reuses_the_images(deployer, fake_docker,
     assert len(fake_docker.builds) == 1
     labels = fake_docker.containers["nexus-app-2048-web"]["Labels"]
     assert "traefik.http.routers.app-2048-web.middlewares" not in labels
+
+
+async def test_check_shows_what_a_visitor_sees_without_building(
+    deployer, fake_docker, traefik, tmp_path
+):
+    resp = await deployer.post("/apps/2048/check", json={"app_id": "p1"})
+    assert resp.json()["running"] is False and "no containers" in resp.json()["detail"]
+
+    static_project(tmp_path)
+    await deployer.post("/apps/2048/deploy", json={**BODY, "stack": "static"})
+    builds = len(fake_docker.builds)
+    fake_docker.shot = {
+        "png": "iVBORw0KGgo=",
+        "errors": ["TypeError: cards is undefined"],
+        "title": "Welcome to nginx!",
+        "text": "If you see this page, the nginx web server is working.",
+    }
+    out = (await deployer.post("/apps/2048/check", json={"app_id": "p1"})).json()
+    assert out["running"] and out["loaded"] and out["title"] == "Welcome to nginx!"
+    assert out["console_errors"] == ["TypeError: cards is undefined"]
+    assert "nexus-app-2048-web (running)" in out["logs"]
+    assert len(fake_docker.builds) == builds
+    assert "nexus-shot-2048" not in fake_docker.containers
+
+    fake_docker.containers["nexus-app-2048-web"]["state"] = "exited"
+    out = (await deployer.post("/apps/2048/check", json={"app_id": "p1"})).json()
+    assert not out["running"] and "nexus-app-2048-web" in out["detail"]

@@ -1,9 +1,9 @@
 import { Paperclip, SendHorizontal } from "lucide-react";
 import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { api } from "../lib/api";
-import { ACCEPT } from "../lib/format";
+import { ACCEPT, isPicture, screenshotName } from "../lib/format";
 import { useStore } from "../store/chat";
-import { FileChip } from "./FileChip";
+import { FileChip, PictureThumb } from "./FileChip";
 import { useAssistantName } from "../lib/assistant";
 
 interface Pending {
@@ -12,6 +12,8 @@ interface Pending {
   size: number;
   id?: string;
   error?: string;
+  /** A local preview of a picture while it uploads and waits to be sent. */
+  preview?: string;
 }
 
 export function Composer({
@@ -36,13 +38,30 @@ export function Composer({
 
   const statusOf = (p: Pending) =>
     p.error ? "failed" : p.id ? (files[p.id]?.status ?? "processing") : "uploading";
-  const busyFiles = pending.some((p) => ["uploading", "processing"].includes(statusOf(p)));
-  const ready = pending.filter((p) => statusOf(p) === "ready");
+  // A picture can go as soon as it is uploaded: the assistant looks at it rather than waiting
+  // for its text to be read. Other files wait until they are read.
+  const sendable = (p: Pending) =>
+    p.preview ? !!p.id && !p.error : statusOf(p) === "ready";
+  const busyFiles = pending.some(
+    (p) => !sendable(p) && ["uploading", "processing"].includes(statusOf(p)),
+  );
+  const ready = pending.filter(sendable);
+  const pictures = pending.filter((p) => p.preview);
+  const others = pending.filter((p) => !p.preview);
+
+  const drop = (keys: Set<string>) => {
+    for (const p of pending) if (keys.has(p.key) && p.preview) URL.revokeObjectURL(p.preview);
+    setPending((ps) => ps.filter((p) => !keys.has(p.key)));
+  };
 
   const addFiles = (list: FileList | File[]) => {
-    for (const file of Array.from(list)) {
+    for (let file of Array.from(list)) {
+      if (file.type.startsWith("image/") && /^image\.\w+$/i.test(file.name)) {
+        file = new File([file], screenshotName(file.type), { type: file.type });
+      }
       const key = `${file.name}-${file.size}-${Math.random()}`;
-      setPending((ps) => [...ps, { key, name: file.name, size: file.size }]);
+      const preview = isPicture(file.name) ? URL.createObjectURL(file) : undefined;
+      setPending((ps) => [...ps, { key, name: file.name, size: file.size, preview }]);
       api
         .uploadFile(file, chatId)
         .then((f) => {
@@ -57,11 +76,11 @@ export function Composer({
 
   const submit = async () => {
     const content = text.trim();
-    if (!content || disabled || sending || busyFiles) return;
+    if ((!content && !ready.length) || disabled || sending || busyFiles) return;
     setSending(true);
     if (await onSend(content, ready.map((p) => p.id!))) {
       setText("");
-      setPending([]);
+      drop(new Set(pending.map((p) => p.key)));
     }
     setSending(false);
   };
@@ -100,15 +119,29 @@ export function Composer({
           dragging ? "border-sky-400" : "border-edge"
         }`}
       >
-        {pending.length > 0 && (
+        {pictures.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {pending.map((p) => (
+            {pictures.map((p) => (
+              <PictureThumb
+                key={p.key}
+                file={p}
+                src={p.preview}
+                status={statusOf(p)}
+                error={p.error}
+                onRemove={() => drop(new Set([p.key]))}
+              />
+            ))}
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {others.map((p) => (
               <FileChip
                 key={p.key}
                 file={p}
                 status={statusOf(p)}
                 error={p.error ?? (p.id ? files[p.id]?.error : null)}
-                onRemove={() => setPending((ps) => ps.filter((x) => x.key !== p.key))}
+                onRemove={() => drop(new Set([p.key]))}
               />
             ))}
           </div>
@@ -118,8 +151,8 @@ export function Composer({
             onClick={() => picker.current?.click()}
             disabled={disabled}
             className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30"
-            aria-label="Attach files"
-            title="Attach files"
+            aria-label="Attach files or screenshots"
+            title="Attach files or screenshots (you can also paste or drop them)"
           >
             <Paperclip size={18} />
           </button>
@@ -143,13 +176,18 @@ export function Composer({
             rows={1}
             disabled={disabled}
             placeholder={
-              placeholder ?? (pending.length ? "Ask about the attached files" : `Message ${assistant}`)
+              placeholder ??
+              (pictures.length && !others.length
+                ? `Ask ${assistant} about the screenshot, or just send it`
+                : pending.length
+                  ? "Ask about the attached files"
+                  : `Message ${assistant}`)
             }
             className="max-h-48 min-h-[1.5rem] flex-1 resize-none bg-transparent py-1 outline-none [field-sizing:content] placeholder:text-slate-500 disabled:opacity-50"
           />
           <button
             onClick={submit}
-            disabled={disabled || sending || busyFiles || !text.trim()}
+            disabled={disabled || sending || busyFiles || (!text.trim() && !ready.length)}
             className="rounded-full bg-sky-500 p-2 text-ink disabled:opacity-30"
             aria-label="Send"
             title={busyFiles ? `Waiting for ${assistant} to finish reading your files` : "Send"}

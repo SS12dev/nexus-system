@@ -1495,6 +1495,9 @@ class Widget(Base):
     state: Mapped[dict] = mapped_column(JSONB, default=dict)
     # Order on the dock, lowest first.
     slot: Mapped[int] = mapped_column(Integer, default=0)
+    # Where it was dragged to on a laptop's main screen: {"x", "y"}, each 0..1 across the room
+    # left beside the card, so 1 is flush right or bottom on any screen. None = in the dock.
+    pos: Mapped[dict | None] = mapped_column(JSONB)
     # The chat that asked for it, if any.
     chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
     fires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

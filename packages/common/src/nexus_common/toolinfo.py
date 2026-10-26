@@ -131,9 +131,9 @@ TOOLS: list[ToolInfo] = [
         "view_image",
         "Look at an image",
         "read",
-        "Look at a render, chart or picture in the library, to check visual work such as a 3D "
-        "model's preview before reporting it.",
-        assistant=False,
+        "Look at a render, chart, picture or screenshot in the library, to check visual work "
+        "such as a 3D model's preview before reporting it, or to look again at an earlier "
+        "screenshot in a chat.",
     ),
     # The workbench: a dev team's project folder, kept for the whole run (agents only).
     ToolInfo(
