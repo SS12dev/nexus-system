@@ -66,6 +66,11 @@ class DeployerClient:
         }
         return DeployResult(**await self._call("POST", f"/apps/{slug}/deploy", json=body))
 
+    async def check(self, slug: str, *, app_id: str) -> dict:
+        """The running app as a visitor sees it: {"running", "loaded", "detail", "title",
+        "text", "console_errors", "logs"}. Builds nothing."""
+        return await self._call("POST", f"/apps/{slug}/check", json={"app_id": app_id})
+
     async def apps(self) -> list[dict]:
         return await self._call("GET", "/apps")
 

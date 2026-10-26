@@ -195,3 +195,72 @@ async def test_fresh_skips_past_results(sdeps, owner, scripts, seen):
     assert "PAST RESULTS" not in human_texts(seen["nexus.design_system"][0])
     async with sdeps.sessionmaker() as db:
         assert len((await db.scalars(select(AgentSystem))).all()) == 2
+
+
+async def _bury(sdeps, owner, n: int) -> None:
+    """n newer finished results, so an older one falls out of the newest ones."""
+    from datetime import timedelta
+
+    from nexus_common.models import SystemLifetime, SystemStatus, utcnow
+
+    user, chat_id = owner
+    async with sdeps.sessionmaker() as db:
+        for i in range(n):
+            system = AgentSystem(
+                id=uuid.uuid4(), user_id=user.id, chat_id=chat_id, name=f"Digest {i}",
+                goal="A news digest", spec={}, topology="single",
+                lifetime=SystemLifetime.ephemeral, status=SystemStatus.archived,
+            )  # fmt: skip
+            db.add(system)
+            await db.flush()
+            db.add(
+                AgentRun(
+                    system_id=system.id, user_id=user.id, chat_id=chat_id, input="news",
+                    status=RunStatus.completed, budget_usd=1, trace_id="t",
+                    finished_at=utcnow() + timedelta(minutes=i + 1),
+                )
+            )  # fmt: skip
+        await db.commit()
+
+
+async def test_an_old_result_named_in_chat_is_found_and_fixed(sdeps, owner, scripts, seen):
+    """ "The minion model is wrong": Nexus finds it among older results however many came
+    after, and the team starts by looking at the old files."""
+    run_id = await _minion_made(sdeps, owner, scripts)
+    async with sdeps.sessionmaker() as db:
+        run = await db.get(AgentRun, uuid.UUID(run_id))
+        system = await db.get(AgentSystem, run.system_id)
+        system.name, system.goal = "Minion 3D model", "A 3D model of a Minion figurine"
+        await db.commit()
+    await _bury(sdeps, owner, 20)
+    spec = {
+        "name": "Minion fix",
+        "goal": "Fix the Minion model",
+        "topology": "single",
+        "agents": [agent("modeller", tools=["run_code"])],
+    }
+    scripts["nexus.design_system"] = [json.dumps({"plan": "p", "spec": spec, "based_on": run_id})]
+    _, tools = await _tools(sdeps, owner, asked="the minion model looks wrong, fix it")
+    out = await tools["build_agent_system"].ainvoke({"request": "The minion model looks wrong"})
+    assert "Started Minion fix" in out
+    prompt = human_texts(seen["nexus.design_system"][0])
+    past = prompt.split("PAST RESULTS", 1)[1]
+    assert past.split("\n")[1].startswith(f"- {run_id}: Minion 3D model")
+    async with sdeps.sessionmaker() as db:
+        new = await db.scalar(select(AgentRun).where(AgentRun.status == RunStatus.queued))
+        md = await db.scalar(select(File).where(File.run_id == uuid.UUID(run_id)))
+    assert str(md.id) in [str(x) for x in new.file_ids]
+    assert "changes an earlier result" in new.input and "minion.md" in new.input
+    assert "view_image" in new.input and "don't start over" in new.input
+
+
+async def test_a_based_on_that_isnt_a_past_result_is_ignored(sdeps, owner, scripts, seen):
+    await _minion_made(sdeps, owner, scripts)
+    spec = {"name": "M", "goal": "g", "topology": "single", "agents": [agent("m")]}
+    scripts["nexus.design_system"] = [json.dumps({"spec": spec, "based_on": str(uuid.uuid4())})]
+    _, tools = await _tools(sdeps, owner, asked="a minion")
+    out = await tools["build_agent_system"].ainvoke({"request": "a minion"})
+    assert "Started M" in out
+    async with sdeps.sessionmaker() as db:
+        new = await db.scalar(select(AgentRun).where(AgentRun.status == RunStatus.queued))
+    assert new.file_ids == [] and "earlier result" not in new.input

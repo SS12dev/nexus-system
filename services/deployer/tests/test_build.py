@@ -23,7 +23,9 @@ def test_stack_comes_from_the_hint_then_the_brief_then_the_folders(tmp_path):
 
 
 def test_parts_per_stack(tmp_path):
-    assert [p.name for p in parts(tmp_path, "static")] == ["web"]
+    (tmp_path / "index.html").write_text("<h1>2048</h1>")
+    assert [(p.name, p.folder) for p in parts(tmp_path, "static")] == [("web", ".")]
+    (tmp_path / "index.html").unlink()
     node = parts(tmp_path, "node")
     assert [(p.name, p.folder, p.template, p.prefix) for p in node] == [
         ("web", "web", "static", None),
@@ -35,6 +37,27 @@ def test_parts_per_stack(tmp_path):
     (tmp_path / "api" / "app" / "main.py").write_text("app = None")
     api = parts(tmp_path, "web_fastapi")[1]
     assert api.build_args == {"ENTRY": "app.main:app"} and api.health == "/api/health"
+
+
+def test_a_static_app_built_in_its_own_folder_is_found(tmp_path):
+    """The solitaire team ran npm create vite@latest solitaire-app: serving the root put up
+    nginx's welcome page instead of the game."""
+    with pytest.raises(BuildProblem, match="no app to serve"):
+        parts(tmp_path, "static")
+    (tmp_path / "BRIEF.md").write_text("Stack: static")
+    (tmp_path / "package-lock.json").write_text('{"packages": {}}')
+    (tmp_path / "node_modules" / "x").mkdir(parents=True)
+    (tmp_path / "node_modules" / "x" / "package.json").write_text("{}")
+    (tmp_path / "solitaire-app").mkdir()
+    (tmp_path / "solitaire-app" / "package.json").write_text('{"scripts": {"build": "vite"}}')
+    assert parts(tmp_path, "static")[0].folder == "solitaire-app"
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "index.html").write_text("<p>")
+    with pytest.raises(BuildProblem, match="more than one app folder"):
+        parts(tmp_path, "static")
+    # An app at the root always wins.
+    (tmp_path / "index.html").write_text("<h1>")
+    assert parts(tmp_path, "static")[0].folder == "."
 
 
 def test_context_has_the_template_and_the_part_only(tmp_path):

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_common.devteam import NEEDED_TOOLS
@@ -22,6 +22,7 @@ from nexus_common.models import (
     AgentRun,
     AgentSystem,
     File,
+    Project,
     RunStatus,
     SystemLifetime,
     SystemStatus,
@@ -48,36 +49,75 @@ class Design:
     template: AgentSystem | None = None
     # A finished run whose result already is what the request asks for.
     existing: AgentRun | None = None
+    # A past result the spec changes or fixes: the team starts from its files.
+    based_on: AgentRun | None = None
     # The architect's flow in words, for the logs.
     plan: str = ""
 
 
 PAST_RESULTS = 15
+# Older results whose name or goal matches the request, shown on top of the recent ones, so
+# "the solitaire app is broken" finds the solitaire app however long ago it was made.
+MATCHES = 5
+ANY_WORD = (
+    "to_tsquery('english', replace(plainto_tsquery('english', :q)::text, '&', '|')) as q(query)"
+)
+
+
+async def matching_systems(
+    db: AsyncSession, user_id: uuid.UUID, request: str, n: int = MATCHES
+) -> list[uuid.UUID]:
+    """The user's systems whose name or goal shares words with the request, best first."""
+    if not request.strip():
+        return []
+    rows = await db.execute(
+        text(
+            f"select s.id from agent_systems s, {ANY_WORD} "
+            "where s.user_id = :u and s.tsv @@ q.query "
+            "order by ts_rank_cd(s.tsv, q.query) desc, s.updated_at desc limit :n"
+        ),
+        {"q": request[:2000], "u": user_id, "n": n},
+    )
+    return [r[0] for r in rows.all()]
 
 
 async def past_results(
-    db: AsyncSession, user_id: uuid.UUID
+    db: AsyncSession, user_id: uuid.UUID, request: str = ""
 ) -> tuple[list[tuple[str, str, str, list[str]]], dict[str, AgentRun]]:
-    """The user's finished runs, newest first, as (run id, name, goal, file names), and the runs
-    by id. One per system: a project's latest result stands for it."""
+    """The user's finished runs as (run id, name, goal, file names), and the runs by id: the
+    ones matching the request first, then the newest. One per system: a project's latest
+    result stands for it."""
+    matched = await matching_systems(db, user_id, request)
+    done = (AgentRun.user_id == user_id, AgentRun.status == RunStatus.completed)
+    found: list[tuple[AgentRun, AgentSystem]] = []
+    if matched:
+        rows = await db.execute(
+            select(AgentRun, AgentSystem)
+            .join(AgentSystem, AgentSystem.id == AgentRun.system_id)
+            .where(*done, AgentRun.system_id.in_(matched))
+            .order_by(AgentRun.finished_at.desc().nulls_last())
+        )
+        rank = {sid: i for i, sid in enumerate(matched)}
+        found += sorted(rows.all(), key=lambda r: rank[r[1].id])
     rows = await db.execute(
         select(AgentRun, AgentSystem)
         .join(AgentSystem, AgentSystem.id == AgentRun.system_id)
-        .where(AgentRun.user_id == user_id, AgentRun.status == RunStatus.completed)
+        .where(*done)
         .order_by(AgentRun.finished_at.desc().nulls_last())
         .limit(PAST_RESULTS * 3)
     )
+    found += rows.all()
     out: list[tuple[str, str, str, list[str]]] = []
     runs: dict[str, AgentRun] = {}
     seen: set[str] = set()
-    for run, system in rows.all():
+    for run, system in found:
         key = (system.spec or {}).get("project") or str(system.id)
         if key in seen:
             continue
         seen.add(key)
         runs[str(run.id)] = run
         out.append((str(run.id), system.name, system.goal, []))
-        if len(out) >= PAST_RESULTS:
+        if len(out) >= PAST_RESULTS + MATCHES:
             break
     if runs:
         files = await db.execute(
@@ -108,21 +148,51 @@ async def templates(db: AsyncSession, user_id: uuid.UUID) -> list[AgentSystem]:
     return list(rows.all())
 
 
-async def projects(db: AsyncSession, user_id: uuid.UUID) -> list[tuple[str, str, str]]:
-    """The user's software projects, newest first: (project id, name, goal). Runs end with their
-    system archived, so archived ones count too."""
+def app_status(row: Project | None) -> str:
+    """A project's app in a few words, for the architect and Nexus."""
+    if row is None or not row.app_slug:
+        return "never deployed"
+    if row.deploy_error:
+        return f"last deploy failed: {row.deploy_error[:150]}"
+    state = row.app_state or "unknown"
+    return f"app {state} at {row.live_url}" if row.live_url else f"app {state}"
+
+
+async def projects(
+    db: AsyncSession, user_id: uuid.UUID, request: str = ""
+) -> list[tuple[str, str, str, str]]:
+    """The user's software projects, the ones matching the request first, then the newest:
+    (project id, name, goal, app status). Runs end with their system archived, so archived
+    ones count too."""
+    matched = await matching_systems(db, user_id, request)
     rows = await db.scalars(
         select(AgentSystem)
         .where(AgentSystem.user_id == user_id, AgentSystem.topology == "dev_project")
         .order_by(AgentSystem.updated_at.desc())
         .limit(40)
     )
+    systems = list(rows.all())
+    if matched:
+        extra = await db.scalars(
+            select(AgentSystem).where(
+                AgentSystem.id.in_(matched), AgentSystem.topology == "dev_project"
+            )
+        )
+        rank = {sid: i for i, sid in enumerate(matched)}
+        systems = sorted(extra.all(), key=lambda s: rank[s.id]) + systems
     out: dict[str, tuple[str, str, str]] = {}
-    for s in rows.all():
+    for s in systems:
         project = (s.spec or {}).get("project")
         if project and project not in out:
             out[project] = (project, s.name, s.goal)
-    return list(out.values())[:10]
+    listed = list(out.values())[:10]
+    rows = await db.scalars(
+        select(Project).where(
+            Project.user_id == user_id, Project.workbench_id.in_([p for p, _, _ in listed])
+        )
+    )
+    apps = {r.workbench_id: r for r in rows.all()}
+    return [(p, n, g, app_status(apps.get(p))) for p, n, g in listed]
 
 
 NEEDS_EXEC = (
@@ -186,11 +256,11 @@ async def design(
     saved = (
         await templates(db, user.id) if use_templates and current is None and not software else []
     )
-    known = await projects(db, user.id)
+    known = await projects(db, user.id, request)
     # Something already made is opened and changed rather than built again; not when this is
     # already a change to one (based_on) or to a saved system (current).
     past, past_runs = (
-        await past_results(db, user.id)
+        await past_results(db, user.id, request)
         if use_existing and current is None and not based_on
         else ([], {})
     )
@@ -250,14 +320,19 @@ async def design(
         else:
             spec, problem = _problems(raw, allowed, slugs, software)
             if spec is not None:
-                if spec.project and spec.project not in {p for p, _, _ in known}:
+                if spec.project and spec.project not in {p for p, *_ in known}:
                     # Only the user's own projects can be continued.
                     spec.project = None
                 if spec.lead.tier == "max" and not best_model:
                     spec.lead.tier = "pro"
+                base = past_runs.get(str(raw.get("based_on") or "").strip())
+                if raw.get("based_on") and base is None:
+                    log.info("Design named an unknown based_on %s; ignored", raw["based_on"])
+                if spec.topology == "dev_project":
+                    base = None  # Software is continued through its project instead.
                 if plan:
                     log.info("Designed %s (%s): %s", spec.name, spec.topology, plan)
-                return Design(spec=spec, plan=plan)
+                return Design(spec=spec, plan=plan, based_on=base)
         log.info("Design attempt %d rejected: %s", attempt + 1, problem)
         messages += [AIMessage(text), HumanMessage(f"{problem}\nReply with corrected JSON only.")]
     raise DesignFailed(f"Couldn't design a working team for this: {problem}")

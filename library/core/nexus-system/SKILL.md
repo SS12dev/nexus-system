@@ -67,7 +67,11 @@ supervisor_workers, parallel_map_reduce, critic_loop, flow (agents wired by `aft
 side when independent, `checks` for a checker that sends work back) or dev_project; agents
 with tools, skills and tiers; a budget. When a recent finished result already is what was
 asked, it starts nothing and hands it back to open and ask what to change (`based_on` to
-change it, `fresh` to rebuild). Runs compile to LangGraph graphs
+change it, `fresh` to rebuild). Results and projects whose name or goal match the request
+come first however old they are, so "the minion model is wrong" or "the solitaire app is
+broken" finds them from any chat; the architect then answers with `based_on` (the team starts
+by looking at the old files and listing what is wrong) or the project id. Nexus also has
+`find_past_work` to look things up. Runs compile to LangGraph graphs
 (`systems/compile.py`, `systems/runner.py`), each with its own budgeted LiteLLM key. Risky
 tools pause the run for an approval card. dev_project (`systems/dev.py`) is a fixed team:
 brief, plan, frontend + backend build, test (Nexus wires and runs the suites itself,

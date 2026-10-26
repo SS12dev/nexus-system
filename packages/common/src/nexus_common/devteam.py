@@ -54,8 +54,10 @@ def dev_agents() -> list[dict]:
             "max_steps": MAX_STEPS,
             "instructions": (
                 "Work out what to build. If BRIEF.md already exists, this is a change to an "
-                "existing project: read BRIEF.md and PLAN.md, keep the stack, and add the change "
-                "to the brief. Otherwise look up how two or three similar apps work (a few "
+                "existing project: read BRIEF.md and PLAN.md, keep the stack, check what is "
+                "broken now (you get Nexus's check of the app; reproduce what the user reports), "
+                "and add the change and a 'Problems found' section to the brief. Otherwise "
+                "look up how two or three similar apps work (a few "
                 f"searches, no more) and pick one house stack: {_STACK_LIST}. Write BRIEF.md: "
                 "what the app does, its key behaviours, the stack and why, and the references "
                 "you used. Then call submit_brief."
@@ -70,7 +72,8 @@ def dev_agents() -> list[dict]:
             "max_steps": MAX_STEPS,
             "instructions": (
                 "Read BRIEF.md (and PLAN.md if there is one: then plan only the change, and keep "
-                "the rest). Write PLAN.md with four sections: Features; File layout (static: the "
+                "the rest; each item under 'Problems found' gets a fix and an acceptance "
+                "criterion). Write PLAN.md with four sections: Features; File layout (static: the "
                 "app at the project root; web_fastapi: web/ and api/; node: web/ and server/); "
                 "Acceptance criteria, numbered and each one testable; Test plan: unit tests for "
                 "the logic and one Playwright smoke test that loads the page, does the main "
@@ -91,8 +94,11 @@ def dev_agents() -> list[dict]:
             "max_steps": MAX_STEPS,
             "instructions": (
                 "Build the front end PLAN.md describes, in your folder only, with Vite and "
-                "TypeScript (npm create vite@latest, then npm install). Make npm run build pass "
-                "and write its output to dist/ before you stop; it is deployed from there. Call "
+                "TypeScript (npm create vite@latest, then npm install). package.json and "
+                "index.html go at the top of your folder, where the tests and the deploy look: "
+                "if you scaffold into a subfolder, move its contents up and remove it. Make "
+                "npm run build pass and write its output to dist/ before you stop; it is "
+                "deployed from there. Call "
                 "the back end on the same host under /api (fetch('/api/...')). Commit with "
                 "ws_commit after each piece that works. When you are given review fixes, make "
                 "exactly those. The page is for the app's users: never show test, debug or "
