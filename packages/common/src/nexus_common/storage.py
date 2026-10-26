@@ -26,6 +26,12 @@ def file_key(user_id: uuid.UUID, file_id: uuid.UUID) -> str:
     return f"users/{user_id}/files/{file_id}"
 
 
+def feedback_shot_key(feedback_id: uuid.UUID, n: int) -> str:
+    """A screenshot sent with feedback. Kept apart from the sender's files: feedback (and its
+    screenshots) outlive the sender's account."""
+    return f"feedback/{feedback_id}/{n}"
+
+
 class S3Storage:
     def __init__(self, settings: Settings):
         self.settings = settings

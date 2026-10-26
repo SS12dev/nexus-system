@@ -262,7 +262,8 @@ export function OrbStage({
         </div>
       )}
 
-      <div className={`pointer-events-none relative z-10 flex items-start gap-3 ${chat ? "px-3 pt-2" : "px-4 pt-4"}`}>
+      {/* Above the widget dock and placed widgets, so the Notices tray opens over them. */}
+      <div className={`pointer-events-none relative z-40 flex items-start gap-3 ${chat ? "px-3 pt-2" : "px-4 pt-4"}`}>
         {/* A soft backdrop keeps the greeting and status readable over the bright shell. */}
         <div className={`min-w-0 max-w-full rounded-lg bg-ink/60 backdrop-blur-sm ${chat ? "px-2 py-0.5" : "px-3 py-1.5"}`}>
           {!chat && (

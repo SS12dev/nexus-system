@@ -76,12 +76,12 @@ async def test_feedback_goes_to_owners(owner, client_for, invite, queue):
     friend = await client_for("friend@example.com")
     resp = await friend.post(
         "/api/feedback",
-        json={"kind": "problem", "message": "The routine page is slow", "page": "/routines"},
+        data={"kind": "problem", "message": "The routine page is slow", "page": "/routines"},
     )
     assert resp.status_code == 201, resp.text
     fid = resp.json()["id"]
     assert [str(x) for x in queue.feedback] == [fid]
-    assert (await friend.post("/api/feedback", json={"message": "x"})).status_code == 422
+    assert (await friend.post("/api/feedback", data={"message": "x"})).status_code == 422
     assert (await friend.get("/api/admin/feedback")).status_code == 403
 
     listed = (await owner.get("/api/admin/feedback")).json()
@@ -89,3 +89,42 @@ async def test_feedback_goes_to_owners(owner, client_for, invite, queue):
     done = (await owner.post(f"/api/admin/feedback/{fid}/done")).json()
     assert done["done_at"]
     assert (await owner.get("/api/admin/feedback?open_only=true")).json() == []
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+
+
+async def test_feedback_carries_screenshots(owner, client_for, invite):
+    await invite(owner, "friend@example.com")
+    friend = await client_for("friend@example.com")
+    resp = await friend.post(
+        "/api/feedback",
+        data={"kind": "problem", "message": "The tray overlaps the clock"},
+        files=[
+            ("screenshots", ("shot.png", PNG, "image/png")),
+            ("screenshots", ("../../evil.png", PNG, "image/png")),
+        ],
+    )
+    assert resp.status_code == 201, resp.text
+    fid = resp.json()["id"]
+    assert [s["name"] for s in resp.json()["screenshots"]] == ["shot.png", "evil.png"]
+
+    # Only owners can look at them, and only pictures go through.
+    assert (await friend.get(f"/api/admin/feedback/{fid}/screenshots/0")).status_code == 403
+    shot = await owner.get(f"/api/admin/feedback/{fid}/screenshots/1")
+    assert shot.status_code == 200 and shot.content == PNG
+    assert shot.headers["content-type"] == "image/png"
+    assert (await owner.get(f"/api/admin/feedback/{fid}/screenshots/2")).status_code == 404
+
+    fake = await friend.post(
+        "/api/feedback",
+        data={"message": "Script, not a picture"},
+        files=[("screenshots", ("x.png", b"<script>", "image/png"))],
+    )
+    assert fake.status_code == 415
+    many = await friend.post(
+        "/api/feedback",
+        data={"message": "Too many"},
+        files=[("screenshots", (f"{n}.png", PNG, "image/png")) for n in range(4)],
+    )
+    assert many.status_code == 422

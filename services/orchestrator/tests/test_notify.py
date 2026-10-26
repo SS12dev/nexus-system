@@ -1,9 +1,19 @@
+import uuid
+
 import pytest
 from arq import Retry
 
 from nexus_api.users import create_user
 from nexus_common import mail
-from nexus_common.models import AccessRequest, AccessRequestStatus, RoleName, UserStatus
+from nexus_common.models import (
+    AccessRequest,
+    AccessRequestStatus,
+    Feedback,
+    FeedbackKind,
+    RoleName,
+    UserStatus,
+)
+from nexus_common.storage import feedback_shot_key
 from nexus_orchestrator import notify
 
 
@@ -98,3 +108,35 @@ async def test_transient_failures_retry_then_give_up(smtp_deps, sessionmaker, mo
     assert exc.value.defer_score == 60_000
     # The last try logs and stops rather than failing the job.
     await notify.access(smtp_deps, "requested", req.id, attempt=notify.MAX_TRIES)
+
+
+async def test_feedback_email_carries_its_screenshots(smtp_deps, sessionmaker, sent, storage):
+    smtp_deps.storage = storage
+    await make_request(sessionmaker)
+    fid = uuid.uuid4()
+    key = feedback_shot_key(fid, 0)
+    await storage.put(key, b"\x89PNG-bytes", "image/png")
+    async with sessionmaker() as db:
+        db.add(
+            Feedback(
+                id=fid,
+                kind=FeedbackKind.problem,
+                message="The tray overlaps the clock",
+                screenshots=[
+                    {"key": key, "name": "tray.png", "content_type": "image/png", "size": 10},
+                    {
+                        "key": "feedback/gone",
+                        "name": "lost.png",
+                        "content_type": "image/png",
+                        "size": 1,
+                    },
+                ],
+            )
+        )
+        await db.commit()
+    await notify.feedback(smtp_deps, fid)
+    [msg] = sent
+    assert msg["To"] == "owner@example.com"
+    [shot] = list(msg.iter_attachments())
+    assert shot.get_filename() == "tray.png" and shot.get_content() == b"\x89PNG-bytes"
+    assert "2 screenshots attached" in msg.get_body(("plain",)).get_content()

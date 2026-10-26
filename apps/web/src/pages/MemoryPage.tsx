@@ -255,7 +255,7 @@ export function MemoryPage() {
                 if (!e.target.value) run(() => load());
               }}
               placeholder={`Search ${profile?.memory_count ?? ""} memories`}
-              className="flex-1 bg-transparent py-2 outline-none"
+              className="min-w-0 flex-1 bg-transparent py-2 outline-none"
             />
           </form>
   

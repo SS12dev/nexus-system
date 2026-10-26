@@ -1432,6 +1432,11 @@ class Feedback(Base):
     message: Mapped[str] = mapped_column(Text)
     # The page they were on, e.g. /routines.
     page: Mapped[str | None] = mapped_column(String(300))
+    # Screenshots sent with it: [{"key", "name", "content_type", "size"}], bytes in storage
+    # under feedback_shot_key().
+    screenshots: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     # Set when the owner marks it handled.
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
