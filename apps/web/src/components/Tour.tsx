@@ -19,7 +19,7 @@ const STEPS: Step[] = [
     anchor: "routines",
     title: "Routines",
     body: (a) =>
-      `Things ${a} does for you on a schedule, like a morning brief. Each posts in its own chat, and can notify your phone.`,
+      `Things ${a} does for you on a schedule, like a morning brief. Results show there, not in your chats, and can notify your phone.`,
   },
   {
     anchor: "memory",

@@ -377,6 +377,9 @@ class Chat(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     title: Mapped[str | None] = mapped_column(String(200))
+    # "chat" for a conversation in the chat list; "routine" for the chat a routine runs in,
+    # which stays out of the list (its runs show on the Routines page instead).
+    kind: Mapped[str] = mapped_column(String(20), default="chat", server_default="chat")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now()
@@ -1333,8 +1336,9 @@ class RoutineRunStatus(enum.StrEnum):
 
 
 class Routine(Base):
-    """A saved prompt that runs on a schedule as its owner, posting into a chat of its own
-    (nexus_common/routines.py has the schedule rules, the orchestrator's routines.py runs them)."""
+    """A saved prompt that runs on a schedule as its owner, in a hidden chat of its own (kind
+    "routine", kept out of the chat list). nexus_common/routines.py has the schedule rules, the
+    orchestrator's routines.py runs them."""
 
     __tablename__ = "routines"
 

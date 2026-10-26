@@ -428,7 +428,7 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
       {step === 5 && (
         <Step
           title="Want a few routines?"
-          hint={`${cleanName} runs these on a schedule and posts each in its own chat. Untick any you don't want; you can change them anytime.`}
+          hint={`${cleanName} runs these on a schedule; their results are on the Routines page, not in your chats. Untick any you don't want; you can change them anytime.`}
         >
           {!canMember && (
             <p className="text-sm text-slate-400">Viewers can't have routines.</p>

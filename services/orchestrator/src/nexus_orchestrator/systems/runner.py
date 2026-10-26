@@ -367,6 +367,13 @@ async def _notify_finished(deps, system: AgentSystem, run: AgentRun, files, link
             )
             done = run.status == RunStatus.completed
             pick = featured(files, links, presented) if done else None
+            # A routine's chat is hidden, so its team's notice opens the team instead.
+            chat_kind = (
+                await db.scalar(select(Chat.kind).where(Chat.id == run.chat_id))
+                if run.chat_id
+                else None
+            )
+            url = f"/c/{run.chat_id}" if chat_kind == "chat" else f"/agents/{system.id}"
             first = next((line for line in (run.output or "").splitlines() if line.strip()), "")
             await notify(
                 db,
@@ -376,7 +383,7 @@ async def _notify_finished(deps, system: AgentSystem, run: AgentRun, files, link
                 NotificationKind.result if done else NotificationKind.failed,
                 f"{system.name} finished" if done else f"{system.name} stopped",
                 (first.lstrip("#* ").strip() if done else (run.error or "")),
-                url=f"/c/{run.chat_id}" if run.chat_id else f"/agents/{system.id}",
+                url=url,
                 chat_id=run.chat_id,
                 run_id=run.id,
                 file=pick.file if pick else None,

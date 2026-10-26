@@ -19,6 +19,7 @@ from nexus_common.routines import (
     clean_delivery,
     describe,
     lower_first,
+    remove_routine,
     reschedule,
     routine_payload,
     upcoming,
@@ -50,9 +51,10 @@ def build_routine_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         only_if_new: bool = False,
         delivery: list[str] | None = None,
     ) -> str:
-        """Save a routine: a prompt that runs on a schedule as the user, posting into a chat of
-        its own, e.g. a morning brief or a weekly digest. schedule is an RFC 5545 RRULE without
-        DTSTART, in the user's local time: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0",
+        """Save a routine: a prompt that runs on a schedule as the user, with its results on
+        the Routines page (not in the chat list), e.g. a morning brief or a weekly digest.
+        schedule is an RFC 5545 RRULE without DTSTART, in the user's local time:
+        "FREQ=DAILY;BYHOUR=8;BYMINUTE=0",
         "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=30",
         "FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=9;BYMINUTE=0". At most hourly. Write prompt as the
         user would ask it, self-contained (it runs later with no chat around it). Set
@@ -84,8 +86,8 @@ def build_routine_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         listed = ", ".join(f"{t.astimezone(zone):%a %d %b %H:%M}" for t in times)
         return (
             f"Saved routine {r.name} (id {r.id}): {lower_first(describe(r.schedule))} in "
-            f"{r.timezone}. Next runs: {listed}. Its results post in a chat called "
-            f"{r.name}; the user can change or pause it on the Routines page."
+            f"{r.timezone}. Next runs: {listed}. Its results show on the Routines "
+            "page (not in the chat list), where the user can also change or pause it."
         )
 
     async def list_routines() -> str:
@@ -124,10 +126,10 @@ def build_routine_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
                 return "No such routine."
             now = datetime.now(UTC)
             if action == "delete":
-                await db.delete(r)
+                await remove_routine(db, r)
                 db.add(AuditLog(actor_id=user_id, action="routine.deleted", target=str(rid)))
                 await db.commit()
-                return f"Deleted the routine {r.name}. Its chat stays."
+                return f"Deleted the routine {r.name} and its run history."
             if action in ("pause", "resume"):
                 r.enabled = action == "resume"
                 if r.enabled:

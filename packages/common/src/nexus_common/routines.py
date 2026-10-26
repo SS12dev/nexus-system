@@ -206,6 +206,8 @@ def describe(schedule: str) -> str:
 # --- Storing routines (shared by the API and the assistant's routine tools) ------------------
 
 DELIVERY = ("push", "email", "whatsapp")
+# Chat.kind of the chat a routine runs in: kept out of the chat list and memory summaries.
+ROUTINE_CHAT = "routine"
 NAME_MAX = 80
 PROMPT_MAX = 4000
 
@@ -239,6 +241,21 @@ def reschedule(r: Routine, now: datetime) -> None:
     r.next_run_at = next_run(r.schedule, r.timezone, now) if r.enabled else None
 
 
+def routine_url(r: Routine) -> str:
+    """Where a run's notice opens: the routine on the Routines page, with its latest run."""
+    return f"/routines?open={r.id}"
+
+
+async def remove_routine(db: AsyncSession, r: Routine) -> None:
+    """Delete a routine, its run history and the hidden chat it ran in."""
+    chat_id = r.chat_id
+    await db.delete(r)
+    if chat_id is not None:
+        chat = await db.get(Chat, chat_id)
+        if chat is not None and chat.kind == ROUTINE_CHAT:
+            await db.delete(chat)
+
+
 def clean_delivery(channels: list[str] | None) -> list[str]:
     return [c for c in DELIVERY if c in set(channels or [])]
 
@@ -257,8 +274,8 @@ async def add_routine(
     enabled: bool = True,
     source: str = "user",
 ) -> Routine:
-    """Validate and store a new routine with a chat of its own. Raises ScheduleError or
-    RoutineLimit with a message that is safe to show."""
+    """Validate and store a new routine with a hidden chat of its own to run in. Raises
+    ScheduleError or RoutineLimit with a message that is safe to show."""
     name = " ".join(name.split())[:NAME_MAX]
     prompt = prompt.strip()[:PROMPT_MAX]
     if not name or not prompt:
@@ -271,7 +288,7 @@ async def add_routine(
     now = datetime.now(UTC)
     tz = timezone or user.timezone or "UTC"
     schedule = validate(schedule, tz, settings.routine_min_interval_minutes, now)
-    chat = Chat(user_id=user.id, title=name)
+    chat = Chat(user_id=user.id, title=name, kind=ROUTINE_CHAT)
     db.add(chat)
     await db.flush()
     r = Routine(

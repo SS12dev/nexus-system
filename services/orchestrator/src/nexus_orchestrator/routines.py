@@ -6,14 +6,15 @@ queues `run_routine` with the arq job id routine:<id>:<slot>. A routine_runs row
 slot makes a second job for the same slot a no-op too.
 
 A run is an ordinary chat turn in the routine's own chat, so it has the person's memory, tools,
-Google services and teams. The prompt goes in as their message with the local date and time;
-the reply streams like any other. Then:
+Google services and teams. That chat is hidden (kind "routine"): routines aren't conversations,
+so their runs are read on the Routines page, which shows each run's reply. The prompt goes in
+as their message with the local date and time; the reply streams like any other. Then:
 
 - with only_if_new, a reply of NOTHING_NEW is a quiet run: both messages are removed and nobody
   is told;
 - otherwise the routine's delivery channels (push, email, WhatsApp) get a short notice;
 - a failed run counts toward MAX_FAILURES, after which the routine pauses itself and says why
-  in its chat.
+  in a notice (bell, toast and phone).
 
 Runs are skipped when the person has less than ROUTINE_MIN_BUDGET_USD left this period, and
 don't feed memory extraction: a news digest says nothing new about the person.
@@ -35,6 +36,7 @@ from nexus_common.models import (
     Message,
     MessageRole,
     MessageStatus,
+    NotificationKind,
     Routine,
     RoutineRun,
     RoutineRunStatus,
@@ -42,13 +44,16 @@ from nexus_common.models import (
     UserStatus,
     utcnow,
 )
+from nexus_common.notices import notify
 from nexus_common.routines import (
     LATE_LIMIT,
     MAX_FAILURES,
     NOTHING_NEW,
+    ROUTINE_CHAT,
     ScheduleError,
     next_run,
     routine_payload,
+    routine_url,
 )
 from nexus_orchestrator.turn import ROUTINE_PREFIX, run_turn
 
@@ -172,7 +177,7 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
 
         chat = await db.get(Chat, r.chat_id) if r.chat_id else None
         if chat is None:
-            chat = Chat(user_id=user.id, title=r.name)
+            chat = Chat(user_id=user.id, title=r.name, kind=ROUTINE_CHAT)
             db.add(chat)
             await db.flush()
             r.chat_id = chat.id
@@ -212,24 +217,14 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
             return None
         run.finished_at = utcnow()
         run.input_tokens, run.output_tokens = reply.input_tokens, reply.output_tokens
+        paused = False
         if reply.status != MessageStatus.complete:
             run.status = RoutineRunStatus.failed
             run.error = reply.error or "The run didn't finish"
             r.failures += 1
             if r.failures >= MAX_FAILURES:
                 r.enabled, r.next_run_at = False, None
-                db.add(
-                    Message(
-                        chat_id=chat_id,
-                        role=MessageRole.assistant,
-                        content=(
-                            f"I paused **{r.name}** after {r.failures} failed runs in a row. "
-                            f"The last error: {run.error}\n\nTurn it back on from the "
-                            "Routines page once that's sorted."
-                        ),
-                        status=MessageStatus.complete,
-                    )
-                )
+                paused = True
         elif r.only_if_new and reply.content.strip().strip(".").upper() == NOTHING_NEW:
             run.status = RoutineRunStatus.quiet
             run.message_id = None
@@ -244,6 +239,23 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
         if status == RoutineRunStatus.ok:
             run.delivered = await deliver(deps, r, user, content)
             await db.commit()
+        if paused:
+            try:
+                await notify(
+                    db,
+                    deps.redis,
+                    deps.settings,
+                    r.user_id,
+                    NotificationKind.failed,
+                    f"Paused {r.name}",
+                    f"{r.failures} failed runs in a row. The last error: "
+                    f"{run.error.rstrip('.')}. Turn it back on from the Routines page once "
+                    "that's sorted.",
+                    url=routine_url(r),
+                    tag=f"routine:{r.id}",
+                )
+            except Exception:
+                log.warning("Could not post the pause notice for routine %s", r.id, exc_info=True)
         await _event(deps, r, status)
     return status
 
@@ -251,8 +263,8 @@ async def run_routine(deps, routine_id: uuid.UUID, scheduled_for: datetime) -> s
 def notice_text(deps, r: Routine, content: str) -> str:
     base = deps.settings.nexus_url.rstrip("/")
     return (
-        f"{content.strip()}\n\n---\nOpen it in Nexus: {base}/c/{r.chat_id}\n"
-        f"Change or pause this routine: {base}/routines\n"
+        f"{content.strip()}\n\n---\nSee it in Nexus, and change or pause this routine: "
+        f"{base}{routine_url(r)}\n"
     )
 
 
@@ -261,9 +273,7 @@ async def deliver(deps, r: Routine, user: User, content: str) -> list[str]:
     done: list[str] = []
     channels = set(r.delivery or [])
     if "push" in channels and deps.settings.push_enabled:
-        notice = push.Notice(
-            title=r.name, body=content, url=f"/c/{r.chat_id}", tag=f"routine:{r.id}"
-        )
+        notice = push.Notice(title=r.name, body=content, url=routine_url(r), tag=f"routine:{r.id}")
         try:
             async with deps.sessionmaker() as db:
                 if await push.send(db, deps.settings, user.id, notice):

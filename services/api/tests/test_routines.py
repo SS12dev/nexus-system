@@ -35,6 +35,41 @@ async def test_create_list_update_and_delete(owner):
 
     assert (await owner.delete(f"/api/routines/{r['id']}")).status_code == 204
     assert (await owner.get("/api/routines")).json() == []
+    # Its hidden chat goes with it.
+    assert (await owner.get(f"/api/chats/{r['chat_id']}/messages")).status_code == 404
+
+
+async def test_routine_chats_stay_out_of_the_chat_list(owner, sessionmaker):
+    import uuid
+
+    from nexus_common.models import Message, MessageRole, MessageStatus, RoutineRun
+
+    mine = (await owner.post("/api/chats", json={"title": "Talk"})).json()
+    r = (await make(owner)).json()
+    assert [c["id"] for c in (await owner.get("/api/chats")).json()] == [mine["id"]]
+
+    # A run's reply is read in the routine's history instead.
+    async with sessionmaker() as db:
+        reply = Message(
+            chat_id=uuid.UUID(r["chat_id"]),
+            role=MessageRole.assistant,
+            content="Three things happened.",
+            status=MessageStatus.complete,
+        )
+        db.add(reply)
+        await db.flush()
+        db.add(
+            RoutineRun(
+                routine_id=uuid.UUID(r["id"]),
+                scheduled_for=datetime.fromisoformat(r["next_run_at"]),
+                status="ok",
+                message_id=reply.id,
+                delivered=[],
+            )
+        )
+        await db.commit()
+    runs = (await owner.get(f"/api/routines/{r['id']}/runs")).json()
+    assert [x["content"] for x in runs] == ["Three things happened."]
 
 
 async def test_bad_schedules_are_refused(owner):

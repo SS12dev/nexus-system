@@ -65,11 +65,9 @@ export function Shell() {
   const { chatId } = useParams();
   const { pathname } = useLocation();
 
-  // Routines post into chats of their own, made on the server: reload the list when one runs.
-  const routinesVersion = useStore((s) => s.routinesVersion);
   useEffect(() => {
     api.chats().then(setChats).catch(console.error);
-  }, [setChats, routinesVersion]);
+  }, [setChats]);
 
   useEffect(() => setOpen(false), [pathname]);
 
