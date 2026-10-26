@@ -8,6 +8,7 @@ from sqlalchemy import select
 from nexus_common.memory import get_profile
 from nexus_common.models import (
     Chat,
+    Entity,
     Episode,
     File,
     FileChunk,
@@ -18,6 +19,7 @@ from nexus_common.models import (
     Message,
     MessageRole,
     MessageStatus,
+    Relation,
     RoleName,
     UserStatus,
     utcnow,
@@ -370,14 +372,42 @@ async def test_quiet_chats_get_an_episode_that_later_chats_recall(
 async def test_profile_rebuild_uses_pinned_memories(deps, model, chat, sessionmaker, embedder):
     user_id, _, _ = chat
     await add_memory(sessionmaker, embedder, user_id, "Prefers tables", pinned=True)
-    model.script = ["**Preferences**\n- Prefers tables"]
+    model.script = [
+        js(
+            entities=[{"name": "Figma", "type": "tool", "summary": "A design tool"}],
+            relations=[
+                {
+                    "from": "USER",
+                    "predicate": "uses",
+                    "to": "Figma",
+                    "fact": "Uses Figma.",
+                    "ended": False,
+                }
+            ],
+            about=[{"item": 0, "entities": ["Figma"]}],
+        ),
+        "**Preferences**\n- Prefers tables",
+    ]
     await memory.rebuild_profile(deps, user_id)
-    prompt = model.seen[0][1].content
+    prompt = model.seen[-1][1].content
     assert "pinned" in prompt and "Prefers tables" in prompt
     async with sessionmaker() as db:
         profile = await get_profile(db, user_id)
+        linked = await db.scalar(
+            select(Memory.graph_at).where(
+                Memory.user_id == user_id,
+                Memory.content == "Prefers tables",
+            )
+        )
+        figma = await db.scalar(
+            select(Entity).where(Entity.user_id == user_id, Entity.name == "Figma")
+        )
+        relation = await db.scalar(
+            select(Relation).where(Relation.user_id == user_id, Relation.predicate == "uses")
+        )
     assert profile.content.startswith("**Preferences**") and profile.stale is False
     assert profile.built_at is not None
+    assert linked is not None and figma is not None and relation is not None
 
 
 async def test_nightly_decays_stale_memories_and_merges_duplicates(

@@ -2,12 +2,13 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy import delete, select, update
 
 from nexus_api.cache import cached_spend
 from nexus_api.deps import AdminUser, DbDep, GatewayDep, QueueDep, RedisDep, SettingsDep
 from nexus_api.schemas import (
+    AdminProfileResetIn,
     AdminUserOut,
     BudgetOut,
     GrantsIn,
@@ -24,16 +25,21 @@ from nexus_api.users import (
     owner_count,
     set_role,
 )
-from nexus_common import notices
+from nexus_common import google, notices
 from nexus_common.litellm import GatewayError, LiteLLMAdmin, active_key, get_budget
 from nexus_common.models import (
+    AccountRecoveryRequest,
+    AccountRecoveryStatus,
     AuditLog,
     Capability,
     NotificationKind,
+    PushSubscription,
+    Role,
     RoleName,
     ToolGrant,
     User,
     UserStatus,
+    utcnow,
 )
 from nexus_common.settings import Settings
 from nexus_common.systems import granted_capabilities
@@ -329,3 +335,82 @@ async def sign_out_user(user_id: uuid.UUID, actor: AdminUser, db: DbDep) -> None
     await revoke_all(db, user)
     db.add(AuditLog(actor_id=actor.id, action="user.signed_out", target=str(user.id)))
     await db.commit()
+
+
+@router.post("/users/{user_id}/reset", status_code=status.HTTP_202_ACCEPTED)
+async def reset_profile(
+    user_id: uuid.UUID,
+    body: AdminProfileResetIn,
+    request: Request,
+    actor: AdminUser,
+    db: DbDep,
+    settings: SettingsDep,
+    gateway: GatewayDep,
+    queue: QueueDep,
+) -> dict[str, str]:
+    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if not can_manage(actor, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't reset this user")
+    if body.confirm.strip().casefold() != user.email.casefold():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Type their email to confirm")
+    if user.status == UserStatus.invited or user.account_deleted_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This profile can't be reset right now")
+    if user.role == RoleName.owner:
+        await db.scalar(select(Role).where(Role.name == RoleName.owner).with_for_update())
+        if await owner_count(db) <= 1:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Promote another active owner before resetting the last owner profile.",
+            )
+
+    key = await active_key(db, user.id)
+    if key:
+        await _gateway_call(gateway.set_blocked(key.secret, True))
+    try:
+        await google.disconnect(db, settings, user.id, http=request.app.state.google_http)
+    except Exception:
+        log.warning("account.google_revoke_failed", exc_info=True, extra={"user_id": str(user.id)})
+
+    await revoke_all(db, user)
+    now = utcnow()
+    user.account_deleted_at = now
+    user.account_delete_expires_at = now
+    user.account_purge_started_at = now
+    user.account_reset_requested_at = now
+    user.status = UserStatus.disabled
+    await db.execute(delete(PushSubscription).where(PushSubscription.user_id == user.id))
+    await db.execute(
+        update(AccountRecoveryRequest)
+        .where(
+            AccountRecoveryRequest.user_id == user.id,
+            AccountRecoveryRequest.status == AccountRecoveryStatus.pending,
+        )
+        .values(status=AccountRecoveryStatus.cancelled, decided_at=now)
+    )
+    db.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="user.profile_reset_requested",
+            target=str(user.id),
+            data={"email": user.email},
+        )
+    )
+    await db.commit()
+    try:
+        await queue.enqueue_account_purge(user.id)
+    except Exception as exc:
+        log.exception(
+            "account.reset_enqueue_failed",
+            extra={"user_id": str(user.id), "actor_id": str(actor.id)},
+        )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The reset is recorded, but cleanup could not be queued. The worker will retry it.",
+        ) from exc
+    log.info(
+        "user.profile_reset_requested",
+        extra={"user_id": str(user.id), "actor_id": str(actor.id)},
+    )
+    return {"status": "resetting"}

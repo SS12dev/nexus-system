@@ -33,6 +33,8 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
             "assistant_name": "Friday",
             "roles": ["teaching"],
             "role_note": "Teaches year 7 science",
+            "current_focus": "Prepare a climate science unit",
+            "tools": "Google Classroom, Python",
             "interests": ["cooking", "travel"],
             "about": "Lives in Pune, follows climate news",
             "timezone": "Asia/Kolkata",
@@ -52,6 +54,9 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
     me = body["me"]
     assert me["onboarded_at"] and me["assistant_name"] == "Friday"
     assert me["timezone"] == "Asia/Kolkata"
+    assert me["profile"]["current_focus"] == "Prepare a climate science unit"
+    assert me["profile"]["tools"] == "Google Classroom, Python"
+    assert me["profile"]["about"] == "Lives in Pune, follows climate news"
     assert set(me["profile"]["packs"]) >= {"essentials", "teaching", "cooking", "travel"}
     assert queue.profiles, "the profile is rebuilt right away"
 
@@ -61,6 +66,9 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
         routines = (await db.scalars(select(Routine).where(Routine.user_id == user.id))).all()
     texts = {m.content for m in memories}
     assert "Work: Teaches year 7 science" in texts
+    assert "Current focus: Prepare a climate science unit" in texts
+    assert "Uses: Google Classroom, Python" in texts
+    assert "About me: Lives in Pune, follows climate news" in texts
     assert "Works as a teacher." in texts
     assert "Prefers short, to-the-point answers." in texts
     assert {"Wants help with cooking.", "Wants help with travel."} <= texts
@@ -75,7 +83,7 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
     predicates = {(r["src"], r["predicate"], r["dst"]) for r in graph["relations"]}
     assert (me["id"], "works in", names["Teaching"]["id"]) in predicates
     assert (me["id"], "wants help with", names["Travel"]["id"]) in predicates
-    about = next(m for m in memories if m.content.startswith("Lives in Pune"))
+    about = next(m for m in memories if m.content.startswith("About me: Lives in Pune"))
     assert about.graph_at is None
     by_name = {r.name: r for r in routines}
     assert by_name["Morning brief"].schedule == "FREQ=DAILY;BYHOUR=7;BYMINUTE=30"

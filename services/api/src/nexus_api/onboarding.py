@@ -68,13 +68,24 @@ def memories_from(body: OnboardingIn, packs: list[Pack]) -> list[Seed]:
     out: list[Seed] = []
     if body.role_note.strip():
         out.append((MemoryKind.fact, f"Work: {' '.join(body.role_note.split())}", True, role_names))
+    if body.current_focus.strip():
+        out.append(
+            (
+                MemoryKind.goal,
+                f"Current focus: {' '.join(body.current_focus.split())}",
+                True,
+                [],
+            )
+        )
+    if body.tools.strip():
+        out.append((MemoryKind.fact, f"Uses: {' '.join(body.tools.split())}", True, []))
     for p in roles:
         out += [(kind, text, True, [p.label]) for kind, text in p.memories]
     for i in body.interests:
         if label := INTERESTS.get(i):
             out.append((MemoryKind.preference, f"Wants help with {label.lower()}.", True, [label]))
     if body.about.strip():
-        out.append((MemoryKind.fact, " ".join(body.about.split()), True, []))
+        out.append((MemoryKind.fact, f"About me: {' '.join(body.about.split())}", True, []))
     if body.day_start:
         out.append((MemoryKind.fact, f"Usually starts the day around {body.day_start}.", False, []))
     if body.style:
@@ -89,8 +100,7 @@ def memories_from(body: OnboardingIn, packs: list[Pack]) -> list[Seed]:
 
 
 def graph_from(body: OnboardingIn, packs: list[Pack]) -> Extracted:
-    """The professions and interests as topics around the user, so the orb shows them from the
-    first minute rather than after the graph job has read the memories."""
+    """Seed selected roles and interests immediately; the profile job links free-text memories."""
     found = Extracted()
     for p in packs:
         if p.kind == "role" and p.id in body.roles:
@@ -156,6 +166,9 @@ async def apply(
     profile = {
         "roles": body.roles,
         "role_note": body.role_note.strip(),
+        "current_focus": body.current_focus.strip(),
+        "tools": body.tools.strip(),
+        "about": body.about.strip(),
         "interests": body.interests,
         "day_start": body.day_start,
         "style": body.style.model_dump() if body.style else None,

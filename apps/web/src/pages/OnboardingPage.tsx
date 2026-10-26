@@ -110,10 +110,12 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
   const [agreed, setAgreed] = useState(!askTerms);
   const [roles, setRoles] = useState<string[]>(prior.roles ?? []);
   const [roleNote, setRoleNote] = useState(prior.role_note ?? "");
+  const [currentFocus, setCurrentFocus] = useState(prior.current_focus ?? "");
+  const [tools, setTools] = useState(prior.tools ?? "");
   const [timezone, setTimezone] = useState(user.timezone || browserTimezone());
   const [dayStart, setDayStart] = useState(prior.day_start || "08:00");
   const [interests, setInterests] = useState<string[]>(prior.interests ?? []);
-  const [about, setAbout] = useState("");
+  const [about, setAbout] = useState(prior.about ?? "");
   const [style, setStyle] = useState<AnswerStyle>(
     prior.style ?? { length: "balanced", tone: "casual", language: "" },
   );
@@ -169,6 +171,8 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
           assistant_name: cleanName,
           roles,
           role_note: roleNote,
+          current_focus: currentFocus,
+          tools,
           interests,
           about,
           timezone,
@@ -365,7 +369,7 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
       )}
 
       {step === 3 && (
-        <Step title={`What should ${cleanName} help with?`} hint="Pick as many as you like.">
+        <Step title={`What should ${cleanName} know about your world?`} hint="A little context helps it remember the people, work and tools that matter to you.">
           <Tiles
             compact
             icons={{ ...ICONS, ...INTEREST_ICONS }}
@@ -377,9 +381,31 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
               )
             }
           />
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-slate-400">A project or goal you’re focused on</span>
+            <input
+              aria-label="Current focus"
+              placeholder="e.g. finishing my thesis or growing a small business"
+              value={currentFocus}
+              maxLength={500}
+              onChange={(e) => setCurrentFocus(e.target.value)}
+              className="w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-slate-400">Tools or technologies you use</span>
+            <input
+              aria-label="Tools or technologies"
+              placeholder="e.g. Python, Figma, Notion"
+              value={tools}
+              maxLength={500}
+              onChange={(e) => setTools(e.target.value)}
+              className="w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
+            />
+          </label>
           <textarea
             aria-label="Anything else"
-            placeholder="Anything else worth knowing? Topics you follow, your city, tools you use… (optional)"
+            placeholder="Anything else worth knowing? Topics you follow, your city, or how you like to work… (optional)"
             value={about}
             rows={3}
             maxLength={1000}

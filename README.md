@@ -131,7 +131,9 @@ sign-in, since Google does not accept private IP addresses as callbacks.
 
 - **Roles:** owner > admin > member > viewer, checked on every API route. Viewers can read their
   own chats but not send messages. Admins manage members and viewers on the People page; only
-  owners grant admin or owner, and the last active owner can't be demoted or disabled.
+  owners grant admin or owner. Resetting a profile permanently removes its chats, memories, files,
+  projects and managed GitHub repositories, then recreates the same identity and role for
+  onboarding; the last active owner can't be reset, demoted or disabled.
 - **Who is owner:** the first person ever to sign in becomes owner; everyone after that joins
   with the role they were invited with (member by default). Only owners see the Admin page and
   can call its APIs (`/api/admin/status`, `usage`, `audit`, `backups`, `maintenance`), so invite
@@ -276,7 +278,8 @@ from Settings › Run setup again). Every step after the first can be skipped:
 1. **Name** their assistant.
 2. **Work**: up to three professions, plus a line in their own words.
 3. **Day**: time zone (from the browser) and when their day starts.
-4. **Help with**: interests such as cooking, travel or news, plus anything else worth knowing.
+4. **About their world**: interests, a current project or goal, tools they use, and anything else
+   worth knowing.
 5. **Style**: short, balanced or detailed; casual or professional; a reply language.
 6. **Routines** suggested for those answers, each with a time, and whether to also be told by
    email or WhatsApp.
@@ -285,7 +288,8 @@ The answers become memories with source `onboarding` (pinned where they were dir
 so they show on the Memory page and can be edited or deleted like any other. Professions and
 interests also go straight into the knowledge graph as topics linked to the person ("works in
 Teaching", "wants help with Cooking"), with their memories attached, so the orb shows them at
-once; the free-text answer is left for the graph job, which can find a city or a tool in it.
+once. The profile rebuild immediately extracts entities and relations from free-text answers too,
+so projects, tools and places can be linked without waiting for the nightly graph job.
 The routines step ticks at most three to start (the morning brief and one per profession;
 interest routines start unticked) and warns past five, since each run uses the budget. The profile is
 rebuilt straight away, the picked routines are added, and a **Welcome** chat lists what was set

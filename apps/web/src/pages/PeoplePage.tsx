@@ -1,7 +1,8 @@
-import { Check, Clock, Copy, History, Inbox, Mail, Search, ShieldCheck, UserPlus, X } from "lucide-react";
+import { Check, Clock, Copy, History, Inbox, Mail, RotateCcw, Search, ShieldCheck, UserPlus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { confirmAction, toast } from "../components/Feedback";
 import { Select } from "../components/Select";
+import { TextPromptDialog } from "../components/TextPromptDialog";
 import { api } from "../lib/api";
 import { APP_NAME } from "../lib/assistant";
 import { describeAgent, formatAgo, formatDateTime } from "../lib/format";
@@ -697,6 +698,7 @@ function PersonRow({
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
   const name = personName(u);
+  const [resetOpen, setResetOpen] = useState(false);
   const seen =
     u.status === "invited"
       ? `invited ${formatAgo(u.created_at)}, hasn't signed in yet`
@@ -814,6 +816,38 @@ function PersonRow({
         <button onClick={toggleDisabled} className={btn}>
           {u.status === "disabled" ? "Enable" : "Disable"}
         </button>
+      )}
+      {u.status !== "invited" && canManage && (
+        <button
+          onClick={() => setResetOpen(true)}
+          className={`${btn} flex items-center gap-1 hover:border-rose-800 hover:text-rose-300`}
+          title="Permanently remove this profile's data and start fresh"
+        >
+          <RotateCcw size={13} /> Reset
+        </button>
+      )}
+      {resetOpen && (
+        <TextPromptDialog
+          title={`Reset ${name}'s profile?`}
+          description="This permanently removes their chats, memories, files, projects, Trash and managed GitHub repositories. Their verified identity and role are recreated for a clean onboarding, and every device is signed out. External repository deletion cannot be undone."
+          fields={[
+            {
+              key: "confirm",
+              label: `Type ${u.email} to confirm`,
+              value: "",
+              maxLength: 320,
+            },
+          ]}
+          confirmLabel="Reset profile"
+          danger
+          onClose={() => setResetOpen(false)}
+          onSubmit={async ({ confirm }) => {
+            await api.resetUser(u.id, confirm);
+            setResetOpen(false);
+            onRemoved();
+            toast(`${name}'s reset is underway. They can sign in again when cleanup finishes.`, "info");
+          }}
+        />
       )}
     </li>
   );

@@ -193,3 +193,58 @@ async def test_manual_invite_queues_email_and_can_retry(owner, app, settings, qu
         ]
     finally:
         app.state.settings = settings
+
+
+async def test_admin_can_reset_a_managed_profile_to_fresh_onboarding(
+    owner, invite, client_for, sessionmaker, queue
+):
+    invited = await invite(owner, "friend@example.com")
+    user_id = uuid.UUID(invited["id"])
+    await client_for("friend@example.com")
+
+    mismatch = await owner.post(
+        f"/api/admin/users/{user_id}/reset", json={"confirm": "wrong@example.com"}
+    )
+    assert mismatch.status_code == 422
+
+    response = await owner.post(
+        f"/api/admin/users/{user_id}/reset", json={"confirm": "FRIEND@example.com"}
+    )
+    assert response.status_code == 202, response.text
+    assert response.json() == {"status": "resetting"}
+    assert queue.account_purges == [user_id]
+    async with sessionmaker() as db:
+        user = await db.get(User, user_id)
+        assert user.status == UserStatus.disabled
+        assert user.account_deleted_at is not None
+        assert user.account_reset_requested_at is not None
+        assert user.account_purge_started_at is not None
+        assert await db.scalar(
+            select(AuditLog.id).where(
+                AuditLog.action == "user.profile_reset_requested",
+                AuditLog.target == str(user_id),
+            )
+        )
+
+
+async def test_admin_cannot_reset_a_higher_role_profile(owner, invite, client_for, sessionmaker):
+    await invite(owner, "admin@example.com", role="admin")
+    admin_client = await client_for("admin@example.com")
+    owner_id = uuid.UUID((await owner.get("/api/me")).json()["id"])
+
+    response = await admin_client.post(
+        f"/api/admin/users/{owner_id}/reset", json={"confirm": "owner@example.com"}
+    )
+    assert response.status_code == 403
+    async with sessionmaker() as db:
+        user = await db.get(User, owner_id)
+        assert user.account_deleted_at is None
+        assert user.status == UserStatus.active
+
+
+async def test_last_active_owner_cannot_reset_their_only_profile(owner):
+    owner_id = (await owner.get("/api/me")).json()["id"]
+    response = await owner.post(
+        f"/api/admin/users/{owner_id}/reset", json={"confirm": "owner@example.com"}
+    )
+    assert response.status_code == 409

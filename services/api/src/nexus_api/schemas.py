@@ -122,6 +122,8 @@ class OnboardingIn(BaseModel):
     roles: list[str] = Field(default=[], max_length=5)
     # Their work in their own words, e.g. "PhD student in marine biology".
     role_note: str = Field(default="", max_length=300)
+    current_focus: str = Field(default="", max_length=500)
+    tools: str = Field(default="", max_length=500)
     interests: list[str] = Field(default=[], max_length=20)
     # Anything else: topics they follow, their city, their stack.
     about: str = Field(default="", max_length=1000)
@@ -293,6 +295,10 @@ class UserUpdateIn(BaseModel):
     role: RoleName | None = None
     status: UserStatus | None = None
     budget_usd: Usd | None = None
+
+
+class AdminProfileResetIn(BaseModel):
+    confirm: EmailStr
 
 
 class GoogleAccessOut(BaseModel):

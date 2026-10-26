@@ -411,6 +411,11 @@ export const api = {
     request<AccountRecoveryRequest>(`/api/admin/account-recovery/${id}/deny`, { method: "POST" }),
   signOutUser: (id: string) =>
     request<void>(`/api/admin/users/${id}/sign-out`, { method: "POST" }),
+  resetUser: (id: string, confirm: string) =>
+    request<{ status: string }>(`/api/admin/users/${id}/reset`, {
+      method: "POST",
+      body: json({ confirm }),
+    }),
   systemStatus: (userIds: string[] = []) =>
     request<OpsStatus>(`/api/admin/status${userIds.length ? `?${forUsers(userIds)}` : ""}`),
   usage: (days = 7, userIds: string[] = []) => {

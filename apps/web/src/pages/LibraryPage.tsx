@@ -18,6 +18,7 @@ import { Link, useSearchParams } from "react-router";
 import { FileIcon, StatusIcon } from "../components/FileChip";
 import { FilePreview } from "../components/FilePreview";
 import { LinkIcon, LinkPreview } from "../components/LinkChip";
+import { TextPromptDialog, type TextPromptField } from "../components/TextPromptDialog";
 import { ProjectCard } from "../components/ProjectCard";
 import { api } from "../lib/api";
 import { ACCEPT, formatDate, formatSize } from "../lib/format";
@@ -31,6 +32,14 @@ import { confirmAction } from "../components/Feedback";
 
 /** Links shown before "Show all", so files stay near the top of the page. */
 const LINKS_SHOWN = 5;
+
+interface LibraryTextPrompt {
+  id: number;
+  title: string;
+  fields: TextPromptField[];
+  confirmLabel: string;
+  onSubmit: (values: Record<string, string>) => Promise<void>;
+}
 
 export function LibraryPage() {
   const assistant = useAssistantName();
@@ -56,6 +65,8 @@ export function LibraryPage() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [preview, setPreview] = useState<FileItem | null>(null);
+  const [textPrompt, setTextPrompt] = useState<LibraryTextPrompt | null>(null);
+  const promptSequence = useRef(0);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -124,6 +135,9 @@ export function LibraryPage() {
     }
   };
 
+  const openPrompt = (prompt: Omit<LibraryTextPrompt, "id">) =>
+    setTextPrompt({ ...prompt, id: ++promptSequence.current });
+
   const upload = (list: FileList | File[]) =>
     Array.from(list).forEach((file) =>
       run(async () => {
@@ -147,36 +161,57 @@ export function LibraryPage() {
   };
 
   const rename = (f: FileItem) => {
-    const name = prompt("Rename file", f.name);
-    if (name && name !== f.name) run(async () => upsertFile(await api.renameFile(f.id, name)));
+    openPrompt({
+      title: "Rename file",
+      fields: [{ key: "name", label: "File name", value: f.name, maxLength: 255 }],
+      confirmLabel: "Save name",
+      onSubmit: async ({ name }) => {
+        const clean = name.trim();
+        if (clean && clean !== f.name) upsertFile(await api.renameFile(f.id, clean));
+      },
+    });
   };
 
-  const move = (f: FileItem, to: string) =>
-    run(async () => {
-      let folderId: string | null = to || null;
-      if (to === "new") {
-        const name = prompt("New project's name", "")?.trim();
-        if (!name) return;
-        const made = await api.addFolder(name);
-        setFolders((xs) => [made, ...xs]);
-        folderId = made.id;
-      }
-      const moved = await api.moveFile(f.id, folderId);
-      upsertFile(moved);
-      // Its other versions moved with it.
-      for (const other of Object.values(useStore.getState().files))
-        if ((other.version_of_id ?? other.id) === (f.version_of_id ?? f.id) && other.id !== f.id)
-          upsertFile({ ...other, folder_id: folderId });
-      if (folderId) setOpen((o) => new Set(o).add(folderId!));
-    });
+  const moveFile = async (f: FileItem, folderId: string | null) => {
+    const moved = await api.moveFile(f.id, folderId);
+    upsertFile(moved);
+    // Its other versions moved with it.
+    for (const other of Object.values(useStore.getState().files))
+      if ((other.version_of_id ?? other.id) === (f.version_of_id ?? f.id) && other.id !== f.id)
+        upsertFile({ ...other, folder_id: folderId });
+    if (folderId) setOpen((o) => new Set(o).add(folderId));
+  };
+
+  const move = (f: FileItem, to: string) => {
+    if (to === "new") {
+      openPrompt({
+        title: "Create a project",
+        fields: [{ key: "name", label: "Project name", value: "", maxLength: 200 }],
+        confirmLabel: "Create and move",
+        onSubmit: async ({ name }) => {
+          const made = await api.addFolder(name.trim());
+          setFolders((xs) => [made, ...xs]);
+          await moveFile(f, made.id);
+        },
+      });
+      return;
+    }
+    run(() => moveFile(f, to || null));
+  };
 
   const renameFolder = (d: Folder) => {
-    const name = prompt("Rename project", d.name)?.trim();
-    if (name && name !== d.name)
-      run(async () => {
-        const saved = await api.renameFolder(d.id, name);
-        setFolders((xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
-      });
+    openPrompt({
+      title: "Rename project",
+      fields: [{ key: "name", label: "Project name", value: d.name, maxLength: 200 }],
+      confirmLabel: "Save name",
+      onSubmit: async ({ name }) => {
+        const clean = name.trim();
+        if (clean && clean !== d.name) {
+          const saved = await api.renameFolder(d.id, clean);
+          setFolders((xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
+        }
+      },
+    });
   };
 
   const removeFolder = async (d: Folder) => {
@@ -245,13 +280,23 @@ export function LibraryPage() {
   };
 
   const editLink = (l: LinkItem) => {
-    const title = prompt("Title", l.title);
-    if (title === null) return;
-    const note = prompt("What it is, in a sentence (optional)", l.note ?? "");
-    if (note === null) return;
-    run(async () => {
-      const saved = await api.editLink(l.id, { title: title.trim() || l.title, note });
-      setLinks((xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
+    openPrompt({
+      title: "Edit link",
+      fields: [
+        { key: "title", label: "Title", value: l.title, maxLength: 200 },
+        {
+          key: "note",
+          label: "What it is, in a sentence (optional)",
+          value: l.note ?? "",
+          maxLength: 500,
+          optional: true,
+        },
+      ],
+      confirmLabel: "Save link",
+      onSubmit: async ({ title, note }) => {
+        const saved = await api.editLink(l.id, { title: title.trim() || l.title, note });
+        setLinks((xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
+      },
     });
   };
 
@@ -457,12 +502,15 @@ export function LibraryPage() {
           {canEdit && (
             <button
               onClick={() =>
-                run(async () => {
-                  const name = prompt("New project's name", "")?.trim();
-                  if (!name) return;
-                  const made = await api.addFolder(name);
-                  setFolders((xs) => [made, ...xs]);
-                  setOpen((o) => new Set(o).add(made.id));
+                openPrompt({
+                  title: "New project",
+                  fields: [{ key: "name", label: "Project name", value: "", maxLength: 200 }],
+                  confirmLabel: "Create project",
+                  onSubmit: async ({ name }) => {
+                    const made = await api.addFolder(name.trim());
+                    setFolders((xs) => [made, ...xs]);
+                    setOpen((o) => new Set(o).add(made.id));
+                  },
                 })
               }
               className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-edge/60 hover:text-white"
@@ -587,6 +635,19 @@ export function LibraryPage() {
       </div>
       {preview && <FilePreview file={preview} onClose={() => setPreview(null)} />}
       {linkPreview && <LinkPreview link={linkPreview} onClose={() => setLinkPreview(null)} />}
+      {textPrompt && (
+        <TextPromptDialog
+          key={textPrompt.id}
+          title={textPrompt.title}
+          fields={textPrompt.fields}
+          confirmLabel={textPrompt.confirmLabel}
+          onClose={() => setTextPrompt(null)}
+          onSubmit={async (values) => {
+            await textPrompt.onSubmit(values);
+            setTextPrompt(null);
+          }}
+        />
+      )}
     </div>
   );
 }

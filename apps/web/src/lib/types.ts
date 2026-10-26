@@ -67,6 +67,9 @@ export interface FeedbackItem {
 export interface UserProfile {
   roles?: string[];
   role_note?: string;
+  current_focus?: string;
+  tools?: string;
+  about?: string;
   interests?: string[];
   day_start?: string | null;
   style?: AnswerStyle | null;
@@ -127,6 +130,8 @@ export interface OnboardingAnswers {
   accept_terms?: string;
   roles: string[];
   role_note: string;
+  current_focus?: string;
+  tools?: string;
   interests: string[];
   about: string;
   timezone: string;

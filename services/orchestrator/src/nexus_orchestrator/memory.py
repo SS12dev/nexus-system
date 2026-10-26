@@ -603,6 +603,14 @@ async def rebuild_profile(deps: TurnDeps, user_id: uuid.UUID) -> None:
         user = await db.get(User, user_id)
         if user is None or user.status != UserStatus.active:
             return
+    if deps.settings.graph_enabled:
+        for _ in range(GRAPH_CALLS_PER_USER):
+            if await _link_batch(deps, user_id) < GRAPH_BATCH:
+                break
+    async with deps.sessionmaker() as db:
+        user = await db.get(User, user_id)
+        if user is None or user.status != UserStatus.active:
+            return
         profile = await get_profile(db, user_id)
         memories = (
             await db.scalars(
