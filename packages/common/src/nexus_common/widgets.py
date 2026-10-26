@@ -61,6 +61,7 @@ def payload(w: Widget) -> dict:
         "title": w.title,
         "state": state,
         "slot": w.slot,
+        "pos": w.pos,
         "chat_id": str(w.chat_id) if w.chat_id else None,
         "fires_at": _iso(w.fires_at),
         "created_at": w.created_at.isoformat(),

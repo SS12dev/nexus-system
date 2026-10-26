@@ -1202,6 +1202,11 @@ export interface WidgetManifest {
 
 /** A widget on the main screen. The server keeps the time: a timer has ends_at, not a
  * countdown, so every device shows the same. */
+export interface WidgetPos {
+  x: number;
+  y: number;
+}
+
 export interface Widget {
   id: string;
   kind: WidgetKind;
@@ -1226,6 +1231,9 @@ export interface Widget {
     approved?: { hosts: string[]; data: string[] };
   };
   slot: number;
+  /** Where it was dragged to on a laptop's main screen, 0..1 across the room beside it; null
+   * when it sits in the dock. */
+  pos: WidgetPos | null;
   chat_id: string | null;
   fires_at: string | null;
   created_at: string;

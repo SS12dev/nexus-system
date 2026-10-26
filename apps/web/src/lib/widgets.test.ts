@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Widget } from "./types";
-import { clock, elapsed, frameHeight, isRinging, pendingAsks, repeatText, timerLeft, zoneCity } from "./widgets";
+import { clock, elapsed, frameHeight, isRinging, pendingAsks, placeIn, repeatText, timerLeft, zoneCity } from "./widgets";
 
 const T0 = Date.parse("2026-10-25T18:00:00Z");
 const widget = (kind: Widget["kind"], state: Widget["state"]): Widget => ({
@@ -9,6 +9,7 @@ const widget = (kind: Widget["kind"], state: Widget["state"]): Widget => ({
   title: "",
   state,
   slot: 1,
+  pos: null,
   chat_id: null,
   fires_at: null,
   created_at: "",
@@ -65,5 +66,19 @@ describe("custom widgets", () => {
       approved: { hosts: ["x.io"], data: [] },
     });
     expect(pendingAsks(w)).toEqual({ hosts: ["api.open-meteo.com"], data: ["calendar.today"] });
+  });
+});
+
+describe("placeIn", () => {
+  const room = { width: 1000, height: 600 };
+  const card = { width: 200, height: 100 };
+  it("measures across the room left beside the card", () => {
+    expect(placeIn(0, 0, room, card)).toEqual({ x: 0, y: 0 });
+    expect(placeIn(800, 500, room, card)).toEqual({ x: 1, y: 1 });
+    expect(placeIn(400, 250, room, card)).toEqual({ x: 0.5, y: 0.5 });
+  });
+  it("keeps a card dragged off the edge on screen", () => {
+    expect(placeIn(-50, 900, room, card)).toEqual({ x: 0, y: 1 });
+    expect(placeIn(10, 10, { width: 150, height: 80 }, card)).toEqual({ x: 0, y: 0 });
   });
 });

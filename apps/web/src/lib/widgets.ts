@@ -101,3 +101,16 @@ export function pendingAsks(w: Widget): { hosts: string[]; data: string[] } {
     data: (m?.data ?? []).filter((d) => !ok.data.includes(d)),
   };
 }
+
+/** Where a card dragged to (left, top) inside a room sits, as 0..1 of the room left beside it:
+ * 0 is flush left or top, 1 flush right or bottom, so it stays in the same corner on any screen. */
+export function placeIn(
+  left: number,
+  top: number,
+  room: { width: number; height: number },
+  card: { width: number; height: number },
+): { x: number; y: number } {
+  const part = (at: number, span: number) =>
+    span <= 0 ? 0 : Math.round(Math.min(Math.max(at / span, 0), 1) * 1e4) / 1e4;
+  return { x: part(left, room.width - card.width), y: part(top, room.height - card.height) };
+}

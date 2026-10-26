@@ -262,3 +262,13 @@ body {
     animation: none;
   }
 }
+
+/* While a widget is dragged across the main screen: no text selection, and frames (custom
+   widgets) don't catch the pointer on the way. */
+body.widget-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+body.widget-dragging iframe {
+  pointer-events: none;
+}

@@ -3,6 +3,7 @@ import {
   BellRing,
   Clock,
   ArrowUpToLine,
+  PanelRightClose,
   Pause,
   Play,
   Plus,
@@ -15,9 +16,20 @@ import {
   Watch,
   X,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { create } from "zustand";
 import { api } from "../lib/api";
-import type { BridgeCall, Widget, WidgetAction, WidgetInput } from "../lib/types";
+import type { BridgeCall, Widget, WidgetAction, WidgetInput, WidgetPos } from "../lib/types";
 import {
   clock,
   DATA_LABELS,
@@ -26,6 +38,7 @@ import {
   isRinging,
   nextRing,
   pendingAsks,
+  placeIn,
   repeatText,
   timeIn,
   timerLeft,
@@ -34,6 +47,7 @@ import {
 import { useStore } from "../store/chat";
 import { useWidgetPointedAt } from "./Screen";
 import { useAssistantName } from "../lib/assistant";
+import { useWide } from "../lib/media";
 
 /** The clock every widget reads from, ticking once a second (or faster for a stopwatch). */
 export function useNow(ms = 1000): number {
@@ -87,8 +101,70 @@ const ICONS: Record<Widget["kind"], ReactNode> = {
 const btn =
   "rounded-md border border-edge bg-ink/40 p-1 text-slate-300 hover:border-sky-400/60 hover:text-white disabled:opacity-40";
 
-/** Where a card sits: the widget board fills the main area with a grid of full cards. */
-const Dock = createContext<{ board: boolean; firstId: string | null }>({ board: false, firstId: null });
+/** Where a card sits: the widget board fills the main area with a grid of full cards; on a
+ * laptop's main screen a card can be dragged out of the dock (movable) and left anywhere
+ * (floating). */
+const Dock = createContext<{ board: boolean; firstId: string | null; movable: boolean; floating: boolean }>({
+  board: false,
+  firstId: null,
+  movable: false,
+  floating: false,
+});
+
+/** The card being dragged, and where it would land (placeIn). */
+const useDrag = create<{ drag: { id: string; x: number; y: number } | null }>(() => ({ drag: null }));
+
+/** The part of the main screen widgets can be left in (FloatingWidgets), while it's shown.
+ * There is one main screen at a time. */
+let room: HTMLElement | null = null;
+
+/** Drag a card from where it is to anywhere in the room. Saved on release; a press that
+ * doesn't move, or one on a button or a note's text, is left to the card. */
+function startDrag(e: ReactPointerEvent, w: Widget, card: HTMLElement | null) {
+  const target = e.target as HTMLElement;
+  if (e.button !== 0 || !room || !card || target.closest("button, a, input, textarea, select")) return;
+  const r = room.getBoundingClientRect();
+  const c = card.getBoundingClientRect();
+  const size = { width: c.width, height: c.height };
+  const grab = { x: e.clientX - c.left, y: e.clientY - c.top };
+  const from = { x: e.clientX, y: e.clientY };
+  let moved = false;
+  const move = (ev: PointerEvent) => {
+    if (!moved && Math.hypot(ev.clientX - from.x, ev.clientY - from.y) < 4) return;
+    if (!moved) {
+      moved = true;
+      window.getSelection()?.removeAllRanges();
+      // Frames would swallow the pointer as it passes over them.
+      document.body.classList.add("widget-dragging");
+    }
+    const at = placeIn(ev.clientX - grab.x - r.left, ev.clientY - grab.y - r.top, r, size);
+    useDrag.setState({ drag: { id: w.id, ...at } });
+  };
+  const done = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", done);
+    window.removeEventListener("pointercancel", done);
+    document.body.classList.remove("widget-dragging");
+    const drag = useDrag.getState().drag;
+    useDrag.setState({ drag: null });
+    if (moved && drag?.id === w.id) place(w, { x: drag.x, y: drag.y });
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", done);
+  window.addEventListener("pointercancel", done);
+}
+
+/** Leave a widget where it was dropped, or (null) put it back in the dock. Shown at once; done
+ * by hand, so the assistant leaves its place alone. */
+async function place(w: Widget, pos: WidgetPos | null) {
+  const { upsertWidget } = useStore.getState();
+  upsertWidget({ ...w, pos });
+  try {
+    upsertWidget(await api.editWidget(w.id, pos ? { pos } : { dock: true }));
+  } catch {
+    upsertWidget(w);
+  }
+}
 
 /** How long a widget the assistant pointed at stays lit. */
 const POINTED_MS = 5000;
@@ -97,9 +173,19 @@ const POINTED_MS = 5000;
  * widget board, a grid over the whole main area. Orion adds them when asked ("set a timer for
  * 5 minutes"); the + button adds one by hand. */
 export function WidgetDock({ compact = false, board = false }: { compact?: boolean; board?: boolean }) {
-  const list = useWidgetList();
-  const now = useNow(list.some((w) => w.kind === "stopwatch" && w.state.status === "running") ? 100 : 1000);
-  const ctx = useMemo(() => ({ board, firstId: list[0]?.id ?? null }), [board, list]);
+  const all = useWidgetList();
+  const now = useWidgetClock(all);
+  const drag = useDrag((s) => s.drag);
+  // On a laptop's main screen the cards dragged out live in FloatingWidgets instead.
+  const movable = useWide() && !board;
+  const list = useMemo(
+    () => (movable ? all.filter((w) => !w.pos && drag?.id !== w.id) : all),
+    [all, movable, drag?.id],
+  );
+  const ctx = useMemo(
+    () => ({ board, firstId: list[0]?.id ?? null, movable, floating: false }),
+    [board, list, movable],
+  );
   const assistant = useAssistantName();
   if (board) {
     return (
@@ -118,7 +204,7 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
       </Dock.Provider>
     );
   }
-  if (list.length === 0 && compact) return null;
+  if (all.length === 0 && compact) return null;
   // The + sits outside the scrolling list, so its menu isn't clipped by it.
   return (
     <Dock.Provider value={ctx}>
@@ -139,6 +225,51 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
   );
 }
 
+/** Stopwatches tick tenths of a second; everything else once a second. */
+function useWidgetClock(list: Widget[]): number {
+  return useNow(list.some((w) => w.kind === "stopwatch" && w.state.status === "running") ? 100 : 1000);
+}
+
+/** The widgets dragged out of the dock on a laptop, each left where it was dropped over the
+ * orb or the lists. Their places are saved, so they come back there on any laptop. */
+export function FloatingWidgets({ compact = false }: { compact?: boolean }) {
+  const wide = useWide();
+  const all = useWidgetList();
+  const now = useWidgetClock(all);
+  const drag = useDrag((s) => s.drag);
+  const ctx = useMemo(() => ({ board: false, firstId: null, movable: true, floating: true }), []);
+  const shown = all.filter((w) => w.pos || drag?.id === w.id);
+  if (!wide) return null;
+  return (
+    <div
+      ref={(el) => {
+        room = el;
+      }}
+      className={`pointer-events-none absolute inset-x-4 bottom-4 z-30 ${compact ? "top-12" : "top-16"}`}
+      aria-label={shown.length ? "Widgets you placed" : undefined}
+    >
+      <Dock.Provider value={ctx}>
+        {shown.map((w) => {
+          const at = drag?.id === w.id ? drag : (w.pos as WidgetPos);
+          return (
+            <div
+              key={w.id}
+              className={`pointer-events-auto absolute ${compact ? "w-44" : "w-56"}`}
+              style={{
+                left: `${at.x * 100}%`,
+                top: `${at.y * 100}%`,
+                transform: `translate(${-at.x * 100}%, ${-at.y * 100}%)`,
+              }}
+            >
+              <WidgetCard widget={w} now={now} compact={compact} />
+            </div>
+          );
+        })}
+      </Dock.Provider>
+    </div>
+  );
+}
+
 /** Put a widget first on the dock. Done by hand, so the assistant leaves its place alone. */
 async function moveFirst(w: Widget) {
   try {
@@ -149,7 +280,8 @@ async function moveFirst(w: Widget) {
 }
 
 function Card({ widget, children, compact }: { widget: Widget; children: ReactNode; compact: boolean }) {
-  const { board, firstId } = useContext(Dock);
+  const { board, firstId, movable, floating } = useContext(Dock);
+  const dragging = useDrag((s) => s.drag?.id === widget.id);
   const pointed = useWidgetPointedAt(widget.id);
   const [lit, setLit] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -162,11 +294,19 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
   }, [pointed]);
   const size = board ? "w-full px-4 py-3" : compact ? "w-32 px-2.5 py-1.5 lg:px-3 lg:py-2" : "w-44 px-3 py-2";
   const hover = "lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100";
+  // A clear sky edge and a lift off the background; brighter when pointed at or held.
+  const edge = lit
+    ? "border-sky-400 shadow-[0_0_0_3px_rgba(56,189,248,0.35)]"
+    : dragging
+      ? "border-sky-400 shadow-2xl shadow-sky-500/20 ring-2 ring-sky-400/30"
+      : "border-sky-400/40 shadow-lg shadow-black/30 ring-1 ring-sky-400/10 hover:border-sky-400/70";
   return (
     <div
       ref={box}
-      className={`group relative shrink-0 rounded-xl border bg-panel/85 backdrop-blur transition-shadow lg:w-full ${size} ${
-        lit ? "border-sky-400 shadow-[0_0_0_3px_rgba(56,189,248,0.35)]" : "border-edge"
+      onPointerDown={movable ? (e) => startDrag(e, widget, box.current) : undefined}
+      title={movable ? "Drag to put it anywhere" : undefined}
+      className={`group relative shrink-0 rounded-xl border bg-panel/90 backdrop-blur transition-[box-shadow,border-color] lg:w-full ${size} ${edge} ${
+        movable ? (dragging ? "cursor-grabbing select-none" : "lg:cursor-grab") : ""
       }`}
     >
       <div className="flex items-center gap-1.5 pr-10 text-[11px] text-slate-400">
@@ -174,7 +314,17 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
         <span className="truncate">{widget.title}</span>
       </div>
       <div className="absolute right-1.5 top-1.5 flex gap-0.5">
-        {firstId !== widget.id && !compact && (
+        {floating && (
+          <button
+            onClick={() => place(widget, null)}
+            aria-label={`Put ${widget.title} back in the dock`}
+            title="Back to the dock"
+            className={`rounded p-0.5 text-slate-500 hover:text-white ${hover}`}
+          >
+            <PanelRightClose size={12} />
+          </button>
+        )}
+        {!floating && firstId !== widget.id && !compact && (
           <button
             onClick={() => moveFirst(widget)}
             aria-label={`Move ${widget.title} first`}
