@@ -1,3 +1,4 @@
+import type { TuneId } from "./tunes";
 import type {
   AccessRequest,
   AccessRequestList,
@@ -162,7 +163,16 @@ export const api = {
     request<Widget | null>(`/api/widgets/${id}/action`, { method: "POST", body: json({ action, minutes }) }),
   editWidget: (
     id: string,
-    body: { title?: string; text?: string; slot?: number; pos?: WidgetPos; dock?: boolean },
+    body: {
+      title?: string;
+      text?: string;
+      slot?: number;
+      pos?: WidgetPos;
+      dock?: boolean;
+      tune?: TuneId;
+      time?: string;
+      days?: string | string[] | null;
+    },
   ) =>
     request<Widget>(`/api/widgets/${id}`, { method: "PATCH", body: json(body) }),
   /** Mark these notices read, or every one when ids is left out. */
@@ -413,6 +423,8 @@ export const api = {
   /** A value per setting, or null to go back to the .env value. */
   saveConfig: (values: Record<string, ConfigValue | null>) =>
     request<ConfigView>("/api/admin/config", { method: "PUT", body: json({ values }) }),
+  /** Sends the signed-in owner a test email with the saved Email settings. */
+  testEmail: () => request<{ to: string; from: string }>("/api/admin/config/test-email", { method: "POST" }),
   setMaintenance: (enabled: boolean, message?: string) =>
     request<{ enabled: boolean; message: string | null }>("/api/admin/maintenance", {
       method: "PUT",

@@ -43,3 +43,61 @@ def test_attachments_still_ride_along():
     assert msg.get_content_type() == "multipart/mixed"
     assert [a.get_filename() for a in msg.iter_attachments()] == ["r.pdf"]
     assert "<strong" in msg.get_body(("html",)).get_content()
+
+
+def test_sender_is_nexus_and_agent_mail_replies_to_the_person():
+    s = Settings(smtp_from="nexus@servhub.cc")
+    assert mail.sender(s) == "Nexus <nexus@servhub.cc>"
+    assert (
+        mail.sender(Settings(smtp_from="ServHub <nexus@servhub.cc>"))
+        == "ServHub <nexus@servhub.cc>"
+    )
+    # Resend signs in as "resend", which isn't an address; From must not become that name.
+    assert mail.sender(Settings(smtp_username="resend")) == "resend"
+
+    msg = mail.message(s, ["a@test"], "Hi", "x")
+    assert msg["From"] == "Nexus <nexus@servhub.cc>" and msg["Reply-To"] is None
+
+    msg = mail.message(
+        s, ["a@test"], "Hi", "x", reply_to="shivam@test", on_behalf_of="Shivam\r\nBcc: x@evil"
+    )
+    assert msg["From"] == '"Shivam Bcc: x@evil via Nexus" <nexus@servhub.cc>'
+    assert msg["Reply-To"] == "shivam@test"
+
+    s2 = Settings(smtp_from="nexus@servhub.cc", smtp_reply_to="me@test")
+    assert mail.message(s2, ["a@test"], "Hi", "x")["Reply-To"] == "me@test"
+    assert mail.message(s2, ["a@test"], "Hi", "x", reply_to="b@test")["Reply-To"] == "b@test"
+
+
+def test_port_465_uses_tls_from_the_start(monkeypatch):
+    used = []
+
+    class Fake:
+        def __init__(self, *a, **k):
+            used.append(type(self).__name__)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            used.append("starttls")
+
+        def login(self, *a):
+            pass
+
+        def send_message(self, msg):
+            pass
+
+    class SMTP(Fake): ...
+
+    class SMTP_SSL(Fake): ...
+
+    monkeypatch.setattr(mail.smtplib, "SMTP", SMTP)
+    monkeypatch.setattr(mail.smtplib, "SMTP_SSL", SMTP_SSL)
+    msg = mail.message(Settings(smtp_from="n@test"), ["a@test"], "s", "b")
+    mail._send(Settings(smtp_host="h", smtp_port=465, smtp_from="n@test"), msg)
+    mail._send(Settings(smtp_host="h", smtp_port=587, smtp_from="n@test"), msg)
+    assert used == ["SMTP_SSL", "SMTP", "starttls"]

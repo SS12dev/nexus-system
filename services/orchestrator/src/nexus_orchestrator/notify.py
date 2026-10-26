@@ -33,7 +33,9 @@ def requested_email(settings: Settings, req: AccessRequest, to: list[str]) -> Em
         f"Nothing happens until you decide. You get this email because you are an owner or "
         f"admin of {APP}."
     )
-    return mail.message(settings, to, f"{req.name or req.email} asked to join {APP}", body)
+    return mail.message(
+        settings, to, f"{req.name or req.email} asked to join {APP}", body, reply_to=req.email
+    )
 
 
 def approved_email(settings: Settings, req: AccessRequest) -> EmailMessage:
@@ -119,7 +121,14 @@ async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
         f"All feedback: {settings.nexus_url.rstrip('/')}/admin?tab=feedback"
     )
     first = (f.message.splitlines() or [""])[0][:60]
-    msg = mail.message(settings, to, f"Nexus feedback: {first}", body)
+
+    msg = mail.message(
+        settings,
+        to,
+        f"Nexus feedback: {first}",
+        body,
+        reply_to=sender.email if sender else None,
+    )
     # Screenshots go along as attachments; one that can't be read is left out, not fatal.
     for shot in f.screenshots or []:
         if deps.storage is None:
@@ -131,6 +140,7 @@ async def feedback(deps, feedback_id: uuid.UUID, *, attempt: int = 1) -> None:
             continue
         maintype, _, subtype = shot["content_type"].partition("/")
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=shot["name"])
+
     try:
         await mail.send(settings, msg)
     except mail.MailError as exc:

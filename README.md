@@ -414,7 +414,7 @@ reuses for similar asks (Nexus only keeps a team up front when you say so).
 
 Web search uses Tavily or Brave when `TAVILY_API_KEY` or `BRAVE_API_KEY` is set (both have free
 tiers), else DuckDuckGo's HTML page, which needs no key but is less reliable. Email needs the
-`SMTP_*` settings (Gmail works with an app password).
+`SMTP_*` settings: Nexus's own mailbox, set up as in [docs/email.md](docs/email.md).
 
 ### The sandbox
 
@@ -580,7 +580,11 @@ Around the orb is a live screen that the assistant runs with you.
   clocks and notes (`nexus_common/widgets.py`). The server keeps the time and the worker rings
   them every 15 seconds, in the app and as a push notification, so a timer runs with the app
   closed. The assistant sets them with its own tools (no team), and the + button adds one by
-  hand.
+  hand: a menu of tiles, one colour per kind, each set up in place or (on a laptop) dragged
+  straight onto the screen. Timers, alarms and reminders ring with one of nine tunes made in
+  the browser (`apps/web/src/lib/tunes.ts`, kept in step with `TUNES` in `widgets.py`); an
+  alarm starts soft and grows, and its time, days and tune change from the card. A note's +
+  makes a new blank note beside it.
 - **Custom widgets** are small HTML apps a one-agent widget-builder team writes
   (`library/core/widget-builder`, tool `save_widget`): a countdown, a habit tracker, a weather
   card. The page is served by `/api/widgets/{id}/frame` with a CSP whose `sandbox` directive

@@ -48,3 +48,13 @@ async def test_bad_requests_say_what_is_wrong(deps, owner):
         {"text": "Job hunting", "time": "21:00", "days": "daily"}
     )
     assert out.startswith("Added") and "every day" in out.lower()
+
+
+async def test_an_alarm_asked_for_with_a_tune_rings_with_it(deps, owner):
+    user, chat_id = owner
+    tools = tools_for(deps, user, chat_id)
+    out = await tools["set_alarm"].ainvoke({"time": "07:00", "days": "weekdays", "tune": "sunrise"})
+    assert out.startswith("Added")
+    async with deps.sessionmaker() as db:
+        w = await db.scalar(select(Widget).where(Widget.user_id == user.id))
+    assert w.state["tune"] == "sunrise"

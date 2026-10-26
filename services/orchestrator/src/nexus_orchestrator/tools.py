@@ -752,13 +752,23 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
     async def send_email(
         to: list[str], subject: str, body: str, file_ids: list[str] | None = None
     ) -> str:
-        """Send an email from the user's configured address, optionally attaching library
-        files. The user approves every email before it goes."""
+        """Send an email from Nexus's own address, as "<user> via Nexus" with replies going to
+        the user, optionally attaching library files. The user approves every email before it
+        goes."""
         await note("send_email", to=to, subject=subject)
         settings = deps.settings
         if not settings.smtp_enabled:
             return "Email isn't set up on this server (SMTP_HOST and SMTP_FROM in .env)."
-        msg = mail.message(settings, to, subject, body)
+        async with sessionmaker() as db:
+            owner = await db.get(User, user_id)
+        msg = mail.message(
+            settings,
+            to,
+            subject,
+            body,
+            reply_to=owner.email if owner else None,
+            on_behalf_of=(owner.name or owner.email) if owner else None,
+        )
         ids = [u for u in (_uuid(x) for x in (file_ids or [])) if u]
         if ids:
             async with sessionmaker() as db:

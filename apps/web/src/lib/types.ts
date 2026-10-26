@@ -1,3 +1,5 @@
+import type { TuneId } from "./tunes";
+
 export type Role = "owner" | "admin" | "member" | "viewer";
 export type UserStatus = "invited" | "active" | "disabled";
 export type AssistantState = "idle" | "thinking" | "speaking";
@@ -1226,6 +1228,8 @@ export interface Widget {
     text?: string;
     zones?: string[];
     rang_at?: string;
+    /** What a timer, alarm or reminder rings with (lib/tunes.ts); chime when unset. */
+    tune?: TuneId;
     /** custom: the version on screen, how many there are, and what it may use. */
     custom_id?: string;
     version?: number;
@@ -1252,6 +1256,9 @@ export interface WidgetInput {
   when?: string;
   text?: string;
   zones?: string[];
+  tune?: TuneId;
+  /** Dropped onto the main screen from the add menu. */
+  pos?: WidgetPos;
 }
 
 export type WidgetAction = "pause" | "resume" | "reset" | "add_time" | "snooze" | "dismiss" | "remove" | "undo";

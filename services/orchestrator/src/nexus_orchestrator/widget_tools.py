@@ -14,7 +14,15 @@ from sqlalchemy import delete, select
 
 from nexus_common import custom_widgets as cw
 from nexus_common.models import User, Widget
-from nexus_common.widgets import WidgetError, act, add, announce, describe_widget, zone_of
+from nexus_common.widgets import (
+    TUNES,
+    WidgetError,
+    act,
+    add,
+    announce,
+    describe_widget,
+    zone_of,
+)
 from nexus_orchestrator.workbench import WorkbenchError
 
 log = logging.getLogger(__name__)
@@ -46,6 +54,7 @@ const fs = require("fs");
 """
 
 Days = Literal["daily", "weekdays", "weekends"] | list[str] | None
+Tune = Literal[TUNES] | None
 
 
 def _uuid(value: str) -> uuid.UUID | None:
@@ -74,19 +83,22 @@ def build_widget_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         await announce(deps.redis, user_id, w)
         return f"Added to the main screen: {line[2:]}"
 
-    async def start_timer(minutes: float, label: str = "") -> str:
+    async def start_timer(minutes: float, label: str = "", tune: Tune = None) -> str:
         """Start a countdown timer on the user's main screen; it rings (in the app and as a
         phone notification) when it ends, even with the app closed. minutes may be fractional
-        (0.5 = 30 seconds), up to 24 hours. label names it ("Pasta")."""
+        (0.5 = 30 seconds), up to 24 hours. label names it ("Pasta"). tune: the sound it rings
+        with, only when the user named one (default chime)."""
         await note("start_timer", minutes=minutes, label=label)
-        return await make("timer", minutes=minutes, title=label)
+        return await make("timer", minutes=minutes, title=label, tune=tune)
 
-    async def set_alarm(time: str, label: str = "", days: Days = None) -> str:
+    async def set_alarm(time: str, label: str = "", days: Days = None, tune: Tune = None) -> str:
         """Set an alarm at a clock time in the user's time zone, 24-hour "HH:MM". Without days
         it rings once, at the next time the clock shows it; days repeats it: "daily",
-        "weekdays", "weekends" or day codes like ["MO", "WE"]."""
+        "weekdays", "weekends" or day codes like ["MO", "WE"]. tune: the sound, only when the
+        user asked for one: chime, bell, marimba, sunrise (gentle, rising), birdsong, harp,
+        retro, digital (classic beeps) or pulse (loud, urgent)."""
         await note("set_alarm", time=time, days=days)
-        return await make("alarm", time=time, days=_days(days), title=label)
+        return await make("alarm", time=time, days=_days(days), title=label, tune=tune)
 
     async def remind_me(
         text: str,

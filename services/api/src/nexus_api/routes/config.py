@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from nexus_api.deps import DbDep, OwnerUser, RedisDep, SettingsDep
-from nexus_common import config
+from nexus_common import config, mail
 from nexus_common.models import AuditLog, User
 
 router = APIRouter(prefix="/api/admin/config", tags=["admin"])
@@ -100,3 +100,28 @@ async def put_config(
     await config.announce(redis, version)
     await config.report(redis, settings, request.app.state.service)
     return await _view(db, redis, settings)
+
+
+@router.post("/test-email")
+async def test_email(actor: OwnerUser, settings: SettingsDep):
+    """Send a short email to the owner with the Email settings as they are now, so a new
+    mailbox can be checked without waiting for a routine."""
+    if not settings.smtp_enabled:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Email is off: set the SMTP server and From address first."
+        )
+    body = (
+        f"This is a test from {mail.APP}. If you can read it, email works: routine results, "
+        f"access requests, feedback and alerts will come from this address.\n\n"
+        f"- **Server:** {settings.smtp_host}:{settings.smtp_port}\n"
+        f"- **From:** {mail.sender(settings)}\n"
+        f"- **Replies go to:** {settings.smtp_reply_to or mail.address(settings)}\n\n"
+        f"Settings: {settings.nexus_url.rstrip('/')}/admin?tab=config"
+    )
+    try:
+        await mail.send(
+            settings, mail.message(settings, [actor.email], f"{mail.APP} test email", body)
+        )
+    except mail.MailError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Sending failed: {exc}") from None
+    return {"to": actor.email, "from": mail.sender(settings)}
