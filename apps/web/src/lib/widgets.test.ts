@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Widget } from "./types";
-import { clock, elapsed, frameHeight, isRinging, pendingAsks, placeIn, repeatText, timerLeft, zoneCity } from "./widgets";
+import {
+  clock,
+  daysFor,
+  elapsed,
+  frameHeight,
+  isRinging,
+  pendingAsks,
+  placeIn,
+  repeatText,
+  ruleDays,
+  timerLeft,
+  WEEK,
+  zoneCity,
+} from "./widgets";
 
 const T0 = Date.parse("2026-10-25T18:00:00Z");
 const widget = (kind: Widget["kind"], state: Widget["state"]): Widget => ({
@@ -80,5 +93,16 @@ describe("placeIn", () => {
   it("keeps a card dragged off the edge on screen", () => {
     expect(placeIn(-50, 900, room, card)).toEqual({ x: 0, y: 1 });
     expect(placeIn(10, 10, { width: 150, height: 80 }, card)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("ruleDays and daysFor", () => {
+  it("reads a repeat back into days and writes days the way the server takes them", () => {
+    expect(ruleDays(null)).toEqual([]);
+    expect(ruleDays("FREQ=DAILY;BYHOUR=7;BYMINUTE=0")).toHaveLength(7);
+    expect(ruleDays("FREQ=WEEKLY;BYDAY=FR,MO;BYHOUR=7;BYMINUTE=0")).toEqual(["MO", "FR"]);
+    expect(daysFor([])).toBeNull();
+    expect(daysFor([...WEEK])).toBe("daily");
+    expect(daysFor(["SU", "SA"])).toEqual(["SA", "SU"]);
   });
 });

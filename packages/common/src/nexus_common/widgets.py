@@ -24,6 +24,11 @@ from nexus_common.routines import ScheduleError, check_timezone, describe, next_
 from nexus_common.settings import Settings
 
 KINDS = ("timer", "alarm", "stopwatch", "reminder", "clock", "note")
+# The sounds a timer, alarm or reminder can ring with; the app plays them (apps/web
+# lib/tunes.ts), so a new one goes in both places.
+TUNES = ("chime", "bell", "marimba", "sunrise", "birdsong", "harp", "retro", "digital", "pulse")
+DEFAULT_TUNE = "chime"
+RINGS = ("timer", "alarm", "reminder")
 MAX_WIDGETS = 24
 MAX_TIMER_MINUTES = 24 * 60
 NOTE_CHARS = 4000
@@ -97,6 +102,15 @@ def next_at_time(time: str, tz: str, now: datetime) -> datetime:
     return at.astimezone(UTC)
 
 
+def check_tune(tune: str | None) -> str | None:
+    if tune is None:
+        return None
+    tune = tune.strip().lower()
+    if tune not in TUNES:
+        raise WidgetError(f"There's no {tune!r} tune; pick one of {', '.join(TUNES)}")
+    return tune
+
+
 def _repeat(days: str | list[str] | None, time: str, tz: str, now: datetime):
     """(rule, first time) for a repeating alarm or reminder, or (None, None) for a one-off."""
     if not days:
@@ -153,9 +167,12 @@ async def add(
     when: str | None = None,
     text: str | None = None,
     zones: list[str] | None = None,
+    tune: str | None = None,
+    pos: dict | None = None,
     now: datetime | None = None,
 ) -> Widget:
-    """Make a widget and put it at the end of the dock. Doesn't commit."""
+    """Make a widget and put it at the end of the dock, or at pos (0..1 across the main screen)
+    when it was dropped there. Doesn't commit."""
     if kind not in KINDS:
         raise WidgetError(f"There's no {kind} widget; the kinds are {', '.join(KINDS)}")
     count = await db.scalar(select(func.count()).where(Widget.user_id == user.id))
@@ -213,6 +230,8 @@ async def add(
     elif kind == "note":
         state = {"text": (text or "")[:NOTE_CHARS]}
         title = title or "Note"
+    if kind in RINGS and (picked := check_tune(tune)):
+        state["tune"] = picked
     slot = await db.scalar(select(func.max(Widget.slot)).where(Widget.user_id == user.id))
     w = Widget(
         user_id=user.id,
@@ -221,6 +240,7 @@ async def add(
         state=state,
         slot=(slot or 0) + 1,
         chat_id=chat_id,
+        pos=pos,
         fires_at=fires,
         created_at=now,
         updated_at=now,
@@ -228,6 +248,31 @@ async def add(
     db.add(w)
     await db.flush()
     return w
+
+
+def retime(
+    w: Widget,
+    time: str,
+    days: str | list[str] | None,
+    *,
+    now: datetime | None = None,
+):
+    """Move an alarm to a new time and repeat (no days = once), switching it on."""
+    if w.kind != "alarm":
+        raise WidgetError("Only an alarm has a time to change")
+    now = now or utcnow()
+    _hhmm(time)
+    s = dict(w.state or {})
+    tz = s.get("tz") or "UTC"
+    rule, fires = _repeat(days, time, tz, now)
+    w.fires_at = fires or next_at_time(time, tz, now)
+    old = s.get("time")
+    s.update(time=time.strip()[:5], repeat=rule, status="set")
+    s.pop("rang_at", None)
+    w.state = s
+    if w.title == f"Alarm {old}":
+        w.title = f"Alarm {s['time']}"
+    w.updated_at = now
 
 
 ACTIONS = ("pause", "resume", "reset", "add_time", "snooze", "dismiss", "remove")

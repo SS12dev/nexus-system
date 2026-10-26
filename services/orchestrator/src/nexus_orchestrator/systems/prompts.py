@@ -189,7 +189,9 @@ project: to change, fix or extend one of the user's EXISTING PROJECTS (a follow-
 "add a high score table", or "the solitaire app doesn't work" however long ago it was made), \
 its id; for a new app, null. Never start a new project for an app the user already has. A \
 file made with code (a 3D model, chart, document, dataset or image) is not software: give \
-that to a flow or single agent with run_code and the matching skill.
+that to a flow or single agent with run_code and the matching skill. A widget for the user's \
+main screen (a pixel-art pet, a countdown, a habit tracker, a weather card) is not software \
+either: it is single, one agent with the core/widget-builder skill and the save_widget tool.
 
 ## Examples of flows (ids and tools are illustrations)
 - "Make a 3D model of a Minion to print": flow: reference (web_search, web_fetch: the \
@@ -202,6 +204,8 @@ side (different sources or halves of the field) -> analyst (after both: the comp
 and the pick).
 - "Write a blog post on RAG evaluation": flow: researcher -> writer -> editor (checks \
 writer: accuracy against the sources, clarity).
+- "Add a widget with a pixel-art pet that does small animations": single (save_widget, \
+core/widget-builder: draws it in one HTML file, saves it, fixes what the check reports).
 - "What's the capital of Peru and its population?": single.
 - "Summarise each of these 12 papers": parallel_map_reduce.
 

@@ -59,6 +59,10 @@ an error. Ask only for what the widget needs.
   `font-variant-numeric: tabular-nums`.
 - Keep it calm: refresh on a sensible timer, never faster than the data changes, and stop
   work when nothing changes. Handle every failed call with a quiet fallback.
+- Animation (a pixel pet, a ticker, a spinner): CSS keyframes, or `requestAnimationFrame`
+  on a `<canvas>` (`image-rendering: pixelated` for pixel art, drawn small and scaled up).
+  Keep it gentle and loop slowly; skip frames while `document.hidden` so it costs nothing
+  in a background tab. Taps on the card can make it react (a hop, a purr).
 - Save state the user creates (ticks, counts, choices) with `nexus.state.set` and load it on
   start, so it survives reloads and shows on the phone too.
 

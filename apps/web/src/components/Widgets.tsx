@@ -1,8 +1,10 @@
 import {
   AlarmClock,
+  ArrowLeft,
   BellRing,
   Clock,
   ArrowUpToLine,
+  Music,
   PanelRightClose,
   Pause,
   Play,
@@ -12,9 +14,11 @@ import {
   Sparkles,
   Undo2,
   StickyNote,
+  Send,
   Timer,
   Watch,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   createContext,
@@ -27,12 +31,14 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { api } from "../lib/api";
 import type { BridgeCall, Widget, WidgetAction, WidgetInput, WidgetPos } from "../lib/types";
 import {
   clock,
   DATA_LABELS,
+  daysFor,
   elapsed,
   frameHeight,
   isRinging,
@@ -40,14 +46,18 @@ import {
   pendingAsks,
   placeIn,
   repeatText,
+  ruleDays,
   timeIn,
   timerLeft,
+  WEEK,
   zoneCity,
 } from "../lib/widgets";
 import { useStore } from "../store/chat";
 import { useWidgetPointedAt } from "./Screen";
 import { useAssistantName } from "../lib/assistant";
 import { useWide } from "../lib/media";
+import { useSend } from "../lib/useSend";
+import { lastTune, playTune, previewTune, rememberTune, swell, tuneOf, TUNES, type TuneId } from "../lib/tunes";
 
 /** The clock every widget reads from, ticking once a second (or faster for a stopwatch). */
 export function useNow(ms = 1000): number {
@@ -88,15 +98,22 @@ async function press(w: Widget, action: WidgetAction, minutes?: number) {
   }
 }
 
-const ICONS: Record<Widget["kind"], ReactNode> = {
-  timer: <Timer size={13} />,
-  alarm: <AlarmClock size={13} />,
-  stopwatch: <Watch size={13} />,
-  reminder: <BellRing size={13} />,
-  clock: <Clock size={13} />,
-  note: <StickyNote size={13} />,
-  custom: <Sparkles size={13} />,
+/** What each kind is, in the add menu and on its card: a name, a line on what it does, an
+ * icon and a colour of its own, so a glance tells a timer from an alarm or a note. */
+const KINDS: Record<Widget["kind"], { name: string; about: string; icon: LucideIcon; tone: string }> = {
+  timer: { name: "Timer", about: "Counts down", icon: Timer, tone: "text-sky-300 bg-sky-400/15" },
+  alarm: { name: "Alarm", about: "Rings at a set time", icon: AlarmClock, tone: "text-amber-300 bg-amber-400/15" },
+  reminder: { name: "Reminder", about: "Nudges you later", icon: BellRing, tone: "text-rose-300 bg-rose-400/15" },
+  stopwatch: { name: "Stopwatch", about: "Counts up", icon: Watch, tone: "text-emerald-300 bg-emerald-400/15" },
+  clock: { name: "World clock", about: "Other time zones", icon: Clock, tone: "text-violet-300 bg-violet-400/15" },
+  note: { name: "Note", about: "A blank note", icon: StickyNote, tone: "text-yellow-300 bg-yellow-400/15" },
+  custom: { name: "Your own", about: "Built for you", icon: Sparkles, tone: "text-purple-300 bg-purple-400/15" },
 };
+
+function KindIcon({ kind, size = 13 }: { kind: Widget["kind"]; size?: number }) {
+  const Icon = KINDS[kind].icon;
+  return <Icon size={size} className={KINDS[kind].tone.split(" ")[0]} />;
+}
 
 const btn =
   "rounded-md border border-edge bg-ink/40 p-1 text-slate-300 hover:border-sky-400/60 hover:text-white disabled:opacity-40";
@@ -122,7 +139,8 @@ let room: HTMLElement | null = null;
  * doesn't move, or one on a button or a note's text, is left to the card. */
 function startDrag(e: ReactPointerEvent, w: Widget, card: HTMLElement | null) {
   const target = e.target as HTMLElement;
-  if (e.button !== 0 || !room || !card || target.closest("button, a, input, textarea, select")) return;
+  // A panel it opened (portalled, but its events still bubble here) isn't the card.
+  if (e.button !== 0 || !room || !card || target.closest("button, a, input, textarea, select, [data-popover]")) return;
   const r = room.getBoundingClientRect();
   const c = card.getBoundingClientRect();
   const size = { width: c.width, height: c.height };
@@ -163,6 +181,29 @@ async function place(w: Widget, pos: WidgetPos | null) {
     upsertWidget(await api.editWidget(w.id, pos ? { pos } : { dock: true }));
   } catch {
     upsertWidget(w);
+  }
+}
+
+/** The note made with a note's + button, which takes the cursor when it shows up. */
+let focusNote: string | null = null;
+
+/** A new blank note next to this one: just below it when it was left on the screen, else in
+ * the dock. */
+async function newNote(from: Widget, floating: boolean, card: HTMLElement | null) {
+  let pos: WidgetPos | undefined;
+  if (floating && from.pos && room && card) {
+    const free = room.getBoundingClientRect().height - card.offsetHeight;
+    const step = free > 0 ? (card.offsetHeight + 8) / free : 1;
+    // Below it, or above when it's already near the bottom.
+    const y = from.pos.y + step <= 1 ? from.pos.y + step : Math.max(0, from.pos.y - step);
+    pos = { x: from.pos.x, y: Math.round(y * 1e4) / 1e4 };
+  }
+  try {
+    const w = await api.addWidget({ kind: "note", ...(pos ? { pos } : {}) });
+    focusNote = w.id;
+    useStore.getState().upsertWidget(w);
+  } catch {
+    /* the dock is full; the menu says so when adding there */
   }
 }
 
@@ -211,7 +252,9 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
       <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
         {list.length > 0 && (
           <div
-            className="flex min-w-0 items-start gap-2 overflow-x-auto pb-1 lg:min-h-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-visible lg:pb-0"
+            // On phones the row fades out before the + so a card that scrolls on is plainly
+            // more to swipe to, not cut off.
+            className="flex min-w-0 items-start gap-2 overflow-x-auto pb-1 pr-10 [mask-image:linear-gradient(to_right,black_calc(100%-3rem),transparent)] lg:min-h-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-visible lg:pb-0 lg:pr-0 lg:[mask-image:none]"
             aria-label="Widgets"
           >
             {list.map((w) => (
@@ -309,11 +352,21 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
         movable ? (dragging ? "cursor-grabbing select-none" : "lg:cursor-grab") : ""
       }`}
     >
-      <div className="flex items-center gap-1.5 pr-10 text-[11px] text-slate-400">
-        {ICONS[widget.kind]}
+      <div className={`flex items-center gap-1.5 text-[11px] text-slate-400 ${widget.kind === "note" && !compact ? "pr-14" : "pr-10"}`}>
+        <KindIcon kind={widget.kind} />
         <span className="truncate">{widget.title}</span>
       </div>
       <div className="absolute right-1.5 top-1.5 flex gap-0.5">
+        {widget.kind === "note" && !compact && (
+          <button
+            onClick={() => newNote(widget, floating, box.current)}
+            aria-label="New blank note"
+            title="New note"
+            className="rounded p-0.5 text-slate-500 hover:text-white"
+          >
+            <Plus size={12} />
+          </button>
+        )}
         {floating && (
           <button
             onClick={() => place(widget, null)}
@@ -413,26 +466,7 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
       </Card>
     );
   }
-  if (w.kind === "alarm") {
-    const on = s.status !== "off";
-    return (
-      <Card widget={w} compact={compact}>
-        <div className="mt-0.5 flex items-center justify-between">
-          <span className={`font-mono ${big} tabular-nums ${on ? "text-slate-100" : "text-slate-500"}`}>{s.time}</span>
-          <button
-            role="switch"
-            aria-checked={on}
-            aria-label={on ? "Turn alarm off" : "Turn alarm on"}
-            onClick={() => press(w, on ? "pause" : "resume")}
-            className={`relative h-5 w-9 rounded-full transition ${on ? "bg-sky-500" : "bg-edge"}`}
-          >
-            <span className={`absolute top-0.5 size-4 rounded-full bg-white transition-all ${on ? "left-4.5" : "left-0.5"}`} />
-          </button>
-        </div>
-        <p className="mt-1 text-[11px] text-slate-400">{repeatText(s.repeat)}</p>
-      </Card>
-    );
-  }
+  if (w.kind === "alarm") return <AlarmCard widget={w} compact={compact} big={big} />;
   if (w.kind === "reminder") {
     const done = s.status === "done";
     return (
@@ -465,8 +499,191 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
   );
 }
 
+/** An alarm: its time (click to change the time, the days it repeats on and its tune), an
+ * on/off switch, and how it repeats. */
+function AlarmCard({ widget: w, compact, big }: { widget: Widget; compact: boolean; big: string }) {
+  const s = w.state;
+  const on = s.status !== "off";
+  const [editing, setEditing] = useState<DOMRect | null>(null);
+  const timeBtn = useRef<HTMLButtonElement>(null);
+  return (
+    <Card widget={w} compact={compact}>
+      <div className="mt-0.5 flex items-center justify-between">
+        <button
+          ref={timeBtn}
+          onClick={(e) => setEditing(editing ? null : e.currentTarget.getBoundingClientRect())}
+          disabled={compact}
+          aria-expanded={!!editing}
+          title="Change the time, days or tune"
+          className={`rounded font-mono ${big} tabular-nums enabled:hover:text-sky-200 ${on ? "text-slate-100" : "text-slate-500"}`}
+        >
+          {s.time}
+        </button>
+        <button
+          role="switch"
+          aria-checked={on}
+          aria-label={on ? "Turn alarm off" : "Turn alarm on"}
+          onClick={() => press(w, on ? "pause" : "resume")}
+          className={`relative h-5 w-9 rounded-full transition ${on ? "bg-sky-500" : "bg-edge"}`}
+        >
+          <span className={`absolute top-0.5 size-4 rounded-full bg-white transition-all ${on ? "left-4.5" : "left-0.5"}`} />
+        </button>
+      </div>
+      <p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
+        <span className="truncate">{repeatText(s.repeat)}</span>
+        {!compact && (
+          <>
+            <span aria-hidden>·</span>
+            <Music size={10} className="shrink-0" />
+            <span className="truncate">{tuneOf(s.tune).name}</span>
+          </>
+        )}
+      </p>
+      {editing && (
+        <Popover anchor={editing} width={300} label={`Change ${w.title}`} onClose={() => setEditing(null)} inside={timeBtn}>
+          <AlarmEditor widget={w} onDone={() => setEditing(null)} />
+        </Popover>
+      )}
+    </Card>
+  );
+}
+
+function AlarmEditor({ widget: w, onDone }: { widget: Widget; onDone: () => void }) {
+  const [time, setTime] = useState(w.state.time ?? "07:00");
+  const [days, setDays] = useState(() => ruleDays(w.state.repeat));
+  const [tune, setTune] = useState<TuneId>(tuneOf(w.state.tune).id);
+  const [error, setError] = useState("");
+  const save = async () => {
+    setError("");
+    try {
+      useStore.getState().upsertWidget(await api.editWidget(w.id, { time, days: daysFor(days), tune }));
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't change it");
+    }
+  };
+  return (
+    <div className="space-y-2.5">
+      <p className="flex items-center gap-1.5 text-sm font-medium text-slate-100">
+        <KindIcon kind="alarm" size={14} /> {w.title}
+      </p>
+      <input
+        type="time"
+        value={time}
+        onChange={(e) => setTime(e.target.value)}
+        aria-label="Alarm time"
+        className="w-full rounded-md border border-edge bg-ink px-2 py-1 text-base sm:text-sm"
+      />
+      <DayPicker days={days} onChange={setDays} />
+      <TunePicker tune={tune} onChange={setTune} />
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+      <div className="flex justify-end gap-1.5">
+        <button onClick={onDone} className="rounded-md px-2 py-1 text-xs text-slate-400 hover:text-white">
+          Cancel
+        </button>
+        <button onClick={save} className="rounded-md bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-500">
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Which days an alarm or reminder repeats on: none picked rings once. */
+function DayPicker({ days, onChange }: { days: string[]; onChange: (days: string[]) => void }) {
+  const toggle = (d: string) => onChange(days.includes(d) ? days.filter((x) => x !== d) : [...days, d]);
+  const preset = (list: readonly string[]) => onChange([...list]);
+  const chip = "rounded-full border px-2 py-0.5 text-[11px]";
+  const off = "border-edge text-slate-400 hover:border-sky-400/60 hover:text-sky-200";
+  const onC = "border-sky-400/70 bg-sky-400/15 text-sky-200";
+  return (
+    <div>
+      <div className="flex justify-between gap-0.5" role="group" aria-label="Repeat on">
+        {WEEK.map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => toggle(d)}
+            aria-pressed={days.includes(d)}
+            title={DAY_LONG[d]}
+            className={`grid size-6 place-items-center rounded-full border text-[10px] font-medium ${days.includes(d) ? onC : off}`}
+          >
+            {d[0]}
+          </button>
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {(
+          [
+            ["Once", []],
+            ["Every day", WEEK],
+            ["Weekdays", WEEK.slice(0, 5)],
+            ["Weekends", WEEK.slice(5)],
+          ] as const
+        ).map(([label, list]) => {
+          const picked = list.length === days.length && list.every((d) => days.includes(d));
+          return (
+            <button key={label} type="button" onClick={() => preset(list)} className={`${chip} ${picked ? onC : off}`}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const DAY_LONG: Record<string, string> = {
+  MO: "Monday",
+  TU: "Tuesday",
+  WE: "Wednesday",
+  TH: "Thursday",
+  FR: "Friday",
+  SA: "Saturday",
+  SU: "Sunday",
+};
+
+/** The tunes, each played once when picked so you hear what you chose. */
+function TunePicker({ tune, onChange }: { tune: TuneId; onChange: (tune: TuneId) => void }) {
+  return (
+    <div>
+      <p className="mb-1 flex items-center gap-1 text-[11px] text-slate-400">
+        <Music size={11} /> Tune <span className="text-slate-500">· tap to hear it</span>
+      </p>
+      <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Tune">
+        {TUNES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="radio"
+            aria-checked={tune === t.id}
+            title={t.about}
+            onClick={() => {
+              onChange(t.id);
+              previewTune(t.id);
+            }}
+            className={`truncate rounded-md border px-1.5 py-1 text-[11px] ${
+              tune === t.id
+                ? "border-sky-400/70 bg-sky-400/15 text-sky-200"
+                : "border-edge text-slate-300 hover:border-sky-400/60"
+            }`}
+          >
+            {t.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NoteText({ widget }: { widget: Widget }) {
   const [text, setText] = useState(widget.state.text ?? "");
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusNote !== widget.id) return;
+    focusNote = null;
+    area.current?.focus();
+  }, [widget.id]);
   useEffect(() => setText(widget.state.text ?? ""), [widget.state.text]);
   const save = () => {
     if (text === (widget.state.text ?? "")) return;
@@ -477,6 +694,7 @@ function NoteText({ widget }: { widget: Widget }) {
   };
   return (
     <textarea
+      ref={area}
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={save}
@@ -595,44 +813,358 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
 
 const QUICK_TIMERS = [1, 5, 10, 25];
 // Roughly how tall the add menu is, to decide which way it opens.
-const MENU_HEIGHT = 340;
+const MENU_HEIGHT = 420;
+const MENU_WIDTH = 384;
 
-/** The + on the dock: a timer, stopwatch, alarm, clock or note by hand. */
+/** A panel drawn over everything beside what opened it (so nothing it sits in can cut it off),
+ * closed by a click elsewhere, Escape, or the page moving under it. */
+function Popover({
+  anchor,
+  width,
+  alignLeft = false,
+  label,
+  onClose,
+  inside,
+  children,
+}: {
+  anchor: DOMRect;
+  width: number;
+  alignLeft?: boolean;
+  label: string;
+  onClose: () => void;
+  /** Also counts as inside: the button that opened it. */
+  inside?: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const within = (t: EventTarget | null) =>
+      panel.current?.contains(t as Node) || inside?.current?.contains(t as Node);
+    const away = (e: MouseEvent) => !within(e.target) && close.current();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    const moved = (e: Event) => !within(e.target) && close.current();
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("resize", moved);
+    document.addEventListener("scroll", moved, true);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", esc);
+      window.removeEventListener("resize", moved);
+      document.removeEventListener("scroll", moved, true);
+    };
+  }, [inside]);
+  return createPortal(
+    <div
+      ref={panel}
+      role="dialog"
+      aria-label={label}
+      data-popover
+      style={menuPlace(anchor, alignLeft, width)}
+      className="fixed z-40 overflow-y-auto rounded-xl border border-edge bg-panel p-3 shadow-2xl"
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** Where the add menu sits on the page, beside its button: below it unless there's more room
+ * above, on the button's right edge (left on the board), and always on screen. It's drawn over
+ * everything, so nothing it sits in can cut it off. */
+function menuPlace(r: DOMRect, alignLeft: boolean, wanted = MENU_WIDTH) {
+  const gap = 6;
+  const below = window.innerHeight - r.bottom - gap * 2;
+  const above = r.top - gap * 2;
+  const up = below < MENU_HEIGHT && above > below;
+  const width = Math.min(wanted, window.innerWidth - 16);
+  const left = Math.min(Math.max(8, alignLeft ? r.left : r.right - width), window.innerWidth - width - 8);
+  return {
+    left,
+    width,
+    maxHeight: Math.max(200, up ? above : below),
+    ...(up ? { bottom: window.innerHeight - r.top + gap } : { top: r.bottom + gap }),
+  };
+}
+// Time zones offered for a world clock, beside your own.
+const ZONES = [
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+// The order of the tiles in the add menu.
+const MENU: Exclude<Widget["kind"], "custom">[] = ["timer", "alarm", "reminder", "stopwatch", "clock", "note"];
+type MenuKind = (typeof MENU)[number] | "custom";
+
+/** A tile being dragged out of the add menu, and where the pointer is. */
+const useTileDrag = create<{ tile: { kind: MenuKind; x: number; y: number; over: boolean } | null }>(() => ({
+  tile: null,
+}));
+
+/** The + on the dock: a menu of every kind of widget, each told apart by its colour and a line
+ * on what it does. Click a tile to set it up (a stopwatch or note just appears); on a laptop's
+ * main screen, drag a tile out and drop it where you want it. */
 function AddWidget({ empty, compact, board = false }: { empty: boolean; compact: boolean; board?: boolean }) {
   const [open, setOpen] = useState(false);
-  // Opens downwards unless there isn't room below and there is more above.
-  const [up, setUp] = useState(false);
+  const [at, setAt] = useState<DOMRect | null>(null);
+  const [pick, setPick] = useState<MenuKind | null>(null);
   const [minutes, setMinutes] = useState("");
   const [time, setTime] = useState("07:00");
+  const [days, setDays] = useState<string[]>([]);
+  const [tune, setTune] = useState<TuneId>(lastTune);
+  const [text, setText] = useState("");
+  const [remindAt, setRemindAt] = useState("18:00");
+  const [zones, setZones] = useState<string[]>([]);
   const [error, setError] = useState("");
   const box = useRef<HTMLDivElement>(null);
+  const tile = useTileDrag((s) => s.tile);
+  const assistant = useAssistantName();
+  const { send } = useSend();
+  const own = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Tiles can be dropped on the screen only where widgets can be left: a laptop's main screen.
+  const droppable = useWide() && !board;
 
   useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
+    if (!open) setPick(null);
   }, [open]);
+
+  const pickTune = (t: TuneId) => {
+    setTune(t);
+    rememberTune(t);
+  };
 
   const make = async (body: WidgetInput) => {
     setError("");
     try {
-      useStore.getState().upsertWidget(await api.addWidget(body));
+      const w = await api.addWidget(body);
+      if (w.kind === "note") focusNote = w.id;
+      useStore.getState().upsertWidget(w);
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't add it");
     }
   };
-  const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-edge/60";
+
+  /** What a tile makes as it is set up now: dragging the alarm tile drops the alarm with the
+   * time and tune picked in it. Null when it needs more first (a reminder's text). */
+  const bodyFor = (kind: MenuKind): WidgetInput | null => {
+    if (kind === "timer") return { kind, minutes: Number(minutes) > 0 ? Number(minutes) : 5, tune };
+    if (kind === "alarm") return { kind, time, days: daysFor(days) ?? undefined, tune };
+    if (kind === "reminder")
+      return text.trim() ? { kind, text: text.trim(), time: remindAt, days: daysFor(days) ?? undefined } : null;
+    if (kind === "clock") return { kind, zones: [own, ...zones.filter((z) => z !== own)].slice(0, 4) };
+    if (kind === "custom") return null;
+    return { kind };
+  };
+
+  const choose = (kind: MenuKind) => {
+    setError("");
+    if (kind === "stopwatch" || kind === "note") make({ kind });
+    else setPick(kind);
+  };
+
+  /** Drag a tile onto the main screen: the widget is made where it is dropped. A press that
+   * doesn't move is a click. */
+  const startTile = (e: ReactPointerEvent, kind: MenuKind) => {
+    if (e.button !== 0 || !droppable || !room) return;
+    const from = { x: e.clientX, y: e.clientY };
+    let moved = false;
+    const inRoom = (x: number, y: number) => {
+      const r = room?.getBoundingClientRect();
+      const m = document.querySelector("[data-popover]")?.getBoundingClientRect();
+      const onMenu = m && x >= m.left && x <= m.right && y >= m.top && y <= m.bottom;
+      return !!r && !onMenu && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - from.x, ev.clientY - from.y) < 6) return;
+      moved = true;
+      document.body.classList.add("widget-dragging");
+      useTileDrag.setState({ tile: { kind, x: ev.clientX, y: ev.clientY, over: inRoom(ev.clientX, ev.clientY) } });
+    };
+    const done = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", done);
+      window.removeEventListener("pointercancel", done);
+      document.body.classList.remove("widget-dragging");
+      useTileDrag.setState({ tile: null });
+      if (!moved) return;
+      const body = bodyFor(kind);
+      if (!body) return setPick(kind);
+      if (ev.type !== "pointerup" || !room || !inRoom(ev.clientX, ev.clientY)) return;
+      const r = room.getBoundingClientRect();
+      const card = { width: compact ? 176 : 224, height: 110 };
+      const pos = placeIn(ev.clientX - card.width / 2 - r.left, ev.clientY - 18 - r.top, r, card);
+      make({ ...body, pos });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", done);
+    window.addEventListener("pointercancel", done);
+  };
+
   const chip = "rounded-full border border-edge px-2 py-0.5 text-xs hover:border-sky-400/60 hover:text-sky-200";
+  const field = "w-full rounded-md border border-edge bg-ink px-2 py-1 text-base sm:text-sm";
+  const go = "rounded-md bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40";
+
+  const pane = () => {
+    if (pick === "timer")
+      return (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_TIMERS.map((m) => (
+              <button key={m} className={chip} onClick={() => make({ kind: "timer", minutes: m, tune })}>
+                {m} min
+              </button>
+            ))}
+          </div>
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (Number(minutes) > 0) make({ kind: "timer", minutes: Number(minutes), tune });
+            }}
+          >
+            <input
+              value={minutes}
+              onChange={(e) => setMinutes(e.target.value)}
+              inputMode="decimal"
+              placeholder="Minutes"
+              aria-label="Timer minutes"
+              className={field}
+            />
+            <button className={go} disabled={!(Number(minutes) > 0)}>
+              Start
+            </button>
+          </form>
+          <TunePicker tune={tune} onChange={pickTune} />
+        </div>
+      );
+    if (pick === "alarm")
+      return (
+        <form
+          className="space-y-2.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            make({ kind: "alarm", time, days: daysFor(days) ?? undefined, tune });
+          }}
+        >
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Alarm time" className={field} />
+          <DayPicker days={days} onChange={setDays} />
+          <TunePicker tune={tune} onChange={pickTune} />
+          <div className="flex justify-end">
+            <button className={go}>Set alarm</button>
+          </div>
+        </form>
+      );
+    if (pick === "reminder")
+      return (
+        <form
+          className="space-y-2.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const body = bodyFor("reminder");
+            if (body) make(body);
+          }}
+        >
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Remind me to…"
+            aria-label="What to remind you of"
+            maxLength={500}
+            className={field}
+            autoFocus
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            At
+            <input type="time" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} aria-label="Reminder time" className={field} />
+          </label>
+          <DayPicker days={days} onChange={setDays} />
+          <div className="flex justify-end">
+            <button className={go} disabled={!text.trim()}>
+              Add reminder
+            </button>
+          </div>
+        </form>
+      );
+    if (pick === "clock")
+      return (
+        <div className="space-y-2.5">
+          <p className="text-xs text-slate-400">
+            Shows {zoneCity(own)} (your time) and up to three more. Pick them:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {ZONES.filter((z) => z !== own).map((z) => {
+              const on = zones.includes(z);
+              return (
+                <button
+                  key={z}
+                  type="button"
+                  aria-pressed={on}
+                  disabled={!on && zones.length >= 3}
+                  onClick={() => setZones(on ? zones.filter((x) => x !== z) : [...zones, z])}
+                  className={`${chip} disabled:opacity-40 ${on ? "border-sky-400/70 bg-sky-400/15 text-sky-200" : ""}`}
+                >
+                  {zoneCity(z)}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex justify-end">
+            <button className={go} onClick={() => make(bodyFor("clock")!)}>
+              Add clock
+            </button>
+          </div>
+        </div>
+      );
+    if (pick === "custom")
+      return (
+        <form
+          className="space-y-2.5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!text.trim()) return;
+            if (await send(`Make me a custom widget: ${text.trim()}`, [])) {
+              setText("");
+              setOpen(false);
+            }
+          }}
+        >
+          <p className="text-xs text-slate-400">
+            Describe it and {assistant} builds it, then puts it here: a countdown, a habit tracker, a weather card, a
+            pixel-art pet…
+          </p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            placeholder="A little pixel-art cat that naps and stretches"
+            aria-label="Describe your widget"
+            className={`${field} resize-none`}
+            autoFocus
+          />
+          <div className="flex justify-end">
+            <button className={`${go} flex items-center gap-1`} disabled={!text.trim()}>
+              <Send size={12} /> Ask {assistant}
+            </button>
+          </div>
+        </form>
+      );
+    return null;
+  };
 
   return (
     <div ref={box} className="relative shrink-0">
       <button
         onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          const below = window.innerHeight - r.bottom;
-          setUp(below < MENU_HEIGHT && r.top > below);
+          setAt(e.currentTarget.getBoundingClientRect());
           setOpen((v) => !v);
         }}
         aria-expanded={open}
@@ -643,114 +1175,119 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
       >
         <Plus size={13} /> {empty ? "Add a widget" : <span className={compact ? "sr-only lg:not-sr-only" : ""}>Add</span>}
       </button>
-      {open && (
-        <div
-          className={`absolute z-30 w-64 rounded-xl border border-edge bg-panel p-2 shadow-xl ${
-            up ? "bottom-full mb-1" : "top-full mt-1"
-          } ${board ? "left-0" : "right-0"}`}
-        >
-          <p className="px-2 pb-1 text-[11px] text-slate-500">
-            Or just ask: "set a timer for 10 minutes", "wake me at 7 on weekdays", "remind me to call mum at 6".
-          </p>
-          <div className="px-2 py-1">
-            <div className="flex items-center gap-2 text-sm">
-              <Timer size={14} /> Timer
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {QUICK_TIMERS.map((m) => (
-                <button key={m} className={chip} onClick={() => make({ kind: "timer", minutes: m })}>
-                  {m} min
+      {open && at && (
+        <Popover anchor={at} width={MENU_WIDTH} alignLeft={board} label="Add a widget" onClose={() => setOpen(false)} inside={box}>
+          <div className="mb-2 flex items-center gap-2">
+            {pick ? (
+              <>
+                <button
+                  onClick={() => setPick(null)}
+                  aria-label="Back to all widgets"
+                  className="rounded p-0.5 text-slate-400 hover:text-white"
+                >
+                  <ArrowLeft size={15} />
                 </button>
-              ))}
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (Number(minutes) > 0) make({ kind: "timer", minutes: Number(minutes) });
-                }}
-              >
-                <input
-                  value={minutes}
-                  onChange={(e) => setMinutes(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="min"
-                  aria-label="Timer minutes"
-                  className="w-12 rounded-md border border-edge bg-ink px-1.5 py-0.5 text-base sm:text-xs"
-                />
-                <button className={chip}>Start</button>
-              </form>
-            </div>
+                <span className={`grid size-6 place-items-center rounded-md ${KINDS[pick].tone}`}>
+                  <KindIcon kind={pick} size={14} />
+                </span>
+                <span className="text-sm font-medium text-slate-100">{KINDS[pick].name}</span>
+              </>
+            ) : (
+              <span className="text-sm font-medium text-slate-100">Add a widget</span>
+            )}
+            <button
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              className="ml-auto rounded p-0.5 text-slate-500 hover:text-white"
+            >
+              <X size={14} />
+            </button>
           </div>
-          <form
-            className="flex items-center gap-2 px-2 py-1.5 text-sm"
-            onSubmit={(e) => {
-              e.preventDefault();
-              make({ kind: "alarm", time });
-            }}
-          >
-            <AlarmClock size={14} /> Alarm
-            <input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              aria-label="Alarm time"
-              className="ml-auto rounded-md border border-edge bg-ink px-1.5 py-0.5 text-base sm:text-xs"
-            />
-            <button className={chip}>Set</button>
-          </form>
-          <button className={item} onClick={() => make({ kind: "stopwatch" })}>
-            <Watch size={14} /> Stopwatch
-          </button>
-          <button
-            className={item}
-            onClick={() => make({ kind: "clock", zones: [Intl.DateTimeFormat().resolvedOptions().timeZone] })}
-          >
-            <Clock size={14} /> Clock
-          </button>
-          <button className={item} onClick={() => make({ kind: "note" })}>
-            <StickyNote size={14} /> Note
-          </button>
-          {error && <p className="px-2 pt-1 text-xs text-rose-400">{error}</p>}
-        </div>
+          {pick ? (
+            pane()
+          ) : (
+            <>
+              <p className="mb-2 text-[11px] text-slate-500">
+                {droppable ? "Click one to set it up, or drag it onto the screen where you want it." : "Pick one to set it up."}
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[...MENU, "custom" as const].map((kind) => (
+                  <button
+                    key={kind}
+                    onClick={() => choose(kind)}
+                    onPointerDown={kind === "custom" ? undefined : (e) => startTile(e, kind)}
+                    title={KINDS[kind].about}
+                    className={`flex min-w-0 items-center gap-2 rounded-lg border border-edge bg-ink/40 p-2 text-left hover:border-sky-400/60 hover:bg-edge/40 ${
+                      droppable && kind !== "custom" ? "cursor-grab active:cursor-grabbing" : ""
+                    } ${tile?.kind === kind ? "opacity-40" : ""}`}
+                  >
+                    <span className={`grid size-7 shrink-0 place-items-center rounded-md ${KINDS[kind].tone}`}>
+                      <KindIcon kind={kind} size={15} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm text-slate-100">{KINDS[kind].name}</span>
+                      <span className="block truncate text-[11px] leading-snug text-slate-400">{KINDS[kind].about}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Or just ask {assistant}: "wake me at 7 on weekdays", "remind me to call mum at 6".
+              </p>
+            </>
+          )}
+          {error && <p className="pt-2 text-xs text-rose-400">{error}</p>}
+        </Popover>
       )}
+      {tile && <TileGhost kind={tile.kind} x={tile.x} y={tile.y} over={tile.over} />}
     </div>
   );
 }
 
-/** A soft two-tone chime, repeated while something rings. Browsers allow sound only after the
- * person has used the page, so a silent first ring is expected on a fresh tab. */
-function useChime(on: boolean) {
+/** The tile following the pointer while it is dragged out of the add menu. */
+function TileGhost({ kind, x, y, over }: { kind: MenuKind; x: number; y: number; over: boolean }) {
+  return (
+    <div
+      className={`pointer-events-none fixed z-50 flex w-44 items-center gap-2 rounded-xl border bg-panel/95 px-3 py-2 shadow-2xl backdrop-blur ${
+        over ? "border-sky-400" : "border-edge opacity-70"
+      }`}
+      style={{ left: x, top: y, transform: "translate(-50%, -50%)" }}
+    >
+      <span className={`grid size-7 place-items-center rounded-md ${KINDS[kind].tone}`}>
+        <KindIcon kind={kind} size={15} />
+      </span>
+      <span className="text-sm text-slate-100">{KINDS[kind].name}</span>
+      <span className="ml-auto text-[10px] text-slate-400">{over ? "Drop here" : "Drag onto the screen"}</span>
+    </div>
+  );
+}
+
+/** The ringing widget's tune, played over and over until it's answered; an alarm starts softer
+ * and grows. Browsers allow sound only after the person has used the page, so a silent first
+ * ring is expected on a fresh tab. */
+function useChime(tune: TuneId | null, grows: boolean) {
   useEffect(() => {
-    if (!on) return;
+    if (!tune) return;
     let ctx: AudioContext | null = null;
     try {
       ctx = new AudioContext();
     } catch {
       return;
     }
+    const t = tuneOf(tune);
+    const began = Date.now();
     const ring = () => {
       if (!ctx) return;
-      [880, 660].forEach((f, i) => {
-        const o = ctx!.createOscillator();
-        const g = ctx!.createGain();
-        const t = ctx!.currentTime + i * 0.25;
-        o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-        o.connect(g).connect(ctx!.destination);
-        o.start(t);
-        o.stop(t + 0.25);
-      });
+      playTune(ctx, t, grows ? swell((Date.now() - began) / 1000) : 1);
       navigator.vibrate?.([200, 100, 200]);
     };
     ring();
-    const t = window.setInterval(ring, 1800);
+    const timer = window.setInterval(ring, t.every * 1000);
     return () => {
-      window.clearInterval(t);
+      window.clearInterval(timer);
       ctx?.close().catch(() => {});
     };
-  }, [on]);
+  }, [tune, grows]);
 }
 
 /** What's ringing, over everything, until it's snoozed or dismissed. */
@@ -758,8 +1295,8 @@ export function RingOverlay() {
   const list = useWidgetList();
   const now = useNow();
   const ringing = list.filter((w) => isRinging(w, now));
-  useChime(ringing.length > 0);
   const w = ringing[0];
+  useChime(w ? tuneOf(w.state.tune).id : null, w?.kind === "alarm");
   if (!w) return null;
   const text = w.kind === "reminder" ? w.state.text : w.kind === "timer" ? "Time's up" : w.state.time;
   return (

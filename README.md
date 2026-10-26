@@ -578,7 +578,11 @@ Around the orb is a live screen that the assistant runs with you.
   clocks and notes (`nexus_common/widgets.py`). The server keeps the time and the worker rings
   them every 15 seconds, in the app and as a push notification, so a timer runs with the app
   closed. The assistant sets them with its own tools (no team), and the + button adds one by
-  hand.
+  hand: a menu of tiles, one colour per kind, each set up in place or (on a laptop) dragged
+  straight onto the screen. Timers, alarms and reminders ring with one of nine tunes made in
+  the browser (`apps/web/src/lib/tunes.ts`, kept in step with `TUNES` in `widgets.py`); an
+  alarm starts soft and grows, and its time, days and tune change from the card. A note's +
+  makes a new blank note beside it.
 - **Custom widgets** are small HTML apps a one-agent widget-builder team writes
   (`library/core/widget-builder`, tool `save_widget`): a countdown, a habit tracker, a weather
   card. The page is served by `/api/widgets/{id}/frame` with a CSP whose `sandbox` directive
