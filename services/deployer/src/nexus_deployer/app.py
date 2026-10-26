@@ -11,6 +11,8 @@ through Traefik and takes a screenshot with the workbench image's Playwright.
 
     POST   /apps/{slug}/deploy    {"app_id", "owner", "user", "project", "stack", "internet"}
     GET    /apps                  every app container, by app
+    POST   /apps/{slug}/check     {"app_id"}: is it up, and what a visitor sees (title, text,
+                                  console errors), without building anything
     POST   /apps/{slug}/stop      POST /apps/{slug}/restart      DELETE /apps/{slug}
 """
 
@@ -63,7 +65,8 @@ ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 # Each template's image runs as this user (none of them as root).
 USERS = {"static": "101", "fastapi": "10010", "node": "1000"}
-# Loads the app through Traefik (as a visitor would) and prints {"png", "errors"} as JSON.
+# Loads the app through Traefik (as a visitor would) and prints {"png", "errors", "title",
+# "text"} as JSON.
 SHOT_JS = """
 const { chromium } = require('/usr/local/lib/node_modules/@playwright/test');
 (async () => {
@@ -79,7 +82,10 @@ const { chromium } = require('/usr/local/lib/node_modules/@playwright/test');
   await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(500);
   const png = await page.screenshot();
-  console.log(JSON.stringify({ png: png.toString('base64'), errors: errors.slice(0, 10) }));
+  const title = await page.title().catch(() => '');
+  const text = (await page.innerText('body').catch(() => '')).slice(0, 400);
+  const errs = errors.slice(0, 10);
+  console.log(JSON.stringify({ png: png.toString('base64'), errors: errs, title, text }));
   await browser.close();
 })().catch((e) => { console.log(JSON.stringify({ error: String(e) })); process.exit(1); });
 """
@@ -214,8 +220,9 @@ async def healthy(slug: str, ps: list[Part]) -> tuple[bool, str]:
     return False, detail
 
 
-async def screenshot(body: DeployIn, slug: str) -> dict:
-    """{"png", "errors"} from a throwaway container of the workbench image; {} if it failed."""
+async def screenshot(app_id: str, slug: str) -> dict:
+    """{"png", "errors", "title", "text"} from a throwaway container of the workbench image;
+    {"error"} when the page didn't load, {} if the container itself failed."""
     name = f"nexus-shot-{slug}"
     host = host_for(slug)
     spec = {
@@ -231,7 +238,7 @@ async def screenshot(body: DeployIn, slug: str) -> dict:
             "http_proxy=",
             "https_proxy=",
         ],
-        "Labels": {"nexus.shot": body.app_id},
+        "Labels": {"nexus.shot": app_id},
         "HostConfig": {
             "Memory": 1024 * 1024 * 1024,
             "NanoCpus": int(1e9),
@@ -339,13 +346,57 @@ async def deploy(slug: str, body: DeployIn):
             logs=logs[-LOG_CHARS:],
         )
     # A change of visibility shows the same app: no new screenshot.
-    shot = await screenshot(body, slug) if body.build else {}
+    shot = await screenshot(body.app_id, slug) if body.build else {}
     return DeployOut(
         ok=True,
         url=url,
         stack=stack,
         screenshot=shot.get("png"),
         console_errors=shot.get("errors") or [],
+    )
+
+
+class CheckIn(BaseModel):
+    app_id: str = Field(pattern=ID.pattern)
+
+
+class CheckOut(BaseModel):
+    running: bool
+    # The page loaded in a browser.
+    loaded: bool = False
+    detail: str = ""
+    title: str = ""
+    text: str = ""
+    console_errors: list[str] = []
+    logs: str = ""
+
+
+@api.post("/apps/{slug}/check", response_model=CheckOut)
+async def check(slug: str, body: CheckIn):
+    """The app as it is now, for a team about to fix it: whether every part runs, the tail of
+    their logs, and what the page shows and logs as errors when a browser opens it."""
+    found = await app_containers(slug_ok(slug))
+    if not found:
+        return CheckOut(running=False, detail="It isn't running: it has no containers.")
+    logs = ""
+    for c in found:
+        name = c["Names"][0].lstrip("/")
+        logs += f"--- {name} ({c.get('State')}) ---\n{await docker.logs(name, tail=40)}\n"
+    logs = logs[-LOG_CHARS:]
+    stopped = [c["Names"][0].lstrip("/") for c in found if c.get("State") != "running"]
+    if stopped:
+        return CheckOut(running=False, detail=f"Not running: {', '.join(stopped)}.", logs=logs)
+    shot = await screenshot(body.app_id, slug)
+    if not shot or shot.get("error"):
+        detail = f"The page didn't load: {shot.get('error')}" if shot else "No browser check."
+        return CheckOut(running=True, detail=detail, logs=logs)
+    return CheckOut(
+        running=True,
+        loaded=True,
+        title=str(shot.get("title") or "")[:200],
+        text=str(shot.get("text") or "")[:400],
+        console_errors=[str(e)[:500] for e in shot.get("errors") or []],
+        logs=logs,
     )
 
 

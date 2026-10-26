@@ -33,7 +33,13 @@ from nexus_common.systems import (
     run_payload,
     system_payload,
 )
-from nexus_orchestrator.systems.design import DesignFailed, describe, design
+from nexus_orchestrator.systems.design import (
+    DesignFailed,
+    describe,
+    design,
+    past_results,
+    projects,
+)
 from nexus_orchestrator.tools import CALL_ID, ToolContext, as_tools, link_line
 
 log = logging.getLogger(__name__)
@@ -141,6 +147,19 @@ async def run_results(db, run: AgentRun) -> tuple[list[File], list[Link], File |
     )
     pick = featured(files, links, presented)
     return files, links, pick.file or pick.link
+
+
+def changes_note(base: AgentRun, earlier: list[File]) -> str:
+    """Added to the request of a team that changes or fixes an earlier result."""
+    when = (base.finished_at or base.created_at).strftime("%d %b %Y")
+    names = ", ".join(f.name for f in earlier[:12]) or "none were kept"
+    return (
+        f"This changes an earlier result (run {base.id}, made {when}); its files are among "
+        f"this task's files: {names}. Start from them. First look at them as they are (open "
+        "pictures and renders with view_image, read the documents) and write down what is "
+        "wrong or missing against this request; then change that, keep the rest, and don't "
+        "start over."
+    )
 
 
 def system_tools(
@@ -305,11 +324,7 @@ def system_tools(
                 earlier, _, _ = await run_results(db, base)
                 # The earlier result's files are what the team changes.
                 ids += [f.id for f in earlier if f.id not in ids]
-                request = (
-                    f"{request}\n\nThis changes an earlier result (run {base.id}): its files are "
-                    "among this task's files. Start from them and change what is asked; keep "
-                    "the rest."
-                )
+                request = f"{request}\n\n{changes_note(base, earlier)}"
             names = {}
             if ids:
                 rows = await db.execute(select(File.id, File.name).where(File.id.in_(ids)))
@@ -334,6 +349,12 @@ def system_tools(
                 return str(exc)
             if result.existing is not None:
                 return await already_made(db, result.existing)
+            if result.based_on is not None:
+                # The architect found the earlier result this request changes or fixes.
+                base = result.based_on
+                earlier, _, _ = await run_results(db, base)
+                ids += [f.id for f in earlier if f.id not in ids]
+                request = f"{request}\n\n{changes_note(base, earlier)}"
             if result.template is not None:
                 system = await db.get(AgentSystem, result.template.id)
                 return f"Using your saved template {system.name}.\n" + await start(
@@ -411,6 +432,32 @@ def system_tools(
             if system.status == SystemStatus.archived:
                 system.lifetime = SystemLifetime.ephemeral
             return await start(db, system, request, await files_for(db, file_ids), budget_usd)
+
+    async def find_past_work(query: str) -> str:
+        """Find what teams made for the user before, in any chat and however long ago: results
+        with their run ids and files, and software projects with their app's state. query: the
+        thing in the user's words, e.g. "solitaire app" or "minion model"."""
+        await note("find_past_work", query=query[:200])
+        async with sessionmaker() as db:
+            past, _ = await past_results(db, user_id, query)
+            known = await projects(db, user_id, query)
+        lines = []
+        if known:
+            lines.append("Software projects (best matches first):")
+            lines += [f"- {n} (project {i}): {g[:150]}; {a}" for i, n, g, a in known[:5]]
+        if past:
+            lines.append("Results (best matches first; run id for based_on):")
+            lines += [
+                f"- {n} (run {i}): {g[:150]}; files: {', '.join(f[:6]) or 'none'}"
+                for i, n, g, f in past[:8]
+            ]
+        if not lines:
+            return "Nothing made before matches; teams haven't made anything for the user yet."
+        lines.append(
+            "To change or fix one, pass the user's words to build_agent_system (with based_on for "
+            "a result): it checks what is wrong with it first."
+        )
+        return "\n".join(lines)
 
     async def list_agent_systems() -> str:
         """List the user's saved agent systems and templates, and runs in progress, with ids."""
@@ -571,6 +618,7 @@ def system_tools(
         build_agent_system,
         run_agent_system,
         list_agent_systems,
+        find_past_work,
         update_agent_system,
         save_as_template,
         delete_agent_system,

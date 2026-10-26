@@ -7,7 +7,8 @@ RUN if [ -f package.json ] && [ "$(npm pkg get scripts.build)" != "{}" ]; then \
       npm run build && test -d dist; \
     else \
       mkdir -p /tmp/site && cp -r . /tmp/site && rm -rf /tmp/site/node_modules && mv /tmp/site dist; \
-    fi
+    fi && \
+    { test -f dist/index.html || { echo "The build made no index.html to serve." >&2; exit 1; }; }
 
 FROM nginxinc/nginx-unprivileged:1.27.5-alpine
 COPY --from=build /app/dist /usr/share/nginx/html

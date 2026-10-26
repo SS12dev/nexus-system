@@ -442,6 +442,49 @@ async def test_run_against_the_real_workbench(
     assert ready.data["commit"] == log[0].split(" ")[0]
 
 
+async def test_a_static_app_made_in_a_subfolder_moves_to_the_root(
+    sdeps, owner, scripts, settings, tmp_path, monkeypatch
+):
+    """The solitaire team scaffolded into solitaire-app/; the deploy served the empty root."""
+    import httpx
+
+    import nexus_workbench.app as workbench_app
+    from nexus_orchestrator.workbench import WorkbenchClient
+
+    monkeypatch.setattr(workbench_app, "ROOT", tmp_path)
+    http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workbench_app.app), base_url="http://wb", timeout=60
+    )
+    sdeps.workbench = WorkbenchClient(settings, http)
+    happy(scripts)
+    scripts["architect"] = [
+        done("ws_write", path="PLAN.md", content=PLAN),
+        done("submit_plan", summary="Klondike."),
+    ]
+    scripts["frontend"] = [
+        done("ws_write", path="package-lock.json", content='{"packages": {}}'),
+        done("ws_write", path="solitaire-app/index.html", content="<h1>Solitaire</h1>\n"),
+        done("ws_write", path="solitaire-app/src/main.ts", content="export {}\n"),
+        done("ws_commit", message="Build solitaire"),
+        "Built it.",
+    ]
+    system_id, run_id = await make_dev_run(sdeps, owner)
+    try:
+        await runner.run_system(sdeps, run_id)
+    finally:
+        await http.aclose()
+
+    run, _, _ = await load(sdeps, run_id)
+    assert run.status == RunStatus.completed, run.error
+    user, _ = owner
+    folder = tmp_path / str(user.id) / str(system_id)
+    assert (folder / "index.html").read_text() == "<h1>Solitaire</h1>\n"
+    assert (folder / "src" / "main.ts").is_file() and (folder / "PLAN.md").is_file()
+    assert not (folder / "solitaire-app").exists()
+    log = (await workbench_app.git(folder, "log", "--format=%s"))["stdout"]
+    assert "Move the app from solitaire-app/ to the project root" in log
+
+
 def test_a_dev_team_always_gets_three_review_rounds():
     """Lowering the rounds to make the estimate look cheaper left every fix undone."""
     spec = AgentSystemSpec.model_validate(

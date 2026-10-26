@@ -185,10 +185,11 @@ merges results. For "do X for each of N things", when N isn't known up front.
 - dev_project: Nexus's software team, ONLY for a program the user will run or use: an app, \
 website, game, tool, script or bot to build, fix or extend. Its agents are fixed: send \
 "agents": [] and only give name (the app's short name, e.g. "2048"), goal and project. \
-project: to change or extend one of the user's EXISTING PROJECTS (a follow-up such as "add a \
-high score table"), its id; for a new app, null. A file made with code (a 3D model, chart, \
-document, dataset or image) is not software: give that to a flow or single agent with \
-run_code and the matching skill.
+project: to change, fix or extend one of the user's EXISTING PROJECTS (a follow-up such as \
+"add a high score table", or "the solitaire app doesn't work" however long ago it was made), \
+its id; for a new app, null. Never start a new project for an app the user already has. A \
+file made with code (a 3D model, chart, document, dataset or image) is not software: give \
+that to a flow or single agent with run_code and the matching skill.
 
 ## Examples of flows (ids and tools are illustrations)
 - "Make a 3D model of a Minion to print": flow: reference (web_search, web_fetch: the \
@@ -254,13 +255,21 @@ change asked for), reply with {"existing": "<run id>"} instead of a spec: the as
 it and asks what to change, which saves a rebuild. Not when the request asks for a new, \
 another or different one, or for changes: then design a spec (a change to a past result \
 starts from its files).
+- If the request is about one of PAST RESULTS that is wrong, broken or should change ("the \
+minion model is wrong", "fix the rocket", "update last week's report"), add "based_on": \
+"<run id>" next to the spec: the team gets that result's files. Its first agent looks at them \
+as they are (view_image for renders and pictures, reading documents) and writes down what is \
+wrong against the request before changing anything; give it view_image when the files are \
+visual, and a checker that confirms each problem is fixed. The user names it in their own \
+words, often from another chat: match on the thing (solitaire, minion, rocket), not exact \
+names. Software is continued with "project" instead.
 
 Reply with JSON only: {"plan": str (the flow in a few lines: steps, what each needs, what \
 runs side by side, what is checked), "spec": {"name": str, "goal": str, "topology": str, \
 "agents": [{"id": str, "name": str, "role": str, "instructions": str, "tier": str, "tools": \
 [str], "skills": [str], "max_steps": int|null, "after": [str], "checks": str|null}], \
 "approval": {"required_for": [str]}, "max_rounds": int, "deliverables": [str], "project": \
-str|null}} or {"template_id": str} or {"existing": str}."""
+str|null}, "based_on": str|null} or {"template_id": str} or {"existing": str}."""
 
 
 DEFAULT_ROLES = ("researcher", "writer", "analyst", "reviewer", "planner", "coder")
@@ -277,7 +286,7 @@ def design_request(
     best_model: bool,
     current: dict | None = None,
     roles: list[str] | None = None,
-    projects: list[tuple[str, str, str]] | None = None,
+    projects: list[tuple[str, str, str, str]] | None = None,
     software: bool = False,
     past: list[tuple[str, str, str, list[str]]] | None = None,
     based_on: str = "",
@@ -287,8 +296,9 @@ def design_request(
         parts.append("This request is software to build, fix or extend: use dev_project.")
     if projects:
         parts.append(
-            "EXISTING PROJECTS (id: name: goal), newest first:\n"
-            + "\n".join(f"- {i}: {n}: {g[:200]}" for i, n, g in projects)
+            "EXISTING PROJECTS (id: name: goal: app), the ones matching the request first, "
+            "then the newest:\n"
+            + "\n".join(f"- {i}: {n}: {g[:200]}: {a}" for i, n, g, a in projects)
         )
     if based_on:
         parts.append(
@@ -298,7 +308,8 @@ def design_request(
         )
     elif past:
         parts.append(
-            "PAST RESULTS (run id: name: goal: files), newest first:\n"
+            "PAST RESULTS (run id: name: goal: files), the ones matching the request first, "
+            "then the newest:\n"
             + "\n".join(
                 f"- {i}: {n}: {g[:200]}: {', '.join(f[:8]) or 'no files'}" for i, n, g, f in past
             )

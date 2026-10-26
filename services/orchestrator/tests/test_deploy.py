@@ -54,6 +54,8 @@ class FakeDeployer:
         self.results = results or []
         self.deploys: list[tuple[str, dict]] = []
         self.stopped: list[str] = []
+        self.checked: list[str] = []
+        self.live = {"running": True, "loaded": True, "title": "2048", "text": "Score 0"}
 
     async def deploy(self, slug, **kw):
         self.deploys.append((slug, kw))
@@ -63,6 +65,10 @@ class FakeDeployer:
 
     async def stop(self, slug):
         self.stopped.append(slug)
+
+    async def check(self, slug, *, app_id):
+        self.checked.append(slug)
+        return self.live
 
 
 def done(tool, **args):
@@ -236,6 +242,66 @@ async def test_unapproved_work_never_replaces_a_live_app(ddeps, owner, scripts):
     assert "- Live link: not updated: the live app keeps the last version" in final
 
 
+class ChangeWorkbench(FakeWorkbench):
+    """An app built before: BRIEF.md exists, and a run that stopped left an edit behind."""
+
+    async def run(self, user, project, command, timeout_s=None):
+        if "NEXUS_CHANGE" in command:
+            return CommandResult(0, "NEXUS_CHANGE\n", "", False, 3)
+        if command.startswith("git status"):
+            return CommandResult(0, " M src/main.ts\n", "", False, 3)
+        return await super().run(user, project, command, timeout_s)
+
+
+async def test_a_change_starts_from_a_check_of_the_app_as_it_is(ddeps, owner, scripts, seen):
+    """The solitaire case: the live link served nginx's welcome page. The team hears what is
+    broken before it plans, the reviewer holds it to that, and the fix replaces the broken app
+    even with open points left."""
+    user, chat_id = owner
+    scripts_for(scripts)
+    await runner.run_system(ddeps, await dev_run(ddeps, user, chat_id, project="p-sol"))
+    assert len(ddeps.deployer.deploys) == 1
+
+    ddeps.workbench = ChangeWorkbench()
+    ddeps.deployer.live = {
+        "running": True,
+        "loaded": True,
+        "title": "Welcome to nginx!",
+        "text": "If you see this page, the nginx web server is successfully installed",
+        "console_errors": [],
+    }
+    scripts_for(scripts, approved=False)
+    run_id = await dev_run(ddeps, user, chat_id, project="p-sol")
+    await runner.run_system(ddeps, run_id)
+
+    assert ddeps.deployer.checked == ["2048"]
+    brief = seen["researcher"][-1][-1].content
+    for fact in ("Welcome to nginx!", "isn't the app", "left uncommitted", "M src/main.ts",
+                 "Problems found", f"Live app {URL}"):  # fmt: skip
+        assert fact in brief, fact
+    assert "ws_run" in seen["researcher:tools"][-1]
+    assert "'Problems found' in BRIEF.md must work now" in seen["reviewer"][-1][-1].content
+    # Unapproved, but what is live is broken: the fix goes up.
+    _, final, _, _ = await outcome(ddeps, run_id)
+    assert len(ddeps.deployer.deploys) == 2
+    assert f"- Live link: {URL} (with the open points below still to fix)" in final
+
+
+async def test_a_working_live_app_is_not_counted_broken(ddeps, owner, scripts, seen):
+    user, chat_id = owner
+    scripts_for(scripts)
+    await runner.run_system(ddeps, await dev_run(ddeps, user, chat_id, project="p-ok"))
+    ddeps.workbench = ChangeWorkbench()
+    ddeps.deployer.live = {"running": True, "loaded": True, "title": "2048", "text": "Score 0"}
+    scripts_for(scripts, approved=False)
+    run_id = await dev_run(ddeps, user, chat_id, project="p-ok")
+    await runner.run_system(ddeps, run_id)
+    _, final, _, _ = await outcome(ddeps, run_id)
+    assert "Title: 2048. Shows: Score 0" in seen["researcher"][-1][-1].content
+    assert len(ddeps.deployer.deploys) == 1
+    assert "not updated: the live app keeps the last version" in final
+
+
 async def test_members_can_run_three_apps(ddeps, sessionmaker):
     from nexus_api.users import create_user
 
@@ -312,3 +378,14 @@ async def test_the_visibility_tool(ddeps, owner, sessionmaker):
     assert "now private" in out and ddeps.deployer.deploys[-1][1]["private"] is True
     async with sessionmaker() as db:
         assert (await db.scalar(select(Project))).public is False
+
+
+async def test_projects_show_their_app_and_matches_come_first(ddeps, owner, scripts):
+    from nexus_orchestrator.systems.design import projects
+
+    user, chat_id = owner
+    scripts_for(scripts)
+    await runner.run_system(ddeps, await dev_run(ddeps, user, chat_id, project="p-2048"))
+    async with ddeps.sessionmaker() as db:
+        found = await projects(db, user.id, "the 2048 game is broken")
+    assert found == [("p-2048", "2048", "A 2048 game", f"app running at {URL}")]
