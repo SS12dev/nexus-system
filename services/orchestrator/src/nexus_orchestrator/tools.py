@@ -3,6 +3,7 @@ one user, so a tool can only ever see that user's data. Which tools exist and ho
 are is in nexus_common.toolinfo; which ones a given caller gets is decided by its owner's role
 and grants (and, for agents, the system spec)."""
 
+import base64
 import contextvars
 import functools
 import logging
@@ -14,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Literal
 
+from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import or_, select
 
@@ -125,6 +127,55 @@ def image_type(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return next((t for magic, t in IMAGE_TYPES.items() if data.startswith(magic)), None)
+
+
+def image_part(kind: str, data: bytes) -> dict:
+    """An image as a message content part the model sees."""
+    url = f"data:{kind};base64,{base64.b64encode(data).decode()}"
+    return {"type": "image_url", "image_url": {"url": url, "detail": "high"}}
+
+
+IMAGE_KEY = re.compile(r"\[image ([0-9a-f]{8})\]")
+# How many of the latest view_image results a caller keeps seeing; older ones become a line of
+# text, so a long review loop doesn't pay for every earlier picture on every call.
+KEEP_IMAGES = 2
+
+
+def show_images(ctx: "ToolContext | None", results: list[ToolMessage]) -> list[HumanMessage]:
+    """The pictures view_image fetched in this batch, as one message after the tool results:
+    tool results can only hold text, a user message can hold images."""
+    if ctx is None:
+        return []
+    parts: list[dict] = []
+    for m in results:
+        if m is None or m.name != "view_image" or not isinstance(m.content, str):
+            continue
+        for key in IMAGE_KEY.findall(m.content):
+            found = ctx.images.pop(key, None)
+            if found is None:
+                continue
+            name, kind, data = found
+            parts += [{"type": "text", "text": f"{name}:"}, image_part(kind, data)]
+    if not parts:
+        return []
+    return [HumanMessage(parts, name="view_image")]
+
+
+def older_images_as_text(messages: list[AnyMessage]) -> list[AnyMessage]:
+    seen = 0
+    out: list[AnyMessage] = []
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage) and m.name == "view_image" and isinstance(m.content, list):
+            seen += 1
+            if seen > KEEP_IMAGES:
+                names = [p["text"].rstrip(":") for p in m.content if p.get("type") == "text"]
+                m = HumanMessage(
+                    f"(Earlier picture{'s' if len(names) > 1 else ''} {', '.join(names)} no "
+                    "longer shown; call view_image again to look.)",
+                    name="view_image",
+                )
+        out.append(m)
+    return out[::-1]
 
 
 def link_line(link: Link) -> str:
@@ -530,9 +581,10 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
 
     async def view_image(name: str) -> str:
         """Look at an image: a render or preview this run made (e.g. out/rocket.png saved as
-        rocket.png), a chart, or a picture the user gave, by file name or id. The picture is
-        shown to you right after this call. Use it to check your own visual output against the
-        request before you report it: missing, misplaced, wrongly sized or ugly parts."""
+        rocket.png), a chart, or a picture or screenshot the user gave, by file name or id. The
+        picture is shown to you right after this call. Use it to check your own visual output
+        against the request before you report it (missing, misplaced, wrongly sized or ugly
+        parts), or to look again at a screenshot from earlier in the chat."""
         await note("view_image", file=name)
         wanted = PurePath(name.strip()).name
         fid = _uuid(name)
@@ -541,15 +593,18 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             if fid is not None:
                 f = await db.scalar(select(File).where(File.id == fid, mine))
             else:
-                # This run's own files first, then the user's library, newest version first.
+                # This run's or chat's own files first, then the user's library, newest version
+                # first.
                 found = select(File).where(File.name == wanted, mine)
                 f = None
-                if ctx.run_id is not None:
-                    f = await db.scalar(
-                        found.where(File.run_id == ctx.run_id)
-                        .order_by(File.created_at.desc())
-                        .limit(1)
-                    )
+                for scope in (
+                    File.run_id == ctx.run_id if ctx.run_id is not None else None,
+                    File.chat_id == ctx.chat_id if ctx.chat_id is not None else None,
+                ):
+                    if f is None and scope is not None:
+                        f = await db.scalar(
+                            found.where(scope).order_by(File.created_at.desc()).limit(1)
+                        )
                 if f is None:
                     f = await db.scalar(found.order_by(File.created_at.desc()).limit(1))
         if f is None:

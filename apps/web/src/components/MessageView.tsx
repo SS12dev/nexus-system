@@ -1,5 +1,6 @@
 import type { Message } from "../lib/types";
-import { FileChip } from "./FileChip";
+import { isPicture } from "../lib/format";
+import { FileChip, PictureThumb } from "./FileChip";
 import { LinkChip } from "./LinkChip";
 import { Markdown } from "./Markdown";
 import { RecallChips } from "./RecallChips";
@@ -9,18 +10,30 @@ import { useAssistantName } from "../lib/assistant";
 export function MessageView({ message, activity }: { message: Message; activity?: string | null }) {
   const assistant = useAssistantName();
   if (message.role === "user") {
+    const pictures = (message.attachments ?? []).filter((f) => isPicture(f.name));
+    const others = (message.attachments ?? []).filter((f) => !isPicture(f.name));
     return (
       <div className="flex flex-col items-end gap-2">
-        {!!message.attachments?.length && (
+        {!!pictures.length && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
-            {message.attachments.map((f) => (
+            {pictures.map((f) => (
+              <PictureThumb key={f.id} file={f} status={f.status} />
+            ))}
+          </div>
+        )}
+        {!!others.length && (
+          <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
+            {others.map((f) => (
               <FileChip key={f.id} file={f} status={f.status} />
             ))}
           </div>
         )}
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-sky-600/80 px-4 py-2.5">
-          {message.content}
-        </div>
+        {/* A screenshot can be sent on its own, with no words. */}
+        {!!message.content && (
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-sky-600/80 px-4 py-2.5">
+            {message.content}
+          </div>
+        )}
       </div>
     );
   }

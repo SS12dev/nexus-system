@@ -1,5 +1,7 @@
 # LiteLLM proxy for Nexus. Agents only ever name the nexus-* aliases, so swapping a model is a
 # change here, not in code. Prices and tiers: see the architecture doc.
+# Screenshots in chat are sent to the model as images, so every chat-facing alias must be a
+# model that reads images; all four GPT-5.4/5.5 tiers do, including the nano fallback.
 model_list:
   - model_name: nexus-nano     # routing, intent, memory extraction, titles, summaries
     litellm_params:

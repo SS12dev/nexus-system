@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeAgent, formatAgo, formatTokens } from "./format";
+import { describeAgent, formatAgo, formatTokens, isPicture, screenshotName } from "./format";
 
 describe("format", () => {
   it("names browsers", () => {
@@ -22,5 +22,20 @@ describe("format", () => {
     expect(formatAgo("2026-10-20T09:00:00Z", now)).toBe("3 h ago");
     expect(formatAgo("2026-10-17T12:00:00Z", now)).toBe("3 days ago");
     expect(formatTokens(1234)).toBe("1.2k");
+  });
+});
+
+describe("pictures", () => {
+  it("knows which files the assistant can look at", () => {
+    expect(isPicture("Screen Shot.PNG")).toBe(true);
+    expect(isPicture("photo.jpeg")).toBe(true);
+    expect(isPicture("scan.tiff")).toBe(false);
+    expect(isPicture("notes.md")).toBe(false);
+  });
+
+  it("names a pasted screenshot by when it was taken", () => {
+    const at = new Date(2026, 9, 26, 9, 5, 7);
+    expect(screenshotName("image/png", at)).toBe("screenshot-2026-10-26-090507.png");
+    expect(screenshotName("image/jpeg", at)).toBe("screenshot-2026-10-26-090507.jpg");
   });
 });

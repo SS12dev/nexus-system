@@ -54,7 +54,10 @@ recalled). It runs with Docker Compose on one machine, reached through a Cloudfl
 API stores the message and queues the turn → the orchestrator builds context (profile,
 nearest memories, past-chat summaries, attached documents) → a nano router decides direct or
 team → the assistant's graph calls LiteLLM with the user's key, streaming over Valkey → the
-reply is stored and a memory job extracts durable facts.
+reply is stored and a memory job extracts durable facts. Pictures attached to the user's
+latest three messages (screenshots, photos; PNG, JPEG, WebP) go to the model as images, since
+every tier reads them; older ones become a line of text and the assistant can call
+`view_image` to look again.
 
 ## Agent teams
 

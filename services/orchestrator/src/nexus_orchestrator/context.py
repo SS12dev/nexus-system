@@ -40,6 +40,12 @@ MEMORY_SEED_SCORE = 0.6
 # Connections put in the prompt, and entities reported to the app, per turn.
 MAX_FACTS = 12
 MAX_ENTITIES = 12
+# Pictures the model sees itself (turn.user_images), so their OCR text isn't added as well.
+PICTURE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+
+def is_picture(f: File) -> bool:
+    return f.content_type in PICTURE_TYPES
 
 
 @dataclass
@@ -77,7 +83,10 @@ class TurnContext:
             docs = []
             for f in self.chat_files:
                 attrs = f'id="{f.id}" name="{html.escape(f.name)}"'
-                if f.status != FileStatus.ready:
+                if is_picture(f):
+                    # Shown with the message it came with; view_image shows it again.
+                    docs.append(f"<picture {attrs}/>")
+                elif f.status != FileStatus.ready:
                     note = "still being read" if f.status == FileStatus.processing else f.error
                     docs.append(f'<document {attrs} unavailable="{html.escape(note or "")}"/>')
                 elif f.id in self.documents:
@@ -260,10 +269,13 @@ async def assemble(
     user_id = chat.user_id
     profile = await get_profile(db, user_id)
     ctx.memory_enabled = profile.memory_enabled
-    vec, _model = await embedder.try_embed_one(db, question[:4000])
+    # A picture sent on its own has no text to search with.
+    asked = bool(question.strip())
+    vec, _model = await embedder.try_embed_one(db, question[:4000]) if asked else (None, "")
 
     if profile.memory_enabled:
         ctx.profile = profile.content
+    if profile.memory_enabled and asked:
         found = await recall(db, settings, user_id, question, vec, exclude_chat_id=chat.id)
         ctx.memories, ctx.episodes = found.memories, found.episodes
         ctx.facts, ctx.entities = found.facts, found.entities
@@ -272,12 +284,12 @@ async def assemble(
         ctx.earlier = await db.scalar(select(Episode.content).where(Episode.chat_id == chat.id))
 
     ctx.chat_files = await chat_files(db, chat)
-    ready = [f for f in ctx.chat_files if f.status == FileStatus.ready]
+    ready = [f for f in ctx.chat_files if f.status == FileStatus.ready and not is_picture(f)]
     if ready:
         if sum(f.char_count for f in ready) <= settings.inline_document_chars:
             for f in ready:
                 ctx.documents[f.id] = await document_text(db, f.id)
-        else:
+        elif asked:
             hits = await hybrid_search(
                 db,
                 "file_chunks",
