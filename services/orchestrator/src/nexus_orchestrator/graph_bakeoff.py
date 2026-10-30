@@ -702,7 +702,18 @@ async def run_dataset(args: argparse.Namespace, settings: Settings, ollama: str)
     out.mkdir(parents=True, exist_ok=True)
     answers: dict[str, list[Result]] = {}
     tallies: dict[str, Tally] = {}
+    # Each model's answers are saved as soon as it finishes, so a rerun after a crash or a
+    # redeploy picks up where it stopped.
+    cache = Path(args.out) / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
     for model in [m.strip() for m in args.models.split(",") if m.strip()]:
+        saved = cache / f"{re.sub(r'[^A-Za-z0-9._-]', '_', model)}.json"
+        if saved.exists():
+            data = json.loads(saved.read_text())
+            answers[model] = [Result(**r) for r in data["results"]]
+            tallies[model] = Tally(memory_gb=data["memory_gb"])
+            print(f"Model: {model} (from {saved.name})", flush=True)
+            continue
         print(f"Model: {model}", flush=True)
         results, mem = [], 0.0
         for i, text in enumerate(texts):
@@ -713,6 +724,7 @@ async def run_dataset(args: argparse.Namespace, settings: Settings, ollama: str)
         if models.is_local(model):
             await models.unload(model)
         answers[model], tallies[model] = results, Tally(memory_gb=mem)
+        saved.write_text(json.dumps({"memory_gb": mem, "results": [r.__dict__ for r in results]}))
 
     names = {e["key"] for rs in answers.values() for r in rs for e in r.entities}
     for c in cases:
