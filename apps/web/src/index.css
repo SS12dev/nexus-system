@@ -200,6 +200,31 @@ body {
   color: rgb(203 213 225);
   background: rgb(11 16 32 / 0.55);
 }
+/* A star's own facts, shown on hover: one line per connection, dotted in its family colour. */
+.orb-facts {
+  max-width: 16rem;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgb(226 232 240);
+  background: rgb(11 16 32 / 0.88);
+  border: 1px solid rgb(28 37 64);
+  pointer-events: none;
+  user-select: none;
+}
+.orb-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.orb-fact-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  transform: translateY(-1px);
+}
 .orb-label-lit {
   color: rgb(254 249 195);
   border-color: rgb(253 224 71 / 0.6);

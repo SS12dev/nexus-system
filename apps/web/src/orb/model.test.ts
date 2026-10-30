@@ -21,6 +21,9 @@ import {
   memoryPoints,
   ORB_R,
   curve,
+  concentric,
+  DEFAULT_VIEW,
+  SHELL_R,
   MOON_FAR,
   MOON_NEAR,
   orbitPos,
@@ -449,5 +452,110 @@ describe("moons outside the orb", () => {
     const mid = p1[Math.floor(p1.length / 2)];
     expect(Math.hypot(mid[1], mid[2])).toBeGreaterThan(0.03);
     expect(curve(a, b, 2)[5]).not.toEqual(mid);
+  });
+});
+
+describe("the concentric constellation", () => {
+  const ent = (id: string, over: Partial<GraphEntity> = {}): GraphEntity => ({
+    id,
+    type: "topic",
+    name: id,
+    aliases: [],
+    summary: "",
+    is_self: false,
+    created_at: "2026-10-20T00:00:00Z",
+    seen_at: "2026-10-20T00:00:00Z",
+    memories: 1,
+    past_chats: 0,
+    files: 0,
+    chats: 0,
+    memory_ids: [],
+    file_ids: [],
+    chat_ids: [],
+    ...over,
+  });
+  const rel = (src: string, dst: string, family = "association", weight = 0.5): KnowledgeGraph["relations"][number] => ({
+    id: `${src}-${dst}`,
+    src,
+    dst,
+    predicate: "related to",
+    fact: "",
+    confidence: 1,
+    valid_from: "",
+    valid_to: null,
+    source_chat_id: null,
+    family,
+    label: "relates to",
+    weight,
+  });
+  const graph: KnowledgeGraph = {
+    entities: [
+      ent("me", { type: "person", name: "Shivam", is_self: true, shell: 0 }),
+      ent("curious", { kind: "trait", shell: 1, domain: null, salience: 0.9 }),
+      ent("ana", { type: "person", kind: "person", shell: 2, domain: "social", community: 1, salience: 0.2 }),
+      ent("raj", { type: "person", kind: "person", shell: 2, domain: "social", community: 1 }),
+      ent("ust", { type: "organisation", kind: "organisation", shell: 2, domain: "work", community: 0 }),
+      ent("nexusapp", { kind: "app", shell: 3, domain: "work", community: 0 }),
+      ent("langgraph", { kind: "tool", shell: 4, domain: "work", community: 0, memories: 7 }),
+      ent("bonsai", { kind: "topic", shell: 4, domain: "hobbies" }),
+    ],
+    relations: [
+      rel("me", "curious", "identity", 0.9),
+      rel("me", "ana", "social", 0.8),
+      rel("me", "raj", "social", 0.4),
+      rel("ana", "raj", "social"),
+      rel("me", "ust", "belonging", 0.9),
+      rel("me", "nexusapp", "activity"),
+      rel("nexusapp", "langgraph", "activity"),
+      rel("ust", "nexusapp", "belonging"),
+      rel("me", "bonsai", "identity", 0.3),
+      rel("curious", "langgraph", "knowledge", 0.2),
+    ],
+  };
+  const chosen = graph.entities.filter((e) => !e.is_self);
+  const layout = (view = DEFAULT_VIEW) => concentric(chosen, graph.relations, "me", view);
+  const byId = (stars: StarPoint[]) => Object.fromEntries(stars.map((s) => [s.id, s]));
+  const lon = (s: StarPoint) => Math.atan2(s.pos[2], s.pos[0]);
+  const gap = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
+  it("puts each thing on its shell: who you are nearest, what you know furthest out", () => {
+    const at = byId(layout());
+    for (const s of Object.values(at)) expect(Math.abs(dist(s.pos) - SHELL_R[s.shell!])).toBeLessThan(0.07);
+    expect(dist(at.curious.pos)).toBeLessThan(dist(at.ana.pos));
+    expect(dist(at.ana.pos)).toBeLessThan(dist(at.nexusapp.pos));
+    expect(dist(at.nexusapp.pos)).toBeLessThan(dist(at.bonsai.pos));
+    expect(Math.max(...Object.values(at).map((s) => dist(s.pos)))).toBeLessThan(0.8 * ORB_R);
+  });
+
+  it("gives each part of life its own side, and a thing without one its strongest neighbour's", () => {
+    const at = byId(layout());
+    expect(at.curious.domain).toBe("work");
+    expect(at.ana.domain).toBe("social");
+    expect(gap(lon(at.ust), lon(at.langgraph))).toBeLessThan(gap(lon(at.ust), lon(at.ana)));
+    expect(gap(lon(at.ana), lon(at.raj))).toBeLessThan(gap(lon(at.ana), lon(at.bonsai)));
+  });
+
+  it("pulls clusters together as gravity rises", () => {
+    const spread = (g: number) => {
+      const at = byId(layout({ size: "connections", gravity: g }));
+      const work = [at.ust, at.nexusapp, at.langgraph].map(lon);
+      return Math.max(gap(work[0], work[1]), gap(work[1], work[2]), gap(work[0], work[2]));
+    };
+    expect(spread(1)).toBeLessThan(spread(0));
+  });
+
+  it("sizes by connections, importance or mentions", () => {
+    const size = (s: "connections" | "importance" | "mentions") =>
+      byId(layout({ size: s, gravity: 0.5 }));
+    expect(size("connections").nexusapp.weight).toBe(3);
+    expect(size("importance").curious.weight).toBeCloseTo(9);
+    expect(size("mentions").langgraph.weight).toBeGreaterThan(size("mentions").bonsai.weight);
+  });
+
+  it("draws the same every time, and through inside() with family-coloured lines", () => {
+    expect(layout()).toEqual(layout());
+    const out = inside(graph, [], { stars: 40, memories: 0 });
+    expect(out.stars.find((s) => s.id === "ana")).toMatchObject({ shell: 2, domain: "social" });
+    expect(out.lines.find((l) => l.a === "me" && l.b === "ana")).toMatchObject({ family: "social", weight: 0.8 });
   });
 });

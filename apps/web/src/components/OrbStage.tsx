@@ -19,12 +19,13 @@ import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type R
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
-import { ENTITY_COLOR, ENTITY_TYPES, RECALL_COLOR, relationText } from "../lib/entities";
+import { DOMAIN_COLOR, ENTITY_COLOR, ENTITY_TYPES, FAMILIES, RECALL_COLOR, relationText, SHELLS } from "../lib/entities";
 import { formatInZone } from "../lib/schedule";
 import type { FileItem, Folder, KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
 import { formatDate } from "../lib/format";
 import {
   buildClusters,
+  DEFAULT_VIEW,
   inside as layoutInside,
   isArtifact,
   KIND_COLOR,
@@ -37,6 +38,7 @@ import {
   SATELLITE_COLOR,
   works,
   type OrbCluster,
+  type OrbView,
   type Work,
 } from "../orb/model";
 import { StarLabels } from "../orb/StarLabels";
@@ -109,6 +111,7 @@ export function OrbStage({
   const [lit, setLit] = useState<Recalled | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
+  const [orbView, setOrbView] = useOrbView();
   const tags = useRef(new Map<string, HTMLElement>());
 
   // Fresh lists on open and after a reconnect, in case events were missed meanwhile.
@@ -164,8 +167,8 @@ export function OrbStage({
   const fileList = useMemo(() => Object.values(files), [files]);
   const artifactCount = useMemo(() => fileList.filter(isArtifact).length, [fileList]);
   const insideData = useMemo(
-    () => layoutInside(graph, memories, { stars: perf.maxStars, memories: perf.maxMemories }, litIds),
-    [graph, memories, perf.maxStars, perf.maxMemories, litIds],
+    () => layoutInside(graph, memories, { stars: perf.maxStars, memories: perf.maxMemories }, litIds, orbView),
+    [graph, memories, perf.maxStars, perf.maxMemories, litIds, orbView],
   );
   const known = useMemo(() => profileEntities(graph).length, [graph]);
   const projectList = useMemo(() => works(projects, folders, fileList), [projects, folders, fileList]);
@@ -351,7 +354,7 @@ export function OrbStage({
 
       {board ? null : showOrb ? (
         <div className="pointer-events-none relative z-10 flex flex-1 flex-col justify-end px-4 pb-2">
-          {!chat && <Legend />}
+          {!chat && <Legend view={orbView} onView={setOrbView} />}
         </div>
       ) : (
         <ListView clusters={clusters} memories={memories} known={known} projects={projectList} />
@@ -406,12 +409,45 @@ export function remembered(r: Recalled): string {
   return `Remembered ${list}`;
 }
 
-function Legend() {
+const VIEW_KEY = "nexus.orb.view";
+
+/** How the viewer likes the constellation drawn, kept in this browser only. */
+function useOrbView(): [OrbView, (v: OrbView) => void] {
+  const [view, setView] = useState<OrbView>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null");
+      if (saved && ["connections", "importance", "mentions"].includes(saved.size) && typeof saved.gravity === "number")
+        return { size: saved.size, gravity: Math.min(1, Math.max(0, saved.gravity)) };
+    } catch {
+      // Private window or blocked storage: the default is fine.
+    }
+    return DEFAULT_VIEW;
+  });
+  const save = (v: OrbView) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify(v));
+    } catch {
+      // Not remembered; it still applies now.
+    }
+  };
+  return [view, save];
+}
+
+const SIZE_HELP: Record<OrbView["size"], string> = {
+  connections: "how many things it connects to",
+  importance: "how central it is to you (ranked each night)",
+  mentions: "how often memories, chats and files mention it",
+};
+
+function Legend({ view, onView }: { view: OrbView; onView: (v: OrbView) => void }) {
+  const [open, setOpen] = useState(false);
   const dot = (c: string) => <span className="inline-block size-2 shrink-0 rounded-full" style={{ background: c }} />;
   const item = "flex items-center gap-1.5 whitespace-nowrap";
   const group = "text-[10px] font-semibold uppercase tracking-wider text-slate-500";
+  const shape = (cls: string, c = "#cbd5e1") => <span className={`inline-block size-2 shrink-0 ${cls}`} style={{ background: c }} />;
   return (
-    <div className="mx-auto hidden max-w-full flex-col gap-1 rounded-2xl border border-edge bg-ink/75 px-4 py-2 text-xs text-slate-300 backdrop-blur sm:flex">
+    <div className="pointer-events-auto mx-auto hidden max-w-full flex-col gap-1 rounded-2xl border border-edge bg-ink/75 px-4 py-2 text-xs text-slate-300 backdrop-blur sm:flex">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className={group}>Outside</span>
         <span className={item}>{dot(NODE_COLOR.running)} team working</span>
@@ -429,13 +465,82 @@ function Legend() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className={group}>Inside</span>
         <span className={item}>{dot("#f8fafc")} you</span>
-        <span className={item}>{dot(ENTITY_COLOR.person)} people, places and interests</span>
+        <span className={item}>{dot(ENTITY_COLOR.person)} what Nexus knows about you</span>
         <span className={item}>
           <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
         </span>
         <span className={item}>{dot(KIND_COLOR.preference)} memories</span>
         <span className={item}>{dot(RECALL_COLOR)} just remembered</span>
+        <button onClick={() => setOpen(!open)} className="ml-auto text-sky-300 hover:text-sky-200" aria-expanded={open}>
+          {open ? "Less" : "Key and view"}
+        </button>
       </div>
+      {open && (
+        <div className="mt-1 space-y-1.5 border-t border-edge pt-2">
+          <p className="max-w-2xl text-slate-400">
+            Inside, the nearer the centre the closer a thing is to who you are. Each part of life has its own side of
+            the orb, and things that belong together cluster.
+          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className={group}>Rings</span>
+            <span className={item} title={SHELLS[1].help}>{shape("rotate-45")} {SHELLS[1].label.toLowerCase()}</span>
+            <span className={item} title={SHELLS[2].help}>{shape("rounded-full")} {SHELLS[2].label.toLowerCase()}</span>
+            <span className={item} title={SHELLS[3].help}>{shape("")} {SHELLS[3].label.toLowerCase()}</span>
+            <span className={item} title={SHELLS[4].help}>
+              <span className="inline-block size-0 border-x-4 border-b-8 border-x-transparent border-b-slate-300" />{" "}
+              {SHELLS[4].label.toLowerCase()}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className={group}>Parts of life</span>
+            {Object.entries(DOMAIN_COLOR).map(([d, c]) => (
+              <span key={d} className={item}>
+                {dot(c)} {d}
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className={group}>Links</span>
+            {Object.entries(FAMILIES).map(([f, x]) => (
+              <span key={f} className={item} title={x.help}>
+                <span className="inline-block h-0.5 w-3" style={{ background: x.color }} /> {x.label.toLowerCase()}
+              </span>
+            ))}
+            <span className={item}>
+              <span className="inline-block w-3 border-t border-dashed border-slate-400" /> ended or implied
+            </span>
+            <span className="text-slate-500">thicker is stronger</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <label className={item}>
+              <span className={group}>Size by</span>
+              <select
+                value={view.size}
+                onChange={(e) => onView({ ...view, size: e.target.value as OrbView["size"] })}
+                className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-xs"
+              >
+                <option value="connections">connections</option>
+                <option value="importance">importance</option>
+                <option value="mentions">mentions</option>
+              </select>
+              <span className="text-slate-500">{SIZE_HELP[view.size]}</span>
+            </label>
+            <label className={item} title="How tightly things that belong together pull into clusters">
+              <span className={group}>Gravity</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={view.gravity}
+                onChange={(e) => onView({ ...view, gravity: Number(e.target.value) })}
+                className="w-24 accent-sky-400"
+              />
+              <span className="text-slate-500">{view.gravity < 0.2 ? "loose" : view.gravity > 0.8 ? "tight" : "medium"}</span>
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -466,15 +571,33 @@ function SelectionCard({
     const t = ENTITY_TYPES[st.type] ?? ENTITY_TYPES.other;
     body = (
       <>
-        <div className="flex items-center gap-2 text-xs" style={{ color: st.self ? "#f8fafc" : ENTITY_COLOR[st.type] }}>
+        <div
+          className="flex items-center gap-2 text-xs"
+          style={{ color: st.self ? "#f8fafc" : (st.domain && DOMAIN_COLOR[st.domain]) || ENTITY_COLOR[st.type] }}
+        >
           <Share2 size={14} /> {st.self ? "You" : t.label}
         </div>
         <div className="mt-1 font-medium">{st.name}</div>
         {st.summary && <p className="mt-0.5 text-sm text-slate-400">{st.summary}</p>}
+        {!st.self && st.shell && (
+          <p className="mt-0.5 text-xs text-slate-500">
+            {SHELLS[st.shell]?.label}
+            {st.domain && <> · {st.domain}</>}
+          </p>
+        )}
         {facts.length > 0 && (
           <ul className="mt-1.5 space-y-0.5 text-sm text-slate-300">
             {facts.slice(0, 3).map((r) => (
-              <li key={r.id}>{relationText(r, names)}</li>
+              <li key={r.id} className="flex items-baseline gap-1.5">
+                {r.family && (
+                  <span
+                    className="inline-block size-1.5 shrink-0 -translate-y-px rounded-full"
+                    style={{ background: FAMILIES[r.family]?.color }}
+                    title={FAMILIES[r.family]?.label}
+                  />
+                )}
+                <span>{relationText(r, names)}</span>
+              </li>
             ))}
             {facts.length > 3 && <li className="text-xs text-slate-500">and {facts.length - 3} more</li>}
           </ul>

@@ -91,9 +91,14 @@ export interface StarPoint {
   type: EntityType;
   summary: string;
   self: boolean;
-  /** How much mentions it: memories, chats and files. Bigger stars are mentioned more. */
+  /** How big it is drawn: its connections, its importance or its mentions (OrbView.size). */
   weight: number;
   pos: Vec3;
+  /** From the ontology, once the graph has it: the full type ("pet", "value"), the shell (0
+   * you .. 4 knowledge) and the part of life it belongs to. */
+  kind?: string;
+  shell?: number;
+  domain?: string | null;
 }
 
 export interface StarLine {
@@ -104,7 +109,22 @@ export interface StarLine {
   /** No relation joins it to anything drawn, but your memories are about it: a faint line to
    * you, so no star floats loose. */
   implied?: boolean;
+  /** The relation's family (its colour), weight (its thickness) and wording (on hover). */
+  family?: string;
+  weight?: number;
+  label?: string;
 }
+
+/** How the viewer likes the constellation drawn (the Key's controls, kept in the browser). */
+export interface OrbView {
+  /** What makes a star big: how connected it is, how central to you (nightly ranking), or how
+   * often memories, chats and files mention it. */
+  size: "connections" | "importance" | "mentions";
+  /** 0 to 1: how tightly each cluster pulls together within its part of life. */
+  gravity: number;
+}
+
+export const DEFAULT_VIEW: OrbView = { size: "connections", gravity: 0.6 };
 
 /** Everything inside the orb: who you are. You at the centre, the people, organisations,
  * places, interests and tools Nexus knows about you, and your memories. Without a knowledge
@@ -373,6 +393,7 @@ export function inside(
   memories: Memory[],
   limits: { stars: number; memories: number },
   focus: Set<string> = new Set(),
+  view: OrbView = DEFAULT_VIEW,
 ): Inside {
   const others = profileEntities(graph);
   const self = graph?.entities.find((e) => e.is_self);
@@ -396,39 +417,27 @@ export function inside(
       (a.seen_at < b.seen_at ? 1 : -1),
   );
   const chosen = ranked.slice(0, limits.stars);
-  const heaviest = Math.max(1, ...chosen.map(weightOf));
-  // Directions spread evenly over a sphere (a Fibonacci lattice), handed out by type so each
-  // type keeps its own region, and turned so the first type faces its usual direction. Plain
-  // per-type directions bunched up when most stars shared a type (a new user's topics).
-  const order = [...chosen].sort(
-    (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || hash(a.id) - hash(b.id),
-  );
-  const lattice = new Map(order.map((e, i) => [e.id, fibonacciDir(i, order.length)]));
-  const stars: StarPoint[] = chosen.map((e) => {
-    const r = rng(hash(e.id));
-    // Loose jitter around the lattice point, so the spread is even without looking gridded.
-    const j = () => (r() - 0.5) * 0.6;
-    const dir = norm(add(lattice.get(e.id)!, [j(), j(), j()]));
-    // Only a clear lead in mentions pulls a star in: a new graph, where everything is
-    // mentioned once, spreads out through the orb instead of crowding you.
-    const near = heaviest > 2 ? Math.sqrt(weightOf(e) / heaviest) : 0.15 + r() * 0.5;
-    const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.1;
-    return {
-      id: e.id,
-      name: e.name,
-      type: e.type,
-      summary: e.summary,
-      self: false,
-      weight: weightOf(e),
-      pos: scale(dir, dist),
-    };
-  });
+  const ontology = chosen.some((e) => e.shell != null);
+  const stars: StarPoint[] = ontology
+    ? concentric(chosen, graph.relations, self?.id ?? YOU, view)
+    : legacyStars(chosen);
   stars.unshift(you);
   const byId = new Map(stars.map((s) => [s.id, s]));
 
   const lines: StarLine[] = graph.relations
     .filter((rel) => rel.src !== rel.dst && byId.has(rel.src) && byId.has(rel.dst))
-    .map((rel) => ({ a: rel.src, b: rel.dst, ended: !!rel.valid_to }));
+    .map((rel) =>
+      rel.family
+        ? {
+            a: rel.src,
+            b: rel.dst,
+            ended: !!rel.valid_to,
+            family: rel.family,
+            weight: rel.weight ?? 0.5,
+            label: rel.label || rel.predicate,
+          }
+        : { a: rel.src, b: rel.dst, ended: !!rel.valid_to },
+    );
   // A star whose relations all lead to things not drawn (a project, a team's tool) would float
   // loose; your memories are about it, so it hangs from you.
   const joined = new Set(lines.flatMap((l) => [l.a, l.b]));
@@ -456,6 +465,157 @@ export function inside(
   });
 
   return { stars, lines, memories: points };
+}
+
+/** The constellation before the graph had shells: stars spread evenly over a sphere, grouped
+ * by type, the most mentioned nearest you. */
+function legacyStars(chosen: KnowledgeGraph["entities"]): StarPoint[] {
+  const heaviest = Math.max(1, ...chosen.map(weightOf));
+  // Directions spread evenly over a sphere (a Fibonacci lattice), handed out by type so each
+  // type keeps its own region, and turned so the first type faces its usual direction. Plain
+  // per-type directions bunched up when most stars shared a type (a new user's topics).
+  const order = [...chosen].sort(
+    (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || hash(a.id) - hash(b.id),
+  );
+  const lattice = new Map(order.map((e, i) => [e.id, fibonacciDir(i, order.length)]));
+  return chosen.map((e) => {
+    const r = rng(hash(e.id));
+    // Loose jitter around the lattice point, so the spread is even without looking gridded.
+    const j = () => (r() - 0.5) * 0.6;
+    const dir = norm(add(lattice.get(e.id)!, [j(), j(), j()]));
+    // Only a clear lead in mentions pulls a star in: a new graph, where everything is
+    // mentioned once, spreads out through the orb instead of crowding you.
+    const near = heaviest > 2 ? Math.sqrt(weightOf(e) / heaviest) : 0.15 + r() * 0.5;
+    const dist = STAR_FAR - (STAR_FAR - STAR_NEAR) * near + (r() - 0.5) * 0.1;
+    return {
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      summary: e.summary,
+      self: false,
+      weight: weightOf(e),
+      pos: scale(dir, dist),
+    };
+  });
+}
+
+// --- Concentric layout ------------------------------------------------------------------------
+
+/** Each shell's distance from the centre, inside the orb: 1 who you are (traits, values,
+ * goals), 2 the people and places in your life, 3 what you do, 4 what you know. */
+export const SHELL_R = [0, 0.3, 0.46, 0.6, 0.74];
+/** Parts of life, each a slice of the sphere (longitude), in this order round the equator. */
+export const DOMAINS = ["work", "learning", "home", "health", "social", "hobbies", "finance"] as const;
+const UNSORTED = "other";
+
+/** Stars on concentric shells: the radius says how close a thing is to who you are, the
+ * longitude which part of life it belongs to, and things the nightly pass clustered together
+ * sit together within that slice, as tightly as `view.gravity` says. Only the parts of life
+ * that have something take room, so a new graph isn't one thin wedge. */
+export function concentric(
+  chosen: KnowledgeGraph["entities"],
+  relations: KnowledgeGraph["relations"],
+  selfId: string,
+  view: OrbView,
+): StarPoint[] {
+  const ids = new Set(chosen.map((e) => e.id));
+  const degree = new Map<string, number>();
+  const neighbours = new Map<string, { id: string; w: number }[]>();
+  for (const r of relations) {
+    if (r.valid_to || r.src === r.dst) continue;
+    for (const [a, b] of [
+      [r.src, r.dst],
+      [r.dst, r.src],
+    ]) {
+      degree.set(a, (degree.get(a) ?? 0) + 1);
+      if (ids.has(b) && b !== selfId) {
+        const list = neighbours.get(a) ?? [];
+        list.push({ id: b, w: r.weight ?? 0.5 });
+        neighbours.set(a, list);
+      }
+    }
+  }
+  // A thing without a part of life of its own takes its strongest neighbour's.
+  const own = new Map(chosen.map((e) => [e.id, e.domain ?? null]));
+  const domainOf = (id: string): string => {
+    const d = own.get(id);
+    if (d) return d;
+    const best = [...(neighbours.get(id) ?? [])].sort((a, b) => b.w - a.w).find((n) => own.get(n.id));
+    return (best && own.get(best.id)) || UNSORTED;
+  };
+  const domains = new Map(chosen.map((e) => [e.id, domainOf(e.id)]));
+
+  // Slices: as wide as the square root of what is in them, in a fixed order.
+  const order = [...DOMAINS, UNSORTED];
+  const counts = new Map<string, number>();
+  for (const d of domains.values()) counts.set(d, (counts.get(d) ?? 0) + 1);
+  const used = order.filter((d) => counts.has(d));
+  const total = used.reduce((t, d) => t + Math.sqrt(counts.get(d)!), 0) || 1;
+  const slice = new Map<string, [number, number]>();
+  let at = 0.3;
+  for (const d of used) {
+    const width = (Math.sqrt(counts.get(d)!) / total) * Math.PI * 2;
+    slice.set(d, [at, width]);
+    at += width;
+  }
+
+  // Each cluster's centre within its slice: spread along it, at a latitude of its own.
+  const clusters = new Map<string, string[]>();
+  for (const e of chosen) {
+    const key = `${domains.get(e.id)}:${e.community ?? `solo-${e.id}`}`;
+    clusters.set(key, [...(clusters.get(key) ?? []), e.id]);
+  }
+  const centre = new Map<string, [number, number]>();
+  for (const d of used) {
+    const keys = [...clusters.keys()].filter((k) => k.startsWith(`${d}:`)).sort();
+    const [start, width] = slice.get(d)!;
+    keys.forEach((k, i) => {
+      const lat = ((hash(k) % 1000) / 1000 - 0.5) * 1.1;
+      centre.set(k, [start + (width * (i + 0.5)) / keys.length, lat]);
+    });
+  }
+
+  const sizeOf = (e: KnowledgeGraph["entities"][number]) =>
+    view.size === "importance" && e.salience
+      ? e.salience * 10
+      : view.size === "mentions"
+        ? weightOf(e)
+        : (degree.get(e.id) ?? 0);
+  const biggest = Math.max(1, ...chosen.map(sizeOf));
+  const g = Math.min(1, Math.max(0, view.gravity));
+
+  return chosen.map((e) => {
+    const r = rng(hash(e.id));
+    const d = domains.get(e.id)!;
+    const [start, width] = slice.get(d)!;
+    const key = `${d}:${e.community ?? `solo-${e.id}`}`;
+    const [cLon, cLat] = centre.get(key)!;
+    // Its own place anywhere in the slice, pulled toward its cluster's centre.
+    const lon0 = start + width * (0.1 + 0.8 * r());
+    const lat0 = (r() - 0.5) * 1.6;
+    const lon = lon0 + (cLon - lon0) * g + (r() - 0.5) * 0.12;
+    const lat = lat0 + (cLat - lat0) * g + (r() - 0.5) * 0.12;
+    const shell = Math.min(4, Math.max(1, e.shell ?? 4));
+    // Within its shell, bigger things sit a little nearer you.
+    const radius = SHELL_R[shell] + (r() - 0.5) * 0.05 - 0.03 * (sizeOf(e) / biggest);
+    const pos: Vec3 = [
+      radius * Math.cos(lat) * Math.cos(lon),
+      radius * Math.sin(lat) * 0.8,
+      radius * Math.cos(lat) * Math.sin(lon),
+    ];
+    return {
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      summary: e.summary,
+      self: false,
+      weight: sizeOf(e),
+      pos,
+      kind: e.kind ?? e.type,
+      shell,
+      domain: d === UNSORTED ? null : d,
+    };
+  });
 }
 
 // --- Outside the orb: what Nexus does and has made --------------------------------------------
