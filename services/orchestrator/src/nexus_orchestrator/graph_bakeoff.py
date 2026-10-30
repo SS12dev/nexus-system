@@ -256,6 +256,13 @@ class Score:
 def score_chat(ref: Result, got: Result, vectors: dict[str, list[float]]) -> dict:
     """Entity and relation agreement for one chat. A relation agrees when both ends match
     (USER matches USER) and the family is the same; the exact predicate is counted apart."""
+    if got.error:  # no usable answer: everything in the reference is missed, nothing is right
+        return {
+            "entities": (0, 1, len(ref.entities)),
+            "typed": 0,
+            "relations": (0, 1, len(ref.relations)),
+            "predicate_same": 0,
+        }
     pairs = match_entities(ref.entities, got.entities, vectors)
     ref_type = {e["key"]: e["type"] for e in ref.entities}
     typed = sum(
@@ -402,7 +409,8 @@ class Models:
             "model": model,
             "stream": False,
             "format": SCHEMA,
-            "think": False,
+            # gpt-oss can't switch reasoning off and returns nothing when asked to; low is fast.
+            "think": "low" if model.startswith("gpt-oss") else False,
             "options": {"temperature": 0, "num_ctx": 8192},
             "messages": [{"role": "system", "content": PROMPT}, {"role": "user", "content": chat}],
         }
@@ -433,9 +441,11 @@ class Models:
         return dict(zip(texts, r.json()["embeddings"], strict=True))
 
 
-async def load_chats(settings: Settings, email: str, count: int) -> list[tuple[str, str]]:
+async def load_chats(
+    database_url: str, email: str, count: int, min_user_messages: int = 2
+) -> list[tuple[str, str]]:
     """The user's most recent chats with at least two messages of their own, as transcripts."""
-    engine = make_engine(settings.database_url)
+    engine = make_engine(database_url)
     try:
         async with make_sessionmaker(engine)() as db:
             user = await db.scalar(select(User).where(func.lower(User.email) == email.lower()))
@@ -445,7 +455,7 @@ async def load_chats(settings: Settings, email: str, count: int) -> list[tuple[s
                 select(Message.chat_id)
                 .where(Message.role == MessageRole.user)
                 .group_by(Message.chat_id)
-                .having(func.count() >= 2)
+                .having(func.count() >= min_user_messages)
             )
             chats = (
                 await db.scalars(
@@ -475,7 +485,11 @@ async def load_chats(settings: Settings, email: str, count: int) -> list[tuple[s
 async def run(args: argparse.Namespace) -> Path:
     settings = Settings()
     ollama = args.ollama or os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-    chats = await load_chats(settings, args.email, args.chats)
+    chats = await load_chats(
+        args.database_url or settings.database_url, args.email, args.chats, args.min_user_messages
+    )
+    if len(chats) < 10:
+        print(f"Only {len(chats)} chats qualify: scores will not mean much.", flush=True)
     print(f"{len(chats)} chats loaded", flush=True)
     models = Models(settings, ollama)
     out = Path(args.out) / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -553,6 +567,12 @@ def main() -> None:
     p.add_argument("--chats", type=int, default=50)
     p.add_argument("--samples", type=int, default=8)
     p.add_argument("--ollama", default="")
+    p.add_argument("--min-user-messages", type=int, default=2)
+    p.add_argument(
+        "--database-url",
+        default="",
+        help="read chats from another database, such as a restored backup copy",
+    )
     p.add_argument("--out", default="/tmp/graph-bakeoff")
     args = p.parse_args()
     logging.basicConfig(level=logging.WARNING)

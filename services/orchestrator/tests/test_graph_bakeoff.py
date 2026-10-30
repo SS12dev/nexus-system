@@ -51,3 +51,10 @@ def test_score_f1_and_empty_cases():
 def test_transcript_keeps_the_latest_part():
     text = transcript([("user", "a" * 50), ("assistant", "b" * 50)], limit=60)
     assert text.startswith("…") and text.endswith("b" * 50)
+
+
+def test_a_broken_answer_scores_zero_even_when_the_reference_is_empty():
+    s = score_chat(Result(), Result(valid=False, error="not JSON"), {})
+    score = Score()
+    score.add(*s["entities"])
+    assert score.f1 == 0.0
