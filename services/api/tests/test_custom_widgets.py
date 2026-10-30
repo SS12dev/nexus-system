@@ -67,7 +67,7 @@ async def test_fetch_and_data_wait_for_approval(owner, sessionmaker):
         f"/api/widgets/{wid}/approve",
         json={"hosts": ["evil.com"], "data": ["files.recent", "widgets"]},
     )
-    assert r.json()["state"]["approved"] == {"hosts": [], "data": ["files.recent"]}
+    assert r.json()["state"]["approved"] == {"hosts": [], "data": ["files.recent"], "actions": []}
     r = await owner.post(bridge, json={"call": "data", "args": {"source": "files.recent"}})
     assert r.status_code == 200 and r.json() == {"result": []}
     r = await owner.post(bridge, json={"call": "data", "args": {"source": "widgets"}})

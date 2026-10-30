@@ -62,6 +62,10 @@ interface Store extends ChatState {
   viewer: { file: FileBrief; chatId: string | null } | null;
   openViewer: (file: FileBrief, chatId: string | null) => void;
   closeViewer: () => void;
+  /** A second chat open beside the main one on a laptop (a fork, or a new chat a widget
+   * opened), or null. */
+  sideChat: string | null;
+  openSideChat: (id: string | null) => void;
   setWidgets: (widgets: Widget[]) => void;
   upsertWidget: (widget: Widget) => void;
   removeWidget: (id: string) => void;
@@ -93,7 +97,11 @@ export const useStore = create<Store>((set) => ({
   removeChat: (id) =>
     set((s) => {
       const { [id]: _removed, ...messages } = s.messages;
-      return { chats: s.chats.filter((c) => c.id !== id), messages };
+      return {
+        chats: s.chats.filter((c) => c.id !== id),
+        messages,
+        sideChat: s.sideChat === id ? null : s.sideChat,
+      };
     }),
   setMessages: (chatId, messages) =>
     set((s) => ({ messages: { ...s.messages, [chatId]: messages } })),
@@ -119,6 +127,8 @@ export const useStore = create<Store>((set) => ({
   viewer: null,
   openViewer: (file, chatId) => set({ viewer: { file, chatId } }),
   closeViewer: () => set({ viewer: null }),
+  sideChat: null,
+  openSideChat: (sideChat) => set({ sideChat }),
   setWidgets: (widgets) => set({ widgets: Object.fromEntries(widgets.map((w) => [w.id, w])) }),
   upsertWidget: (widget) => set((s) => ({ widgets: { ...s.widgets, [widget.id]: widget } })),
   removeWidget: (id) =>

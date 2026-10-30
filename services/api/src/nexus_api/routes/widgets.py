@@ -1,6 +1,7 @@
 """Widgets on the main screen (nexus_common/widgets.py): list them, add one from the dock's
-menu, press a widget's buttons, edit a note, move a widget along the dock or drag it anywhere
-on the main screen. A custom widget
+menu, press a widget's buttons, edit a note, move a widget along the dock, drag it anywhere on
+the main screen or resize it. Removing one puts it in the person's widget library, which lists
+here too and puts it back (restore) or deletes it for good (forget). A custom widget
 (nexus_common/custom_widgets.py) also has its page, the bridge its page talks through, the
 person's approvals and its versions."""
 
@@ -14,9 +15,14 @@ from sqlalchemy import delete, select
 from nexus_api.deps import CurrentUser, DbDep, RedisDep, SettingsDep
 from nexus_common import custom_widgets as cw
 from nexus_common import screen as sc
-from nexus_common.models import AuditLog, NotificationKind, Widget, utcnow
+from nexus_common.models import AuditLog, CustomWidget, NotificationKind, Widget, utcnow
 from nexus_common.notices import notify
 from nexus_common.widgets import (
+    ENGINES,
+    MAX_H,
+    MAX_W,
+    MIN_H,
+    MIN_W,
     NOTE_CHARS,
     RINGS,
     TITLE_CHARS,
@@ -25,13 +31,19 @@ from nexus_common.widgets import (
     act,
     add,
     announce,
+    check_size,
+    on_screen,
     payload,
+    prune_library,
+    put_away,
+    restore,
     retime,
 )
 
 router = APIRouter(prefix="/api/widgets", tags=["widgets"])
 
 Tune = Literal[TUNES]
+Engine = Literal[ENGINES]
 
 
 class WidgetPos(BaseModel):
@@ -39,8 +51,13 @@ class WidgetPos(BaseModel):
     y: float = Field(ge=0, le=1)
 
 
+class WidgetSize(BaseModel):
+    w: float = Field(ge=MIN_W, le=MAX_W)
+    h: float = Field(ge=MIN_H, le=MAX_H)
+
+
 class WidgetIn(BaseModel):
-    kind: Literal["timer", "alarm", "stopwatch", "reminder", "clock", "note"]
+    kind: Literal["timer", "alarm", "stopwatch", "reminder", "clock", "note", "search"]
     title: str = Field("", max_length=TITLE_CHARS)
     minutes: float | None = None
     time: str | None = None
@@ -49,12 +66,26 @@ class WidgetIn(BaseModel):
     text: str | None = Field(None, max_length=NOTE_CHARS)
     zones: list[str] | None = None
     tune: Tune | None = None
+    # A search box's engine (or "assistant", which asks in chat).
+    engine: Engine | None = None
     # Dropped onto the main screen from the add menu, rather than added to the dock.
     pos: WidgetPos | None = None
 
 
 class ActionIn(BaseModel):
-    action: Literal["pause", "resume", "reset", "add_time", "snooze", "dismiss", "remove", "undo"]
+    # remove puts it in the library; restore puts it back; forget deletes it from the library.
+    action: Literal[
+        "pause",
+        "resume",
+        "reset",
+        "add_time",
+        "snooze",
+        "dismiss",
+        "remove",
+        "undo",
+        "restore",
+        "forget",
+    ]
     minutes: float | None = None
     # undo: show this version of a custom widget instead of the one before.
     version: int | None = None
@@ -68,6 +99,7 @@ class BridgeIn(BaseModel):
 class ApproveIn(BaseModel):
     hosts: list[str] = Field(default_factory=list)
     data: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
 
 
 class WidgetPatch(BaseModel):
@@ -78,6 +110,11 @@ class WidgetPatch(BaseModel):
     # Dragged somewhere on the main screen, or back into the dock (dock: true).
     pos: WidgetPos | None = None
     dock: bool = False
+    # Resized by its corner, or back to its own size (reset_size: true).
+    size: WidgetSize | None = None
+    reset_size: bool = False
+    # A search box's engine.
+    engine: Engine | None = None
     # What a timer, alarm or reminder rings with.
     tune: Tune | None = None
     # An alarm's new time, HH:MM, and its repeat (none = once); days only goes with a time.
@@ -85,8 +122,12 @@ class WidgetPatch(BaseModel):
     days: str | list[str] | None = None
 
 
-async def _own(db, user, widget_id: uuid.UUID) -> Widget:
-    w = await db.scalar(select(Widget).where(Widget.id == widget_id, Widget.user_id == user.id))
+async def _own(db, user, widget_id: uuid.UUID, *, away: bool = False) -> Widget:
+    """One of the person's widgets on the screen, or (away) in their library too."""
+    query = select(Widget).where(Widget.id == widget_id, Widget.user_id == user.id)
+    if not away:
+        query = query.where(on_screen())
+    w = await db.scalar(query)
     if w is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such widget")
     return w
@@ -95,7 +136,21 @@ async def _own(db, user, widget_id: uuid.UUID) -> Widget:
 @router.get("")
 async def list_widgets(user: CurrentUser, db: DbDep) -> list[dict]:
     rows = await db.scalars(
-        select(Widget).where(Widget.user_id == user.id).order_by(Widget.slot, Widget.created_at)
+        select(Widget)
+        .where(Widget.user_id == user.id, on_screen())
+        .order_by(Widget.slot, Widget.created_at)
+    )
+    return [payload(w) for w in rows.all()]
+
+
+@router.get("/library")
+async def widget_library(user: CurrentUser, db: DbDep) -> list[dict]:
+    """The widgets put away, newest first, to put back from the add menu. A custom widget
+    carries its manifest's line about what it does."""
+    rows = await db.scalars(
+        select(Widget)
+        .where(Widget.user_id == user.id, Widget.removed_at.is_not(None))
+        .order_by(Widget.removed_at.desc())
     )
     return [payload(w) for w in rows.all()]
 
@@ -118,14 +173,32 @@ async def add_widget(body: WidgetIn, user: CurrentUser, db: DbDep, redis: RedisD
 async def widget_action(
     widget_id: uuid.UUID, body: ActionIn, user: CurrentUser, db: DbDep, redis: RedisDep
 ) -> dict | None:
-    w = await _own(db, user, widget_id)
+    w = await _own(db, user, widget_id, away=body.action in ("restore", "forget"))
     if body.action == "remove":
-        await db.execute(delete(Widget).where(Widget.id == w.id))
+        put_away(w)
+        await db.flush()
+        await prune_library(db, user.id)
         await db.commit()
         await announce(redis, user.id, w, deleted=True)
         return None
+    if body.action == "forget":
+        if w.removed_at is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Only a widget in the library can be deleted for good"
+            )
+        if w.kind == "custom" and (root := (w.state or {}).get("root_id")):
+            await db.execute(
+                delete(CustomWidget).where(
+                    CustomWidget.root_id == uuid.UUID(root), CustomWidget.user_id == user.id
+                )
+            )
+        await db.execute(delete(Widget).where(Widget.id == w.id))
+        await db.commit()
+        return None
     try:
-        if body.action == "undo":
+        if body.action == "restore":
+            await restore(db, user, w)
+        elif body.action == "undo":
             if w.kind != "custom":
                 raise WidgetError("Only a custom widget has versions to go back to")
             await cw.show_version(db, w, body.version)
@@ -158,6 +231,12 @@ async def edit_widget(
             retime(w, body.time, body.days)
         except WidgetError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    if body.engine is not None:
+        if w.kind != "search":
+            raise HTTPException(status.HTTP_409_CONFLICT, "Only a search box has an engine")
+        w.state = {**(w.state or {}), "engine": body.engine}
+    if body.size is not None or body.reset_size:
+        w.size = None if body.reset_size else check_size(body.size.w, body.size.h)
     if body.pos is not None or body.dock:
         # Placed by hand, like a move along the dock: the assistant leaves it be for a while.
         w.pos = None if body.dock else {"x": round(body.pos.x, 4), "y": round(body.pos.y, 4)}
@@ -258,14 +337,14 @@ async def approve_widget(
 ) -> dict:
     """The person let the widget fetch from these hosts or read this data."""
     w = await _custom(db, user, widget_id)
-    cw.approve(w, body.hosts, body.data)
+    cw.approve(w, body.hosts, body.data, body.actions)
     w.updated_at = utcnow()
     db.add(
         AuditLog(
             actor_id=user.id,
             action="widget.approved",
             target=str(w.id),
-            data={"hosts": body.hosts, "data": body.data},
+            data={"hosts": body.hosts, "data": body.data, "actions": body.actions},
         )
     )
     await db.commit()

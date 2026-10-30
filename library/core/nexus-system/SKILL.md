@@ -120,6 +120,8 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | light theme, tour | `web/src/index.css`, `lib/theme.ts`, `components/Tour.tsx` |
 | the main screen: notices, widgets, screen control | `nexus_common/notices.py`, `widgets.py`, `screen.py`, `orchestrator/widget_tools.py`, `screen_tools.py`, `web/src/components/Notices.tsx`, `Widgets.tsx`, `Screen.tsx` |
 | custom widgets (sandboxed HTML) | `nexus_common/custom_widgets.py` (checks, bridge, frame CSP), `save_widget` in `orchestrator/widget_tools.py`, `library/core/widget-builder` |
+| widget library, resizing, search box | `nexus_common/widgets.py` (`put_away`, `restore`, `prune_library`, `check_size`), `api/routes/widgets.py` (`/library`, restore/forget), `LibraryPane` and `startResize` in `web/src/components/Widgets.tsx` |
+| forking a chat, second chat window | `POST /api/chats/{id}/fork` in `api/routes/chats.py`, `web/src/lib/chatActions.ts`, `SideChat` in `web/src/pages/OrbLayout.tsx` |
 | the orb's layout (stars, memories, moons outside) | `web/src/orb/model.ts`; drawing in `orb/Inside.tsx`, `Network.tsx`, `Satellites.tsx` |
 | the logo | `web/src/components/Orb.tsx` (`NexusMark`), `web/public/icon.svg` |
 | checking one account | `api/inspect_user.py`, `scripts/inspect-user.sh` |

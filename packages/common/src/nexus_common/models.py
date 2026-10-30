@@ -1598,9 +1598,11 @@ class Notification(Base):
 
 
 class Widget(Base):
-    """A widget on the main screen: a timer, alarm, stopwatch, reminder, clock or note
-    (nexus_common/widgets.py). The server keeps the time, so a timer keeps running with the tab
-    closed and rings on every device; fires_at is when the worker next has to act."""
+    """A widget on the main screen: a timer, alarm, stopwatch, reminder, clock, note or search
+    box (nexus_common/widgets.py). The server keeps the time, so a timer keeps running with the
+    tab closed and rings on every device; fires_at is when the worker next has to act. One the
+    person removed stays as a row with removed_at set: it's in their widget library, ready to
+    put back as it was."""
 
     __tablename__ = "widgets"
 
@@ -1615,15 +1617,20 @@ class Widget(Base):
     # Where it was dragged to on a laptop's main screen: {"x", "y"}, each 0..1 across the room
     # left beside the card, so 1 is flush right or bottom on any screen. None = in the dock.
     pos: Mapped[dict | None] = mapped_column(JSONB)
+    # Resized by hand on a laptop: {"w", "h"} in CSS pixels. None = the kind's own size.
+    size: Mapped[dict | None] = mapped_column(JSONB)
     # The chat that asked for it, if any.
     chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
     fires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Taken off the screen into the library; None = on the screen.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
         Index("ix_widgets_user", "user_id", "slot"),
         Index("ix_widgets_fires_at", "fires_at"),
+        Index("ix_widgets_user_removed", "user_id", "removed_at"),
     )
 
 

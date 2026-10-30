@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { ArrowLeftRight, ExternalLink, GitBranch, X } from "lucide-react";
 import { Outlet, useNavigate, useParams } from "react-router";
 import { FilePreview } from "../components/FilePreview";
 import { useAutoOpenResult } from "../components/Notices";
@@ -9,7 +9,9 @@ import { api } from "../lib/api";
 import { useStore } from "../store/chat";
 import { useAssistantName } from "../lib/assistant";
 import { NewChatComposer } from "./HomePage";
+import { ChatView } from "./ChatPage";
 import { useWide } from "../lib/media";
+import { useChatActions } from "../lib/chatActions";
 
 const ORB_KEY = "nexus.chat.orb";
 
@@ -31,7 +33,11 @@ function savedOrbOpen(): boolean {
  * A team's result (a 3D model, an image, a report) opens in the orb's place on laptops and as
  * a panel over everything on phones: by itself when it lands for the chat that's open, or
  * from a notice, or when you ask the assistant to show you something. Closing it brings the orb
- * back. */
+ * back.
+ *
+ * A second chat can sit beside the open one on a laptop: a fork of it (the branch button in its
+ * title bar, or a widget's button), or a new chat a widget started. It has its own title bar to
+ * swap it with the main chat, pop it out into a window of its own, or close it. */
 export function OrbLayout() {
   const { chatId } = useParams();
   const inChat = !!chatId;
@@ -89,6 +95,35 @@ function OrbLayoutBody({
 }) {
   const navigate = useNavigate();
   const title = useStore((s) => s.chats.find((c) => c.id === chatId)?.title);
+  const wide = useWide();
+  const side = useStore((s) => s.sideChat);
+  const openSideChat = useStore((s) => s.openSideChat);
+  const { fork } = useChatActions();
+  const [forking, setForking] = useState(false);
+  const second = wide && inChat && side && side !== chatId ? side : null;
+  useEffect(() => {
+    // Opened as the main chat (swapped, or from the list): it's no longer the second one.
+    if (side && side === chatId) openSideChat(null);
+  }, [side, chatId, openSideChat]);
+
+  const forkOpen = async () => {
+    setForking(true);
+    try {
+      await fork();
+    } catch {
+      /* the chat went away meanwhile */
+    } finally {
+      setForking(false);
+    }
+  };
+
+  /** Closing the main chat while a second is open makes the second the main one. */
+  const closeMain = () => {
+    if (second) {
+      openSideChat(null);
+      navigate(`/c/${second}`);
+    } else navigate("/");
+  };
 
   const collapse = (collapsed: boolean) => {
     setOrbOpen(!collapsed);
@@ -99,11 +134,14 @@ function OrbLayoutBody({
     }
   };
 
-  const stage = !inChat ? "flex-1" : orbOpen ? "h-[34vh] shrink-0 lg:h-auto lg:flex-1" : "";
+  // min-w-0: beside two chats the orb gives way rather than pushing the chats off the screen.
+  const stage = !inChat ? "flex-1" : orbOpen ? "h-[34vh] shrink-0 lg:h-auto lg:min-w-0 lg:flex-1" : "";
+  // Two chats side by side share the room the one had, so the orb keeps some of it.
+  const width = second ? "lg:w-[360px] xl:w-[420px] 2xl:w-[500px]" : "lg:w-[440px] xl:w-[520px]";
   const panel = !inChat
     ? "shrink-0"
     : orbOpen
-      ? "flex min-h-0 flex-1 flex-col border-t border-edge lg:w-[440px] lg:flex-none lg:border-l lg:border-t-0 xl:w-[520px]"
+      ? `flex min-h-0 flex-1 flex-col border-t border-edge ${width} lg:flex-none lg:border-l lg:border-t-0`
       : "flex min-h-0 flex-1 flex-col";
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${inChat ? "lg:flex-row" : ""}`}>
@@ -122,18 +160,74 @@ function OrbLayoutBody({
         {inChat && (
           <div className="flex shrink-0 items-center gap-2 border-b border-edge px-2 py-1.5">
             <button
-              onClick={() => navigate("/")}
+              onClick={closeMain}
               className="rounded-md p-1 text-slate-400 hover:bg-edge/60 hover:text-white"
               aria-label="Close chat"
               title="Close chat"
             >
               <X size={16} />
             </button>
-            <span className="min-w-0 truncate text-sm text-slate-400">{title || "Chat"}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-slate-400">{title || "Chat"}</span>
+            <button
+              onClick={forkOpen}
+              disabled={forking}
+              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs text-slate-400 hover:bg-edge/60 hover:text-white disabled:opacity-50"
+              aria-label="Fork this chat"
+              title={
+                wide
+                  ? "Fork: copy this conversation into a second chat beside it, to try another direction"
+                  : "Fork: copy this conversation into a new chat, to try another direction"
+              }
+            >
+              <GitBranch size={14} /> <span className="hidden sm:inline">Fork</span>
+            </button>
           </div>
         )}
         <Outlet />
       </div>
+      {second && <SideChat id={second} mainId={chatId!} className={panel} />}
     </div>
+  );
+}
+
+/** The second chat beside the main one, with its own title bar. */
+function SideChat({ id, mainId, className }: { id: string; mainId: string; className: string }) {
+  const navigate = useNavigate();
+  const title = useStore((s) => s.chats.find((c) => c.id === id)?.title);
+  const openSideChat = useStore((s) => s.openSideChat);
+  const btn = "rounded-md p-1 text-slate-400 hover:bg-edge/60 hover:text-white";
+  return (
+    <section className={className} aria-label="Second chat">
+      <div className="flex shrink-0 items-center gap-1 border-b border-edge px-2 py-1.5">
+        <button onClick={() => openSideChat(null)} className={btn} aria-label="Close second chat" title="Close this chat">
+          <X size={16} />
+        </button>
+        <GitBranch size={13} className="shrink-0 text-sky-300" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-sm text-slate-400">{title || "Chat"}</span>
+        <button
+          onClick={() => {
+            openSideChat(mainId);
+            navigate(`/c/${id}`);
+          }}
+          className={btn}
+          aria-label="Swap the two chats"
+          title="Swap: make this the main chat"
+        >
+          <ArrowLeftRight size={15} />
+        </button>
+        <button
+          onClick={() => {
+            const win = window.open(`/c/${id}`, `nexus-chat-${id}`, "popup,width=560,height=820");
+            if (win) openSideChat(null);
+          }}
+          className={btn}
+          aria-label="Open in its own window"
+          title="Open in a window of its own"
+        >
+          <ExternalLink size={15} />
+        </button>
+      </div>
+      <ChatView key={id} chatId={id} side />
+    </section>
   );
 }

@@ -15,6 +15,13 @@ const EMPTY: Message[] = [];
 
 export function ChatPage() {
   const { chatId } = useParams();
+  return <ChatView chatId={chatId} />;
+}
+
+/** A conversation: its messages, the teams it started and the composer. The main chat comes
+ * from the address; a second one (side) sits beside it on a laptop, and closes instead of
+ * going home when it can't be loaded. */
+export function ChatView({ chatId, side = false }: { chatId?: string; side?: boolean }) {
   const navigate = useNavigate();
   const user = useStore((s) => s.user)!;
   const messages = useStore((s) => (chatId ? (s.messages[chatId] ?? EMPTY) : EMPTY));
@@ -33,11 +40,11 @@ export function ChatPage() {
     api
       .messages(chatId)
       .then((list) => mergeFetched(chatId, list))
-      .catch(() => navigate("/", { replace: true }));
+      .catch(() => (side ? useStore.getState().openSideChat(null) : navigate("/", { replace: true })));
     // Teams started from this chat, and steps waiting for approval.
     api.systems({ chat_id: chatId }).then(upsertSystems).catch(() => {});
     api.approvals(chatId).then(upsertApprovals).catch(() => {});
-  }, [chatId, connected, navigate, mergeFetched, upsertSystems, upsertApprovals, setError]);
+  }, [chatId, side, connected, navigate, mergeFetched, upsertSystems, upsertApprovals, setError]);
 
   const systems = useMemo(
     () =>

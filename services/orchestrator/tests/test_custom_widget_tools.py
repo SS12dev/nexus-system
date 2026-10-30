@@ -63,3 +63,19 @@ async def test_a_widget_lands_on_the_dock_and_changes_can_be_undone(deps, owner)
     assert w.state["version"] == 1 and w.title == "Launch"
     out = await tools["control_widget"].ainvoke({"widget_id": wid, "action": "undo"})
     assert "first version" in out
+
+
+async def test_buttons_that_act_in_the_app_must_be_in_the_manifest(deps, owner):
+    user, chat_id = owner
+    tools = tools_for(deps, user, chat_id)
+    html = GOOD.replace(
+        "nexus.state.get()", "n.onclick = () => nexus.chat.fork(); nexus.state.get()"
+    )
+    out = await tools["save_widget"].ainvoke({"name": "Fork", "html": html})
+    assert out.startswith("Not saved") and "chat.fork" in out
+    out = await tools["save_widget"].ainvoke({"name": "Fork", "html": html, "actions": ["fly"]})
+    assert "No action fly" in out
+    out = await tools["save_widget"].ainvoke(
+        {"name": "Fork", "html": html, "actions": ["chat.fork"]}
+    )
+    assert "Saved Fork" in out and "Allow button for chat.fork" in out

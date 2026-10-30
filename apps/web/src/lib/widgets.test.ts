@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Widget } from "./types";
 import {
+  ago,
+  clampSize,
   clock,
+  libraryLine,
+  mayAct,
+  safeLink,
+  searchUrl,
   daysFor,
   elapsed,
   frameHeight,
@@ -78,7 +84,7 @@ describe("custom widgets", () => {
       manifest: { size: "m", hosts: ["api.open-meteo.com", "x.io"], data: ["calendar.today"], about: "" },
       approved: { hosts: ["x.io"], data: [] },
     });
-    expect(pendingAsks(w)).toEqual({ hosts: ["api.open-meteo.com"], data: ["calendar.today"] });
+    expect(pendingAsks(w)).toEqual({ hosts: ["api.open-meteo.com"], data: ["calendar.today"], actions: [] });
   });
 });
 
@@ -104,5 +110,53 @@ describe("ruleDays and daysFor", () => {
     expect(daysFor([])).toBeNull();
     expect(daysFor([...WEEK])).toBe("daily");
     expect(daysFor(["SU", "SA"])).toEqual(["SA", "SU"]);
+  });
+});
+
+describe("app actions", () => {
+  const w = widget("custom", {
+    manifest: { size: "m", hosts: [], data: [], actions: ["chat.fork", "open"], about: "" },
+    approved: { hosts: [], data: [], actions: ["chat.fork", "ask"] },
+  });
+  it("waits for what the manifest asks for and you allowed", () => {
+    expect(pendingAsks(w).actions).toEqual(["open"]);
+    expect(mayAct(w, "chat.fork")).toBe(true);
+    // Allowed but never asked for, or asked for but not allowed: no.
+    expect(mayAct(w, "ask")).toBe(false);
+    expect(mayAct(w, "open")).toBe(false);
+  });
+  it("opens only https links", () => {
+    expect(safeLink("https://example.com/a?b=1")).toBe("https://example.com/a?b=1");
+    expect(safeLink("javascript:alert(1)")).toBeNull();
+    expect(safeLink("http://example.com")).toBeNull();
+    expect(safeLink(42)).toBeNull();
+  });
+});
+
+describe("search boxes", () => {
+  it("search the web, or leave it to the assistant", () => {
+    expect(searchUrl("google", "pasta recipes")).toBe("https://www.google.com/search?q=pasta%20recipes");
+    expect(searchUrl(undefined, "a&b")).toBe("https://www.google.com/search?q=a%26b");
+    expect(searchUrl("duckduckgo", "x")).toBe("https://duckduckgo.com/?q=x");
+    expect(searchUrl("assistant", "x")).toBeNull();
+  });
+});
+
+describe("the library", () => {
+  it("keeps sizes within what the server takes", () => {
+    expect(clampSize(10, 5000)).toEqual({ w: 160, h: 800 });
+    expect(clampSize(300.4, 200.6)).toEqual({ w: 300, h: 201 });
+  });
+  it("tells widgets apart in a line", () => {
+    expect(libraryLine(widget("note", { text: "  Buy milk\nand eggs" }))).toBe("Buy milk");
+    expect(libraryLine(widget("note", {}))).toBe("Empty note");
+    expect(libraryLine(widget("alarm", { time: "07:00", repeat: "FREQ=DAILY" }))).toBe("07:00 · Every day");
+    expect(libraryLine({ ...widget("alarm", { time: "07:00" }), title: "Alarm 07:00" })).toBe("Once");
+    expect(libraryLine(widget("clock", { zones: ["Asia/Kolkata", "Europe/London"] }))).toBe("Kolkata, London");
+  });
+  it("says how long ago it was put away", () => {
+    expect(ago("2026-10-25T17:59:30Z", T0)).toBe("just now");
+    expect(ago("2026-10-25T15:00:00Z", T0)).toBe("3 h ago");
+    expect(ago("2026-10-24T18:00:00Z", T0)).toBe("1 day ago");
   });
 });

@@ -16,6 +16,7 @@ from nexus_common.library import file_payload
 from nexus_common.models import Entity, File, NotificationKind, Widget, utcnow
 from nexus_common.notices import notify
 from nexus_common.trash import visible_file
+from nexus_common.widgets import on_screen
 
 Op = Literal["pin", "move", "focus", "mode", "highlight", "notice", "clear"]
 MAX_HIGHLIGHT = 8
@@ -70,7 +71,7 @@ def build_screen_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
             if op in ("pin", "move"):
                 wid = _uuid(target)
                 w = wid and await db.scalar(
-                    select(Widget).where(Widget.id == wid, Widget.user_id == user_id)
+                    select(Widget).where(Widget.id == wid, Widget.user_id == user_id, on_screen())
                 )
                 if not w:
                     return "No such widget; call list_widgets for the ids."
@@ -102,7 +103,9 @@ def build_screen_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
                 else:
                     wid = _uuid(target)
                     w = wid and await db.scalar(
-                        select(Widget).where(Widget.id == wid, Widget.user_id == user_id)
+                        select(Widget).where(
+                            Widget.id == wid, Widget.user_id == user_id, on_screen()
+                        )
                     )
                     if not w:
                         return f"No file or widget called {target}; list_documents or list_widgets."

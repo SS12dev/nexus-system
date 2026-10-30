@@ -1274,14 +1274,21 @@ export interface ScreenOpData {
   recall?: Recalled;
 }
 
-export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note" | "custom";
+export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note" | "search" | "custom";
 
-/** What a custom widget asks for: its size class, the web hosts it fetches from and the Nexus
- * data it reads, each approved once. */
+/** Where a search box sends what's typed in it: a web search in a new tab, or the assistant. */
+export type SearchEngine = "google" | "duckduckgo" | "bing" | "assistant";
+
+/** What a custom widget can ask the app to do (custom_widgets.py ACTIONS). */
+export type AppAction = "open" | "chat.fork" | "chat.new" | "ask";
+
+/** What a custom widget asks for: its size class, the web hosts it fetches from, the Nexus
+ * data it reads and the app actions its buttons take, each approved once. */
 export interface WidgetManifest {
   size: "s" | "m" | "l";
   hosts: string[];
   data: string[];
+  actions?: AppAction[];
   about: string;
 }
 
@@ -1290,6 +1297,12 @@ export interface WidgetManifest {
 export interface WidgetPos {
   x: number;
   y: number;
+}
+
+/** A size dragged out on a card's corner, in CSS pixels. */
+export interface WidgetSize {
+  w: number;
+  h: number;
 }
 
 export interface Widget {
@@ -1310,19 +1323,25 @@ export interface Widget {
     rang_at?: string;
     /** What a timer, alarm or reminder rings with (lib/tunes.ts); chime when unset. */
     tune?: TuneId;
+    /** search: where it searches. */
+    engine?: SearchEngine;
     /** custom: the version on screen, how many there are, and what it may use. */
     custom_id?: string;
     version?: number;
     versions?: number;
     manifest?: WidgetManifest;
-    approved?: { hosts: string[]; data: string[] };
+    approved?: { hosts: string[]; data: string[]; actions?: AppAction[] };
   };
   slot: number;
   /** Where it was dragged to on a laptop's main screen, 0..1 across the room beside it; null
    * when it sits in the dock. */
   pos: WidgetPos | null;
+  /** Resized by hand on a laptop; null keeps the kind's own size. */
+  size?: WidgetSize | null;
   chat_id: string | null;
   fires_at: string | null;
+  /** When it was put away in the library; null while it's on the screen. */
+  removed_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1337,11 +1356,23 @@ export interface WidgetInput {
   text?: string;
   zones?: string[];
   tune?: TuneId;
+  engine?: SearchEngine;
   /** Dropped onto the main screen from the add menu. */
   pos?: WidgetPos;
 }
 
-export type WidgetAction = "pause" | "resume" | "reset" | "add_time" | "snooze" | "dismiss" | "remove" | "undo";
+/** remove puts a widget in the library, restore puts it back, forget deletes it for good. */
+export type WidgetAction =
+  | "pause"
+  | "resume"
+  | "reset"
+  | "add_time"
+  | "snooze"
+  | "dismiss"
+  | "remove"
+  | "undo"
+  | "restore"
+  | "forget";
 
 /** A call from a custom widget's page (window.nexus) that the app forwards to the server. */
 export type BridgeCall = "state.get" | "state.set" | "fetch" | "data" | "notify";

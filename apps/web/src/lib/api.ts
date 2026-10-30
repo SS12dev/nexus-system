@@ -33,6 +33,8 @@ import type {
   ScreenState,
   Widget,
   WidgetPos,
+  WidgetSize,
+  SearchEngine,
   WidgetAction,
   WidgetInput,
   OnboardingAnswers,
@@ -167,6 +169,8 @@ export const api = {
   suggestions: () => request<string[]>("/api/me/suggestions"),
   notifications: () => request<{ items: Notice[]; unread: number }>("/api/notifications"),
   widgets: () => request<Widget[]>("/api/widgets"),
+  /** The widgets put away, newest first. */
+  widgetLibrary: () => request<Widget[]>("/api/widgets/library"),
   addWidget: (body: WidgetInput) => request<Widget>("/api/widgets", { method: "POST", body: json(body) }),
   widgetAction: (id: string, action: WidgetAction, minutes?: number) =>
     request<Widget | null>(`/api/widgets/${id}/action`, { method: "POST", body: json({ action, minutes }) }),
@@ -178,6 +182,9 @@ export const api = {
       slot?: number;
       pos?: WidgetPos;
       dock?: boolean;
+      size?: WidgetSize;
+      reset_size?: boolean;
+      engine?: SearchEngine;
       tune?: TuneId;
       time?: string;
       days?: string | string[] | null;
@@ -192,8 +199,8 @@ export const api = {
     request<ScreenState>("/api/screen/close", { method: "POST", body: json({ kind, id }) }),
   widgetBridge: (id: string, call: BridgeCall, args: Record<string, unknown>) =>
     request<{ result: unknown }>(`/api/widgets/${id}/bridge`, { method: "POST", body: json({ call, args }) }),
-  approveWidget: (id: string, hosts: string[], data: string[]) =>
-    request<Widget>(`/api/widgets/${id}/approve`, { method: "POST", body: json({ hosts, data }) }),
+  approveWidget: (id: string, hosts: string[], data: string[], actions: string[] = []) =>
+    request<Widget>(`/api/widgets/${id}/approve`, { method: "POST", body: json({ hosts, data, actions }) }),
   readNotifications: (ids?: string[]) =>
     request<void>("/api/notifications/read", { method: "POST", body: json({ ids: ids ?? null }) }),
   acceptTerms: (version: string) =>
@@ -246,6 +253,9 @@ export const api = {
   permanentlyDeleteTrash: (id: string) =>
     request<{ queued: boolean }>(`/api/trash/${id}`, { method: "DELETE" }),
   createChat: () => request<Chat>("/api/chats", { method: "POST", body: json({}) }),
+  /** A copy of the chat so far (up to `until`, a message id) as a new chat. */
+  forkChat: (id: string, until?: string) =>
+    request<Chat>(`/api/chats/${id}/fork`, { method: "POST", body: json(until ? { until } : {}) }),
   renameChat: (id: string, title: string) =>
     request<Chat>(`/api/chats/${id}`, { method: "PATCH", body: json({ title }) }),
   deleteChat: (id: string) => request<void>(`/api/chats/${id}`, { method: "DELETE" }),

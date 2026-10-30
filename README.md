@@ -602,16 +602,31 @@ Around the orb is a live screen that the assistant runs with you.
   straight onto the screen. Timers, alarms and reminders ring with one of nine tunes made in
   the browser (`apps/web/src/lib/tunes.ts`, kept in step with `TUNES` in `widgets.py`); an
   alarm starts soft and grows, and its time, days and tune change from the card. A note's +
-  makes a new blank note beside it.
+  makes a new blank note beside it. A **search box** sends what's typed to Google, DuckDuckGo
+  or Bing in a new tab, or to the assistant. On a laptop every card can be dragged anywhere
+  and **resized by its corner** (saved in `widgets.size`; big numbers grow with the card).
+- **Widget library.** Removing a widget puts it away instead of deleting it (`widgets.removed_at`):
+  the add menu's **Your library** tab lists what you removed, with everything on it, to put
+  back as it was (an alarm that was on is set again) or delete for good. Custom widgets stay
+  until you delete them; the 40 newest of the others are kept. The assistant can restore one
+  too (`list_widgets` with `library=true`, then `control_widget` restore).
+- **Fork a chat.** The branch button in a chat's title bar (or a widget's button) copies the
+  conversation so far into a new chat (`POST /api/chats/{id}/fork`) and opens it as a second
+  chat window beside the first on a laptop, which can be swapped with it or popped out into a
+  window of its own.
 - **Custom widgets** are small HTML apps a one-agent widget-builder team writes
   (`library/core/widget-builder`, tool `save_widget`): a countdown, a habit tracker, a weather
   card. The page is served by `/api/widgets/{id}/frame` with a CSP whose `sandbox` directive
   gives it an opaque origin with no network, cookies or storage, inside an
   `<iframe sandbox="allow-scripts">`. It talks to Nexus only through `window.nexus` (its own
   state, a server-side fetch to hosts you allowed, read-only data you allowed such as today's
-  calendar, notices, resize), checked in `nexus_common/custom_widgets.py`. Before saving, the
-  HTML is checked (size, no outside scripts or network) and loaded in headless Chromium on the
-  workbench. Each change is a version you can undo.
+  calendar, notices, resize, which chat is open), checked in `nexus_common/custom_widgets.py`.
+  Its buttons can also act in the app (open a link, fork the open chat, start a new chat, ask
+  the assistant): each action has to be in its manifest, allowed by you, and pressed, so a
+  widget can't act on its own. Before saving, the HTML is checked (size, no outside scripts or
+  network, and that every host, data source and action it calls is in its manifest) and
+  loaded in headless Chromium on the workbench at a narrow and a wide card size. Each change is
+  a version you can undo.
 - **Screen control.** The assistant's `screen` tool opens a file in the orb's place, switches
   between **Orb**, **List** and a **Widgets** board, orders the dock, lights names in the orb
   or posts a notice (`nexus_common/screen.py`, `screen.op`). The layout is saved per user. Your
