@@ -19,12 +19,23 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
+from nexus_common import ontology
 from nexus_common.embeddings import CachedEmbedder, EmbeddingError
-from nexus_common.models import Entity, Mention, Relation, TrashItem, User, utcnow
+from nexus_common.models import (
+    Entity,
+    Mention,
+    Relation,
+    RelationEvidence,
+    TrashItem,
+    User,
+    utcnow,
+)
 from nexus_common.search import vector_literal
 
 log = logging.getLogger(__name__)
 
+# The types the memory model is asked for today; the ontology has more (nexus_common.ontology),
+# which the local extractor will use.
 TYPES = ("person", "project", "organisation", "place", "topic", "tool", "other")
 # What the model writes for the user themself in a relation.
 SELF = "user"
@@ -127,6 +138,8 @@ async def self_entity(db: AsyncSession, user: User) -> Entity:
             aliases=[],
             summary="",
             is_self=True,
+            shell=0,
+            origin="app",
         )
         db.add(found)
         await db.flush()
@@ -186,6 +199,7 @@ class Resolver:
                     id=uuid.uuid4(),
                     user_id=self.user.id,
                     type=it["type"],
+                    shell=ontology.shell_of(it["type"]),
                     name=it["name"],
                     aliases=it.get("aliases", []),
                     summary=it.get("summary", ""),
@@ -247,12 +261,13 @@ async def ingest(
         if src is None or dst is None or src.id == dst.id:
             continue
         touched |= {src.id, dst.id}
+        canon = ontology.canonical(r["predicate"])
         same = await db.scalar(
             select(Relation).where(
                 Relation.user_id == user.id,
                 Relation.src_id == src.id,
                 Relation.dst_id == dst.id,
-                Relation.predicate == r["predicate"],
+                Relation.predicate == canon.predicate,
                 Relation.valid_to.is_(None),
             )
         )
@@ -261,14 +276,21 @@ async def ingest(
                 same.valid_to = same.updated_at = now
             else:
                 # Learned only that it used to be true: keep it as history.
-                db.add(_relation(user, src, dst, r, chat_id, now, ended=True))
+                same = _relation(user, src, dst, r, chat_id, now, ended=True)
+                db.add(same)
         elif same is not None:
             same.confidence = min(1.0, same.confidence + 0.1)
-            same.updated_at = now
+            same.weight = min(1.0, same.weight + 0.1)
+            same.evidence_count += 1
+            same.updated_at = same.last_seen = now
             if r["fact"]:
                 same.fact = r["fact"]
         else:
-            db.add(_relation(user, src, dst, r, chat_id, now))
+            same = _relation(user, src, dst, r, chat_id, now)
+            db.add(same)
+        if chat_id is not None:
+            await db.flush()
+            await add_evidence(db, user.id, same.id, chat_id=chat_id)
 
     targets: list[tuple[dict, list[Entity]]] = []
     if chat_id is not None:
@@ -290,18 +312,37 @@ async def ingest(
 
 
 def _relation(user, src, dst, r, chat_id, now, ended: bool = False) -> Relation:
+    canon = ontology.canonical(r["predicate"])
     return Relation(
         id=uuid.uuid4(),
         user_id=user.id,
         src_id=src.id,
         dst_id=dst.id,
-        predicate=r["predicate"],
+        predicate=canon.predicate,
+        family=canon.family,
+        label=canon.label,
+        weight=0.6,
+        evidence_count=1,
+        last_seen=now,
         fact=r["fact"],
         confidence=0.7,
         source_chat_id=chat_id,
         valid_from=now,
         valid_to=now if ended else None,
         updated_at=now,
+    )
+
+
+async def add_evidence(
+    db: AsyncSession, user_id: uuid.UUID, relation_id: uuid.UUID, **target
+) -> None:
+    """Record one item (chat_id=, memory_id=, ...) as support for a relation."""
+    await db.execute(
+        insert(RelationEvidence)
+        .values(
+            id=uuid.uuid4(), user_id=user_id, relation_id=relation_id, created_at=utcnow(), **target
+        )
+        .on_conflict_do_nothing(constraint="uq_relation_evidence")
     )
 
 
@@ -313,10 +354,11 @@ async def forget_mentions(db: AsyncSession, **target) -> None:
 
 async def prune(db: AsyncSession, user_id: uuid.UUID | None = None) -> int:
     """Delete entities nothing mentions any more (their relations go with them), so deleting a
-    memory or a chat also removes what the graph learned only from it."""
+    memory or a chat also removes what the graph learned only from it. Entities for the app's
+    own records stay while the record does (graph_sync removes them with it)."""
     sql = """
         delete from entities e
-        where not e.is_self {scope}
+        where not e.is_self and e.source_kind is null {scope}
           and not exists (select 1 from mentions m where m.entity_id = e.id)"""
     params = {}
     if user_id is not None:
@@ -388,6 +430,7 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
         text(
             """
             select e.id, e.type, e.name, e.aliases, e.summary, e.is_self, e.created_at, e.seen_at,
+                   e.shell, e.domain, e.salience, e.pos, e.origin, e.source_kind, e.source_id,
                    count(m.memory_id) as memories, count(m.episode_id) as past_chats,
                    count(m.file_id) as files, count(m.chat_id) as chats,
                    coalesce(array_agg(m.memory_id) filter (where m.memory_id is not null),
@@ -454,7 +497,7 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
                   where t.kind = 'entity' and t.entity_id = e.id and t.user_id = :user_id
               )
             group by e.id
-            having e.is_self or count(m.id) > 0
+            having e.is_self or e.source_kind is not null or count(m.id) > 0
             order by e.is_self desc, count(m.id) desc, e.seen_at desc"""
         ),
         {"user_id": user_id},
@@ -462,7 +505,16 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
     entities = [
         {
             "id": str(r.id),
-            "type": r.type,
+            # The nearest of the original seven types, which today's orb and Knowledge page
+            # draw; "kind" is the full ontology type.
+            "type": "person" if r.is_self else ontology.legacy_type(r.type),
+            "kind": r.type,
+            "shell": r.shell,
+            "domain": r.domain,
+            "salience": r.salience,
+            "pos": r.pos,
+            "origin": r.origin,
+            "source": {"kind": r.source_kind, "id": str(r.source_id)} if r.source_kind else None,
             "name": r.name,
             "aliases": r.aliases or [],
             "summary": r.summary,
@@ -505,6 +557,11 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "src": str(r.src_id),
             "dst": str(r.dst_id),
             "predicate": r.predicate,
+            "family": r.family or "association",
+            "label": r.label or r.predicate,
+            "weight": r.weight,
+            "evidence_count": r.evidence_count,
+            "origin": r.origin,
             "fact": r.fact,
             "confidence": r.confidence,
             "valid_from": r.valid_from.isoformat(),
