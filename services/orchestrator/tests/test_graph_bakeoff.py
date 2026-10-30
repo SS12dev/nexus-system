@@ -58,3 +58,49 @@ def test_a_broken_answer_scores_zero_even_when_the_reference_is_empty():
     score = Score()
     score.add(*s["entities"])
     assert score.f1 == 0.0
+
+
+def _perfect(case):
+    from nexus_common.graph import norm
+
+    ents = [
+        {"name": e["name"], "key": norm(e["name"]), "type": e["types"][0]} for e in case.entities
+    ]
+    rels = [
+        {
+            "from": "user" if r["from"] == "USER" else norm(r["from"]),
+            "to": "user" if r["to"] == "USER" else norm(r["to"]),
+            "family": r["families"][0],
+            "predicate": "",
+        }
+        for r in case.relations
+    ]
+    return Result(entities=ents, relations=rels)
+
+
+def test_every_case_is_consistent_and_a_perfect_answer_scores_full_marks():
+    from nexus_orchestrator.graph_bakeoff import ALL_TYPES, FAMILIES, score_gold
+    from nexus_orchestrator.graph_cases import CASES
+
+    assert len({c.id for c in CASES}) == len(CASES)
+    for c in CASES:
+        names = {e["name"] for e in c.entities}
+        for e in c.entities:
+            assert set(e["types"]) <= set(ALL_TYPES), (c.id, e)
+        for r in c.relations:
+            assert {r["from"], r["to"]} <= names | {"USER"}, (c.id, r)
+            assert set(r["families"]) <= set(FAMILIES), (c.id, r)
+        s = score_gold(c, _perfect(c), {})
+        tp, got, ref = s["entities"]
+        assert tp == got == ref, c.id
+        assert s["relations"][0] == len(c.relations), c.id
+        assert s["traps"] == 0, c.id
+
+
+def test_a_trap_name_counts_as_a_hit():
+    from nexus_orchestrator.graph_bakeoff import score_gold
+    from nexus_orchestrator.graph_cases import CASES
+
+    case = next(c for c in CASES if c.id == "edge-hypothetical")
+    got = Result(entities=[{"name": "Berlin", "key": "berlin", "type": "place"}])
+    assert score_gold(case, got, {})["traps"] == 1

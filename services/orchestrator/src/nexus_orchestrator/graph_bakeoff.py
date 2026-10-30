@@ -33,6 +33,7 @@ from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.graph import clean_name, norm
 from nexus_common.models import Chat, Message, MessageRole, User
 from nexus_common.settings import Settings
+from nexus_orchestrator.graph_cases import CASES, Case
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ TYPES = {
         "state",
         "communication_style",
     ],
-    "life": ["person", "group", "organisation", "place", "role", "life_event"],
+    "life": ["person", "pet", "group", "organisation", "place", "role", "life_event"],
     "activity": ["project", "app", "routine", "task", "decision"],
     "knowledge": ["topic", "tool", "document", "source"],
 }
@@ -133,7 +134,7 @@ SCHEMA = {
 }
 # Two entity names this close (cosine distance of their embeddings) are the same thing.
 SAME_NAME = 0.15
-MAX_CHARS = 12_000
+MAX_CHARS = 24_000
 
 
 @dataclass
@@ -291,6 +292,90 @@ def score_chat(ref: Result, got: Result, vectors: dict[str, list[float]]) -> dic
     }
 
 
+def gold_keys(e: dict) -> list[str]:
+    return [norm(e["name"]), *(norm(a) for a in e["aliases"])]
+
+
+def score_gold(case: Case, got: Result, vectors: dict[str, list[float]]) -> dict:
+    """Agreement with a hand-labelled case: an entity matches a gold one by name or alias, then
+    by meaning; its type is right when it is one of the gold types; a relation matches when
+    both ends match (in either direction) and its family is one of the gold families. A name
+    on the case's forbidden list is a trap hit."""
+    if got.error:
+        return {
+            "entities": (0, 1, len(case.entities)),
+            "typed": 0,
+            "relations": (0, 1, len(case.relations)),
+            "predicate_same": 0,
+            "traps": 0,
+        }
+    gold = case.entities
+    free = set(range(len(gold)))
+    pairs: dict[str, int] = {}
+    for e in got.entities:
+        for i in sorted(free):
+            if e["key"] in gold_keys(gold[i]):
+                pairs[e["key"]] = i
+                free.discard(i)
+                break
+    for e in got.entities:
+        if e["key"] in pairs or e["key"] not in vectors:
+            continue
+        best = min(
+            (
+                (cosine_distance(vectors[e["key"]], vectors[k]), i)
+                for i in free
+                for k in gold_keys(gold[i])
+                if k in vectors
+            ),
+            default=None,
+        )
+        if best and best[0] <= SAME_NAME:
+            pairs[e["key"]] = best[1]
+            free.discard(best[1])
+    typed = sum(
+        1 for e in got.entities if e["key"] in pairs and e["type"] in gold[pairs[e["key"]]]["types"]
+    )
+
+    index = {norm(g["name"]): i for i, g in enumerate(gold)}
+
+    def gold_end(name: str) -> int | str | None:
+        return "user" if name == "USER" else index.get(norm(name))
+
+    def got_end(key: str) -> int | str | None:
+        return "user" if key == "user" else pairs.get(key)
+
+    rel_tp, used = 0, set()
+    for r in got.relations:
+        ends = {got_end(r["from"]), got_end(r["to"])}
+        for j, g in enumerate(case.relations):
+            if j in used or r["family"] not in g["families"]:
+                continue
+            if ends == {gold_end(g["from"]), gold_end(g["to"])}:
+                used.add(j)
+                rel_tp += 1
+                break
+
+    def trapped(key: str) -> bool:
+        for f in case.forbidden:
+            k = norm(f)
+            if key == k or (
+                key in vectors
+                and k in vectors
+                and cosine_distance(vectors[key], vectors[k]) <= SAME_NAME
+            ):
+                return True
+        return False
+
+    return {
+        "entities": (len(pairs), len(got.entities), len(gold)),
+        "typed": typed,
+        "relations": (rel_tp, len(got.relations), len(case.relations)),
+        "predicate_same": 0,
+        "traps": sum(trapped(e["key"]) for e in got.entities),
+    }
+
+
 @dataclass
 class Tally:
     """A model's totals over all chats."""
@@ -304,8 +389,15 @@ class Tally:
     seconds: list[float] = field(default_factory=list)
     memory_gb: float = 0.0
     errors: int = 0
+    traps: int = 0
+    by_category: dict[str, tuple[Score, Score]] = field(default_factory=dict)
 
-    def add(self, s: dict, res: Result) -> None:
+    def add(self, s: dict, res: Result, category: str = "") -> None:
+        self.traps += s.get("traps", 0)
+        if category:
+            ents, rels = self.by_category.setdefault(category, (Score(), Score()))
+            ents.add(*s["entities"])
+            rels.add(*s["relations"])
         self.entities.add(*s["entities"])
         self.relations.add(*s["relations"])
         self.typed += s["typed"]
@@ -341,6 +433,47 @@ def report(reference: str, tallies: dict[str, Tally], chats: int, samples: str) 
         f"reference: {reference}\n\nScores are agreement with the reference model, not ground "
         "truth. Check the samples below to see who was right where they differ.\n\n"
         + "\n".join(rows)
+        + "\n\n"
+        + samples
+    )
+
+
+def gold_report(tallies: dict[str, Tally], cases: int, samples: str) -> str:
+    rows = [
+        "| Model | Entity F1 | Entity P / R | Right type | Relation F1 | Relation P / R | "
+        "Trap hits | Valid JSON | Median s/chat | Max s/chat | Memory GB |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    ranked = sorted(tallies.items(), key=lambda kv: -kv[1].entities.f1 - kv[1].relations.f1)
+    for name, t in ranked:
+        e, r = t.entities, t.relations
+        rows.append(
+            f"| {name} | {e.f1:.2f} | {e.precision:.2f} / {e.recall:.2f} | "
+            f"{t.typed / e.tp if e.tp else 0:.0%} | {r.f1:.2f} | {r.precision:.2f} / "
+            f"{r.recall:.2f} | {t.traps} | {t.valid}/{t.chats} | {median(t.seconds):.1f} | "
+            f"{max(t.seconds, default=0):.1f} | {t.memory_gb or '-'} |"
+        )
+    cats = sorted({c for t in tallies.values() for c in t.by_category})
+    by_cat = [
+        "| Model | " + " | ".join(cats) + " |",
+        "| --- |" + " --- |" * len(cats),
+    ]
+    for name, t in ranked:
+        cells = [
+            f"{t.by_category[c][0].f1:.2f} / {t.by_category[c][1].f1:.2f}"
+            if c in t.by_category
+            else "-"
+            for c in cats
+        ]
+        by_cat.append(f"| {name} | " + " | ".join(cells) + " |")
+    return (
+        f"# Graph extraction test set\n\n{datetime.now(UTC):%Y-%m-%d %H:%M} UTC · {cases} "
+        "hand-labelled cases (nexus_orchestrator/graph_cases.py)\n\nScored against the "
+        "written answers. Trap hits are names that must not be extracted (hypotheticals, things "
+        "only the assistant said, public figures, file names, injected text).\n\n"
+        + "\n".join(rows)
+        + "\n\n## Entity F1 / relation F1 by category\n\n"
+        + "\n".join(by_cat)
         + "\n\n"
         + samples
     )
@@ -411,7 +544,7 @@ class Models:
             "format": SCHEMA,
             # gpt-oss can't switch reasoning off and returns nothing when asked to; low is fast.
             "think": "low" if model.startswith("gpt-oss") else False,
-            "options": {"temperature": 0, "num_ctx": 8192},
+            "options": {"temperature": 0, "num_ctx": 16384},
             "messages": [{"role": "system", "content": PROMPT}, {"role": "user", "content": chat}],
         }
         r = await self.http.post(f"{self.ollama}/api/chat", json=body)
@@ -485,6 +618,10 @@ async def load_chats(
 async def run(args: argparse.Namespace) -> Path:
     settings = Settings()
     ollama = args.ollama or os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+    if args.dataset:
+        return await run_dataset(args, settings, ollama)
+    if not args.email:
+        raise SystemExit("Give an account email, or --dataset to use the hand-labelled cases")
     chats = await load_chats(
         args.database_url or settings.database_url, args.email, args.chats, args.min_user_messages
     )
@@ -555,9 +692,80 @@ async def run(args: argparse.Namespace) -> Path:
     return out
 
 
+async def run_dataset(args: argparse.Namespace, settings: Settings, ollama: str) -> Path:
+    """Every model in --models against the hand-labelled cases (no reference model)."""
+    cases = [c for c in CASES if not args.only or c.category in args.only.split(",")]
+    texts = [transcript(c.messages) for c in cases]
+    print(f"{len(cases)} cases", flush=True)
+    models = Models(settings, ollama)
+    out = Path(args.out) / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    out.mkdir(parents=True, exist_ok=True)
+    answers: dict[str, list[Result]] = {}
+    tallies: dict[str, Tally] = {}
+    for model in [m.strip() for m in args.models.split(",") if m.strip()]:
+        print(f"Model: {model}", flush=True)
+        results, mem = [], 0.0
+        for i, text in enumerate(texts):
+            results.append(await models.extract(model, text))
+            if i == 0 and models.is_local(model):
+                mem = await models.memory_gb(model)
+            print(f"  {i + 1}/{len(texts)} {cases[i].id} {results[-1].seconds:.1f}s", flush=True)
+        if models.is_local(model):
+            await models.unload(model)
+        answers[model], tallies[model] = results, Tally(memory_gb=mem)
+
+    names = {e["key"] for rs in answers.values() for r in rs for e in r.entities}
+    for c in cases:
+        names.update(k for g in c.entities for k in gold_keys(g))
+        names.update(norm(f) for f in c.forbidden)
+    vectors = await models.embed(sorted(n for n in names if n))
+    for model, results in answers.items():
+        for c, res in zip(cases, results, strict=True):
+            tallies[model].add(score_gold(c, res, vectors), res, c.category)
+
+    for i, c in enumerate(cases):
+        (out / f"{c.id}.json").write_text(
+            json.dumps(
+                {
+                    "id": c.id,
+                    "note": c.note,
+                    "gold": {"entities": c.entities, "relations": c.relations},
+                    "forbidden": c.forbidden,
+                    "answers": {
+                        m: {
+                            "entities": rs[i].entities,
+                            "relations": rs[i].relations,
+                            "error": rs[i].error,
+                            "seconds": rs[i].seconds,
+                            "score": score_gold(c, rs[i], vectors),
+                        }
+                        for m, rs in answers.items()
+                    },
+                },
+                indent=1,
+            )
+        )
+    edge = [i for i, c in enumerate(cases) if c.category == "edge"][: args.samples]
+    samples = "## Edge-case answers\n\n" + "\n".join(
+        sample_block(
+            f"{cases[i].id}: {cases[i].note}", texts[i], {m: rs[i] for m, rs in answers.items()}
+        )
+        for i in edge
+    )
+    (out / "report.md").write_text(gold_report(tallies, len(cases), samples))
+    await models.http.aclose()
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("email")
+    p.add_argument("email", nargs="?", default="")
+    p.add_argument(
+        "--dataset",
+        action="store_true",
+        help="score against the hand-labelled cases in graph_cases.py instead of real chats",
+    )
+    p.add_argument("--only", default="", help="with --dataset: comma-separated categories")
     p.add_argument(
         "--models",
         default="nexus-nano",
