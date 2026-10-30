@@ -1,6 +1,6 @@
 ---
 name: widget-builder
-description: Build a custom widget for the user's main screen (a countdown, tracker, weather card, calendar glance, pixel pet, or buttons that fork the open chat, start a chat, ask the assistant or open a search) as one self-contained HTML file saved with save_widget. Use for any request for a widget or a change to one.
+description: Build a custom widget for the user's main screen (a countdown, tracker, weather card, calendar glance, pixel pet, or buttons that fork the open chat, start a chat, ask the assistant, or search a few chosen sites and read the results) as one self-contained HTML file saved with save_widget. Use for any request for a widget or a change to one.
 metadata:
   category: productivity
 ---
@@ -17,8 +17,8 @@ The user can drag the card anywhere, **resize it by its corner** (from about 160
 wide and 64 px to 800 px tall), remove it (it goes to their widget library, to put back
 later) and undo your last change. Build for all of that.
 
-Before writing, load `references/examples.md` (skills_read_file): six complete widgets that
-pass every check. Start from the nearest one.
+Before writing, load `references/examples.md` (skills_read_file): seven complete widgets that
+pass every check, including a search box kept to one field's sites. Start from the nearest one.
 
 ## 1. Pin down what it is
 
@@ -32,14 +32,16 @@ and say which in your reply; don't stop to ask.
 - **Size class**: `s` (about 120 px tall: one number or one line), `m` (200 px, the
   default), `l` (320 px: a small chart or list). Width starts at about 220 px (180 px on a
   phone) and grows on the widget board or when resized.
-- **Where data comes from**: nothing, a public https API (`hosts`), the user's Nexus data
-  (`data`), or the user through taps saved in `nexus.state`.
-- **What its buttons do in the app** (`actions`), if anything: open a link, fork the chat,
-  start a new chat, ask the assistant.
+- **Where data comes from**: nothing, a web search (`web.search` in `data`), a public https
+  API (`hosts`), the user's Nexus data (`data`), or the user through taps saved in
+  `nexus.state`.
+- **What its buttons do in the app** (`actions`), if anything: read a page inside Nexus,
+  open a link, fork the chat, start a new chat, ask the assistant.
 - **Is it a built-in?** Timers, alarms, reminders, stopwatches, world clocks, notes and a
-  plain web search box (Google, DuckDuckGo, Bing or "ask the assistant") are built-in widgets
-  the assistant adds directly. Build a custom one only when it does something they don't: a
-  search box with several special sites (arXiv, GitHub, Wikipedia), a habit tracker, a pet.
+  plain web search box (results in the card, or Google, DuckDuckGo, Bing, "ask the
+  assistant") are built-in widgets the assistant adds directly. Build a custom one only when
+  it does something they don't: a search kept to one field's sites (cinematography, arXiv
+  papers, a framework's docs), a habit tracker, a pet.
 
 ## 2. The bridge: window.nexus
 
@@ -57,21 +59,28 @@ calls something its manifest leaves out.
 | `nexus.resize(height)` | Asks for a frame height in px, kept within half to 1.5x its size class (ignored once the user resized the card) | Nothing |
 | `nexus.context()` | `{chat: {id, title} or null, theme, inApp}`: the chat open beside it | Nothing |
 | `nexus.on("context", fn)` | Calls `fn(context)` whenever the open chat or theme changes; returns an unsubscribe function | Nothing |
+| `nexus.read(url)` | Opens a web page as text in Nexus's reading view, with an "Open in browser" link | `read` in `actions` |
 | `nexus.open(url)` | Opens an https link in a new tab | `open` in `actions` |
 | `nexus.chat.fork()` | Copies the open chat into a new chat and opens it in a second chat window beside it; resolves `{id, title}` | `chat.fork` in `actions` |
 | `nexus.chat.new(text)` | A new chat in a second window, asking `text` there first if given; resolves `{id, title}` | `chat.new` in `actions` |
 | `nexus.ask(text)` | Sends `text` to the assistant in the open chat (a new chat from the home screen) | `ask` in `actions` |
 
-Data sources: `calendar.today` (today's events: title, start, end, location),
+Data sources: `web.search` with `{query, sites}` (up to 10 results
+`[{title, url, site, snippet}]` from the web search Nexus's agents use, cached 10 minutes;
+`sites` is an optional list of up to 8 domains to keep it to), `calendar.today` (today's events: title, start, end, location),
 `tasks.open` (Google Tasks: title, due), `files.recent` (newest file names),
 `memory.search` with `{query}` (matching memories as text), `widgets` (the user's other
 widgets on screen: kind, title, status, rings_at).
 
-**Approval.** The user allows each host, data source and action once, with an Allow button
-on the card that names them in plain words. Until then those calls fail; show a quiet
-"Waiting for access" line, never an error box. Ask only for what the widget needs.
+**What needs the user's Allow.** Only what reaches their private data or speaks for them:
+hosts for `nexus.fetch`, the personal data sources (`calendar.today`, `tasks.open`,
+`files.recent`, `memory.search`, `widgets`) and `ask`. The user allows those once, with an
+Allow button on the card that names them in plain words; until then those calls fail, so
+show a quiet "Waiting for access" line, never an error box. `web.search`, `read`, `open`,
+`chat.fork` and `chat.new` only need naming in the manifest, no Allow. Ask only for what the
+widget needs.
 
-**App actions need a tap.** `open`, `chat.fork`, `chat.new` and `ask` only work straight
+**App actions need a tap.** `read`, `open`, `chat.fork`, `chat.new` and `ask` only work straight
 after the user taps or clicks inside the widget. Call them directly in the click or submit
 handler, never from a timer, on load, or after a long `await`. `chat.fork` fails with
 "Open a chat first" when no chat is open: use `nexus.context()` / `nexus.on("context")` to
@@ -148,7 +157,8 @@ Call `save_widget(name, html, size, hosts, data, actions, about)`:
 
 If it says "Not saved", fix **every** point it lists and call it again. Typical ones:
 "calls nexus.fetch but hosts is empty", "fetches from X, which isn't in hosts",
-"calls nexus.chat.fork, which isn't in actions", "content is 40 px wider than the card (at
+"calls nexus.chat.fork, which isn't in actions", "reads nexus.data('web.search'), which isn't in
+data", "content is 40 px wider than the card (at
 200 px wide)", "error: ... is not defined". After three failed tries, simplify the widget
 rather than patching around the same error.
 

@@ -3,22 +3,26 @@ a widget that counts down to the Artemis launch").
 
 A widget is one self-contained HTML file plus a manifest. It's served by the API with a
 Content-Security-Policy whose sandbox directive gives it an opaque origin (no cookies, no
-session, no reading the app), and shown in an <iframe sandbox="allow-scripts">. Its CSP allows
-inline script and style and nothing else: no network, no outside scripts, no form posts. The
+session, no reading the app), and shown in an <iframe sandbox="allow-scripts allow-forms">
+(allow-forms only so the page hears its own submit events). Its CSP allows inline script and
+style and nothing else: no network, no outside scripts, no form posts (form-action 'none'). The
 only way out is the postMessage bridge (the injected window.nexus), which the app forwards to
 POST /api/widgets/{id}/bridge and which is checked here against the manifest:
 
     nexus.state.get() / .set(value)   the widget's own JSON state (64 KB)
     nexus.fetch(url)                  a server-side GET, only to hosts the person approved
-    nexus.data(source, options)       read-only Nexus data the person approved (DATA_SOURCES)
+    nexus.data(source, options)       read-only Nexus data the person approved (DATA_SOURCES),
+                                      or a web search (FREE_DATA, no approval)
     nexus.notify(title, body)         a notice on the main screen, rate-limited
     nexus.resize(height)              the app sizes the frame, within its size class
     nexus.context() / nexus.on(...)   the chat that's open, the theme and the card's size
 
 and the app actions, which the app itself carries out (ACTIONS), each only when the manifest
-names it, the person allowed it, and the frame was just tapped or clicked:
+names it, the frame was just tapped or clicked, and (for ask, which speaks for the person) the
+person allowed it:
 
     nexus.open(url)                   an https link in a new tab
+    nexus.read(url)                   a web page as clean text, in a reading view in Nexus
     nexus.chat.fork()                 a copy of the open chat, in a second chat window
     nexus.chat.new(text)              a new chat in a second window, optionally asking text
     nexus.ask(text)                   send text to the assistant in the open chat
@@ -43,7 +47,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import google
+from nexus_common import google, web
 from nexus_common.models import CustomWidget, File, Memory, User, Widget, utcnow
 from nexus_common.widgets import (
     TITLE_CHARS,
@@ -65,15 +69,23 @@ DATA_SOURCES = {
     "files.recent": "the names of your newest files",
     "memory.search": "searching what Nexus remembers about you",
     "widgets": "your other widgets and when they ring",
+    "web.search": "searching the web for what you type in it",
 }
+# Data a widget only has to name in its manifest, without the person's Allow: a web search
+# sends out only what the widget was given, and reads nothing of the person's.
+FREE_DATA = {"web.search"}
 # What a widget can ask the app to do, in the words its Allow button uses. The app carries these
 # out (apps/web lib/widgets.ts APP_ACTIONS has the same names), only after a tap in the frame.
 ACTIONS = {
     "open": "open web links in a new tab",
     "chat.fork": "copy the chat you have open into a second chat window",
     "chat.new": "start a new chat in a second window",
+    "read": "open web pages in a reading view inside Nexus",
     "ask": "send messages to your assistant for you",
 }
+# Actions that only open something for the person to look at, on their own tap: named in the
+# manifest is enough. Sending messages as them (ask) still waits for their Allow.
+FREE_ACTIONS = {"open", "chat.fork", "chat.new", "read"}
 FETCH_MAX_BYTES = 256_000
 FETCH_CACHE_S = 60
 FETCH_REDIRECTS = 3
@@ -82,7 +94,7 @@ HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]
 
 # Served with every widget: no network, no outside code, no forms, no navigating the app.
 FRAME_CSP = (
-    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+    "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; "
     "connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
 )
@@ -116,7 +128,7 @@ SHIM = (
     'return call("resize",{height:h});},context:function(){return call("context");},'
     "on:function(n,f){(subs[n]=subs[n]||[]).push(f);return function(){"
     "subs[n]=(subs[n]||[]).filter(function(g){return g!==f;});};},"
-    'open:function(u){return call("open",{url:u});},'
+    'open:function(u){return call("open",{url:u});},read:function(u){return call("read",{url:u});},'
     'ask:function(t){return call("ask",{text:t});},chat:{'
     'fork:function(){return call("chat.fork");},'
     'new:function(t){return call("chat.new",{text:t||""});}}};})();</script>'
@@ -208,6 +220,7 @@ def check_html(html: str) -> list[str]:
 # What the page calls on window.nexus, to check against what the manifest asks for.
 _USES = [
     (re.compile(r"\bnexus\.open\s*\("), "open"),
+    (re.compile(r"\bnexus\.read\s*\("), "read"),
     (re.compile(r"\bnexus\.chat\.fork\s*\("), "chat.fork"),
     (re.compile(r"\bnexus\.chat\.new\s*\("), "chat.new"),
     (re.compile(r"\bnexus\.ask\s*\("), "ask"),
@@ -254,8 +267,13 @@ def pending(state: dict) -> dict:
     """What the widget's manifest asks for that the person hasn't approved yet."""
     manifest = state.get("manifest") or {}
     approved = state.get("approved") or {}
+    free = {"hosts": set(), "data": FREE_DATA, "actions": FREE_ACTIONS}
     return {
-        key: [x for x in manifest.get(key, []) if x not in approved.get(key, [])]
+        key: [
+            x
+            for x in manifest.get(key, [])
+            if x not in approved.get(key, []) and x not in free[key]
+        ]
         for key in ("hosts", "data", "actions")
     }
 
@@ -457,13 +475,32 @@ async def fetch(
     return result
 
 
-async def read_data(db: AsyncSession, settings, user: User, widget: Widget, source: str, options):
-    """Read-only Nexus data for the widget, if the person approved that source for it."""
+async def read_data(
+    db: AsyncSession, settings, user: User, widget: Widget, source: str, options, redis=None
+):
+    """Read-only Nexus data for the widget, if the person approved that source for it (or, for
+    a web search, its manifest names it)."""
     if source not in DATA_SOURCES:
         raise CustomWidgetError(f"No data source {source}")
-    if source not in (widget.state.get("approved") or {}).get("data", []):
+    named = (widget.state.get("manifest") or {}).get("data", [])
+    if source in FREE_DATA:
+        if source not in named:
+            raise CustomWidgetError(f"{source} isn't in this widget's manifest")
+    elif source not in (widget.state.get("approved") or {}).get("data", []):
         raise CustomWidgetError(f"{source} isn't approved for this widget")
     options = options if isinstance(options, dict) else {}
+    if source == "web.search":
+        sites = options.get("sites")
+        try:
+            return await web.cached_search(
+                redis,
+                settings,
+                str(options.get("query", "")),
+                sites if isinstance(sites, list) else None,
+                int(options.get("limit") or 8),
+            )
+        except (web.WebError, ValueError) as exc:
+            raise CustomWidgetError(str(exc)) from exc
     if source == "files.recent":
         rows = await db.scalars(
             select(File).where(File.user_id == user.id).order_by(File.created_at.desc()).limit(10)

@@ -151,8 +151,9 @@ def build_widget_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
     ) -> str:
         """Put a stopwatch (starts at once), a clock (zones: IANA names like "Asia/Kolkata",
         "Europe/London", up to 4; the user's own zone when left out), a note (text) or a search
-        box (engine: google, duckduckgo, bing, or assistant to ask you in chat; google when
-        left out) on the user's main screen. To bring back one the user removed, use
+        box (engine: nexus to list results in the card and read them inside Nexus, the
+        default; google, duckduckgo or bing to open a new tab; assistant to ask you in chat)
+        on the user's main screen. To bring back one the user removed, use
         list_widgets(library=true) and control_widget restore instead."""
         await note("add_widget", kind=kind)
         return await make(kind, title=title, text=text or None, zones=zones, engine=engine)
@@ -272,14 +273,15 @@ def build_widget_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         through window.nexus (see the widget-builder skill). size: s, m or l (the user can
         resize the card, so the layout must stretch). hosts: the web hosts it fetches from
         with nexus.fetch (https only, e.g. api.open-meteo.com); data: the Nexus data it reads
-        with nexus.data (calendar.today, tasks.open, files.recent, memory.search, widgets);
-        actions: the app actions its buttons take (open: a link in a new tab; chat.fork: copy
+        with nexus.data (calendar.today, tasks.open, files.recent, memory.search, widgets,
+        web.search for web results listed in the card); actions: the app actions its buttons
+        take (open: a link in a new tab; read: a page in Nexus's reading view; chat.fork: copy
         the open chat into a second chat window; chat.new: a new chat in a second window;
-        ask: send a message to the assistant). The user approves hosts, data and actions
-        once. about: one line on what it does. widget_id: an existing custom widget's id (from
-        list_widgets, library=true for one the user put away) to save a new version of it.
-        The HTML and manifest are checked and loaded in a headless browser first; fix what it
-        reports."""
+        ask: send a message to the assistant). The user approves hosts, data (except
+        web.search) and ask once; the other actions only need naming. about: one line on
+        what it does. widget_id: an existing custom widget's id (from list_widgets,
+        library=true for one the user put away) to save a new version of it. The HTML and
+        manifest are checked and loaded in a headless browser first; fix what it reports."""
         await note("save_widget", title=name, widget=widget_id or None)
         try:
             manifest = cw.check_manifest(size, hosts, data, about, actions)

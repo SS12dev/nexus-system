@@ -90,12 +90,14 @@ export const DATA_LABELS: Record<string, string> = {
   "files.recent": "your newest file names",
   "memory.search": "searching your memories",
   widgets: "your other widgets",
+  "web.search": "searching the web",
 };
 
 /** What a custom widget's buttons may do in the app, in the Allow button's words
  * (custom_widgets.py ACTIONS). */
 export const ACTION_LABELS: Record<AppAction, string> = {
   open: "open web links in a new tab",
+  read: "open web pages in a reading view inside Nexus",
   "chat.fork": "copy the chat you have open into a second chat window",
   "chat.new": "start a new chat in a second window",
   ask: "send messages to your assistant for you",
@@ -103,24 +105,33 @@ export const ACTION_LABELS: Record<AppAction, string> = {
 
 export const APP_ACTIONS = Object.keys(ACTION_LABELS) as AppAction[];
 
+/** Actions that only open something for you to look at, on your own tap: a widget naming them
+ * is enough. Sending messages as you (ask) waits for your Allow (custom_widgets.py
+ * FREE_ACTIONS), and so does any data but a web search (FREE_DATA). */
+export const FREE_ACTIONS: AppAction[] = ["open", "read", "chat.fork", "chat.new"];
+export const FREE_DATA = ["web.search"];
+
 /** What a custom widget asks for that you haven't allowed yet. */
 export function pendingAsks(w: Widget): { hosts: string[]; data: string[]; actions: AppAction[] } {
   const m = w.state.manifest;
   const ok = w.state.approved ?? { hosts: [], data: [] };
   return {
     hosts: (m?.hosts ?? []).filter((h) => !ok.hosts.includes(h)),
-    data: (m?.data ?? []).filter((d) => !ok.data.includes(d)),
-    actions: (m?.actions ?? []).filter((a) => !(ok.actions ?? []).includes(a)),
+    data: (m?.data ?? []).filter((d) => !ok.data.includes(d) && !FREE_DATA.includes(d)),
+    actions: (m?.actions ?? []).filter((a) => !(ok.actions ?? []).includes(a) && !FREE_ACTIONS.includes(a)),
   };
 }
 
-/** Whether a custom widget may take this app action: its manifest names it and you allowed it. */
+/** Whether a custom widget may take this app action: its manifest names it and, for one that
+ * speaks for you, you allowed it. */
 export function mayAct(w: Widget, action: AppAction): boolean {
-  return !!w.state.manifest?.actions?.includes(action) && !!w.state.approved?.actions?.includes(action);
+  if (!w.state.manifest?.actions?.includes(action)) return false;
+  return FREE_ACTIONS.includes(action) || !!w.state.approved?.actions?.includes(action);
 }
 
 /** The search boxes' engines, in the order the box offers them. */
 export const ENGINES: { id: SearchEngine; name: string }[] = [
+  { id: "nexus", name: "Here" },
   { id: "google", name: "Google" },
   { id: "duckduckgo", name: "DuckDuckGo" },
   { id: "bing", name: "Bing" },
@@ -130,7 +141,7 @@ export const ENGINES: { id: SearchEngine; name: string }[] = [
 /** The web page that searches for `q`, or null for the assistant (asked in chat instead). */
 export function searchUrl(engine: SearchEngine | undefined, q: string): string | null {
   const query = encodeURIComponent(q.trim());
-  if (engine === "assistant") return null;
+  if (engine === "assistant" || engine === "nexus" || engine === undefined) return null;
   if (engine === "duckduckgo") return `https://duckduckgo.com/?q=${query}`;
   if (engine === "bing") return `https://www.bing.com/search?q=${query}`;
   return `https://www.google.com/search?q=${query}`;
@@ -164,7 +175,7 @@ export function libraryLine(w: Widget): string {
   if (w.kind === "alarm") return w.title.includes(s.time ?? "--") ? repeatText(s.repeat) : `${s.time} · ${repeatText(s.repeat)}`;
   if (w.kind === "clock") return (s.zones ?? []).map(zoneCity).join(", ");
   if (w.kind === "timer") return clock(s.duration_s ?? 0);
-  if (w.kind === "search") return ENGINES.find((e) => e.id === (s.engine ?? "google"))?.name ?? "";
+  if (w.kind === "search") return ENGINES.find((e) => e.id === (s.engine ?? "nexus"))?.name ?? "";
   return "";
 }
 

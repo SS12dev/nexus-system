@@ -31,9 +31,10 @@ from nexus_common.routines import ScheduleError, check_timezone, describe, next_
 from nexus_common.settings import Settings
 
 KINDS = ("timer", "alarm", "stopwatch", "reminder", "clock", "note", "search")
-# Where a search box sends what's typed in it: a web search in a new tab, or the assistant.
-ENGINES = ("google", "duckduckgo", "bing", "assistant")
-DEFAULT_ENGINE = "google"
+# Where a search box sends what's typed in it: results listed in the card ("nexus", opened in
+# the reading view), a web search in a new tab, or the assistant.
+ENGINES = ("nexus", "google", "duckduckgo", "bing", "assistant")
+DEFAULT_ENGINE = "nexus"
 # The sounds a timer, alarm or reminder can ring with; the app plays them (apps/web
 # lib/tunes.ts), so a new one goes in both places.
 TUNES = ("chime", "bell", "marimba", "sunrise", "birdsong", "harp", "retro", "digital", "pulse")

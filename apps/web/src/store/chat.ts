@@ -65,6 +65,9 @@ interface Store extends ChatState {
   /** A second chat open beside the main one on a laptop (a fork, or a new chat a widget
    * opened), or null. */
   sideChat: string | null;
+  /** A web page open in the reading view, over everything, or null. */
+  reader: string | null;
+  openReader: (url: string | null) => void;
   openSideChat: (id: string | null) => void;
   setWidgets: (widgets: Widget[]) => void;
   upsertWidget: (widget: Widget) => void;
@@ -128,6 +131,8 @@ export const useStore = create<Store>((set) => ({
   openViewer: (file, chatId) => set({ viewer: { file, chatId } }),
   closeViewer: () => set({ viewer: null }),
   sideChat: null,
+  reader: null,
+  openReader: (reader) => set({ reader }),
   openSideChat: (sideChat) => set({ sideChat }),
   setWidgets: (widgets) => set({ widgets: Object.fromEntries(widgets.map((w) => [w.id, w])) }),
   upsertWidget: (widget) => set((s) => ({ widgets: { ...s.widgets, [widget.id]: widget } })),

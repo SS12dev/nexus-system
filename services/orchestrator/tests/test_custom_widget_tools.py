@@ -78,4 +78,8 @@ async def test_buttons_that_act_in_the_app_must_be_in_the_manifest(deps, owner):
     out = await tools["save_widget"].ainvoke(
         {"name": "Fork", "html": html, "actions": ["chat.fork"]}
     )
-    assert "Saved Fork" in out and "Allow button for chat.fork" in out
+    # Forking on a tap needs no Allow.
+    assert "Saved Fork" in out and "Allow" not in out
+    html = html.replace("nexus.chat.fork()", "nexus.ask('hi')")
+    out = await tools["save_widget"].ainvoke({"name": "Ask", "html": html, "actions": ["ask"]})
+    assert "Allow button for ask" in out

@@ -42,6 +42,7 @@ import type {
   AppAction,
   BridgeCall,
   SearchEngine,
+  WebResult,
   Widget,
   WidgetAction,
   WidgetInput,
@@ -628,20 +629,34 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
   );
 }
 
-/** A search box: what's typed goes to Google (or DuckDuckGo or Bing) in a new tab, or to the
- * assistant, in the open chat or a new one. The chips under it pick where. */
+/** A search box. "Here" (the default) lists the results in the card, and a tap reads the page
+ * inside Nexus; Google, DuckDuckGo or Bing open a new tab with the words filled in; "Ask"
+ * sends them to the assistant, in the open chat or a new one. The chips under it pick where. */
 function SearchCard({ widget: w, compact }: { widget: Widget; compact: boolean }) {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
+  const [results, setResults] = useState<WebResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
   const { ask } = useChatActions();
   const assistant = useAssistantName();
-  const engine: SearchEngine = w.state.engine ?? "google";
+  const engine: SearchEngine = w.state.engine ?? "nexus";
   const name = (id: SearchEngine) => (id === "assistant" ? `Ask ${assistant}` : ENGINES.find((e) => e.id === id)!.name);
   const go = async (e: FormEvent) => {
     e.preventDefault();
     const text = q.trim();
     if (!text) return;
     setError("");
+    if (engine === "nexus") {
+      setBusy(true);
+      try {
+        setResults(await api.webSearch(text));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't search");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const url = searchUrl(engine, text);
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer");
@@ -670,12 +685,17 @@ function SearchCard({ widget: w, compact }: { widget: Widget; compact: boolean }
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder={engine === "assistant" ? `Ask ${assistant}…` : `Search ${name(engine)}…`}
-          aria-label={engine === "assistant" ? `Ask ${assistant}` : `Search ${name(engine)}`}
+          placeholder={engine === "assistant" ? `Ask ${assistant}…` : engine === "nexus" ? "Search the web…" : `Search ${name(engine)}…`}
+          aria-label={engine === "assistant" ? `Ask ${assistant}` : engine === "nexus" ? "Search the web" : `Search ${name(engine)}`}
           enterKeyHint="search"
           className="min-w-0 flex-1 rounded-md border border-edge bg-ink/60 px-2 py-1 text-base text-slate-100 placeholder:text-slate-500 focus:border-sky-400/70 focus:outline-none sm:text-sm @[24rem]:py-2 @[24rem]:text-base"
         />
-        <button className={btn} disabled={!q.trim()} aria-label="Search" title={engine === "assistant" ? "Ask" : "Search in a new tab"}>
+        <button
+          className={btn}
+          disabled={!q.trim() || busy}
+          aria-label="Search"
+          title={engine === "assistant" ? "Ask" : engine === "nexus" ? "Search, results here" : "Search in a new tab"}
+        >
           {engine === "assistant" ? <Send size={13} /> : <Search size={13} />}
         </button>
       </form>
@@ -687,7 +707,10 @@ function SearchCard({ widget: w, compact }: { widget: Widget; compact: boolean }
               type="button"
               role="radio"
               aria-checked={engine === e.id}
-              onClick={() => pick(e.id)}
+              onClick={() => {
+                pick(e.id);
+                setResults(null);
+              }}
               className={`rounded-full border px-1.5 py-px text-[10px] ${
                 engine === e.id ? "border-sky-400/70 bg-sky-400/15 text-sky-200" : "border-edge text-slate-400 hover:text-sky-200"
               }`}
@@ -698,7 +721,35 @@ function SearchCard({ widget: w, compact }: { widget: Widget; compact: boolean }
         </div>
       )}
       {error && <p className="mt-1 text-[11px] text-rose-400">{error}</p>}
+      {busy && <p className="mt-1.5 text-[11px] text-slate-500">Searching…</p>}
+      {results && !busy && <WebResults results={results} compact={compact} />}
     </Card>
+  );
+}
+
+/** Web results in a card: a tap reads the page inside Nexus (the reading view). */
+function WebResults({ results, compact }: { results: WebResult[]; compact: boolean }) {
+  const openReader = useStore((s) => s.openReader);
+  if (!results.length) return <p className="mt-1.5 text-[11px] text-slate-500">Nothing found</p>;
+  return (
+    <ul
+      className={`mt-1.5 space-y-1 overflow-y-auto pr-0.5 ${compact ? "max-h-24" : "max-h-56"} group-data-[sized]:max-h-none group-data-[sized]:min-h-0 group-data-[sized]:flex-1`}
+      aria-label="Results"
+    >
+      {results.map((r) => (
+        <li key={r.url}>
+          <button
+            onClick={() => openReader(r.url)}
+            className="block w-full rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
+            title={`Read ${r.site} here`}
+          >
+            <span className="line-clamp-2 block text-xs text-sky-200">{r.title}</span>
+            <span className="block truncate text-[10px] text-slate-500">{r.site}</span>
+            {!compact && r.snippet && <span className="line-clamp-2 block text-[11px] text-slate-400">{r.snippet}</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -983,10 +1034,11 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
           return reply({ ok: false, error: `${action} only works straight after a tap or click` });
         try {
           const text = String(m.args?.text ?? "");
-          if (action === "open") {
+          if (action === "open" || action === "read") {
             const url = safeLink(m.args?.url);
             if (!url) throw new Error("Only https links can be opened");
-            window.open(url, "_blank", "noopener,noreferrer");
+            if (action === "read") useStore.getState().openReader(url);
+            else window.open(url, "_blank", "noopener,noreferrer");
             return reply({ ok: true, result: true });
           }
           if (action === "ask") {
@@ -1047,7 +1099,9 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
         key={`${w.state.custom_id}:${(w.state.approved?.hosts ?? []).length}:${(w.state.approved?.data ?? []).length}:${(w.state.approved?.actions ?? []).length}`}
         src={theme ? `/api/widgets/${w.id}/frame?theme=${theme}` : undefined}
         title={w.title}
-        sandbox="allow-scripts"
+        // allow-forms only so the page gets its own submit events; the frame's CSP has
+        // form-action 'none', so a form can't send anything anywhere.
+        sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
         onLoad={tell}
         // Made bigger by its corner, the page fills the card; else its size class sets it.

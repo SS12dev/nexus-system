@@ -1277,10 +1277,26 @@ export interface ScreenOpData {
 export type WidgetKind = "timer" | "alarm" | "stopwatch" | "reminder" | "clock" | "note" | "search" | "custom";
 
 /** Where a search box sends what's typed in it: a web search in a new tab, or the assistant. */
-export type SearchEngine = "google" | "duckduckgo" | "bing" | "assistant";
+export type SearchEngine = "nexus" | "google" | "duckduckgo" | "bing" | "assistant";
+
+/** A web search result shown inside Nexus. */
+export interface WebResult {
+  title: string;
+  url: string;
+  site: string;
+  snippet: string;
+}
+
+/** A web page as clean text, for the reading view. */
+export interface WebPage {
+  url: string;
+  site: string;
+  title: string;
+  text: string;
+}
 
 /** What a custom widget can ask the app to do (custom_widgets.py ACTIONS). */
-export type AppAction = "open" | "chat.fork" | "chat.new" | "ask";
+export type AppAction = "open" | "read" | "chat.fork" | "chat.new" | "ask";
 
 /** What a custom widget asks for: its size class, the web hosts it fetches from, the Nexus
  * data it reads and the app actions its buttons take, each approved once. */

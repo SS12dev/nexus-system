@@ -37,6 +37,7 @@ from nexus_api.routes import (
     skills,
     systems,
     trash,
+    web,
     widgets,
 )
 from nexus_api.routes import (
@@ -130,6 +131,7 @@ def create_app(
     app.include_router(links.router)
     app.include_router(notifications.router)
     app.include_router(widgets.router)
+    app.include_router(web.router)
     app.include_router(screen.router)
     app.include_router(projects.router)
     app.include_router(folders.router)

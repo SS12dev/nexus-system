@@ -35,6 +35,8 @@ import type {
   WidgetPos,
   WidgetSize,
   SearchEngine,
+  WebPage,
+  WebResult,
   WidgetAction,
   WidgetInput,
   OnboardingAnswers,
@@ -169,6 +171,13 @@ export const api = {
   suggestions: () => request<string[]>("/api/me/suggestions"),
   notifications: () => request<{ items: Notice[]; unread: number }>("/api/notifications"),
   widgets: () => request<Widget[]>("/api/widgets"),
+  /** A web search whose results show in Nexus, optionally kept to some sites. */
+  webSearch: (q: string, sites: string[] = []) =>
+    request<WebResult[]>(
+      `/api/web/search?${new URLSearchParams([["q", q], ...sites.map((s) => ["sites", s] as [string, string])])}`,
+    ),
+  /** A page as clean text for the reading view. */
+  webRead: (url: string) => request<WebPage>(`/api/web/read?${new URLSearchParams({ url })}`),
   /** The widgets put away, newest first. */
   widgetLibrary: () => request<Widget[]>("/api/widgets/library"),
   addWidget: (body: WidgetInput) => request<Widget>("/api/widgets", { method: "POST", body: json(body) }),

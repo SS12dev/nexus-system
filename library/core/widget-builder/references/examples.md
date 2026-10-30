@@ -271,3 +271,93 @@ function loop(t) {
 requestAnimationFrame(loop);
 </script></body></html>
 ```
+
+## Domain search (size m, data: web.search, actions: read, open)
+
+A search box kept to a few sites for one field (here cinematography). Results come back as
+`[{title, url, site, snippet}]`; a tap reads the page inside Nexus, the arrow opens it in a
+browser tab. None of it needs an Allow. Change `SITES` for another field.
+
+```html
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;font:13px/1.4 system-ui,sans-serif;color:#e2e8f0;background:transparent;container-type:inline-size}
+form{display:flex;gap:4px}
+input{flex:1;min-width:0;border:1px solid #334155;background:transparent;color:inherit;border-radius:8px;padding:5px 8px;font:inherit}
+button{border:1px solid #334155;background:rgba(15,23,42,.4);color:inherit;border-radius:8px;padding:4px 8px;font:inherit;cursor:pointer}
+button:hover{border-color:#38bdf8}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #38bdf8;outline-offset:1px}
+.chips{display:flex;flex-wrap:wrap;gap:3px;margin:6px 0}
+.chips button{font-size:11px;padding:2px 7px;border-radius:999px}
+.chips button[aria-pressed="true"]{border-color:#38bdf8;color:#38bdf8}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;gap:6px;align-items:flex-start;padding:5px 0;border-top:1px solid #334155}
+li .t{flex:1;min-width:0;text-align:left;border:0;background:none;padding:0;cursor:pointer}
+li .t b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m{color:#94a3b8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.s{display:none;color:#94a3b8;font-size:11px}
+li .o{flex:none;font-size:11px;padding:1px 6px}
+@container (min-width: 320px){.s{display:block}}
+[data-theme="light"] body{color:#0f172a}[data-theme="light"] .m,[data-theme="light"] .s{color:#475569}
+[data-theme="light"] input,[data-theme="light"] button,[data-theme="light"] li{border-color:#cbd5e1;background:transparent}
+</style></head><body>
+<form id="f"><input id="q" placeholder="Lens, lighting, a shot…" aria-label="Search cinematography sites"><button>Search</button></form>
+<div class="chips" id="chips" aria-label="Sites to search"></div>
+<div class="m" id="msg" aria-live="polite">Search a few cinematography sites.</div>
+<ul id="list"></ul>
+<script>
+// The sites this widget keeps its search to. Tap a chip to leave one out.
+const SITES = [
+  ["ASC", "theasc.com"], ["No Film School", "nofilmschool.com"],
+  ["StudioBinder", "studiobinder.com"], ["CineD", "cined.com"], ["Shot Deck", "shotdeck.com"],
+];
+const $ = (id) => document.getElementById(id);
+let off = [];
+function chips() {
+  $("chips").textContent = "";
+  for (const [name, site] of SITES) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = name;
+    b.setAttribute("aria-pressed", String(!off.includes(site)));
+    b.onclick = () => {
+      off = off.includes(site) ? off.filter((s) => s !== site) : [...off, site];
+      chips(); nexus.state.set({ off });
+    };
+    $("chips").append(b);
+  }
+}
+nexus.state.get().then((s) => { off = (s && s.off) || []; chips(); });
+chips();
+
+function show(results) {
+  $("list").textContent = "";
+  $("msg").textContent = results.length ? "" : "Nothing found on these sites.";
+  for (const r of results) {
+    const li = document.createElement("li");
+    const t = document.createElement("button");
+    t.className = "t"; t.title = "Read it here";
+    const b = document.createElement("b"); b.textContent = r.title;
+    const m = document.createElement("div"); m.className = "m"; m.textContent = r.site;
+    const s = document.createElement("div"); s.className = "s"; s.textContent = r.snippet;
+    t.append(b, m, s);
+    // Opens the page as text in Nexus's reading view, straight from the tap.
+    t.onclick = () => nexus.read(r.url).catch((e) => { $("msg").textContent = e.message; });
+    const o = document.createElement("button");
+    o.className = "o"; o.textContent = "↗"; o.setAttribute("aria-label", "Open " + r.title + " in the browser");
+    o.onclick = () => nexus.open(r.url).catch((e) => { $("msg").textContent = e.message; });
+    li.append(t, o);
+    $("list").append(li);
+  }
+  nexus.resize(Math.min(document.body.scrollHeight, 400));
+}
+$("f").onsubmit = async (e) => {
+  e.preventDefault();
+  const query = $("q").value.trim();
+  if (!query) return;
+  const sites = SITES.map((s) => s[1]).filter((s) => !off.includes(s));
+  if (!sites.length) { $("msg").textContent = "Turn on at least one site."; return; }
+  $("msg").textContent = "Searching…";
+  try { show(await nexus.data("web.search", { query, sites })); }
+  catch (err) { $("msg").textContent = "Couldn't search just now."; }
+};
+</script></body></html>
+```

@@ -115,15 +115,16 @@ describe("ruleDays and daysFor", () => {
 
 describe("app actions", () => {
   const w = widget("custom", {
-    manifest: { size: "m", hosts: [], data: [], actions: ["chat.fork", "open"], about: "" },
-    approved: { hosts: [], data: [], actions: ["chat.fork", "ask"] },
+    manifest: { size: "m", hosts: [], data: ["web.search"], actions: ["chat.fork", "open", "ask"], about: "" },
+    approved: { hosts: [], data: [], actions: ["chat.new"] },
   });
-  it("waits for what the manifest asks for and you allowed", () => {
-    expect(pendingAsks(w).actions).toEqual(["open"]);
+  it("waits for your Allow only to speak for you", () => {
+    expect(pendingAsks(w)).toEqual({ hosts: [], data: [], actions: ["ask"] });
     expect(mayAct(w, "chat.fork")).toBe(true);
-    // Allowed but never asked for, or asked for but not allowed: no.
+    expect(mayAct(w, "open")).toBe(true);
     expect(mayAct(w, "ask")).toBe(false);
-    expect(mayAct(w, "open")).toBe(false);
+    // Allowed but never named in the manifest: no.
+    expect(mayAct(w, "chat.new")).toBe(false);
   });
   it("opens only https links", () => {
     expect(safeLink("https://example.com/a?b=1")).toBe("https://example.com/a?b=1");
@@ -136,9 +137,10 @@ describe("app actions", () => {
 describe("search boxes", () => {
   it("search the web, or leave it to the assistant", () => {
     expect(searchUrl("google", "pasta recipes")).toBe("https://www.google.com/search?q=pasta%20recipes");
-    expect(searchUrl(undefined, "a&b")).toBe("https://www.google.com/search?q=a%26b");
+    expect(searchUrl("google", "a&b")).toBe("https://www.google.com/search?q=a%26b");
     expect(searchUrl("duckduckgo", "x")).toBe("https://duckduckgo.com/?q=x");
     expect(searchUrl("assistant", "x")).toBeNull();
+    expect(searchUrl("nexus", "x")).toBeNull();
   });
 });
 

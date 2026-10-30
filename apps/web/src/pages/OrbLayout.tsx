@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ExternalLink, GitBranch, X } from "lucide-react";
 import { Outlet, useNavigate, useParams } from "react-router";
 import { FilePreview } from "../components/FilePreview";
+import { Reader } from "../components/Reader";
 import { useAutoOpenResult } from "../components/Notices";
 import { OrbStage } from "../components/OrbStage";
 import { useScreenOps } from "../components/Screen";
@@ -73,6 +74,7 @@ export function OrbLayout() {
         chatId={chatId}
       />
       {showing && !wide && <FilePreview file={showing.file} onClose={close} />}
+      <Reader />
     </>
   );
 }

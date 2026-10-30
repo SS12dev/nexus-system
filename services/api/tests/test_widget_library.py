@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 
 from nexus_common import custom_widgets as cw
+from nexus_common import web
 from nexus_common.models import (
     Chat,
     CustomWidget,
@@ -135,7 +136,7 @@ async def test_a_search_box_and_its_engine(owner):
     r = await owner.post("/api/widgets", json={"kind": "search"})
     assert r.status_code == 201
     w = r.json()
-    assert w["title"] == "Search" and w["state"]["engine"] == "google"
+    assert w["title"] == "Search" and w["state"]["engine"] == "nexus"
     r = await owner.patch(f"/api/widgets/{w['id']}", json={"engine": "assistant"})
     assert r.json()["state"]["engine"] == "assistant"
     r = await owner.patch(f"/api/widgets/{w['id']}", json={"engine": "altavista"})
@@ -174,18 +175,72 @@ def test_the_page_and_its_manifest_have_to_agree():
     assert "chat.fork" in cw.SHIM
 
 
-async def test_app_actions_wait_for_approval_like_hosts(owner, sessionmaker):
+async def test_only_speaking_for_the_person_waits_for_allow(owner, sessionmaker):
     async with sessionmaker() as db:
         u = await db.merge(await me(owner, sessionmaker))
-        w = await cw.save(db, u, "Fork", HTML, cw.check_manifest(actions=["chat.fork", "open"]))
+        manifest = cw.check_manifest(
+            actions=["chat.fork", "open", "read", "ask"], data=["web.search"]
+        )
+        w = await cw.save(db, u, "Tools", HTML, manifest)
         await db.commit()
         wid = w.id
-        assert cw.pending(w.state)["actions"] == ["chat.fork", "open"]
+        # Opening things on a tap needs no Allow; sending messages as the person does.
+        assert cw.pending(w.state) == {"hosts": [], "data": [], "actions": ["ask"]}
     r = await owner.post(
-        f"/api/widgets/{wid}/approve", json={"actions": ["chat.fork", "ask"], "hosts": []}
+        f"/api/widgets/{wid}/approve", json={"actions": ["ask", "chat.new"], "hosts": []}
     )
     # Only what the manifest asks for counts.
-    assert r.json()["state"]["approved"]["actions"] == ["chat.fork"]
+    assert r.json()["state"]["approved"]["actions"] == ["ask"]
+
+
+async def test_a_widget_searches_the_web_without_an_allow(owner, sessionmaker, monkeypatch):
+    seen = []
+
+    async def search(self, query, limit=8):
+        seen.append(query)
+        return [web.SearchResult("Roger Deakins on lighting", "https://www.ascmag.com/x", "Soft")]
+
+    monkeypatch.setattr(web.WebClient, "search", search)
+    async with sessionmaker() as db:
+        u = await db.merge(await me(owner, sessionmaker))
+        named = await cw.save(db, u, "Cine", HTML, cw.check_manifest(data=["web.search"]))
+        other = await cw.save(db, u, "Other", HTML, cw.check_manifest())
+        await db.commit()
+    args = {"source": "web.search", "options": {"query": "low key", "sites": ["ascmag.com"]}}
+    r = await owner.post(f"/api/widgets/{named.id}/bridge", json={"call": "data", "args": args})
+    assert r.status_code == 200
+    assert r.json()["result"] == [
+        {
+            "title": "Roger Deakins on lighting",
+            "url": "https://www.ascmag.com/x",
+            "site": "ascmag.com",
+            "snippet": "Soft",
+        }
+    ]
+    assert seen == ["low key (site:ascmag.com)"]
+    # Asked again within ten minutes: from the cache.
+    await owner.post(f"/api/widgets/{named.id}/bridge", json={"call": "data", "args": args})
+    assert len(seen) == 1
+    r = await owner.post(f"/api/widgets/{other.id}/bridge", json={"call": "data", "args": args})
+    assert r.status_code == 403 and "manifest" in r.json()["detail"]
+
+
+def test_a_search_can_be_kept_to_some_sites():
+    assert web.scoped_query("  dolly   zoom ") == "dolly zoom"
+    q = web.scoped_query("dolly zoom", ["https://www.ascmag.com/articles", "nofilmschool.com", "x"])
+    assert q == "dolly zoom (site:ascmag.com OR site:nofilmschool.com)"
+
+
+async def test_a_page_opens_as_text_to_read_in_nexus(owner, monkeypatch):
+    async def fetch(self, url, max_chars=15000):
+        return url, "Lighting", "# Three-point lighting\n\nKey, fill and back light. " * 3
+
+    monkeypatch.setattr(web.WebClient, "fetch", fetch)
+    r = await owner.get("/api/web/read", params={"url": "https://www.ascmag.com/a"})
+    assert r.status_code == 200
+    assert r.json()["site"] == "ascmag.com" and r.json()["title"] == "Lighting"
+    r = await owner.get("/api/web/read", params={"url": "javascript:alert(1)"})
+    assert r.status_code == 422
 
 
 async def chat_with_messages(app, owner) -> tuple[str, list[uuid.UUID]]:

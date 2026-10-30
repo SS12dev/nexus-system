@@ -311,7 +311,7 @@ async def widget_bridge(
             source = str(body.args.get("source", ""))
             return {
                 "result": await cw.read_data(
-                    db, settings, user, w, source, body.args.get("options")
+                    db, settings, user, w, source, body.args.get("options"), redis
                 )
             }
         if not await cw.may_notify(redis, w):
