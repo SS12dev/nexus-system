@@ -171,12 +171,16 @@ the user is working towards over weeks or months, not what they asked for in thi
 "forget".
 - Usually there is nothing to save; then return empty lists.
 
-{graph_rules}
+{graph_rules}{reply}"""
+
+MEMORY_REPLY_GRAPH = """
 For each memory, "about" lists the entity names it is about (not USER).
 
-Reply with JSON only: {{"memories": [{{"content": str, "kind": "preference"|"fact"|"goal"|\
-"instruction", "confidence": float, "about": [str]}}], "forget": [str], \
-"entities": [entity], "relations": [relation]}}"""
+Reply with JSON only: {"memories": [{"content": str, "kind": "preference"|"fact"|"goal"|\
+"instruction", "confidence": float, "about": [str]}], "forget": [str], \
+"entities": [entity], "relations": [relation]}"""
+MEMORY_REPLY = """Reply with JSON only: {"memories": [{"content": str, "kind": "preference"|\
+"fact"|"goal"|"instruction", "confidence": float}], "forget": [str]}"""
 
 MEMORY_DECIDE = """You keep a user's long-term memory consistent. You get EXISTING memories \
 (with numeric ids) and NEW candidate memories. For each candidate choose one op:
@@ -201,9 +205,7 @@ long-term memory. In 2 to 6 sentences say what the user wanted, what was decided
 produced (names, numbers, files), and anything left open. Write in the third person about \
 "the user".
 
-{graph_rules}
-
-Reply with JSON only: {{"summary": str, "entities": [entity], "relations": [relation]}}"""
+{graph_rules}{reply}"""
 
 GRAPH_RULES = """Also note the knowledge graph of the user's world: the named people, \
 projects, organisations, places, topics and tools that matter to them beyond this one chat \
@@ -220,8 +222,18 @@ Mac").
 Only what the user said or clearly confirmed. Usually there are none; then return empty \
 lists."""
 
-MEMORY_EXTRACT = MEMORY_EXTRACT_TEMPLATE.format(graph_rules=GRAPH_RULES)
-EPISODE = EPISODE_TEMPLATE.format(graph_rules=GRAPH_RULES)
+MEMORY_EXTRACT = MEMORY_EXTRACT_TEMPLATE.format(graph_rules=GRAPH_RULES, reply=MEMORY_REPLY_GRAPH)
+EPISODE = EPISODE_TEMPLATE.format(
+    graph_rules=GRAPH_RULES,
+    reply="\n\nReply with JSON only: "
+    '{"summary": str, "entities": [entity], "relations": [relation]}',
+)
+# When the local model builds the graph (graph_extractor "local"), the memory model is asked
+# for memories and summaries only.
+MEMORY_EXTRACT_ONLY = MEMORY_EXTRACT_TEMPLATE.format(graph_rules="", reply=MEMORY_REPLY)
+EPISODE_ONLY = EPISODE_TEMPLATE.format(
+    graph_rules="", reply='Reply with JSON only: {"summary": str}'
+)
 
 GRAPH_EXTRACT = (
     """You build the knowledge graph of a user's world for their personal \

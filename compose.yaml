@@ -150,6 +150,9 @@ x-nexus-env: &nexus-env
   GRAPH_RECALL_ENABLED: ${GRAPH_RECALL_ENABLED:-false}
   GRAPH_HOPS: ${GRAPH_HOPS:-2}
   GRAPH_EXTRA_MEMORIES: ${GRAPH_EXTRA_MEMORIES:-4}
+  GRAPH_EXTRACTOR: ${GRAPH_EXTRACTOR:-local}
+  GRAPH_LOCAL_MODEL: ${GRAPH_LOCAL_MODEL:-qwen3.5:9b}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
   MEMORY_NIGHTLY_HOUR_UTC: ${MEMORY_NIGHTLY_HOUR_UTC:-21}
   MEMORY_NIGHTLY_MINUTE_UTC: ${MEMORY_NIGHTLY_MINUTE_UTC:-30}
   SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
@@ -273,6 +276,9 @@ services:
       test: ["CMD", "python", "-c", "import os, redis; r = redis.Redis.from_url(os.environ['REDIS_URL']); raise SystemExit(0 if r.exists('arq:queue:health-check') else 1)"]
     build: { context: ., dockerfile: services/orchestrator/Dockerfile }
     environment: *nexus-env
+    # The local graph model runs in Ollama on the host (Docker on a Mac has no GPU).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # The only service that can reach the sandbox and the workbench.
     networks: [default, sandbox, workbench, deployer]
     # More workers take more turns and runs at once (each also uses more memory).

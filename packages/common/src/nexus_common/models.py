@@ -794,6 +794,8 @@ class Entity(Base):
     # How central it is to the user, 0..1 (personalised PageRank, nightly), and where the
     # nightly layout put it; None until the first layout.
     salience: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    # Its cluster in the user's graph (nightly Leiden; 0 is the biggest), None when alone.
+    community: Mapped[int | None] = mapped_column(Integer)
     pos: Mapped[list | None] = mapped_column(JSON)
     # Where it came from: model (extracted from text), app (one of the app's own records),
     # user (said outright, such as onboarding) or inferred.

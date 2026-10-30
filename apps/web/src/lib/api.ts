@@ -61,6 +61,7 @@ import type {
   ToolEntry,
   Alerts,
   Improvements,
+  GraphAdmin,
   KnowledgeGraph,
   LlmQuery,
   LlmUsage,
@@ -468,6 +469,9 @@ export const api = {
   recall: () => request<RecallSummary>("/api/admin/recall"),
   runRecallCheck: () => request<RecallCheck>("/api/admin/recall/run", { method: "POST" }),
   resetRecallQuestions: () => request<void>("/api/admin/recall/questions", { method: "DELETE" }),
+  graphAdmin: () => request<GraphAdmin>("/api/admin/graph"),
+  runGraph: (what: "extract" | "rearrange") =>
+    request<{ queued: string }>("/api/admin/graph/run", { method: "POST", body: json({ what }) }),
   approveProposal: (id: string, note?: string) =>
     request<Proposal>(`/api/admin/improvements/${id}/approve`, { method: "POST", body: json({ note: note || null }) }),
   denyProposal: (id: string, note?: string) =>

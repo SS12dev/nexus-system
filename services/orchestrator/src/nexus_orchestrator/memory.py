@@ -48,9 +48,11 @@ from nexus_common.trash import visible, visible_file
 from nexus_orchestrator.llm import parse_json, private
 from nexus_orchestrator.prompts import (
     EPISODE,
+    EPISODE_ONLY,
     GRAPH_EXTRACT,
     MEMORY_DECIDE,
     MEMORY_EXTRACT,
+    MEMORY_EXTRACT_ONLY,
     PROFILE,
 )
 from nexus_orchestrator.turn import TurnDeps
@@ -97,6 +99,12 @@ async def ask_memory_model(
     runnable = model.bind(response_format={"type": "json_object"}) if json_mode else model
     reply = await runnable.ainvoke([SystemMessage(system), HumanMessage(prompt)])
     return reply.text if isinstance(reply.text, str) else reply.text()
+
+
+def graph_by_memory_model(settings) -> bool:
+    """The memory model notes the graph in its own calls; otherwise the local model builds it
+    from what those calls save (graph_local)."""
+    return settings.graph_enabled and settings.graph_extractor != "local"
 
 
 async def _active_user(db: AsyncSession, user_id: uuid.UUID) -> tuple[User, Profile] | None:
@@ -151,7 +159,7 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
             deps,
             db,
             user,
-            MEMORY_EXTRACT,
+            MEMORY_EXTRACT if graph_by_memory_model(deps.settings) else MEMORY_EXTRACT_ONLY,
             f"Conversation (the last USER message is the one to learn from):\n\n{transcript}",
             name="memory.extract",
             session_id=str(chat.id),
@@ -159,7 +167,9 @@ async def extract_memories(deps: TurnDeps, chat_id: uuid.UUID, message_id: uuid.
         data = parse_json(raw)
         candidates = _candidates(data.get("memories"))
         forget = [str(f)[:300] for f in data.get("forget") or [] if str(f).strip()][:5]
-        found = graph.parse_graph(data) if deps.settings.graph_enabled else graph.Extracted()
+        found = (
+            graph.parse_graph(data) if graph_by_memory_model(deps.settings) else graph.Extracted()
+        )
         if not candidates and not forget and not found:
             return
         await apply_candidates(deps, db, user, chat, latest_user, candidates, forget, found)
@@ -329,7 +339,13 @@ async def apply_candidates(
                 deleted.append(m)
 
     linked = 0
-    if deps.settings.graph_enabled and (found or by_candidate):
+    if deps.settings.graph_enabled and not graph_by_memory_model(deps.settings):
+        # The local model links new and changed memories (graph_at unset) on its next run.
+        for m, op in changed:
+            if op == "update":
+                await graph.forget_mentions(db, memory_id=m.id)
+                m.graph_at = None
+    elif deps.settings.graph_enabled and (found or by_candidate):
         ops = {m.id: op for m, op in changed}
         links = []
         for i, m in by_candidate.items():
@@ -442,7 +458,7 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
             deps,
             db,
             user,
-            EPISODE,
+            EPISODE if graph_by_memory_model(deps.settings) else EPISODE_ONLY,
             f"Chat title: {chat.title or 'untitled'}\n\n{earlier}Messages:\n\n{transcript}",
             name="episode",
             session_id=str(chat_id),
@@ -460,7 +476,9 @@ async def summarize_chat(deps: TurnDeps, chat_id: uuid.UUID, count: int) -> bool
         episode.message_count = count
         episode.embedding, episode.embedding_model = vec, (model or None)
         episode.updated_at = now
-        if deps.settings.graph_enabled:
+        if not graph_by_memory_model(deps.settings):
+            episode.graph_at = None  # the local model reads the chat again
+        else:
             await db.flush()
             found = graph.parse_graph(data)
             await graph.forget_mentions(db, episode_id=episode.id)
@@ -489,8 +507,9 @@ GRAPH_CALLS_PER_USER = 3
 
 
 async def link_graph(deps: TurnDeps, max_users: int = 20) -> int:
-    """Link pending items into each user's graph, a few calls per user per run."""
-    if not deps.settings.graph_enabled:
+    """Link pending items into each user's graph, a few calls per user per run. With the local
+    extractor, graph_local does this instead."""
+    if not graph_by_memory_model(deps.settings):
         return 0
     async with deps.sessionmaker() as db:
         pending = (
@@ -603,7 +622,7 @@ async def rebuild_profile(deps: TurnDeps, user_id: uuid.UUID) -> None:
         user = await db.get(User, user_id)
         if user is None or user.status != UserStatus.active:
             return
-    if deps.settings.graph_enabled:
+    if graph_by_memory_model(deps.settings):
         for _ in range(GRAPH_CALLS_PER_USER):
             if await _link_batch(deps, user_id) < GRAPH_BATCH:
                 break

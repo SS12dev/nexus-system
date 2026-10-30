@@ -26,6 +26,8 @@ from nexus_common.storage import S3Storage
 from nexus_orchestrator import (
     accounts,
     deploy,
+    graph_local,
+    graph_nightly,
     improve,
     links,
     memory,
@@ -292,8 +294,31 @@ async def every_ten_minutes(ctx: dict) -> None:
 
 
 @traced_job
+async def graph_extract(ctx: dict) -> None:
+    """The local model's pass over what is waiting for the graph (graph_extractor "local")."""
+    stats = await graph_local.extract_pending(ctx["deps"])
+    if stats.get("items"):
+        log.info(
+            "Local graph model: %d items, %d entities, %d relations in %.0f s",
+            stats["items"],
+            stats["entities"],
+            stats["relations"],
+            stats["seconds"],
+        )
+
+
+@traced_job
+async def graph_rearrange(ctx: dict) -> None:
+    """The nightly graph upkeep on its own, from Admin > Graph."""
+    await graph_nightly.consolidate(ctx["deps"])
+
+
+@traced_job
 async def nightly(ctx: dict) -> None:
-    await memory.nightly(ctx["deps"])
+    deps: TurnDeps = ctx["deps"]
+    await memory.nightly(deps)
+    if deps.settings.graph_enabled:
+        await graph_nightly.consolidate(deps)
 
 
 # A review reads up to IMPROVE_MAX_REQUESTS requests in batches, then drafts its proposals.
@@ -325,6 +350,9 @@ class WorkerSettings:
         func(self_review, timeout=REVIEW_TIMEOUT_S, keep_result=0),
         func(proposal_pr, timeout=120, keep_result=0),
         func(recall_check, timeout=900, keep_result=0),
+        # Admin > Graph "Run now"; the same jobs also run on the schedule below.
+        func(graph_extract, timeout=graph_local.RUN_SECONDS + 180, keep_result=0),
+        func(graph_rearrange, timeout=1200, keep_result=0),
         # A routine's turn is a chat turn; a team it starts runs as its own job.
         func(run_routine, timeout=600, keep_result=0),
     ]
@@ -334,6 +362,13 @@ class WorkerSettings:
         cron(expire_trash, hour=3, minute=10, unique=True, timeout=60),
         cron(expire_deleted_accounts, hour=3, minute=20, unique=True, timeout=60),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
+        # Five minutes after, so a chat summarised at :00 is in the graph by :05.
+        cron(
+            graph_extract,
+            minute=set(range(5, 60, 10)),
+            unique=True,
+            timeout=graph_local.RUN_SECONDS + 180,
+        ),
         cron(
             nightly,
             hour=settings.memory_nightly_hour_utc,
