@@ -4,18 +4,21 @@ import {
   BellRing,
   Clock,
   ArrowUpToLine,
+  Library,
   Music,
   PanelRightClose,
   Pause,
   Play,
   Plus,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Undo2,
   StickyNote,
   Send,
   Timer,
+  Trash2,
   Watch,
   X,
   type LucideIcon,
@@ -27,6 +30,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -34,10 +38,29 @@ import {
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { api } from "../lib/api";
-import type { BridgeCall, Widget, WidgetAction, WidgetInput, WidgetPos } from "../lib/types";
+import type {
+  AppAction,
+  BridgeCall,
+  SearchEngine,
+  WebResult,
+  Widget,
+  WidgetAction,
+  WidgetInput,
+  WidgetPos,
+  WidgetSize,
+} from "../lib/types";
 import {
+  ACTION_LABELS,
+  ago,
+  APP_ACTIONS,
+  clampSize,
   clock,
   DATA_LABELS,
+  ENGINES,
+  libraryLine,
+  mayAct,
+  safeLink,
+  searchUrl,
   daysFor,
   elapsed,
   frameHeight,
@@ -57,6 +80,7 @@ import { useWidgetPointedAt } from "./Screen";
 import { useAssistantName } from "../lib/assistant";
 import { useWide } from "../lib/media";
 import { useSend } from "../lib/useSend";
+import { useChatActions } from "../lib/chatActions";
 import { lastTune, playTune, previewTune, rememberTune, swell, tuneOf, TUNES, type TuneId } from "../lib/tunes";
 
 /** The clock every widget reads from, ticking once a second (or faster for a stopwatch). */
@@ -107,6 +131,7 @@ const KINDS: Record<Widget["kind"], { name: string; about: string; icon: LucideI
   stopwatch: { name: "Stopwatch", about: "Counts up", icon: Watch, tone: "text-emerald-300 bg-emerald-400/15" },
   clock: { name: "World clock", about: "Other time zones", icon: Clock, tone: "text-violet-300 bg-violet-400/15" },
   note: { name: "Note", about: "A blank note", icon: StickyNote, tone: "text-yellow-300 bg-yellow-400/15" },
+  search: { name: "Search", about: "Google, or ask", icon: Search, tone: "text-teal-300 bg-teal-400/15" },
   custom: { name: "Your own", about: "Built for you", icon: Sparkles, tone: "text-purple-300 bg-purple-400/15" },
 };
 
@@ -184,6 +209,66 @@ async function place(w: Widget, pos: WidgetPos | null) {
   }
 }
 
+/** The card being resized by its corner: its size so far and, when it was left on the screen,
+ * where it sits so the corner opposite the handle stays put. */
+const useResize = create<{ live: { id: string; size: WidgetSize; pos: WidgetPos | null } | null }>(() => ({
+  live: null,
+}));
+
+/** Which corner a card's resize handle is on: the one away from the screen edge it's held to,
+ * so the card grows into the room. The dock is on the right, so its cards grow leftwards. */
+function handleOnLeft(w: Widget, floating: boolean): boolean {
+  return floating ? (w.pos?.x ?? 0) > 0.5 : true;
+}
+
+/** Drag a card's corner to make it bigger or smaller. Saved on release; a double-click on the
+ * corner gives it back its own size. */
+function startResize(e: ReactPointerEvent, w: Widget, card: HTMLElement | null, floating: boolean) {
+  if (e.button !== 0 || !card) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const c = card.getBoundingClientRect();
+  const r = floating ? room?.getBoundingClientRect() : null;
+  const left = handleOnLeft(w, floating);
+  const from = { x: e.clientX, y: e.clientY };
+  document.body.classList.add("widget-dragging");
+  const move = (ev: PointerEvent) => {
+    const dx = ev.clientX - from.x;
+    const size = clampSize(left ? c.width - dx : c.width + dx, c.height + ev.clientY - from.y);
+    let pos: WidgetPos | null = null;
+    if (r) {
+      // Keep the top corner opposite the handle where it was.
+      const at = left ? c.right - size.w : c.left;
+      pos = placeIn(at - r.left, c.top - r.top, r, { width: size.w, height: size.h });
+    }
+    useResize.setState({ live: { id: w.id, size, pos } });
+  };
+  const done = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", done);
+    window.removeEventListener("pointercancel", done);
+    document.body.classList.remove("widget-dragging");
+    const live = useResize.getState().live;
+    useResize.setState({ live: null });
+    if (live?.id === w.id) resize(w, live.size, live.pos);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", done);
+  window.addEventListener("pointercancel", done);
+}
+
+/** Keep a widget at the size it was dragged to (and, left on the screen, where that put it),
+ * or (null) give it back its own size. */
+async function resize(w: Widget, size: WidgetSize | null, pos: WidgetPos | null = null) {
+  const { upsertWidget } = useStore.getState();
+  upsertWidget({ ...w, size, ...(pos ? { pos } : {}) });
+  try {
+    upsertWidget(await api.editWidget(w.id, size ? { size, ...(pos ? { pos } : {}) } : { reset_size: true }));
+  } catch {
+    upsertWidget(w);
+  }
+}
+
 /** The note made with a note's + button, which takes the cursor when it shows up. */
 let focusNote: string | null = null;
 
@@ -249,12 +334,13 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
   // The + sits outside the scrolling list, so its menu isn't clipped by it.
   return (
     <Dock.Provider value={ctx}>
-      <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-56"}`}>
+      {/* As wide as its widest card: one made bigger by its corner widens the column leftwards. */}
+      <div className={`pointer-events-auto flex gap-2 lg:max-h-full lg:flex-col ${compact ? "lg:w-44" : "lg:w-max lg:min-w-56"}`}>
         {list.length > 0 && (
           <div
             // On phones the row fades out before the + so a card that scrolls on is plainly
             // more to swipe to, not cut off.
-            className="flex min-w-0 items-start gap-2 overflow-x-auto pb-1 pr-10 [mask-image:linear-gradient(to_right,black_calc(100%-3rem),transparent)] lg:min-h-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-visible lg:pb-0 lg:pr-0 lg:[mask-image:none]"
+            className="flex min-w-0 items-start gap-2 overflow-x-auto pb-1 pr-10 [mask-image:linear-gradient(to_right,black_calc(100%-3rem),transparent)] lg:min-h-0 lg:flex-col lg:items-end lg:overflow-y-auto lg:overflow-x-visible lg:pb-0 lg:pr-0 lg:[mask-image:none]"
             aria-label="Widgets"
           >
             {list.map((w) => (
@@ -280,6 +366,7 @@ export function FloatingWidgets({ compact = false }: { compact?: boolean }) {
   const all = useWidgetList();
   const now = useWidgetClock(all);
   const drag = useDrag((s) => s.drag);
+  const live = useResize((s) => s.live);
   const ctx = useMemo(() => ({ board: false, firstId: null, movable: true, floating: true }), []);
   const shown = all.filter((w) => w.pos || drag?.id === w.id);
   if (!wide) return null;
@@ -293,11 +380,12 @@ export function FloatingWidgets({ compact = false }: { compact?: boolean }) {
     >
       <Dock.Provider value={ctx}>
         {shown.map((w) => {
-          const at = drag?.id === w.id ? drag : (w.pos as WidgetPos);
+          const at = drag?.id === w.id ? drag : live?.id === w.id && live.pos ? live.pos : (w.pos as WidgetPos);
+          const sized = !compact && (w.size || live?.id === w.id);
           return (
             <div
               key={w.id}
-              className={`pointer-events-auto absolute ${compact ? "w-44" : "w-56"}`}
+              className={`pointer-events-auto absolute ${sized ? "" : compact ? "w-44" : "w-56"}`}
               style={{
                 left: `${at.x * 100}%`,
                 top: `${at.y * 100}%`,
@@ -322,9 +410,21 @@ async function moveFirst(w: Widget) {
   }
 }
 
+/** The size a card is shown at: dragged out by its corner on a laptop's main screen (not on the
+ * board, in a chat's small orb strip, or on a phone), else null for the kind's own size. */
+function useCardSize(widget: Widget, compact: boolean): WidgetSize | null {
+  const { board, movable } = useContext(Dock);
+  const live = useResize((s) => (s.live?.id === widget.id ? s.live.size : null));
+  if (!movable || board || compact) return null;
+  return live ?? widget.size ?? null;
+}
+
 function Card({ widget, children, compact }: { widget: Widget; children: ReactNode; compact: boolean }) {
   const { board, firstId, movable, floating } = useContext(Dock);
   const dragging = useDrag((s) => s.drag?.id === widget.id);
+  const sized = useCardSize(widget, compact);
+  const resizable = movable && !board && !compact;
+  const onLeft = handleOnLeft(widget, floating);
   const pointed = useWidgetPointedAt(widget.id);
   const [lit, setLit] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -335,7 +435,13 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
     const t = window.setTimeout(() => setLit(false), POINTED_MS);
     return () => window.clearTimeout(t);
   }, [pointed]);
-  const size = board ? "w-full px-4 py-3" : compact ? "w-32 px-2.5 py-1.5 lg:px-3 lg:py-2" : "w-44 px-3 py-2";
+  const size = board
+    ? "w-full px-4 py-3"
+    : compact
+      ? "w-32 px-2.5 py-1.5 lg:w-full lg:px-3 lg:py-2"
+      : sized
+        ? "flex flex-col px-3 py-2"
+        : "w-44 px-3 py-2 lg:w-56";
   const hover = "lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100";
   // A clear sky edge and a lift off the background; brighter when pointed at or held.
   const edge = lit
@@ -348,7 +454,10 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
       ref={box}
       onPointerDown={movable ? (e) => startDrag(e, widget, box.current) : undefined}
       title={movable ? "Drag to put it anywhere" : undefined}
-      className={`group relative shrink-0 rounded-xl border bg-panel/90 backdrop-blur transition-[box-shadow,border-color] lg:w-full ${size} ${edge} ${
+      data-sized={sized ? "true" : undefined}
+      style={sized ? { width: sized.w, height: sized.h } : undefined}
+      // A container, so big numbers grow with the card when it's made bigger.
+      className={`group @container relative shrink-0 rounded-xl border bg-panel/90 backdrop-blur transition-[box-shadow,border-color] ${size} ${edge} ${
         movable ? (dragging ? "cursor-grabbing select-none" : "lg:cursor-grab") : ""
       }`}
     >
@@ -396,16 +505,31 @@ function Card({ widget, children, compact }: { widget: Widget; children: ReactNo
           <X size={12} />
         </button>
       </div>
-      {children}
+      {sized ? <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div> : children}
+      {resizable && (
+        <button
+          onPointerDown={(e) => startResize(e, widget, box.current, floating)}
+          onDoubleClick={() => widget.size && resize(widget, null)}
+          aria-label={`Resize ${widget.title}`}
+          title={widget.size ? "Drag to resize · double-click for its own size" : "Drag to resize"}
+          className={`absolute bottom-0 ${onLeft ? "left-0 cursor-nesw-resize" : "right-0 cursor-nwse-resize"} grid size-4 place-items-center text-slate-500 hover:text-sky-300 ${hover}`}
+        >
+          <svg viewBox="0 0 10 10" className={`size-2.5 ${onLeft ? "-scale-x-100" : ""}`} aria-hidden>
+            <path d="M9 3 3 9M9 6 6 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
 
 function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; compact: boolean }) {
   if (w.kind === "custom") return <CustomWidgetCard widget={w} compact={compact} />;
+  if (w.kind === "search") return <SearchCard widget={w} compact={compact} />;
   const s = w.state;
-  // In a chat on a phone the orb strip is short: values only, buttons on the ring screen.
-  const big = compact ? "text-lg lg:text-2xl" : "text-2xl";
+  // In a chat on a phone the orb strip is short: values only, buttons on the ring screen. A card
+  // made bigger shows its numbers bigger.
+  const big = compact ? "text-lg lg:text-2xl" : "text-2xl @[15rem]:text-4xl @[24rem]:text-6xl";
   const row = compact ? "mt-2 hidden gap-1 lg:flex" : "mt-2 flex gap-1";
   if (w.kind === "timer") {
     const left = timerLeft(w, now);
@@ -471,7 +595,11 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
     const done = s.status === "done";
     return (
       <Card widget={w} compact={compact}>
-        <p className={`mt-0.5 line-clamp-2 text-sm ${done ? "text-slate-500 line-through" : "text-slate-100"}`}>{s.text}</p>
+        <p
+          className={`mt-0.5 line-clamp-2 text-sm group-data-[sized]:line-clamp-none @[15rem]:text-base ${done ? "text-slate-500 line-through" : "text-slate-100"}`}
+        >
+          {s.text}
+        </p>
         <p className="mt-1 truncate text-[11px] text-slate-400">
           {done ? "Done" : `${nextRing(w.fires_at, now)}${s.repeat ? ` · ${repeatText(s.repeat)}` : ""}`}
         </p>
@@ -484,8 +612,10 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
         <ul className="mt-0.5 space-y-0.5">
           {(s.zones ?? []).map((z) => (
             <li key={z} className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-xs text-slate-400">{zoneCity(z)}</span>
-              <span className="font-mono text-lg tabular-nums text-slate-100">{timeIn(z, now)}</span>
+              <span className="truncate text-xs text-slate-400 @[15rem]:text-sm">{zoneCity(z)}</span>
+              <span className="font-mono text-lg tabular-nums text-slate-100 @[15rem]:text-2xl @[24rem]:text-4xl">
+                {timeIn(z, now)}
+              </span>
             </li>
           ))}
         </ul>
@@ -496,6 +626,130 @@ function WidgetCard({ widget: w, now, compact }: { widget: Widget; now: number; 
     <Card widget={w} compact={compact}>
       <NoteText widget={w} />
     </Card>
+  );
+}
+
+/** A search box. "Here" (the default) lists the results in the card, and a tap reads the page
+ * inside Nexus; Google, DuckDuckGo or Bing open a new tab with the words filled in; "Ask"
+ * sends them to the assistant, in the open chat or a new one. The chips under it pick where. */
+function SearchCard({ widget: w, compact }: { widget: Widget; compact: boolean }) {
+  const [q, setQ] = useState("");
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<WebResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { ask } = useChatActions();
+  const assistant = useAssistantName();
+  const engine: SearchEngine = w.state.engine ?? "nexus";
+  const name = (id: SearchEngine) => (id === "assistant" ? `Ask ${assistant}` : ENGINES.find((e) => e.id === id)!.name);
+  const go = async (e: FormEvent) => {
+    e.preventDefault();
+    const text = q.trim();
+    if (!text) return;
+    setError("");
+    if (engine === "nexus") {
+      setBusy(true);
+      try {
+        setResults(await api.webSearch(text));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't search");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    const url = searchUrl(engine, text);
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      setQ("");
+      return;
+    }
+    try {
+      await ask(text);
+      setQ("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't ask");
+    }
+  };
+  const pick = (id: SearchEngine) => {
+    if (id === engine) return;
+    const { upsertWidget } = useStore.getState();
+    upsertWidget({ ...w, state: { ...w.state, engine: id } });
+    api
+      .editWidget(w.id, { engine: id })
+      .then(upsertWidget)
+      .catch(() => upsertWidget(w));
+  };
+  return (
+    <Card widget={w} compact={compact}>
+      <form onSubmit={go} className="mt-1 flex items-center gap-1" role="search">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={engine === "assistant" ? `Ask ${assistant}…` : engine === "nexus" ? "Search the web…" : `Search ${name(engine)}…`}
+          aria-label={engine === "assistant" ? `Ask ${assistant}` : engine === "nexus" ? "Search the web" : `Search ${name(engine)}`}
+          enterKeyHint="search"
+          className="min-w-0 flex-1 rounded-md border border-edge bg-ink/60 px-2 py-1 text-base text-slate-100 placeholder:text-slate-500 focus:border-sky-400/70 focus:outline-none sm:text-sm @[24rem]:py-2 @[24rem]:text-base"
+        />
+        <button
+          className={btn}
+          disabled={!q.trim() || busy}
+          aria-label="Search"
+          title={engine === "assistant" ? "Ask" : engine === "nexus" ? "Search, results here" : "Search in a new tab"}
+        >
+          {engine === "assistant" ? <Send size={13} /> : <Search size={13} />}
+        </button>
+      </form>
+      {!compact && (
+        <div className="mt-1.5 flex flex-wrap gap-1" role="radiogroup" aria-label="Search with">
+          {ENGINES.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              role="radio"
+              aria-checked={engine === e.id}
+              onClick={() => {
+                pick(e.id);
+                setResults(null);
+              }}
+              className={`rounded-full border px-1.5 py-px text-[10px] ${
+                engine === e.id ? "border-sky-400/70 bg-sky-400/15 text-sky-200" : "border-edge text-slate-400 hover:text-sky-200"
+              }`}
+            >
+              {name(e.id)}
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="mt-1 text-[11px] text-rose-400">{error}</p>}
+      {busy && <p className="mt-1.5 text-[11px] text-slate-500">Searching…</p>}
+      {results && !busy && <WebResults results={results} compact={compact} />}
+    </Card>
+  );
+}
+
+/** Web results in a card: a tap reads the page inside Nexus (the reading view). */
+function WebResults({ results, compact }: { results: WebResult[]; compact: boolean }) {
+  const openReader = useStore((s) => s.openReader);
+  if (!results.length) return <p className="mt-1.5 text-[11px] text-slate-500">Nothing found</p>;
+  return (
+    <ul
+      className={`mt-1.5 space-y-1 overflow-y-auto pr-0.5 ${compact ? "max-h-24" : "max-h-56"} group-data-[sized]:max-h-none group-data-[sized]:min-h-0 group-data-[sized]:flex-1`}
+      aria-label="Results"
+    >
+      {results.map((r) => (
+        <li key={r.url}>
+          <button
+            onClick={() => openReader(r.url)}
+            className="block w-full rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
+            title={`Read ${r.site} here`}
+          >
+            <span className="line-clamp-2 block text-xs text-sky-200">{r.title}</span>
+            <span className="block truncate text-[10px] text-slate-500">{r.site}</span>
+            {!compact && r.snippet && <span className="line-clamp-2 block text-[11px] text-slate-400">{r.snippet}</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -701,7 +955,8 @@ function NoteText({ widget }: { widget: Widget }) {
       rows={3}
       placeholder="Write something…"
       aria-label={`${widget.title} text`}
-      className="mt-1 w-full resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
+      // Fills a card made bigger.
+      className="mt-1 w-full resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none group-data-[sized]:min-h-0 group-data-[sized]:flex-1"
     />
   );
 }
@@ -724,15 +979,32 @@ function useCardTheme(ref: RefObject<HTMLElement | null>): "dark" | "light" | nu
 const BRIDGE_CALLS: BridgeCall[] = ["state.get", "state.set", "fetch", "data", "notify"];
 
 /** A custom widget: its page in a locked-down frame (no network, no cookies, its own opaque
- * origin), and the bridge its window.nexus talks through. Calls go to the server, which checks
- * them against what you allowed; resize is handled here. */
+ * origin), and the bridge its window.nexus talks through. Calls for data go to the server,
+ * which checks them against what you allowed; resize and context are answered here, and so are
+ * the app actions (open a link, fork the open chat, a new chat, ask the assistant), which also
+ * need to be in its manifest, allowed by you, and pressed: a widget can't do them by itself on
+ * a timer. The page hears about the open chat and the theme as a "context" event. */
 function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [asked, setAsked] = useState<number | null>(null);
   const theme = useCardTheme(frame);
+  const sized = useCardSize(w, compact);
   const asks = pendingAsks(w);
-  const waiting = asks.hosts.length + asks.data.length > 0;
+  const waiting = asks.hosts.length + asks.data.length + asks.actions.length > 0;
   const size = w.state.manifest?.size ?? "m";
+  const actions = useChatActions();
+  const chatTitle = useStore((s) => s.chats.find((c) => c.id === actions.chatId)?.title ?? null);
+  const context = useMemo(
+    () => ({ chat: actions.chatId ? { id: actions.chatId, title: chatTitle } : null, theme, inApp: true }),
+    [actions.chatId, chatTitle, theme],
+  );
+  // The message handler reads these as they are now, not as they were when it was set up.
+  const live = useRef({ w, actions, context });
+  live.current = { w, actions, context };
+
+  const tell = () =>
+    frame.current?.contentWindow?.postMessage({ nexus: 1, event: "context", data: live.current.context }, "*");
+  useEffect(tell, [context]);
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
@@ -742,9 +1014,42 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
       // The frame's origin is opaque ("null"), so replies can only be addressed with "*"; they
       // go to this frame's window and nowhere else.
       const reply = (body: Record<string, unknown>) => win.postMessage({ nexus: 1, id: m.id, ...body }, "*");
+      const now = live.current;
       if (m.call === "resize") {
         setAsked(Number(m.args?.height) || null);
         return reply({ ok: true, result: true });
+      }
+      if (m.call === "context") return reply({ ok: true, result: now.context });
+      if (APP_ACTIONS.includes(m.call)) {
+        const action = m.call as AppAction;
+        if (!mayAct(now.w, action)) {
+          const named = now.w.state.manifest?.actions?.includes(action);
+          return reply({
+            ok: false,
+            error: named ? `${action} isn't allowed yet; tap Allow on the card` : `${action} isn't in this widget's manifest`,
+          });
+        }
+        // A tap in the frame counts as one here too; anything else is the widget acting alone.
+        if (navigator.userActivation && !navigator.userActivation.isActive)
+          return reply({ ok: false, error: `${action} only works straight after a tap or click` });
+        try {
+          const text = String(m.args?.text ?? "");
+          if (action === "open" || action === "read") {
+            const url = safeLink(m.args?.url);
+            if (!url) throw new Error("Only https links can be opened");
+            if (action === "read") useStore.getState().openReader(url);
+            else window.open(url, "_blank", "noopener,noreferrer");
+            return reply({ ok: true, result: true });
+          }
+          if (action === "ask") {
+            await now.actions.ask(text);
+            return reply({ ok: true, result: true });
+          }
+          const chat = action === "chat.fork" ? await now.actions.fork() : await now.actions.newChat(text);
+          return reply({ ok: true, result: { id: chat.id, title: chat.title } });
+        } catch (err) {
+          return reply({ ok: false, error: err instanceof Error ? err.message : "Nexus refused" });
+        }
       }
       if (!BRIDGE_CALLS.includes(m.call)) return reply({ ok: false, error: `Unknown call ${m.call}` });
       try {
@@ -760,7 +1065,7 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
 
   const allow = async () => {
     try {
-      useStore.getState().upsertWidget(await api.approveWidget(w.id, asks.hosts, asks.data));
+      useStore.getState().upsertWidget(await api.approveWidget(w.id, asks.hosts, asks.data, asks.actions));
     } catch {
       /* its event brings the truth */
     }
@@ -770,12 +1075,13 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
   return (
     <Card widget={w} compact={compact}>
       {waiting && !compact && (
-        <div className="mt-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 p-2 text-[11px] text-amber-100">
+        <div className="mt-1.5 shrink-0 rounded-lg border border-amber-400/40 bg-amber-400/10 p-2 text-[11px] text-amber-100">
           <p>
             Wants to{" "}
             {[
               ...asks.hosts.map((h) => `fetch from ${h}`),
               ...asks.data.map((d) => `read ${DATA_LABELS[d] ?? d}`),
+              ...asks.actions.map((a) => ACTION_LABELS[a] ?? a),
             ].join(", ")}
             .
           </p>
@@ -790,18 +1096,22 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
       <iframe
         ref={frame}
         // A new version or an approval reloads the page, so it starts with what it may use.
-        key={`${w.state.custom_id}:${(w.state.approved?.hosts ?? []).length}:${(w.state.approved?.data ?? []).length}`}
+        key={`${w.state.custom_id}:${(w.state.approved?.hosts ?? []).length}:${(w.state.approved?.data ?? []).length}:${(w.state.approved?.actions ?? []).length}`}
         src={theme ? `/api/widgets/${w.id}/frame?theme=${theme}` : undefined}
         title={w.title}
-        sandbox="allow-scripts"
+        // allow-forms only so the page gets its own submit events; the frame's CSP has
+        // form-action 'none', so a form can't send anything anywhere.
+        sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
-        className="mt-1 block w-full rounded-md border-0 bg-transparent"
-        style={{ height }}
+        onLoad={tell}
+        // Made bigger by its corner, the page fills the card; else its size class sets it.
+        className={`mt-1 block w-full rounded-md border-0 bg-transparent ${sized ? "min-h-0 flex-1" : ""}`}
+        style={sized ? undefined : { height }}
       />
       {(w.state.version ?? 1) > 1 && !compact && (
         <button
           onClick={() => press(w, "undo")}
-          className="mt-1 flex items-center gap-1 text-[11px] text-slate-500 hover:text-white"
+          className="mt-1 flex shrink-0 items-center gap-1 self-start text-[11px] text-slate-500 hover:text-white"
           title="Go back to the previous version"
         >
           <Undo2 size={11} /> Undo last change (v{w.state.version})
@@ -901,7 +1211,7 @@ const ZONES = [
   "Australia/Sydney",
 ];
 // The order of the tiles in the add menu.
-const MENU: Exclude<Widget["kind"], "custom">[] = ["timer", "alarm", "reminder", "stopwatch", "clock", "note"];
+const MENU: Exclude<Widget["kind"], "custom">[] = ["timer", "alarm", "reminder", "stopwatch", "clock", "note", "search"];
 type MenuKind = (typeof MENU)[number] | "custom";
 
 /** A tile being dragged out of the add menu, and where the pointer is. */
@@ -916,6 +1226,7 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState<DOMRect | null>(null);
   const [pick, setPick] = useState<MenuKind | null>(null);
+  const [tab, setTab] = useState<"new" | "library">("new");
   const [minutes, setMinutes] = useState("");
   const [time, setTime] = useState("07:00");
   const [days, setDays] = useState<string[]>([]);
@@ -933,7 +1244,10 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
   const droppable = useWide() && !board;
 
   useEffect(() => {
-    if (!open) setPick(null);
+    if (!open) {
+      setPick(null);
+      setTab("new");
+    }
   }, [open]);
 
   const pickTune = (t: TuneId) => {
@@ -967,7 +1281,7 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
 
   const choose = (kind: MenuKind) => {
     setError("");
-    if (kind === "stopwatch" || kind === "note") make({ kind });
+    if (kind === "stopwatch" || kind === "note" || kind === "search") make({ kind });
     else setPick(kind);
   };
 
@@ -1193,7 +1507,26 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
                 <span className="text-sm font-medium text-slate-100">{KINDS[pick].name}</span>
               </>
             ) : (
-              <span className="text-sm font-medium text-slate-100">Add a widget</span>
+              <div className="flex rounded-lg border border-edge p-0.5 text-xs" role="tablist" aria-label="Add a widget">
+                {(
+                  [
+                    ["new", "New widget", Plus],
+                    ["library", "Your library", Library],
+                  ] as const
+                ).map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    role="tab"
+                    aria-selected={tab === id}
+                    onClick={() => setTab(id)}
+                    className={`flex items-center gap-1 rounded-md px-2 py-1 ${
+                      tab === id ? "bg-edge text-slate-100" : "text-slate-400 hover:text-slate-100"
+                    }`}
+                  >
+                    <Icon size={12} /> {label}
+                  </button>
+                ))}
+              </div>
             )}
             <button
               onClick={() => setOpen(false)}
@@ -1205,6 +1538,8 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
           </div>
           {pick ? (
             pane()
+          ) : tab === "library" ? (
+            <LibraryPane assistant={assistant} onAsk={() => setPick("custom")} />
           ) : (
             <>
               <p className="mb-2 text-[11px] text-slate-500">
@@ -1240,6 +1575,133 @@ function AddWidget({ empty, compact, board = false }: { empty: boolean; compact:
         </Popover>
       )}
       {tile && <TileGhost kind={tile.kind} x={tile.x} y={tile.y} over={tile.over} />}
+    </div>
+  );
+}
+
+/** Your widget library, the other side of the add menu: every widget you removed, waiting with
+ * everything on it (a note's text, a clock's cities, a custom widget's versions and what you
+ * allowed it), newest first. Put one back on the screen, or delete it for good. Custom widgets
+ * stay until you delete them; of the rest the newest 40 are kept. */
+function LibraryPane({ assistant, onAsk }: { assistant: string; onAsk: () => void }) {
+  const [items, setItems] = useState<Widget[] | null>(null);
+  const [error, setError] = useState("");
+  const [sure, setSure] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const now = useNow(60_000);
+  useEffect(() => {
+    let live = true;
+    api
+      .widgetLibrary()
+      .then((list) => live && setItems(list))
+      .catch(() => live && setError("Couldn't load your library"));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const act = async (w: Widget, action: "restore" | "forget") => {
+    setError("");
+    setBusy(w.id);
+    try {
+      const back = await api.widgetAction(w.id, action);
+      if (back) useStore.getState().upsertWidget(back);
+      setItems((list) => (list ?? []).filter((x) => x.id !== w.id));
+      setSure(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't do that");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (items === null)
+    return <p className="py-6 text-center text-xs text-slate-500">{error || "Loading your library…"}</p>;
+  const made = items.filter((w) => w.kind === "custom");
+  const rest = items.filter((w) => w.kind !== "custom");
+  const row = (w: Widget) => (
+    <li key={w.id} className="flex items-center gap-2 rounded-lg border border-edge bg-ink/40 p-2">
+      <span className={`grid size-7 shrink-0 place-items-center rounded-md ${KINDS[w.kind].tone}`}>
+        <KindIcon kind={w.kind} size={15} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-slate-100">{w.title}</span>
+        <span className="block truncate text-[11px] text-slate-400">
+          {[`Removed ${ago(w.removed_at, now)}`, libraryLine(w)].filter(Boolean).join(" · ")}
+        </span>
+      </span>
+      {sure === w.id ? (
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            onClick={() => act(w, "forget")}
+            disabled={busy === w.id}
+            className="rounded-md bg-rose-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+          >
+            Delete
+          </button>
+          <button onClick={() => setSure(null)} className="rounded-md px-1.5 py-1 text-[11px] text-slate-400 hover:text-white">
+            Keep
+          </button>
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center gap-0.5">
+          <button
+            onClick={() => act(w, "restore")}
+            disabled={busy === w.id}
+            className="flex items-center gap-1 rounded-md bg-sky-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            title="Put it back on the screen, as it was"
+          >
+            <Undo2 size={11} /> Put back
+          </button>
+          <button
+            onClick={() => setSure(w.id)}
+            aria-label={`Delete ${w.title} for good`}
+            title="Delete for good"
+            className="rounded-md p-1 text-slate-500 hover:text-rose-300"
+          >
+            <Trash2 size={13} />
+          </button>
+        </span>
+      )}
+    </li>
+  );
+  return (
+    <div>
+      {items.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-edge p-4 text-center">
+          <Library size={18} className="mx-auto text-slate-500" />
+          <p className="mt-2 text-sm text-slate-300">Nothing put away yet</p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            When you remove a widget with its ×, it waits here with everything on it, ready to put back. Widgets{" "}
+            {assistant} makes for you live here too once you remove them.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {made.length > 0 && (
+            <section>
+              <p className="mb-1 flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                <Sparkles size={11} className="text-purple-300" /> Made for you
+              </p>
+              <ul className="space-y-1">{made.map(row)}</ul>
+            </section>
+          )}
+          {rest.length > 0 && (
+            <section>
+              <p className="mb-1 text-[11px] font-medium text-slate-400">Removed</p>
+              <ul className="space-y-1">{rest.map(row)}</ul>
+            </section>
+          )}
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-slate-500">
+        Custom widgets stay until you delete them; the 40 newest of the others are kept.{" "}
+        <button onClick={onAsk} className="text-sky-300 hover:underline">
+          Ask {assistant} for a new one
+        </button>
+        .
+      </p>
+      {error && <p className="pt-2 text-xs text-rose-400">{error}</p>}
     </div>
   );
 }

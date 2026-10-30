@@ -2,6 +2,7 @@
 listed, paused and removed by id."""
 
 import re
+import uuid
 
 from sqlalchemy import select
 
@@ -58,3 +59,26 @@ async def test_an_alarm_asked_for_with_a_tune_rings_with_it(deps, owner):
     async with deps.sessionmaker() as db:
         w = await db.scalar(select(Widget).where(Widget.user_id == user.id))
     assert w.state["tune"] == "sunrise"
+
+
+async def test_a_removed_widget_can_be_found_in_the_library_and_put_back(deps, owner):
+    user, chat_id = owner
+    tools = tools_for(deps, user, chat_id)
+    await tools["add_widget"].ainvoke({"kind": "note", "text": "Gate code 4512"})
+    wid = re.search(r"id ([0-9a-f-]{36})", await tools["list_widgets"].ainvoke({})).group(1)
+    out = await tools["control_widget"].ainvoke({"widget_id": wid, "action": "remove"})
+    assert "widget library" in out
+    assert await tools["list_widgets"].ainvoke({}) == "No widgets on the screen."
+    assert "in the library" in await tools["list_widgets"].ainvoke({"library": True})
+    out = await tools["control_widget"].ainvoke({"widget_id": wid, "action": "restore"})
+    assert out.startswith("Done")
+    async with deps.sessionmaker() as db:
+        w = await db.get(Widget, uuid.UUID(wid))
+    assert w.removed_at is None and w.state["text"] == "Gate code 4512"
+
+
+async def test_a_search_box_from_chat(deps, owner):
+    user, chat_id = owner
+    tools = tools_for(deps, user, chat_id)
+    out = await tools["add_widget"].ainvoke({"kind": "search", "engine": "duckduckgo"})
+    assert out.startswith("Added") and "duckduckgo" in out

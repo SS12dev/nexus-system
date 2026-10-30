@@ -1,4 +1,5 @@
-"""Widgets on the main screen: timers, alarms, stopwatches, reminders, clocks and notes.
+"""Widgets on the main screen: timers, alarms, stopwatches, reminders, clocks, notes and
+search boxes.
 
 The server is the clock. A timer stores when it ends, not a countdown, so it keeps running with
 the tab closed and shows the same time on the laptop and the phone. Anything that rings sets
@@ -7,6 +8,12 @@ and pushes it to the phone, and moves a repeating alarm or reminder on to its ne
 
 Both the assistant's tools and the app's buttons go through add() and act(), so a timer Orion
 started can be paused from the dock and one started from the dock can be cancelled in chat.
+
+Removing a widget puts it away rather than deleting it: it keeps its row (removed_at set) and
+waits in the person's widget library, the "Your library" side of the add menu, to be put back
+as it was: a note with its text, a clock with its cities, a custom widget with its versions and
+approvals. Put away, nothing on it rings. The library keeps every custom widget and the newest
+LIBRARY_KEEP of the rest; only "delete for good" (forget) removes a row.
 """
 
 import uuid
@@ -14,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_common.events import Event, publish
@@ -23,7 +30,11 @@ from nexus_common.notices import notify
 from nexus_common.routines import ScheduleError, check_timezone, describe, next_run, rule_for
 from nexus_common.settings import Settings
 
-KINDS = ("timer", "alarm", "stopwatch", "reminder", "clock", "note")
+KINDS = ("timer", "alarm", "stopwatch", "reminder", "clock", "note", "search")
+# Where a search box sends what's typed in it: results listed in the card ("nexus", opened in
+# the reading view), a web search in a new tab, or the assistant.
+ENGINES = ("nexus", "google", "duckduckgo", "bing", "assistant")
+DEFAULT_ENGINE = "nexus"
 # The sounds a timer, alarm or reminder can ring with; the app plays them (apps/web
 # lib/tunes.ts), so a new one goes in both places.
 TUNES = ("chime", "bell", "marimba", "sunrise", "birdsong", "harp", "retro", "digital", "pulse")
@@ -37,6 +48,11 @@ MAX_ZONES = 4
 SNOOZE_MINUTES = 5
 # Widgets the worker handles per pass; the rest wait 15 seconds.
 FIRE_BATCH = 200
+# Built-in widgets kept in the library once put away; custom ones are all kept.
+LIBRARY_KEEP = 40
+# A size set by dragging a card's corner, in CSS pixels.
+MIN_W, MAX_W = 160, 720
+MIN_H, MAX_H = 64, 800
 
 
 class WidgetError(ValueError):
@@ -45,6 +61,11 @@ class WidgetError(ValueError):
 
 def zone_of(user: User) -> str:
     return user.timezone or "UTC"
+
+
+def on_screen():
+    """The widgets on the screen, not put away in the library."""
+    return Widget.removed_at.is_(None)
 
 
 def _iso(t: datetime | None) -> str | None:
@@ -67,8 +88,10 @@ def payload(w: Widget) -> dict:
         "state": state,
         "slot": w.slot,
         "pos": w.pos,
+        "size": w.size,
         "chat_id": str(w.chat_id) if w.chat_id else None,
         "fires_at": _iso(w.fires_at),
+        "removed_at": _iso(w.removed_at),
         "created_at": w.created_at.isoformat(),
         "updated_at": w.updated_at.isoformat(),
     }
@@ -80,6 +103,21 @@ async def announce(redis: Redis, user_id: uuid.UUID, w: Widget, *, deleted: bool
     else:
         event = Event(type="widget.updated", data={"widget": payload(w)})
     await publish(redis, user_id, event)
+
+
+def check_size(width: float, height: float) -> dict:
+    """A size dragged out on a card, kept within what fits on a screen."""
+    return {
+        "w": round(min(max(width, MIN_W), MAX_W)),
+        "h": round(min(max(height, MIN_H), MAX_H)),
+    }
+
+
+def check_engine(engine: str | None) -> str:
+    engine = (engine or DEFAULT_ENGINE).strip().lower()
+    if engine not in ENGINES:
+        raise WidgetError(f"A search box searches with {', '.join(ENGINES)}; not {engine}")
+    return engine
 
 
 def _hhmm(time: str) -> tuple[int, int]:
@@ -168,6 +206,7 @@ async def add(
     text: str | None = None,
     zones: list[str] | None = None,
     tune: str | None = None,
+    engine: str | None = None,
     pos: dict | None = None,
     now: datetime | None = None,
 ) -> Widget:
@@ -175,9 +214,7 @@ async def add(
     when it was dropped there. Doesn't commit."""
     if kind not in KINDS:
         raise WidgetError(f"There's no {kind} widget; the kinds are {', '.join(KINDS)}")
-    count = await db.scalar(select(func.count()).where(Widget.user_id == user.id))
-    if (count or 0) >= MAX_WIDGETS:
-        raise WidgetError(f"The dock holds {MAX_WIDGETS} widgets; remove one first")
+    await check_room(db, user.id)
     now = now or utcnow()
     tz = zone_of(user)
     state: dict = {}
@@ -230,15 +267,17 @@ async def add(
     elif kind == "note":
         state = {"text": (text or "")[:NOTE_CHARS]}
         title = title or "Note"
+    elif kind == "search":
+        state = {"engine": check_engine(engine)}
+        title = title or "Search"
     if kind in RINGS and (picked := check_tune(tune)):
         state["tune"] = picked
-    slot = await db.scalar(select(func.max(Widget.slot)).where(Widget.user_id == user.id))
     w = Widget(
         user_id=user.id,
         kind=kind,
         title=title[:TITLE_CHARS],
         state=state,
-        slot=(slot or 0) + 1,
+        slot=await next_slot(db, user.id),
         chat_id=chat_id,
         pos=pos,
         fires_at=fires,
@@ -248,6 +287,101 @@ async def add(
     db.add(w)
     await db.flush()
     return w
+
+
+async def check_room(db: AsyncSession, user_id: uuid.UUID) -> None:
+    count = await db.scalar(select(func.count()).where(Widget.user_id == user_id, on_screen()))
+    if (count or 0) >= MAX_WIDGETS:
+        raise WidgetError(
+            f"The screen holds {MAX_WIDGETS} widgets; put one away in the library first"
+        )
+
+
+async def next_slot(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """The end of the dock."""
+    slot = await db.scalar(
+        select(func.max(Widget.slot)).where(Widget.user_id == user_id, on_screen())
+    )
+    return (slot or 0) + 1
+
+
+def put_away(w: Widget, now: datetime | None = None) -> None:
+    """Take a widget off the screen into the library. Nothing on it rings while it's there: a
+    running timer or stopwatch is paused where it was, an alarm or reminder remembers it was on
+    so putting it back sets it again. Doesn't commit; the caller announces widget.deleted."""
+    now = now or utcnow()
+    s = dict(w.state or {})
+    status = s.get("status")
+    if w.kind == "timer" and status == "running" and s.get("ends_at"):
+        left = max(0.0, (_parse(s["ends_at"]) - now).total_seconds())
+        s.update(status="paused", remaining_s=round(left), ends_at=None)
+    elif w.kind == "timer" and status == "ringing":
+        s.update(status="done", ends_at=None)
+    elif w.kind == "stopwatch" and status == "running" and s.get("started_at"):
+        run = (now - _parse(s["started_at"])).total_seconds()
+        s.update(status="paused", elapsed_s=round(s.get("elapsed_s", 0) + run, 1), started_at=None)
+    elif w.kind in ("alarm", "reminder"):
+        if w.fires_at and status in ("set", "ringing"):
+            s["away_from"] = {"status": "set", "fires_at": _iso(w.fires_at)}
+        elif status == "ringing" and s.get("repeat"):
+            s["away_from"] = {"status": "set", "fires_at": None}
+        if status == "ringing":
+            s["status"] = "set" if s.get("repeat") else ("off" if w.kind == "alarm" else "done")
+    s.pop("rang_at", None)
+    w.state = s
+    w.fires_at = None
+    w.pos = None
+    w.removed_at = now
+    w.updated_at = now
+
+
+async def restore(db: AsyncSession, user: User, w: Widget, now: datetime | None = None) -> None:
+    """Put a widget from the library back at the end of the dock, as it was. An alarm or
+    reminder that was on is set again for its next time; a one-off whose time went by while it
+    was away comes back done (a reminder) or off (an alarm). Doesn't commit."""
+    if w.removed_at is None:
+        raise WidgetError(f"{w.title} is already on the screen")
+    await check_room(db, user.id)
+    now = now or utcnow()
+    s = dict(w.state or {})
+    was = s.pop("away_from", None)
+    if w.kind in ("alarm", "reminder") and was:
+        tz = s.get("tz") or zone_of(user)
+        fires = _parse(was.get("fires_at"))
+        if s.get("repeat"):
+            fires = next_run(s["repeat"], tz, now)
+        elif w.kind == "alarm" and s.get("time") and (fires is None or fires <= now):
+            # A one-off alarm rings at its time; the next one is as good as the one it missed.
+            fires = next_at_time(s["time"], tz, now)
+        if fires and fires > now:
+            s["status"] = "set"
+            w.fires_at = fires
+        else:
+            s["status"] = "off" if w.kind == "alarm" else "done"
+    w.state = s
+    w.removed_at = None
+    w.slot = await next_slot(db, user.id)
+    w.updated_at = now
+
+
+async def prune_library(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Delete for good the oldest built-in widgets in the library beyond LIBRARY_KEEP. Custom
+    widgets stay: they were made for the person, and only they decide to delete one."""
+    old = (
+        await db.scalars(
+            select(Widget.id)
+            .where(
+                Widget.user_id == user_id,
+                Widget.removed_at.is_not(None),
+                Widget.kind != "custom",
+            )
+            .order_by(Widget.removed_at.desc())
+            .offset(LIBRARY_KEEP)
+        )
+    ).all()
+    if old:
+        await db.execute(delete(Widget).where(Widget.id.in_(old)))
+    return len(old)
 
 
 def retime(
@@ -276,11 +410,13 @@ def retime(
 
 
 ACTIONS = ("pause", "resume", "reset", "add_time", "snooze", "dismiss", "remove")
+# What can be done to a widget in the library (beside looking at it).
+LIBRARY_ACTIONS = ("restore", "forget")
 
 
 def act(w: Widget, action: str, *, minutes: float | None = None, now: datetime | None = None):
     """Change a widget in place: pause, resume or reset a timer or stopwatch, add time, snooze
-    or dismiss what's ringing. "remove" is the caller's to do (it deletes the row)."""
+    or dismiss what's ringing. "remove" is the caller's to do (put_away)."""
     now = now or utcnow()
     s = dict(w.state or {})
     status = s.get("status")
@@ -288,6 +424,8 @@ def act(w: Widget, action: str, *, minutes: float | None = None, now: datetime |
         raise WidgetError(f"Widgets can {', '.join(ACTIONS)}; not {action}")
     if action == "remove":
         return
+    if w.removed_at is not None:
+        raise WidgetError(f"{w.title} is in the library; put it back on the screen first")
     if w.kind == "timer":
         if action == "pause" and status == "running":
             left = max(0.0, (_parse(s["ends_at"]) - now).total_seconds())
@@ -376,7 +514,10 @@ def describe_widget(w: Widget, tz: str) -> str:
     status = f" ({s['status']})" if s.get("status") else ""
     if w.kind == "custom":
         status = f" (version {s.get('version')} of {s.get('versions')})"
-    return f"- {w.kind} {w.title!r} (id {w.id}){status}{when}{repeat}"
+    if w.kind == "search":
+        status = f" (searches with {s.get('engine', DEFAULT_ENGINE)})"
+    away = ", in the library" if w.removed_at else ""
+    return f"- {w.kind} {w.title!r} (id {w.id}){status}{when}{repeat}{away}"
 
 
 async def fire_due(db: AsyncSession, redis: Redis, settings: Settings, now=None) -> int:

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_common.events import Event, publish
 from nexus_common.models import AuditLog, ScreenState, Widget, utcnow
-from nexus_common.widgets import announce
+from nexus_common.widgets import announce, on_screen
 
 MODES = ("orb", "list", "dashboard")
 FOCUS_KINDS = ("file", "widget")
@@ -129,7 +129,9 @@ async def reorder(
     announces the widgets that moved; returns where it ended up."""
     rows = (
         await db.scalars(
-            select(Widget).where(Widget.user_id == user_id).order_by(Widget.slot, Widget.created_at)
+            select(Widget)
+            .where(Widget.user_id == user_id, on_screen())
+            .order_by(Widget.slot, Widget.created_at)
         )
     ).all()
     order = [w for w in rows if w.id != widget.id]

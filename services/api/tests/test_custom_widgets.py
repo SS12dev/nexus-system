@@ -35,7 +35,7 @@ async def test_the_page_is_sandboxed_with_no_network(owner, sessionmaker):
     r = await owner.get(f"/api/widgets/{wid}/frame")
     assert r.status_code == 200 and "window.nexus" in r.text
     csp = r.headers["content-security-policy"]
-    assert csp.startswith("sandbox allow-scripts") and "connect-src 'none'" in csp
+    assert csp.startswith("sandbox allow-scripts allow-forms") and "connect-src 'none'" in csp
     assert "allow-same-origin" not in csp
     widgets = (await owner.get("/api/widgets")).json()
     assert widgets[0]["kind"] == "custom" and "data" not in widgets[0]["state"]
@@ -67,7 +67,7 @@ async def test_fetch_and_data_wait_for_approval(owner, sessionmaker):
         f"/api/widgets/{wid}/approve",
         json={"hosts": ["evil.com"], "data": ["files.recent", "widgets"]},
     )
-    assert r.json()["state"]["approved"] == {"hosts": [], "data": ["files.recent"]}
+    assert r.json()["state"]["approved"] == {"hosts": [], "data": ["files.recent"], "actions": []}
     r = await owner.post(bridge, json={"call": "data", "args": {"source": "files.recent"}})
     assert r.status_code == 200 and r.json() == {"result": []}
     r = await owner.post(bridge, json={"call": "data", "args": {"source": "widgets"}})

@@ -3,6 +3,7 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -114,6 +115,72 @@ async def create_chat(body: ChatCreateIn, user: MemberUser, db: DbDep):
     db.add(chat)
     await db.commit()
     return chat
+
+
+class ForkIn(BaseModel):
+    # Copy up to and including this message; the whole conversation when left out.
+    until: uuid.UUID | None = None
+
+
+FORK_SUFFIX = " (fork)"
+
+
+@router.post("/{chat_id}/fork", response_model=ChatOut, status_code=status.HTTP_201_CREATED)
+async def fork_chat(chat_id: uuid.UUID, body: ForkIn, user: MemberUser, db: DbDep, redis: RedisDep):
+    """A copy of the conversation so far as a new chat of its own, to take another direction
+    without losing this one (the app opens it in a second chat window). Finished messages are
+    copied with their files and links; a reply still being written and the teams the chat
+    started stay with the original."""
+    chat = await own_chat(db, user, chat_id)
+    rows = (
+        await db.scalars(
+            select(Message).where(Message.chat_id == chat.id).order_by(Message.created_at)
+        )
+    ).all()
+    if body.until is not None:
+        cut = next((i for i, m in enumerate(rows) if m.id == body.until), None)
+        if cut is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such message in this chat")
+        rows = rows[: cut + 1]
+    keep = [m for m in rows if m.status == MessageStatus.complete]
+    base = (chat.title or "Chat").removesuffix(FORK_SUFFIX)
+    now = utcnow()
+    fork = Chat(
+        user_id=user.id,
+        title=(base[: 200 - len(FORK_SUFFIX)] + FORK_SUFFIX),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(fork)
+    await db.flush()
+    ids = [m.id for m in keep]
+    files = await attachments_for(db, ids)
+    links = await links_for(db, ids)
+    for m in keep:
+        copy = Message(
+            chat_id=fork.id,
+            role=m.role,
+            content=m.content,
+            status=m.status,
+            model=m.model,
+            input_tokens=m.input_tokens,
+            output_tokens=m.output_tokens,
+            steps=m.steps,
+            recalled=m.recalled,
+            created_at=m.created_at,
+        )
+        db.add(copy)
+        await db.flush()
+        db.add_all(Attachment(message_id=copy.id, file_id=f.id) for f in files.get(m.id, []))
+        db.add_all(MessageLink(message_id=copy.id, link_id=x.id) for x in links.get(m.id, []))
+    await db.commit()
+    out = ChatOut.model_validate(fork)
+    await publish(
+        redis,
+        user.id,
+        Event(type="chat.updated", chat_id=fork.id, data={"chat": out.model_dump(mode="json")}),
+    )
+    return out
 
 
 @router.patch("/{chat_id}", response_model=ChatOut)

@@ -90,14 +90,20 @@ TOOLS: list[ToolInfo] = [
         "add_widget",
         "Add a widget",
         "write",
-        "Put a stopwatch, clock or note on the user's main screen.",
+        "Put a stopwatch, clock, note or search box on the user's main screen.",
     ),
-    ToolInfo("list_widgets", "List widgets", "read", "List the widgets on the main screen."),
+    ToolInfo(
+        "list_widgets",
+        "List widgets",
+        "read",
+        "List the widgets on the main screen, or the ones put away in the library.",
+    ),
     ToolInfo(
         "control_widget",
         "Change a widget",
         "write",
-        "Pause, resume, reset, snooze, dismiss or remove a widget, or add time to a timer.",
+        "Pause, resume, reset, snooze, dismiss, remove or restore a widget, or add time to a "
+        "timer.",
     ),
     ToolInfo(
         "save_widget",

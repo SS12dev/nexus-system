@@ -461,8 +461,15 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
     }
     case "notification.read":
       return markRead(state, event.data.ids);
-    case "widget.updated":
-      return { ...state, widgets: { ...state.widgets, [event.data.widget.id]: event.data.widget } };
+    case "widget.updated": {
+      const w = event.data.widget;
+      // Put away in the library: it leaves the screen.
+      if (w.removed_at) {
+        const { [w.id]: _away, ...widgets } = state.widgets;
+        return { ...state, widgets };
+      }
+      return { ...state, widgets: { ...state.widgets, [w.id]: w } };
+    }
     case "widget.deleted": {
       const { [event.data.id]: _gone, ...widgets } = state.widgets;
       return { ...state, widgets };

@@ -3,20 +3,33 @@ a widget that counts down to the Artemis launch").
 
 A widget is one self-contained HTML file plus a manifest. It's served by the API with a
 Content-Security-Policy whose sandbox directive gives it an opaque origin (no cookies, no
-session, no reading the app), and shown in an <iframe sandbox="allow-scripts">. Its CSP allows
-inline script and style and nothing else: no network, no outside scripts, no form posts. The
+session, no reading the app), and shown in an <iframe sandbox="allow-scripts allow-forms">
+(allow-forms only so the page hears its own submit events). Its CSP allows inline script and
+style and nothing else: no network, no outside scripts, no form posts (form-action 'none'). The
 only way out is the postMessage bridge (the injected window.nexus), which the app forwards to
 POST /api/widgets/{id}/bridge and which is checked here against the manifest:
 
     nexus.state.get() / .set(value)   the widget's own JSON state (64 KB)
     nexus.fetch(url)                  a server-side GET, only to hosts the person approved
-    nexus.data(source, options)       read-only Nexus data the person approved (DATA_SOURCES)
+    nexus.data(source, options)       read-only Nexus data the person approved (DATA_SOURCES),
+                                      or a web search (FREE_DATA, no approval)
     nexus.notify(title, body)         a notice on the main screen, rate-limited
     nexus.resize(height)              the app sizes the frame, within its size class
+    nexus.context() / nexus.on(...)   the chat that's open, the theme and the card's size
+
+and the app actions, which the app itself carries out (ACTIONS), each only when the manifest
+names it, the frame was just tapped or clicked, and (for ask, which speaks for the person) the
+person allowed it:
+
+    nexus.open(url)                   an https link in a new tab
+    nexus.read(url)                   a web page as clean text, in a reading view in Nexus
+    nexus.chat.fork()                 a copy of the open chat, in a second chat window
+    nexus.chat.new(text)              a new chat in a second window, optionally asking text
+    nexus.ask(text)                   send text to the assistant in the open chat
 
 Each save is a new version (CustomWidget row, same root_id), so a change can be rolled back.
-The manifest's hosts and data are approved once per widget by the person; a new version that
-asks for more waits for approval of the new ones only.
+The manifest's hosts, data and actions are approved once per widget by the person; a new
+version that asks for more waits for approval of the new ones only.
 """
 
 import asyncio
@@ -34,9 +47,17 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import google
+from nexus_common import google, web
 from nexus_common.models import CustomWidget, File, Memory, User, Widget, utcnow
-from nexus_common.widgets import MAX_WIDGETS, TITLE_CHARS, WidgetError, zone_of
+from nexus_common.widgets import (
+    TITLE_CHARS,
+    WidgetError,
+    check_room,
+    next_slot,
+    on_screen,
+    restore,
+    zone_of,
+)
 
 MAX_HTML = 200_000
 MAX_STATE = 64_000
@@ -48,7 +69,23 @@ DATA_SOURCES = {
     "files.recent": "the names of your newest files",
     "memory.search": "searching what Nexus remembers about you",
     "widgets": "your other widgets and when they ring",
+    "web.search": "searching the web for what you type in it",
 }
+# Data a widget only has to name in its manifest, without the person's Allow: a web search
+# sends out only what the widget was given, and reads nothing of the person's.
+FREE_DATA = {"web.search"}
+# What a widget can ask the app to do, in the words its Allow button uses. The app carries these
+# out (apps/web lib/widgets.ts APP_ACTIONS has the same names), only after a tap in the frame.
+ACTIONS = {
+    "open": "open web links in a new tab",
+    "chat.fork": "copy the chat you have open into a second chat window",
+    "chat.new": "start a new chat in a second window",
+    "read": "open web pages in a reading view inside Nexus",
+    "ask": "send messages to your assistant for you",
+}
+# Actions that only open something for the person to look at, on their own tap: named in the
+# manifest is enough. Sending messages as them (ask) still waits for their Allow.
+FREE_ACTIONS = {"open", "chat.fork", "chat.new", "read"}
 FETCH_MAX_BYTES = 256_000
 FETCH_CACHE_S = 60
 FETCH_REDIRECTS = 3
@@ -57,30 +94,44 @@ HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]
 
 # Served with every widget: no network, no outside code, no forms, no navigating the app.
 FRAME_CSP = (
-    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+    "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; "
     "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; "
     "connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
 )
 
 # window.nexus inside the frame. Opened on its own (no parent, e.g. the builder's smoke test)
-# it answers with empty data, so a widget can be tried outside the app.
+# it answers with empty data, so a widget can be tried outside the app. The app also sends it
+# {nexus: 1, event, data} messages (the "context" event: the open chat, theme and card size),
+# which nexus.on(event, fn) listens for.
 SHIM = (
-    "<script>(function(){var seq=0,waiting={},alone=parent===window;function stub(name){"
+    "<script>(function(){var seq=0,waiting={},subs={},alone=parent===window;"
+    'var ctx={chat:null,theme:document.documentElement.dataset.theme||"dark",'
+    "width:innerWidth,height:innerHeight,inApp:!alone};function stub(name){"
     'return name==="data"?[]:name==="fetch"?{'
-    'status:200,content_type:"text/plain",text:""}:null;}function call(name,args){'
+    'status:200,content_type:"text/plain",text:""}:name==="context"?ctx:null;}'
+    "function call(name,args){"
     "return new Promise(function(res,rej){if(alone){res(stub(name));return;}var id=++seq;"
     "waiting[id]={res:res,rej:rej};parent.postMessage({"
     'nexus:1,id:id,call:name,args:args||{}},"*");setTimeout(function(){if(waiting[id]){'
     'delete waiting[id];rej(new Error("Nexus didn\'t answer "+name));}},20000);});}'
     'window.addEventListener("message",function(e){if(e.source!==parent)return;'
-    "var m=e.data;if(!m||m.nexus!==1||!waiting[m.id])return;var w=waiting[m.id];"
+    "var m=e.data;if(!m||m.nexus!==1)return;if(m.event){"
+    'if(m.event==="context")ctx=m.data;(subs[m.event]||[]).forEach(function(f){'
+    "try{f(m.data);}catch(err){setTimeout(function(){throw err;});}});return;}"
+    "if(!waiting[m.id])return;var w=waiting[m.id];"
     "delete waiting[m.id];if(m.ok)w.res(m.result);"
     'else w.rej(new Error(m.error||"Nexus refused"));});window.nexus={state:{'
     'get:function(){return call("state.get");},set:function(v){return call("state.set",{'
     'value:v});}},fetch:function(u){return call("fetch",{url:u});},data:function(s,o){'
     'return call("data",{source:s,options:o||{}});},notify:function(t,b){'
     'return call("notify",{title:t,body:b||""});},resize:function(h){'
-    'return call("resize",{height:h});}};})();</script>'
+    'return call("resize",{height:h});},context:function(){return call("context");},'
+    "on:function(n,f){(subs[n]=subs[n]||[]).push(f);return function(){"
+    "subs[n]=(subs[n]||[]).filter(function(g){return g!==f;});};},"
+    'open:function(u){return call("open",{url:u});},read:function(u){return call("read",{url:u});},'
+    'ask:function(t){return call("ask",{text:t});},chat:{'
+    'fork:function(){return call("chat.fork");},'
+    'new:function(t){return call("chat.new",{text:t||""});}}};})();</script>'
 )
 
 _CHECKS = [
@@ -115,10 +166,15 @@ class CustomWidgetError(WidgetError):
 
 
 def check_manifest(
-    size: str = "m", hosts: list[str] | None = None, data: list[str] | None = None, about=""
+    size: str = "m",
+    hosts: list[str] | None = None,
+    data: list[str] | None = None,
+    about="",
+    actions: list[str] | None = None,
 ) -> dict:
-    """The manifest as stored: a size class, the web hosts it may fetch from and the Nexus data
-    it may read (each approved once by the person), and a line about what it does."""
+    """The manifest as stored: a size class, the web hosts it may fetch from, the Nexus data it
+    may read and the app actions it may take (each approved once by the person), and a line
+    about what it does."""
     if size not in SIZES:
         raise CustomWidgetError("size is s, m or l")
     clean_hosts = []
@@ -135,10 +191,14 @@ def check_manifest(
         raise CustomWidgetError(
             f"No data source {', '.join(unknown)}; there are {', '.join(DATA_SOURCES)}"
         )
+    strange = [a for a in actions or [] if a not in ACTIONS]
+    if strange:
+        raise CustomWidgetError(f"No action {', '.join(strange)}; there are {', '.join(ACTIONS)}")
     return {
         "size": size,
         "hosts": clean_hosts,
         "data": list(dict.fromkeys(data or [])),
+        "actions": list(dict.fromkeys(actions or [])),
         "about": (about or "").strip()[:300],
     }
 
@@ -154,6 +214,35 @@ def check_html(html: str) -> list[str]:
     for pattern, why in _CHECKS:
         if pattern.search(html):
             problems.append(f"It {why}")
+    return problems
+
+
+# What the page calls on window.nexus, to check against what the manifest asks for.
+_USES = [
+    (re.compile(r"\bnexus\.open\s*\("), "open"),
+    (re.compile(r"\bnexus\.read\s*\("), "read"),
+    (re.compile(r"\bnexus\.chat\.fork\s*\("), "chat.fork"),
+    (re.compile(r"\bnexus\.chat\.new\s*\("), "chat.new"),
+    (re.compile(r"\bnexus\.ask\s*\("), "ask"),
+]
+_FETCH_URL = re.compile(r"\bnexus\.fetch\s*\(\s*[\"'`]https?://([^/\"'`?#:]+)", re.I)
+_DATA_NAME = re.compile(r"\bnexus\.data\s*\(\s*[\"'`]([\w.]+)[\"'`]")
+
+
+def check_uses(html: str, manifest: dict) -> list[str]:
+    """Where the page and its manifest disagree: a call to something the manifest doesn't ask
+    for fails in the app with "isn't approved", so it's caught before saving."""
+    problems = []
+    hosts = set(manifest.get("hosts", []))
+    if re.search(r"\bnexus\.fetch\s*\(", html) and not hosts:
+        problems.append("It calls nexus.fetch but hosts is empty; list the hosts it fetches from")
+    for host in sorted({h.lower() for h in _FETCH_URL.findall(html)} - hosts):
+        problems.append(f"It fetches from {host}, which isn't in hosts; add it")
+    for source in sorted(set(_DATA_NAME.findall(html)) - set(manifest.get("data", []))):
+        problems.append(f"It reads nexus.data({source!r}), which isn't in data; add it")
+    for pattern, action in _USES:
+        if pattern.search(html) and action not in manifest.get("actions", []):
+            problems.append(f"It calls nexus.{action}, which isn't in actions; add {action!r}")
     return problems
 
 
@@ -178,9 +267,14 @@ def pending(state: dict) -> dict:
     """What the widget's manifest asks for that the person hasn't approved yet."""
     manifest = state.get("manifest") or {}
     approved = state.get("approved") or {}
+    free = {"hosts": set(), "data": FREE_DATA, "actions": FREE_ACTIONS}
     return {
-        "hosts": [h for h in manifest.get("hosts", []) if h not in approved.get("hosts", [])],
-        "data": [d for d in manifest.get("data", []) if d not in approved.get("data", [])],
+        key: [
+            x
+            for x in manifest.get(key, [])
+            if x not in approved.get(key, []) and x not in free[key]
+        ]
+        for key in ("hosts", "data", "actions")
     }
 
 
@@ -192,7 +286,7 @@ def _state_for(cw: CustomWidget, versions: int, old: dict | None = None) -> dict
         "version": cw.version,
         "versions": versions,
         "manifest": cw.manifest,
-        "approved": old.get("approved") or {"hosts": [], "data": []},
+        "approved": {"hosts": [], "data": [], "actions": [], **(old.get("approved") or {})},
         "data": old.get("data"),
     }
 
@@ -208,14 +302,15 @@ async def save(
     chat_id: uuid.UUID | None = None,
     run_id: uuid.UUID | None = None,
 ) -> Widget:
-    """Save a new widget, or a new version of `widget`, and show it on the dock. Doesn't
-    commit. The HTML must already pass check_html."""
+    """Save a new widget, or a new version of `widget`, and show it on the dock (a widget in
+    the library comes back onto the screen with its new version). Doesn't commit. The HTML must
+    already pass check_html."""
     now = utcnow()
     name = (name or "").strip()[:TITLE_CHARS] or "Widget"
+    if widget is not None and widget.removed_at is not None:
+        await restore(db, user, widget, now)
     if widget is None:
-        count = await db.scalar(select(func.count()).where(Widget.user_id == user.id))
-        if (count or 0) >= MAX_WIDGETS:
-            raise CustomWidgetError(f"The dock holds {MAX_WIDGETS} widgets; remove one first")
+        await check_room(db, user.id)
         cid = uuid.uuid4()
         cw = CustomWidget(id=cid, root_id=cid, version=1)
     else:
@@ -234,13 +329,12 @@ async def save(
     db.add(cw)
     await db.flush()
     if widget is None:
-        slot = await db.scalar(select(func.max(Widget.slot)).where(Widget.user_id == user.id))
         widget = Widget(
             user_id=user.id,
             kind="custom",
             title=name,
             state=_state_for(cw, 1),
-            slot=(slot or 0) + 1,
+            slot=await next_slot(db, user.id),
             chat_id=chat_id,
             created_at=now,
             updated_at=now,
@@ -294,18 +388,19 @@ async def current(db: AsyncSession, widget: Widget) -> CustomWidget:
     return cw
 
 
-def approve(widget: Widget, hosts: list[str], data: list[str]) -> None:
+def approve(
+    widget: Widget, hosts: list[str], data: list[str], actions: list[str] | None = None
+) -> None:
     """The person allowed some of what the manifest asks for. Only what it asks for counts."""
     s = dict(widget.state)
     manifest = s.get("manifest") or {}
-    approved = s.get("approved") or {"hosts": [], "data": []}
+    approved = s.get("approved") or {}
+    given = {"hosts": hosts, "data": data, "actions": actions or []}
     s["approved"] = {
-        "hosts": sorted(
-            {*approved.get("hosts", []), *(h for h in hosts if h in manifest.get("hosts", []))}
-        ),
-        "data": sorted(
-            {*approved.get("data", []), *(d for d in data if d in manifest.get("data", []))}
-        ),
+        key: sorted(
+            {*approved.get(key, []), *(x for x in given[key] if x in manifest.get(key, []))}
+        )
+        for key in given
     }
     widget.state = s
 
@@ -380,13 +475,32 @@ async def fetch(
     return result
 
 
-async def read_data(db: AsyncSession, settings, user: User, widget: Widget, source: str, options):
-    """Read-only Nexus data for the widget, if the person approved that source for it."""
+async def read_data(
+    db: AsyncSession, settings, user: User, widget: Widget, source: str, options, redis=None
+):
+    """Read-only Nexus data for the widget, if the person approved that source for it (or, for
+    a web search, its manifest names it)."""
     if source not in DATA_SOURCES:
         raise CustomWidgetError(f"No data source {source}")
-    if source not in (widget.state.get("approved") or {}).get("data", []):
+    named = (widget.state.get("manifest") or {}).get("data", [])
+    if source in FREE_DATA:
+        if source not in named:
+            raise CustomWidgetError(f"{source} isn't in this widget's manifest")
+    elif source not in (widget.state.get("approved") or {}).get("data", []):
         raise CustomWidgetError(f"{source} isn't approved for this widget")
     options = options if isinstance(options, dict) else {}
+    if source == "web.search":
+        sites = options.get("sites")
+        try:
+            return await web.cached_search(
+                redis,
+                settings,
+                str(options.get("query", "")),
+                sites if isinstance(sites, list) else None,
+                int(options.get("limit") or 8),
+            )
+        except (web.WebError, ValueError) as exc:
+            raise CustomWidgetError(str(exc)) from exc
     if source == "files.recent":
         rows = await db.scalars(
             select(File).where(File.user_id == user.id).order_by(File.created_at.desc()).limit(10)
@@ -409,7 +523,7 @@ async def read_data(db: AsyncSession, settings, user: User, widget: Widget, sour
     if source == "widgets":
         rows = await db.scalars(
             select(Widget)
-            .where(Widget.user_id == user.id, Widget.kind != "custom")
+            .where(Widget.user_id == user.id, Widget.kind != "custom", on_screen())
             .order_by(Widget.slot)
         )
         return [

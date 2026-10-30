@@ -1,4 +1,4 @@
-import type { Widget } from "./types";
+import type { AppAction, SearchEngine, Widget } from "./types";
 
 /** How long a widget keeps ringing on screen if nobody answers it. */
 export const RING_MS = 30 * 60 * 1000;
@@ -90,16 +90,104 @@ export const DATA_LABELS: Record<string, string> = {
   "files.recent": "your newest file names",
   "memory.search": "searching your memories",
   widgets: "your other widgets",
+  "web.search": "searching the web",
 };
 
+/** What a custom widget's buttons may do in the app, in the Allow button's words
+ * (custom_widgets.py ACTIONS). */
+export const ACTION_LABELS: Record<AppAction, string> = {
+  open: "open web links in a new tab",
+  read: "open web pages in a reading view inside Nexus",
+  "chat.fork": "copy the chat you have open into a second chat window",
+  "chat.new": "start a new chat in a second window",
+  ask: "send messages to your assistant for you",
+};
+
+export const APP_ACTIONS = Object.keys(ACTION_LABELS) as AppAction[];
+
+/** Actions that only open something for you to look at, on your own tap: a widget naming them
+ * is enough. Sending messages as you (ask) waits for your Allow (custom_widgets.py
+ * FREE_ACTIONS), and so does any data but a web search (FREE_DATA). */
+export const FREE_ACTIONS: AppAction[] = ["open", "read", "chat.fork", "chat.new"];
+export const FREE_DATA = ["web.search"];
+
 /** What a custom widget asks for that you haven't allowed yet. */
-export function pendingAsks(w: Widget): { hosts: string[]; data: string[] } {
+export function pendingAsks(w: Widget): { hosts: string[]; data: string[]; actions: AppAction[] } {
   const m = w.state.manifest;
   const ok = w.state.approved ?? { hosts: [], data: [] };
   return {
     hosts: (m?.hosts ?? []).filter((h) => !ok.hosts.includes(h)),
-    data: (m?.data ?? []).filter((d) => !ok.data.includes(d)),
+    data: (m?.data ?? []).filter((d) => !ok.data.includes(d) && !FREE_DATA.includes(d)),
+    actions: (m?.actions ?? []).filter((a) => !(ok.actions ?? []).includes(a) && !FREE_ACTIONS.includes(a)),
   };
+}
+
+/** Whether a custom widget may take this app action: its manifest names it and, for one that
+ * speaks for you, you allowed it. */
+export function mayAct(w: Widget, action: AppAction): boolean {
+  if (!w.state.manifest?.actions?.includes(action)) return false;
+  return FREE_ACTIONS.includes(action) || !!w.state.approved?.actions?.includes(action);
+}
+
+/** The search boxes' engines, in the order the box offers them. */
+export const ENGINES: { id: SearchEngine; name: string }[] = [
+  { id: "nexus", name: "Here" },
+  { id: "google", name: "Google" },
+  { id: "duckduckgo", name: "DuckDuckGo" },
+  { id: "bing", name: "Bing" },
+  { id: "assistant", name: "Ask" },
+];
+
+/** The web page that searches for `q`, or null for the assistant (asked in chat instead). */
+export function searchUrl(engine: SearchEngine | undefined, q: string): string | null {
+  const query = encodeURIComponent(q.trim());
+  if (engine === "assistant" || engine === "nexus" || engine === undefined) return null;
+  if (engine === "duckduckgo") return `https://duckduckgo.com/?q=${query}`;
+  if (engine === "bing") return `https://www.bing.com/search?q=${query}`;
+  return `https://www.google.com/search?q=${query}`;
+}
+
+/** A link a custom widget may open: https only, so it can't run script or open the app. */
+export function safeLink(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A size dragged out on a card, kept as the server keeps it (widgets.py MIN_W..MAX_H). */
+export const SIZE_LIMITS = { minW: 160, maxW: 720, minH: 64, maxH: 800 } as const;
+
+export function clampSize(w: number, h: number): { w: number; h: number } {
+  const { minW, maxW, minH, maxH } = SIZE_LIMITS;
+  return { w: Math.round(Math.min(Math.max(w, minW), maxW)), h: Math.round(Math.min(Math.max(h, minH), maxH)) };
+}
+
+/** One line on a widget in the library, so you can tell two notes apart. */
+export function libraryLine(w: Widget): string {
+  const s = w.state;
+  if (w.kind === "custom") return s.manifest?.about || "Made for you";
+  if (w.kind === "note") return (s.text ?? "").trim().split("\n")[0] || "Empty note";
+  if (w.kind === "reminder") return s.text ?? "";
+  if (w.kind === "alarm") return w.title.includes(s.time ?? "--") ? repeatText(s.repeat) : `${s.time} · ${repeatText(s.repeat)}`;
+  if (w.kind === "clock") return (s.zones ?? []).map(zoneCity).join(", ");
+  if (w.kind === "timer") return clock(s.duration_s ?? 0);
+  if (w.kind === "search") return ENGINES.find((e) => e.id === (s.engine ?? "nexus"))?.name ?? "";
+  return "";
+}
+
+/** "just now", "5 min ago", "3 h ago", "2 days ago". */
+export function ago(iso: string | null | undefined, now: number): string {
+  if (!iso) return "";
+  const s = Math.max(0, (now - Date.parse(iso)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  const d = Math.floor(s / 86400);
+  return `${d} day${d === 1 ? "" : "s"} ago`;
 }
 
 /** Where a card dragged to (left, top) inside a room sits, as 0..1 of the room left beside it:
