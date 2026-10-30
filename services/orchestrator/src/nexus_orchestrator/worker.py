@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
-from nexus_common import config, widgets
+from nexus_common import config, graph_sync, widgets
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
@@ -279,12 +279,15 @@ async def every_ten_minutes(ctx: dict) -> None:
     summarised = await memory.summarize_chats(deps)
     embedded = await memory.embed_missing(deps)
     linked = await memory.link_graph(deps)
-    if summarised or embedded or linked:
+    filed = await graph_sync.sync_all(deps.sessionmaker) if deps.settings.graph_enabled else 0
+    if summarised or embedded or linked or filed:
         log.info(
-            "Summarised %d chats, embedded %d rows, linked %d into the graph",
+            "Summarised %d chats, embedded %d rows, linked %d into the graph, %d graph updates "
+            "from app records",
             summarised,
             embedded,
             linked,
+            filed,
         )
 
 

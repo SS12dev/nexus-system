@@ -80,7 +80,7 @@ async def test_onboarding_stores_answers_memories_routines_and_a_welcome(
     assert {"Teaching", "Cooking", "Travel"} <= set(names)
     assert names["Cooking"]["type"] == "topic" and names["Cooking"]["memories"] == 1
     me = next(e for e in graph["entities"] if e["is_self"])
-    predicates = {(r["src"], r["predicate"], r["dst"]) for r in graph["relations"]}
+    predicates = {(r["src"], r["label"], r["dst"]) for r in graph["relations"]}
     assert (me["id"], "works in", names["Teaching"]["id"]) in predicates
     assert (me["id"], "wants help with", names["Travel"]["id"]) in predicates
     about = next(m for m in memories if m.content.startswith("About me: Lives in Pune"))

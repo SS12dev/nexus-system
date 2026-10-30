@@ -112,11 +112,13 @@ async def test_chat_extraction_builds_the_graph(deps, model, chat, sessionmaker)
         mentions = (await db.scalars(select(Mention))).all()
         mems = {m.content: m for m in (await db.scalars(select(Memory))).all()}
     by_name = {e.id: n for n, e in ents.items()}
-    assert {(by_name[r.src_id], r.predicate, by_name[r.dst_id]) for r in rels} == {
-        ("Shivam", "is building", "Nexus"),
-        ("Nexus", "uses", "LangGraph"),
-        ("Shivam", "works at", "UST"),
+    # Predicates are canonical and grouped into families; the model's words stay as labels.
+    assert {(by_name[r.src_id], r.predicate, r.family, by_name[r.dst_id]) for r in rels} == {
+        ("Shivam", "works on", "activity", "Nexus"),
+        ("Nexus", "uses", "activity", "LangGraph"),
+        ("Shivam", "works at", "belonging", "UST"),
     }
+    assert {r.label for r in rels} == {"is building", "uses", "works at"}
     built = mems["Builds Nexus on LangGraph"]
     assert {by_name[m.entity_id] for m in mentions if m.memory_id == built.id} == {
         "Nexus",

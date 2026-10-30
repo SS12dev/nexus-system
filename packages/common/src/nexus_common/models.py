@@ -761,16 +761,17 @@ class Episode(Base):
 
 
 class Entity(Base):
-    """Someone or something a user's memories are about: a person, project, organisation,
-    place, topic or tool. Each user has one entity for themselves (is_self), which every
-    relation about "the user" starts from."""
+    """Someone or something in a user's world: a person, a trait, a project, a topic and so on
+    (nexus_common.ontology.TYPES). Each user has one entity for themselves (is_self), which
+    every relation about "the user" starts from. Entities for the app's own records (a
+    project, a folder, a routine) point back at them through source_kind and source_id."""
 
     __tablename__ = "entities"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    # person, project, organisation, place, topic, tool or other (nexus_common.graph.TYPES)
-    type: Mapped[str] = mapped_column(String(16))
+    # A type from nexus_common.ontology.TYPES ("person", "value", "routine", ...).
+    type: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(200))
     # Other names it goes by, lower-cased, for matching ("ust global", "the habit app").
     aliases: Mapped[list] = mapped_column(JSON, default=list)
@@ -786,9 +787,31 @@ class Entity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     # Last time a chat, memory or file mentioned it.
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # The orb's shell (0 the user, 1 personality, 2 life, 3 activity, 4 knowledge) and life
+    # domain (ontology.DOMAINS, None until known).
+    shell: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
+    domain: Mapped[str | None] = mapped_column(String(16))
+    # How central it is to the user, 0..1 (personalised PageRank, nightly), and where the
+    # nightly layout put it; None until the first layout.
+    salience: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    pos: Mapped[list | None] = mapped_column(JSON)
+    # Where it came from: model (extracted from text), app (one of the app's own records),
+    # user (said outright, such as onboarding) or inferred.
+    origin: Mapped[str] = mapped_column(String(16), default="model", server_default="model")
+    # The app record it stands for: project, folder or routine, and its id.
+    source_kind: Mapped[str | None] = mapped_column(String(16))
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
     __table_args__ = (
         Index("ix_entities_user", "user_id"),
+        Index(
+            "uq_entities_source",
+            "user_id",
+            "source_kind",
+            "source_id",
+            unique=True,
+            postgresql_where=text("source_kind is not null"),
+        ),
         Index("ix_entities_tsv", "tsv", postgresql_using="gin"),
         Index(
             "ix_entities_embedding",
@@ -809,8 +832,17 @@ class Relation(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     src_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
     dst_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
-    # A short verb phrase, lower case: "works at", "uses", "is planning".
+    # A canonical predicate from nexus_common.ontology.FAMILIES ("works at", "uses"), its
+    # family (the colour the orb draws it in), and the words the model or user used.
     predicate: Mapped[str] = mapped_column(String(80))
+    family: Mapped[str | None] = mapped_column(String(16))
+    label: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    # How related the two are, 0..1: more evidence, recent use and confirmation raise it,
+    # time lowers it (nightly). evidence_count counts relation_evidence rows.
+    weight: Mapped[float] = mapped_column(Float, default=0.5, server_default="0.5")
+    evidence_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    origin: Mapped[str] = mapped_column(String(16), default="model", server_default="model")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The same fact as a sentence, for the prompt and the Memory page.
     fact: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float] = mapped_column(Float, default=0.7)
@@ -863,6 +895,66 @@ class Mention(Base):
         Index("ix_mentions_file", "file_id"),
         Index("ix_mentions_chat", "chat_id"),
     )
+
+
+class RelationEvidence(Base):
+    """One memory, chat, past-chat summary or file that supports a relation. A relation can
+    have many; it stays alive while it has evidence or the user confirmed it."""
+
+    __tablename__ = "relation_evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    relation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("relations.id", ondelete="CASCADE"))
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("memories.id", ondelete="CASCADE")
+    )
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="CASCADE")
+    )
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "relation_id",
+            "memory_id",
+            "episode_id",
+            "file_id",
+            "chat_id",
+            name="uq_relation_evidence",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_relation_evidence_relation", "relation_id"),
+    )
+
+
+class OntologyType(Base):
+    """A kind of entity the graph knows, and the orb shell it sits in. Built-ins come from
+    nexus_common.ontology; approved self-review proposals add more."""
+
+    __tablename__ = "ontology_types"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    shell: Mapped[int] = mapped_column(Integer)
+    label: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OntologyPredicate(Base):
+    """A canonical relation predicate and its family."""
+
+    __tablename__ = "ontology_predicates"
+
+    name: Mapped[str] = mapped_column(String(48), primary_key=True)
+    family: Mapped[str] = mapped_column(String(16))
+    symmetric: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class RecallQuestion(Base):

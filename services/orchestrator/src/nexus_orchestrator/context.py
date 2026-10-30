@@ -271,7 +271,7 @@ async def _through_graph(
         reverse=True,
     )
     found.facts = [
-        r.fact or f"{names.get(r.src_id, '?')} {r.predicate} {names.get(r.dst_id, '?')}"
+        r.fact or f"{names.get(r.src_id, '?')} {r.label or r.predicate} {names.get(r.dst_id, '?')}"
         for r in rels[:MAX_FACTS]
     ]
 
