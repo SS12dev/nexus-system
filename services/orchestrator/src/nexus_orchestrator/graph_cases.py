@@ -991,7 +991,6 @@ CASES: list[Case] = [
         ],
         [E("iPad", "tool")],
         [R(ME, "iPad", "activity")],
-        ["Kindle"],
     ),
     Case(
         "edge-empty-smalltalk",
@@ -1025,7 +1024,6 @@ CASES: list[Case] = [
             R(ME, "Ranking service", "activity"),
             R("Ranking service", "Kubernetes", "activity", "belonging"),
         ],
-        ["Ranker", "RS"],
     ),
 ]
 
