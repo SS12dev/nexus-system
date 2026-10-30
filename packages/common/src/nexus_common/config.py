@@ -407,6 +407,28 @@ OPTIONS: tuple[Option, ...] = (
         max=20,
     ),
     Option(
+        "graph_extractor",
+        "Memory and context",
+        "Who builds the knowledge graph",
+        "local: a model in Ollama on this machine reads memories, finished chats and files "
+        "for the graph, in two passes (things, then how they relate), with pasted code and "
+        "logs left out. It costs nothing, so memory-model calls get shorter. memory: the memory "
+        "model notes the graph in the same call that saves memories, as before. Admin > Graph "
+        "shows whether the local model answers and what is waiting.",
+        "choice",
+        choices=("local", "memory"),
+    ),
+    Option(
+        "graph_local_model",
+        "Memory and context",
+        "Local graph model",
+        "The Ollama model the local graph builder uses (`ollama pull` it on the host first). "
+        "qwen3.5:9b won the 30 Oct bake-off: the most precise and the only small model that "
+        "ignored instructions hidden in pasted text.",
+        "text",
+        allow_empty=False,
+    ),
+    Option(
         "memory_nightly_hour_utc",
         "Memory and context",
         "Nightly memory upkeep hour (UTC)",

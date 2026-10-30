@@ -9,6 +9,7 @@ import {
   Cpu,
   ExternalLink,
   Gauge,
+  Network,
   MessageSquareHeart,
   RefreshCw,
   ScrollText,
@@ -27,6 +28,7 @@ import type { AuditEntry, Backup, LoggedError, Monitoring, MonitorRow, OpsStatus
 import { APP_NAME } from "../lib/assistant";
 import { ConfigPanel } from "./AdminConfig";
 import { FeedbackPanel } from "./AdminFeedback";
+import { GraphPanel } from "./AdminGraph";
 import { AlertsPanel } from "./AdminAlerts";
 import { ImprovementsPanel } from "./AdminImprovements";
 import { ModelsPanel } from "./AdminModels";
@@ -41,6 +43,7 @@ type Tab =
   | "improvements"
   | "feedback"
   | "recall"
+  | "graph"
   | "monitoring"
   | "audit"
   | "backups"
@@ -75,6 +78,7 @@ const GROUPS: { title: string; tabs: TabInfo[] }[] = [
       },
       { key: "feedback", label: "Feedback", icon: MessageSquareHeart, hint: "What people sent you from the app" },
       { key: "recall", label: "Recall", icon: Target, hint: "How well memory finds the right thing" },
+      { key: "graph", label: "Graph", icon: Network, hint: "Who builds the knowledge graph and what it holds" },
     ],
   },
   {
@@ -195,6 +199,7 @@ export function AdminPage() {
             )}
             {tab === "feedback" && <FeedbackPanel onError={setError} />}
             {tab === "recall" && <RecallPanel onError={setError} onOpenConfig={() => go("config")} />}
+            {tab === "graph" && <GraphPanel onError={setError} onOpenConfig={() => go("config")} />}
             {tab === "monitoring" && <MonitoringPanel onError={setError} onOpenAlerts={() => go("alerts")} />}
             {tab === "audit" && <AuditPanel onError={setError} userIds={picked} />}
             {tab === "backups" && <BackupsPanel onError={setError} />}

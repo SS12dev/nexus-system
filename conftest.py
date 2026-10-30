@@ -59,6 +59,8 @@ def settings() -> Settings:
         library_path=str(Path(__file__).parent / "library"),
         # Off by default so scripted models aren't asked to route; routing tests turn it on.
         route_model="",
+        # Scripted memory models note the graph themselves; graph_local tests switch to local.
+        graph_extractor="memory",
     )
 
 

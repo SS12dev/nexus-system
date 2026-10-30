@@ -91,10 +91,13 @@ def parse_graph(data: dict) -> Extracted:
         seen.add(key)
         kind = str(e.get("type") or "other").lower()
         aliases = [norm(a) for a in map(clean_name, e.get("aliases") or []) if norm(a)][:5]
+        domain = str(e.get("domain") or "").lower()
         out.entities.append(
             {
                 "name": name,
-                "type": kind if kind in TYPES else "other",
+                # The memory model is asked for TYPES; the local model for the whole ontology.
+                "type": kind if kind in ontology.TYPES else "other",
+                "domain": domain if domain in ontology.DOMAINS else None,
                 "summary": str(e.get("summary") or "").strip()[:300],
                 "aliases": [a for a in aliases if a != key],
             }
@@ -107,11 +110,18 @@ def parse_graph(data: dict) -> Extracted:
         predicate = norm(str(r.get("predicate") or ""))[:80]
         if not src or not dst or not predicate or src == dst:
             continue
+        try:
+            weight = min(1.0, max(0.1, float(r["weight"]))) if "weight" in r else None
+        except (TypeError, ValueError):
+            weight = None
         out.relations.append(
             {
                 "from": src,
                 "to": dst,
                 "predicate": predicate,
+                # The user's own wording when the model gave the canonical predicate apart.
+                "label": norm(str(r.get("label") or ""))[:80],
+                "weight": weight,
                 "fact": str(r.get("fact") or "").strip()[:300],
                 "ended": bool(r.get("ended")),
             }
@@ -165,6 +175,7 @@ class Resolver:
                     Entity.type,
                     Entity.summary,
                     Entity.is_self,
+                    Entity.domain,
                 )
             )
             .where(Entity.user_id == self.user.id)
@@ -191,6 +202,8 @@ class Resolver:
             if key in self.by_name:  # an earlier item in this batch made it
                 continue
             match = await self._nearest(it["type"], vec) if vec is not None else None
+            if match is not None and not match.domain:
+                match.domain = it.get("domain")
             if match is not None:
                 if key not in match.aliases:
                     match.aliases = [*match.aliases, key][:20]
@@ -200,6 +213,7 @@ class Resolver:
                     user_id=self.user.id,
                     type=it["type"],
                     shell=ontology.shell_of(it["type"]),
+                    domain=it.get("domain"),
                     name=it["name"],
                     aliases=it.get("aliases", []),
                     summary=it.get("summary", ""),
@@ -213,19 +227,27 @@ class Resolver:
             e = self.by_name[norm(it["name"])]
             if it.get("summary") and not e.summary:
                 e.summary = it["summary"]
+            if it.get("domain") and not e.is_self and not e.domain:
+                e.domain = it["domain"]
         await self.db.flush()
 
     async def _nearest(self, kind: str, vec: list[float]) -> Entity | None:
+        """The closest entity in the same shell: the same kind of thing ("Ledgerly" the app
+        and "Ledgerly" the project), though the types differ."""
         row = (
             await self.db.execute(
                 text(
                     """
                     select id, embedding <=> cast(:vec as vector) as d from entities
-                    where user_id = :user_id and type = :type and not is_self
+                    where user_id = :user_id and shell = :shell and not is_self
                       and embedding is not null
                     order by d limit 1"""
                 ),
-                {"vec": vector_literal(vec), "user_id": self.user.id, "type": kind},
+                {
+                    "vec": vector_literal(vec),
+                    "user_id": self.user.id,
+                    "shell": ontology.shell_of(kind),
+                },
             )
         ).first()
         if row is None or row.d >= MATCH_DISTANCE:
@@ -271,7 +293,7 @@ async def ingest(
                 Relation.valid_to.is_(None),
             )
         )
-        if r["ended"]:
+        if r.get("ended"):
             if same is not None:
                 same.valid_to = same.updated_at = now
             else:
@@ -283,7 +305,7 @@ async def ingest(
             same.weight = min(1.0, same.weight + 0.1)
             same.evidence_count += 1
             same.updated_at = same.last_seen = now
-            if r["fact"]:
+            if r.get("fact"):
                 same.fact = r["fact"]
         else:
             same = _relation(user, src, dst, r, chat_id, now)
@@ -320,11 +342,11 @@ def _relation(user, src, dst, r, chat_id, now, ended: bool = False) -> Relation:
         dst_id=dst.id,
         predicate=canon.predicate,
         family=canon.family,
-        label=canon.label,
-        weight=0.6,
+        label=r.get("label") or canon.label,
+        weight=r.get("weight") or 0.6,
         evidence_count=1,
         last_seen=now,
-        fact=r["fact"],
+        fact=r.get("fact") or "",
         confidence=0.7,
         source_chat_id=chat_id,
         valid_from=now,
@@ -430,7 +452,8 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
         text(
             """
             select e.id, e.type, e.name, e.aliases, e.summary, e.is_self, e.created_at, e.seen_at,
-                   e.shell, e.domain, e.salience, e.pos, e.origin, e.source_kind, e.source_id,
+                   e.shell, e.domain, e.salience, e.community, e.pos, e.origin,
+                   e.source_kind, e.source_id,
                    count(m.memory_id) as memories, count(m.episode_id) as past_chats,
                    count(m.file_id) as files, count(m.chat_id) as chats,
                    coalesce(array_agg(m.memory_id) filter (where m.memory_id is not null),
@@ -512,6 +535,7 @@ async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "shell": r.shell,
             "domain": r.domain,
             "salience": r.salience,
+            "community": r.community,
             "pos": r.pos,
             "origin": r.origin,
             "source": {"kind": r.source_kind, "id": str(r.source_id)} if r.source_kind else None,

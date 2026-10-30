@@ -1215,6 +1215,16 @@ export interface GraphEntity {
   file_ids: string[];
   /** Chats it came up in, live or summarised. */
   chat_ids: string[];
+  /** The full ontology type ("pet", "value", "app"); `type` is the nearest of the first seven. */
+  kind?: string;
+  /** 0 the user, 1 personality, 2 life, 3 activity, 4 knowledge. */
+  shell?: number;
+  domain?: string | null;
+  /** 0 to 1: how central it is to the user (nightly personalised PageRank). */
+  salience?: number;
+  /** Its cluster (nightly Leiden; 0 is the biggest), null when alone. */
+  community?: number | null;
+  origin?: string;
 }
 
 export interface GraphRelation {
@@ -1228,6 +1238,50 @@ export interface GraphRelation {
   /** Set when it stopped being true. */
   valid_to: string | null;
   source_chat_id: string | null;
+  /** identity, social, belonging, activity, causal, knowledge or association. */
+  family?: string;
+  /** The words the user or model used ("is building"); `predicate` is the canonical one. */
+  label?: string;
+  weight?: number;
+  evidence_count?: number;
+  origin?: string;
+}
+
+/** Admin > Graph: who builds the knowledge graph and how it is doing. Counts only. */
+export interface GraphRun {
+  at: string;
+  seconds?: number;
+  items?: number;
+  calls?: number;
+  entities?: number;
+  relations?: number;
+  error?: string;
+  users?: number;
+  merged?: number;
+  faded?: number;
+  communities?: number;
+  failed?: number;
+}
+
+export interface GraphAdmin {
+  enabled: boolean;
+  extractor: "local" | "memory";
+  ollama: {
+    url: string;
+    model: string;
+    reachable: boolean;
+    installed: boolean;
+    loaded_gb: number;
+    error?: string;
+  } | null;
+  backlog: { memories: number; chats: number; files: number };
+  last_extract: GraphRun | null;
+  last_nightly: GraphRun | null;
+  nightly_utc: string;
+  entities: { total: number; by_shell: Record<string, number>; by_origin: Record<string, number> };
+  relations: { total: number; by_family: Record<string, number>; by_origin: Record<string, number> };
+  shells: Record<string, string>;
+  families: string[];
 }
 
 export interface KnowledgeGraph {
