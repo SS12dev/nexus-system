@@ -30,3 +30,34 @@ export const ENTITY_TYPES: Record<EntityType, { label: string; plural: string; t
 export function relationText(r: GraphRelation, names: Map<string, string>): string {
   return r.fact || `${names.get(r.src) ?? "?"} ${r.predicate} ${names.get(r.dst) ?? "?"}`;
 }
+
+/** How a relation is drawn in the orb: its family's colour and what the family means. */
+export const FAMILIES: Record<string, { label: string; color: string; help: string }> = {
+  identity: { label: "Who you are", color: "#f472b6", help: "traits, values, likes and goals" },
+  social: { label: "People", color: "#fb923c", help: "knows, family, friends, colleagues" },
+  belonging: { label: "Belongs to", color: "#a3e635", help: "works at, lives in, part of" },
+  activity: { label: "Does", color: "#38bdf8", help: "builds, uses, runs, owns" },
+  causal: { label: "Cause", color: "#f87171", help: "led to, depends on, blocked by" },
+  knowledge: { label: "Knowledge", color: "#a78bfa", help: "about, learned from, references" },
+  association: { label: "Related", color: "#94a3b8", help: "related, without a clearer word" },
+};
+
+/** Each part of life: a slice of the orb and the colour of what sits in it. */
+export const DOMAIN_COLOR: Record<string, string> = {
+  work: "#7dd3fc",
+  learning: "#c4b5fd",
+  home: "#86efac",
+  health: "#5eead4",
+  social: "#f9a8d4",
+  hobbies: "#fdba74",
+  finance: "#d9d29a",
+};
+
+/** The orb's shells, centre outwards. */
+export const SHELLS: { label: string; help: string }[] = [
+  { label: "You", help: "at the centre" },
+  { label: "Personality", help: "traits, values, goals, skills" },
+  { label: "Life", help: "people, pets, places, organisations" },
+  { label: "Activity", help: "tasks, decisions and work" },
+  { label: "Knowledge", help: "topics, tools, documents" },
+];

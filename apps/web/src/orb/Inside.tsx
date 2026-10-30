@@ -1,12 +1,13 @@
-import { Line } from "@react-three/drei";
+import { Html, Line } from "@react-three/drei";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AdditiveBlending, Color, InstancedMesh, Mesh, Object3D, Vector3 } from "three";
-import { ENTITY_COLOR, RECALL_COLOR } from "../lib/entities";
+import { DOMAIN_COLOR, ENTITY_COLOR, FAMILIES, RECALL_COLOR } from "../lib/entities";
 import {
   curve,
   hash,
   KIND_COLOR,
+  SHELL_R,
   type MemoryPoint,
   type StarLine,
   type StarPoint,
@@ -155,9 +156,15 @@ export function Constellation({
   }, [stars, selected, hovered, lit, heaviest]);
   const always = (st: StarPoint) => st.self || st.id === selected || st.id === hovered || lit.has(st.id);
   usePlaceLabels(order, tags, labels, always, sizeOf);
+  const focus = hovered ?? selected;
+  const shells = useMemo(() => [...new Set(stars.map((s) => s.shell).filter((x): x is number => !!x))], [stars]);
   return (
     <group>
-      <Lines stars={stars} lines={lines} lit={lit} />
+      {shells.map((sh) => (
+        <ShellRing key={sh} radius={SHELL_R[sh]} />
+      ))}
+      <Lines stars={stars} lines={lines} lit={lit} focus={focus} />
+      {hovered && <Facts star={stars.find((s) => s.id === hovered)} stars={stars} lines={lines} />}
       {stars.map((s) => (
         <Star
           key={s.id}
@@ -243,7 +250,7 @@ function Star({
   onPick: (s: StarPoint) => void;
 }) {
   const halo = useRef<Mesh>(null);
-  const color = star.self ? "#f8fafc" : lit ? RECALL_COLOR : (ENTITY_COLOR[star.type] ?? ENTITY_COLOR.other);
+  const color = star.self ? "#f8fafc" : lit ? RECALL_COLOR : starColor(star);
   useFrame(() => {
     const h = halo.current;
     if (!h) return;
@@ -270,7 +277,7 @@ function Star({
           onHover(false);
         }}
       >
-        <sphereGeometry args={[1, lite ? 12 : 20, lite ? 8 : 14]} />
+        <StarShape shell={star.self ? 0 : (star.shell ?? 0)} lite={lite} />
         <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
       {(lit || selected || star.self) && (
@@ -290,19 +297,105 @@ function Star({
   );
 }
 
+/** A star's colour: its part of life once the graph has one, else its type's tint. */
+export function starColor(star: StarPoint): string {
+  if (star.domain) return DOMAIN_COLOR[star.domain] ?? "#cbd5e1";
+  if (star.shell != null) return "#cbd5e1";
+  return ENTITY_COLOR[star.type] ?? ENTITY_COLOR.other;
+}
+
+/** A star's shape says which shell it is in, so closeness reads without colour: a diamond for
+ * personality, a round star for people and places, a cube for what you do, a small pyramid for
+ * what you know. */
+function StarShape({ shell, lite }: { shell: number; lite: boolean }) {
+  if (shell === 1) return <octahedronGeometry args={[1.25, 0]} />;
+  if (shell === 3) return <boxGeometry args={[1.5, 1.5, 1.5]} />;
+  if (shell === 4) return <tetrahedronGeometry args={[1.35, 0]} />;
+  return <sphereGeometry args={[1, lite ? 12 : 20, lite ? 8 : 14]} />;
+}
+
+/** A faint ring round the equator at a shell's radius, so the layers read as layers. */
+function ShellRing({ radius }: { radius: number }) {
+  const points = useMemo(() => {
+    const pts: Vec3[] = [];
+    for (let i = 0; i <= 96; i++) {
+      const a = (i / 96) * Math.PI * 2;
+      pts.push([radius * Math.cos(a), 0, radius * Math.sin(a)]);
+    }
+    return pts;
+  }, [radius]);
+  return (
+    <Line
+      points={points}
+      color="#94a3b8"
+      lineWidth={1}
+      transparent
+      opacity={0.14}
+      depthWrite={false}
+      toneMapped={false}
+      raycast={() => null}
+    />
+  );
+}
+
+/** What the hovered star is connected to, in words, next to it. */
+function Facts({ star, stars, lines }: { star?: StarPoint; stars: StarPoint[]; lines: StarLine[] }) {
+  if (!star) return null;
+  const names = new Map(stars.map((s) => [s.id, s.self ? "you" : s.name]));
+  const facts = lines
+    .filter((l) => !l.implied && !l.ended && (l.a === star.id || l.b === star.id))
+    .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+    .slice(0, 6);
+  if (facts.length === 0) return null;
+  return (
+    <Html position={star.pos} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+      <div className="orb-facts">
+        {facts.map((l) => (
+          <div key={`${l.a}:${l.b}:${l.label}`} className="orb-fact">
+            <span className="orb-fact-dot" style={{ background: FAMILIES[l.family ?? ""]?.color ?? "#cbd5e1" }} />
+            {l.a === star.id ? (
+              <>
+                {l.label ?? "related to"} <b>{names.get(l.b)}</b>
+              </>
+            ) : (
+              <>
+                <b>{names.get(l.a)}</b> {l.label ?? "related to"}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </Html>
+  );
+}
+
 const LINE = { open: "#cbd5e1", ended: "#64748b" };
 
-/** Every relation as screen-space lines a couple of pixels wide, so they stay readable at any
- * zoom and over the glow of the shell. */
-function Lines({ stars, lines, lit }: { stars: StarPoint[]; lines: StarLine[]; lit: Set<string> }) {
-  const { normal, hot } = useMemo(() => {
+type Batch = { points: Vec3[]; colors: Vec3[] };
+const batch = (): Batch => ({ points: [], colors: [] });
+
+/** Every relation as screen-space lines, so they stay readable at any zoom and over the glow
+ * of the shell. Once relations have families, each is drawn in its family's colour, thicker
+ * and brighter the stronger it is; ended and implied ones are dashed and faint. The hovered or
+ * selected star's relations stand out. */
+function Lines({
+  stars,
+  lines,
+  lit,
+  focus,
+}: {
+  stars: StarPoint[];
+  lines: StarLine[];
+  lit: Set<string>;
+  focus: string | null;
+}) {
+  const groups = useMemo(() => {
     const at = new Map(stars.map((s) => [s.id, s.pos]));
     const self = stars.find((s) => s.self)?.id;
-    const normal = { points: [] as Vec3[], colors: [] as Vec3[] };
-    const hot = { points: [] as Vec3[], colors: [] as Vec3[] };
+    const g = { weak: batch(), mid: batch(), strong: batch(), faint: batch(), hot: batch(), focus: batch() };
     const c = new Color();
     // Relations bow gently, each its own way, like threads rather than spokes.
-    const put = (into: typeof normal, a: Vec3, b: Vec3, hex: string, k: number, seed = 0) => {
+    const put = (into: Batch, a: Vec3, b: Vec3, hex: string, k: number, seed = 0) => {
       c.set(hex).multiplyScalar(k);
       const pts = seed ? curve(a, b, seed, 0.14, 8) : [a, b];
       for (let i = 0; i < pts.length - 1; i++) {
@@ -318,40 +411,46 @@ function Lines({ stars, lines, lit }: { stars: StarPoint[]; lines: StarLine[]; l
       const lights =
         (lit.has(l.a) && lit.has(l.b)) || ((lit.has(l.a) || lit.has(l.b)) && (l.a === self || l.b === self));
       const seed = hash(`${l.a}:${l.b}`);
-      if (lights) put(hot, a, b, RECALL_COLOR, 1, seed);
-      else put(normal, a, b, l.ended ? LINE.ended : LINE.open, l.ended || l.implied ? 0.5 : 1, seed);
+      const hex = l.family ? (FAMILIES[l.family]?.color ?? LINE.open) : l.ended ? LINE.ended : LINE.open;
+      if (lights) put(g.hot, a, b, RECALL_COLOR, 1, seed);
+      else if (focus && (l.a === focus || l.b === focus) && !l.implied) put(g.focus, a, b, hex, 1.3, seed);
+      else if (l.ended || l.implied) put(g.faint, a, b, hex, 0.6, seed);
+      else if (!l.family) put(g.mid, a, b, hex, 1, seed);
+      else {
+        const w = l.weight ?? 0.5;
+        put(w >= 0.75 ? g.strong : w >= 0.45 ? g.mid : g.weak, a, b, hex, 0.7 + 0.5 * w, seed);
+      }
     }
-    return { normal, hot };
-  }, [stars, lines, lit]);
+    return g;
+  }, [stars, lines, lit, focus]);
 
+  const draw = (b: Batch, width: number, opacity: number, dashed = false) =>
+    b.points.length > 0 && (
+      <Line
+        segments
+        points={b.points}
+        vertexColors={b.colors}
+        lineWidth={width}
+        transparent
+        opacity={opacity}
+        dashed={dashed}
+        dashSize={0.02}
+        gapSize={0.015}
+        depthWrite={false}
+        toneMapped={false}
+        raycast={() => null}
+      />
+    );
+  // While something is hovered or selected, everything else steps back.
+  const dim = focus ? 0.45 : 1;
   return (
     <>
-      {normal.points.length > 0 && (
-        <Line
-          segments
-          points={normal.points}
-          vertexColors={normal.colors}
-          lineWidth={1.4}
-          transparent
-          opacity={0.7}
-          depthWrite={false}
-          toneMapped={false}
-          raycast={() => null}
-        />
-      )}
-      {hot.points.length > 0 && (
-        <Line
-          segments
-          points={hot.points}
-          vertexColors={hot.colors}
-          lineWidth={2.4}
-          transparent
-          opacity={0.95}
-          depthWrite={false}
-          toneMapped={false}
-          raycast={() => null}
-        />
-      )}
+      {draw(groups.faint, 1, 0.35 * dim, true)}
+      {draw(groups.weak, 1, 0.45 * dim)}
+      {draw(groups.mid, 1.5, 0.65 * dim)}
+      {draw(groups.strong, 2.3, 0.85 * dim)}
+      {draw(groups.focus, 2.6, 1)}
+      {draw(groups.hot, 2.4, 0.95)}
     </>
   );
 }
