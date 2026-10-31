@@ -306,12 +306,18 @@ async def graph_extract(ctx: dict) -> None:
             stats["relations"],
             stats["seconds"],
         )
+    # A big backlog (an imported chat history) is read run after run, not one run per ten
+    # minutes; the schedule only picks it up again if Ollama stopped answering.
+    if stats.get("more") and stats.get("items") and not stats.get("error"):
+        await ctx["redis"].enqueue_job("graph_extract")
 
 
 @traced_job
 async def read_chat_import(ctx: dict, import_id: str) -> None:
-    """Read an uploaded ChatGPT or Claude export, keeping the user's own words."""
+    """Read an uploaded ChatGPT or Claude export, keeping the user's own words, then start the
+    local model on it straight away rather than at the next scheduled run."""
     await chat_import.read_import(ctx["deps"], uuid.UUID(import_id))
+    await ctx["redis"].enqueue_job("graph_extract")
 
 
 @traced_job
