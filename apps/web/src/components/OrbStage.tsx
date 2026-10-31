@@ -50,6 +50,7 @@ import { useStore } from "../store/chat";
 import { NoticeBell } from "./Notices";
 import { FloatingWidgets, WidgetDock } from "./Widgets";
 import { Orb } from "./Orb";
+import { QuestionCards } from "./QuestionCards";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
 import type { ScreenMode } from "../lib/types";
@@ -362,6 +363,7 @@ export function OrbStage({
 
       {board ? null : showOrb ? (
         <div className="pointer-events-none relative z-10 flex flex-1 flex-col justify-end px-4 pb-2">
+          {!chat && <QuestionCards className="mx-auto mb-2 w-full max-w-md" />}
           {!chat && <Legend view={orbView} onView={setOrbView} />}
         </div>
       ) : (

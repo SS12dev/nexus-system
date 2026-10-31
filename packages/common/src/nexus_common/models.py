@@ -959,6 +959,40 @@ class OntologyPredicate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class GraphQuestion(Base):
+    """A short question card that fills in the knowledge graph: the starter deck (who you are,
+    the people and places in your life, what you do, what you learn) and the nightly cards
+    where the graph is unsure (two names that may be one thing, a link with no recent sign,
+    a thing with no part of life). `key` makes each one asked at most once; skipped and
+    answered cards stay so they are not asked again."""
+
+    __tablename__ = "graph_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(String(160))
+    # starter, confirm, still, domain or thin
+    kind: Mapped[str] = mapped_column(String(16))
+    shell: Mapped[int | None] = mapped_column(Integer)
+    prompt: Mapped[str] = mapped_column(Text)
+    help: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # one, many, yesno or text
+    form: Mapped[str] = mapped_column(String(8))
+    options: Mapped[list] = mapped_column(JSON, default=list)
+    # What the answer applies to: entity or relation ids, the starter card's id.
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    # open, answered or skipped
+    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open")
+    answer: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_graph_questions_key"),
+        Index("ix_graph_questions_open", "user_id", "status"),
+    )
+
+
 class RecallQuestion(Base):
     """A question whose answer is one memory or past-chat summary, written by the memory model
     for the recall check on the Admin page. It goes when its target goes."""

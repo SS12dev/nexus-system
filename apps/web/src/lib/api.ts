@@ -63,6 +63,8 @@ import type {
   Improvements,
   GraphAdmin,
   KnowledgeGraph,
+  GraphCard,
+  CardAnswer,
   LlmQuery,
   LlmUsage,
   Monitoring,
@@ -330,6 +332,13 @@ export const api = {
     request<void>(`/api/memories/${id}${rebuild ? "?rebuild=true" : ""}`, { method: "DELETE" }),
   memoryEvents: (id: string) => request<MemoryEvent[]>(`/api/memories/${id}/events`),
   knowledgeGraph: () => request<KnowledgeGraph>("/api/memories/graph"),
+  questionCards: () => request<GraphCard[]>("/api/questions"),
+  answerCard: (id: string, answer: CardAnswer) =>
+    request<{ note: string; entities: string[]; memories: number }>(`/api/questions/${id}/answer`, {
+      method: "POST",
+      body: json({ answer }),
+    }),
+  skipCard: (id: string) => request<void>(`/api/questions/${id}/skip`, { method: "POST" }),
   deleteEntity: (id: string) => request<void>(`/api/memories/entities/${id}`, { method: "DELETE" }),
   forgetEverything: () => request<void>("/api/memories", { method: "DELETE" }),
   profile: () => request<Profile>("/api/memories/profile"),

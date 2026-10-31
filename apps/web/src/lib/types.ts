@@ -1250,9 +1250,26 @@ export interface GraphRelation {
   origin?: string;
 }
 
+/** A question card that fills in the knowledge graph (GET /api/questions). */
+export interface GraphCard {
+  id: string;
+  /** starter (the first deck), confirm, still, domain or thin (the nightly ones). */
+  kind: "starter" | "confirm" | "still" | "domain" | "thin";
+  shell: number | null;
+  prompt: string;
+  help: string;
+  form: "one" | "many" | "yesno" | "text";
+  options: string[];
+  /** For "many": how many may be picked. */
+  most: number;
+}
+
+export type CardAnswer = { choice: string } | { choices: string[] } | { yes: boolean } | { text: string };
+
 /** Admin > Graph: who builds the knowledge graph and how it is doing. Counts only. */
 export interface GraphRun {
   strengthened?: number;
+  questions?: number;
   at: string;
   seconds?: number;
   items?: number;

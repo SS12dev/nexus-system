@@ -418,6 +418,19 @@ OPTIONS: tuple[Option, ...] = (
         max=0.2,
     ),
     Option(
+        "graph_question_cards_per_day",
+        "Memory and context",
+        "Question cards per day",
+        "Each night, at most this many new question cards per person where the knowledge "
+        "graph is unsure: two names that may be one thing, a link with no sign for two months, "
+        "something mentioned often with no part of life, a part of life with nothing in it. "
+        "They show on the home screen and the Knowledge page and can always be skipped. The "
+        "starter deck is separate. 0 stops new ones.",
+        "int",
+        min=0,
+        max=10,
+    ),
+    Option(
         "graph_extractor",
         "Memory and context",
         "Who builds the knowledge graph",
