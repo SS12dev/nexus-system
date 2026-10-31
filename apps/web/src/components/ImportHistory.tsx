@@ -7,9 +7,25 @@ import { confirmAction, toast } from "./Feedback";
 
 const SOURCE = { chatgpt: "ChatGPT", claude: "Claude" } as const;
 
+/** Upload an export without waiting on it: the request carries on when the page that started
+ * it moves on (onboarding goes ahead while a big export is still going up), and a toast says
+ * when it's in. */
+export function uploadInBackground(file: File): Promise<boolean> {
+  return api.uploadImport(file).then(
+    () => {
+      toast("Your chat history is in. It's being read in the background");
+      return true;
+    },
+    (e) => {
+      toast((e as Error).message, "error");
+      return false;
+    },
+  );
+}
+
 /** Upload a ChatGPT or Claude export so the graph starts from years of your own conversations.
- * Only your own messages are kept, read on this machine by the local model over a few nights;
- * deleting the import takes back what it taught. */
+ * Only your own messages are kept, read on this machine by the local model in the background
+ * as fast as it goes; deleting the import takes back what it taught. */
 export function ImportHistory({ assistant }: { assistant: string }) {
   const [items, setItems] = useState<ChatImportItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -80,8 +96,8 @@ export function ImportHistory({ assistant }: { assistant: string }) {
         Upload the data export from ChatGPT (Settings, Data controls, Export) or Claude (Settings, Privacy, Export),
         either the zip or the conversations.json inside it. Only your own messages are kept, with pasted code and
         logs left out; the export itself is deleted once read. A model on this machine reads it into what{" "}
-        {assistant} knows, a few conversations at a time, so a big history takes a few nights. Nothing goes to a
-        cloud model.
+        {assistant} knows in the background, newest first, as fast as this machine goes: a few hundred
+        conversations take a couple of hours while it's awake. Nothing goes to a cloud model.
       </p>
       {items.length > 0 && (
         <ul className="mt-2 space-y-1.5">

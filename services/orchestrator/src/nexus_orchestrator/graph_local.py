@@ -53,12 +53,15 @@ log = logging.getLogger(__name__)
 BATCH = 12
 ITEM_CHARS = 1500
 CHAT_CHARS = 9000
-# Imported conversations per user per run, after anything newer: a big import is read over a
-# few nights rather than holding up today's chats.
-IMPORTS_PER_RUN = 6
+# Imported conversations per user per round. Each round looks again for anything newer first,
+# so today's chats never wait behind a big import, and rounds go on back to back until the run's
+# time is up; the worker then starts the next run straight away while anything is still waiting.
+IMPORTS_PER_ROUND = 6
 # One run stops starting new calls after this long, well inside its job timeout.
 RUN_SECONDS = 420
 STATUS_KEY = "graph:local:last"
+# Held while a run goes, so the schedule, "Run now" and a run's own follow-on never overlap.
+LOCK_KEY = "graph:local:running"
 
 ENTITY_PROMPT = f"""You build the knowledge graph of a user's mind for their personal \
 assistant. Each numbered item is a memory about the USER, a finished chat (its summary and \
@@ -350,7 +353,7 @@ async def _pending(db: AsyncSession, user_id: uuid.UUID) -> list[list[Item]]:
             select(ImportedChat)
             .where(ImportedChat.user_id == user_id, ImportedChat.graph_at.is_(None))
             .order_by(ImportedChat.started_at.desc().nulls_last())
-            .limit(IMPORTS_PER_RUN)
+            .limit(IMPORTS_PER_ROUND)
         )
     ).all():
         batches.append([Item({"imported_chat_id": c.id}, _imported_text(c), c, at=c.started_at)])
@@ -418,38 +421,54 @@ async def _users(db: AsyncSession) -> list[uuid.UUID]:
 async def extract_pending(
     deps: TurnDeps, model: LocalModel | None = None, seconds: float = RUN_SECONDS
 ) -> dict:
-    """One run: batches for every user with waiting items until the time is up."""
+    """One run: rounds of batches for every user with waiting items, back to back until nothing
+    is left or the time is up. "more" says whether anything is still waiting."""
     s = deps.settings
     if not (s.graph_enabled and s.graph_extractor == "local"):
         return {}
+    if not await deps.redis.set(LOCK_KEY, "1", nx=True, ex=int(seconds) + 180):
+        return {"busy": True}
     own = model is None
     model = model or LocalModel(s)
     start = time.monotonic()
-    stats = {"items": 0, "calls": 0, "entities": 0, "relations": 0, "error": ""}
+    stats = {"items": 0, "calls": 0, "entities": 0, "relations": 0, "error": "", "more": False}
+
+    def out_of_time() -> bool:
+        return time.monotonic() - start > seconds
+
     try:
-        async with deps.sessionmaker() as db:
-            user_ids = await _users(db)
-        for user_id in user_ids:
+        while not out_of_time():
             async with deps.sessionmaker() as db:
-                user = await db.get(User, user_id)
-                for batch in await _pending(db, user_id):
-                    if time.monotonic() - start > seconds:
-                        break
-                    try:
-                        got = await extract(model, batch)
-                    except LocalModelError as exc:
-                        # Ollama down or the model missing: everything waits for the next run.
-                        stats["error"] = str(exc)
-                        raise
-                    stats["calls"] += 2 if got.found.entities else 1
-                    await _apply(deps, db, user, batch, got)
-                    await db.commit()
-                    stats["items"] += len(batch)
-                    stats["entities"] += len(got.found.entities)
-                    stats["relations"] += len(got.found.relations)
+                user_ids = await _users(db)
+            before = stats["items"]
+            for user_id in user_ids:
+                async with deps.sessionmaker() as db:
+                    user = await db.get(User, user_id)
+                    for batch in await _pending(db, user_id):
+                        if out_of_time():
+                            break
+                        try:
+                            got = await extract(model, batch)
+                        except LocalModelError as exc:
+                            # Ollama down or the model missing: everything waits for the next run.
+                            stats["error"] = str(exc)
+                            raise
+                        stats["calls"] += 2 if got.found.entities else 1
+                        await _apply(deps, db, user, batch, got)
+                        await db.commit()
+                        stats["items"] += len(batch)
+                        stats["entities"] += len(got.found.entities)
+                        stats["relations"] += len(got.found.relations)
+            # Nothing left that can be read (some waiting rows may be in the Trash).
+            if stats["items"] == before:
+                break
+        if out_of_time():
+            async with deps.sessionmaker() as db:
+                stats["more"] = bool(await _users(db))
     except LocalModelError as exc:
         log.warning("Local graph model unavailable: %s", exc)
     finally:
+        await deps.redis.delete(LOCK_KEY)
         if own:
             await model.aclose()
         stats["seconds"] = round(time.monotonic() - start, 1)

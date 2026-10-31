@@ -29,8 +29,9 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
+import { uploadInBackground } from "../components/ImportHistory";
 import { Orb } from "../components/Orb";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
@@ -412,6 +413,7 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
             onChange={(e) => setAbout(e.target.value)}
             className="mt-3 w-full rounded-md border border-edge bg-panel px-3 py-2 text-sm"
           />
+          {canMember && <HistoryUpload assistant={cleanName ?? DEFAULT_ASSISTANT_NAME} />}
         </Step>
       )}
 
@@ -606,6 +608,50 @@ export function OnboardingPage({ onDone }: { onDone?: () => void }) {
         </button>
       </div>
     </Frame>
+  );
+}
+
+/** Optional: start from a ChatGPT or Claude export. It uploads and is read in the background,
+ * so nobody waits on this page for it. */
+function HistoryUpload({ assistant }: { assistant: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [sent, setSent] = useState<{ name: string; state: "sending" | "in" | "failed" } | null>(null);
+  const pick = (file: File) => {
+    setSent({ name: file.name, state: "sending" });
+    void uploadInBackground(file).then((ok) =>
+      setSent((s) => (s ? { ...s, state: ok ? "in" : "failed" } : s)),
+    );
+  };
+  return (
+    <div className="mt-3 rounded-md border border-dashed border-edge px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-slate-400">Used ChatGPT or Claude before? Bring that history along.</span>
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          className="ml-auto shrink-0 rounded-md border border-edge px-2.5 py-1 text-xs hover:bg-white/5"
+        >
+          Upload export
+        </button>
+        <input
+          ref={input}
+          type="file"
+          accept=".zip,.json"
+          className="hidden"
+          aria-label="Chat history export"
+          onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])}
+        />
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        {sent?.state === "sending"
+          ? `Uploading ${sent.name} in the background. Carry on, there's no need to wait.`
+          : sent?.state === "in"
+            ? `${sent.name} is in. ${assistant} reads it in the background and you can follow along on the Knowledge page.`
+            : sent?.state === "failed"
+              ? `${sent.name} didn't upload. You can try again later on the Knowledge page.`
+              : "The zip from Settings, then Export, in either app. Only your own messages are kept, read on this machine."}
+      </p>
+    </div>
   );
 }
 

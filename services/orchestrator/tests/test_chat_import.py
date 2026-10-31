@@ -213,3 +213,55 @@ async def test_an_import_is_read_then_built_into_the_graph_with_its_own_dates(
     assert {e.imported_chat_id for e in evidence} == {kept[0].id}
     assert {m.imported_chat_id for m in mentions} == {kept[0].id}
     assert ents["Ana"].origin == "import"
+
+
+async def _waiting_imports(sessionmaker, user, n):
+    async with sessionmaker() as db:
+        imp = ChatImport(user_id=user.id, name="claude.zip", status="ready", kept=n)
+        db.add(imp)
+        await db.flush()
+        for i in range(n):
+            db.add(
+                ImportedChat(
+                    import_id=imp.id,
+                    user_id=user.id,
+                    external_id=f"c{i}",
+                    title=f"Chat {i}",
+                    text=f"USER: {PERSONAL}",
+                    messages=1,
+                )
+            )
+        await db.commit()
+
+
+async def test_a_big_import_is_read_in_one_run_not_six_chats_every_ten_minutes(
+    deps, sessionmaker, owner
+):
+    user, _chat = owner
+    deps.settings = deps.settings.model_copy(update={"graph_extractor": "local"})
+    await _waiting_imports(sessionmaker, user, graph_local.IMPORTS_PER_ROUND * 2 + 2)
+    fake = FakeLocal([{"entities": []}] * 50)
+    stats = await graph_local.extract_pending(deps, model=fake)
+    assert stats["items"] == graph_local.IMPORTS_PER_ROUND * 2 + 2 and stats["more"] is False
+    async with sessionmaker() as db:
+        left = await db.scalar(select(ImportedChat).where(ImportedChat.graph_at.is_(None)))
+    assert left is None
+
+
+async def test_a_run_out_of_time_says_more_is_waiting_and_runs_never_overlap(
+    deps, sessionmaker, owner, redis
+):
+    user, _chat = owner
+    deps.settings = deps.settings.model_copy(update={"graph_extractor": "local"})
+    await _waiting_imports(sessionmaker, user, 3)
+    stats = await graph_local.extract_pending(deps, model=FakeLocal([]), seconds=-1)
+    assert stats["items"] == 0 and stats["more"] is True
+    # The lock is let go after a run, and held while one goes.
+    assert await redis.exists(graph_local.LOCK_KEY) == 0
+    await redis.set(graph_local.LOCK_KEY, "1")
+    fake = FakeLocal([])
+    try:
+        assert await graph_local.extract_pending(deps, model=fake) == {"busy": True}
+        assert fake.calls == []
+    finally:
+        await redis.delete(graph_local.LOCK_KEY)
