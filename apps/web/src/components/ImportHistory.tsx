@@ -97,7 +97,7 @@ export function ImportHistory({ assistant }: { assistant: string }) {
                 ) : (
                   <span className="text-slate-400">
                     {i.read} of {i.kept} conversations read
-                    {i.conversations > i.kept && <> ({i.conversations - i.kept} were tasks with nothing about you)</>}
+                    {i.conversations > i.kept && <> ({i.conversations - i.kept} skipped as empty, very short or with nothing about you)</>}
                   </span>
                 )}
                 {i.status === "ready" && i.kept > 0 && (
