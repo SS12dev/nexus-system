@@ -65,6 +65,7 @@ import type {
   KnowledgeGraph,
   GraphCard,
   CardAnswer,
+  ChatImportItem,
   LlmQuery,
   LlmUsage,
   Monitoring,
@@ -339,6 +340,13 @@ export const api = {
       body: json({ answer }),
     }),
   skipCard: (id: string) => request<void>(`/api/questions/${id}/skip`, { method: "POST" }),
+  imports: () => request<ChatImportItem[]>("/api/imports"),
+  uploadImport: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ChatImportItem>("/api/imports", { method: "POST", body: form });
+  },
+  deleteImport: (id: string) => request<void>(`/api/imports/${id}`, { method: "DELETE" }),
   deleteEntity: (id: string) => request<void>(`/api/memories/entities/${id}`, { method: "DELETE" }),
   forgetEverything: () => request<void>("/api/memories", { method: "DELETE" }),
   profile: () => request<Profile>("/api/memories/profile"),

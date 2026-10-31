@@ -19,6 +19,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 from sqlalchemy import func, select
@@ -30,6 +31,7 @@ from nexus_common.models import (
     Episode,
     File,
     FileStatus,
+    ImportedChat,
     Memory,
     Message,
     MessageRole,
@@ -51,6 +53,9 @@ log = logging.getLogger(__name__)
 BATCH = 12
 ITEM_CHARS = 1500
 CHAT_CHARS = 9000
+# Imported conversations per user per run, after anything newer: a big import is read over a
+# few nights rather than holding up today's chats.
+IMPORTS_PER_RUN = 6
 # One run stops starting new calls after this long, well inside its job timeout.
 RUN_SECONDS = 420
 STATUS_KEY = "graph:local:last"
@@ -236,8 +241,10 @@ class LocalModel:
 class Item:
     target: dict  # the mention target: {"memory_id": ...}, {"episode_id": ...}, {"file_id": ...}
     text: str
-    row: Memory | Episode | File
+    row: Memory | Episode | File | ImportedChat
     chat_id: uuid.UUID | None = None
+    # When it was said, for an imported conversation: its facts enter with that date.
+    at: datetime | None = None
 
 
 @dataclass
@@ -338,12 +345,32 @@ async def _pending(db: AsyncSession, user_id: uuid.UUID) -> list[list[Item]]:
         )
     ).all():
         batches.append([Item({"episode_id": e.id}, await _chat_text(db, e), e, e.chat_id)])
+    for c in (
+        await db.scalars(
+            select(ImportedChat)
+            .where(ImportedChat.user_id == user_id, ImportedChat.graph_at.is_(None))
+            .order_by(ImportedChat.started_at.desc().nulls_last())
+            .limit(IMPORTS_PER_RUN)
+        )
+    ).all():
+        batches.append([Item({"imported_chat_id": c.id}, _imported_text(c), c, at=c.started_at)])
     return batches
+
+
+def _imported_text(c: ImportedChat) -> str:
+    when = f" from {c.started_at:%B %Y}" if c.started_at else ""
+    said = c.text if len(c.text) <= CHAT_CHARS else "…" + c.text[-CHAT_CHARS:]
+    return (
+        f"A conversation with another assistant{when}, titled {c.title!r}. Facts in it may "
+        f"have changed since.\n\nThe user's own messages:\n\n{said}"
+    )
 
 
 async def _apply(deps: TurnDeps, db: AsyncSession, user: User, batch: list[Item], got: Found):
     now = utcnow()
-    chat_id = batch[0].chat_id if len(batch) == 1 else None
+    one = batch[0] if len(batch) == 1 else None
+    chat_id = one.chat_id if one else None
+    imported = one is not None and "imported_chat_id" in one.target
     links = []
     for i, it in enumerate(batch):
         await graph.forget_mentions(db, **it.target)
@@ -351,7 +378,17 @@ async def _apply(deps: TurnDeps, db: AsyncSession, user: User, batch: list[Item]
         if names:
             links.append((it.target, names))
         it.row.graph_at = now
-    await graph.ingest(db, deps.embedder, user, got.found, chat_id=chat_id, links=links)
+    await graph.ingest(
+        db,
+        deps.embedder,
+        user,
+        got.found,
+        chat_id=chat_id,
+        links=links,
+        origin="import" if imported else "model",
+        evidence=one.target if imported else None,
+        at=one.at if imported else None,
+    )
     await graph.prune(db, user.id)
 
 
@@ -362,6 +399,7 @@ async def _users(db: AsyncSession) -> list[uuid.UUID]:
         .union(
             select(Episode.user_id).where(Episode.graph_at.is_(None)),
             select(File.user_id).where(File.graph_at.is_(None), File.status == FileStatus.ready),
+            select(ImportedChat.user_id).where(ImportedChat.graph_at.is_(None)),
         )
         .subquery()
     )
@@ -434,5 +472,8 @@ async def backlog(db: AsyncSession) -> dict:
             select(func.count())
             .select_from(File)
             .where(File.graph_at.is_(None), File.status == FileStatus.ready)
+        ),
+        "imported": await db.scalar(
+            select(func.count()).select_from(ImportedChat).where(ImportedChat.graph_at.is_(None))
         ),
     }

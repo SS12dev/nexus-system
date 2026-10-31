@@ -25,6 +25,7 @@ from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
 from nexus_orchestrator import (
     accounts,
+    chat_import,
     deploy,
     graph_local,
     graph_nightly,
@@ -308,6 +309,12 @@ async def graph_extract(ctx: dict) -> None:
 
 
 @traced_job
+async def read_chat_import(ctx: dict, import_id: str) -> None:
+    """Read an uploaded ChatGPT or Claude export, keeping the user's own words."""
+    await chat_import.read_import(ctx["deps"], uuid.UUID(import_id))
+
+
+@traced_job
 async def graph_rearrange(ctx: dict) -> None:
     """The nightly graph upkeep on its own, from Admin > Graph."""
     await graph_nightly.consolidate(ctx["deps"])
@@ -353,6 +360,7 @@ class WorkerSettings:
         # Admin > Graph "Run now"; the same jobs also run on the schedule below.
         func(graph_extract, timeout=graph_local.RUN_SECONDS + 180, keep_result=0),
         func(graph_rearrange, timeout=1200, keep_result=0),
+        func(read_chat_import, timeout=600, keep_result=0),
         # A routine's turn is a chat turn; a team it starts runs as its own job.
         func(run_routine, timeout=600, keep_result=0),
     ]

@@ -1250,6 +1250,21 @@ export interface GraphRelation {
   origin?: string;
 }
 
+/** A chat history export from another assistant, being read into the knowledge graph. */
+export interface ChatImportItem {
+  id: string;
+  name: string;
+  source: "chatgpt" | "claude" | null;
+  status: "reading" | "ready" | "failed";
+  conversations: number;
+  /** Conversations kept: the rest were tasks with nothing about you. */
+  kept: number;
+  /** Of those, how many the local model has read into the graph. */
+  read: number;
+  error: string | null;
+  created_at: string;
+}
+
 /** A question card that fills in the knowledge graph (GET /api/questions). */
 export interface GraphCard {
   id: string;
@@ -1295,7 +1310,7 @@ export interface GraphAdmin {
     loaded_gb: number;
     error?: string;
   } | null;
-  backlog: { memories: number; chats: number; files: number };
+  backlog: { memories: number; chats: number; files: number; imported?: number };
   last_extract: GraphRun | null;
   last_nightly: GraphRun | null;
   nightly_utc: string;

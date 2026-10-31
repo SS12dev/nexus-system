@@ -19,7 +19,7 @@ async def test_graph_tab_counts_what_waits_and_queues_runs(owner, queue, redis, 
     data = (await owner.get("/api/admin/graph")).json()
     # The tests run with the memory model building the graph, so Ollama isn't asked.
     assert data["extractor"] == "memory" and data["ollama"] is None
-    assert data["backlog"] == {"memories": 1, "chats": 0, "files": 0}
+    assert data["backlog"] == {"memories": 1, "chats": 0, "files": 0, "imported": 0}
     assert data["last_nightly"]["merged"] == 2 and data["last_extract"] is None
     assert data["shells"]["0"] == "you" and "association" in data["families"]
     assert data["entities"]["by_shell"] == {"2": 1}

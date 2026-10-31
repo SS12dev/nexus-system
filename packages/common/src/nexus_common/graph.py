@@ -13,8 +13,9 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -270,17 +271,23 @@ async def ingest(
     chat_id: uuid.UUID | None = None,
     links: list[tuple[dict, list[str]]] = (),
     origin: str = "model",
+    evidence: dict | None = None,
+    at: datetime | None = None,
 ) -> int:
     """Add what the model found to the user's graph. `links` pairs a mention target, such as
     {"memory_id": id}, with the names it is about; every entity found is also mentioned by
     `chat_id`. `origin` is who said it: "user" (a question card) makes new relations certain.
-    Returns how many entities were touched."""
+    `evidence` is what each relation is noted as coming from (default: `chat_id`), and `at`
+    when it was said, for an imported conversation from years ago. Returns how many entities
+    were touched."""
     if not found and not any(names for _t, names in links):
         return 0
     resolver = Resolver(db, embedder, user, origin)
     await resolver.load()
     await resolver.resolve(found.entities)
-    now = utcnow()
+    now = at or utcnow()
+    if evidence is None and chat_id is not None:
+        evidence = {"chat_id": chat_id}
     touched: set[uuid.UUID] = set()
 
     for r in found.relations:
@@ -309,15 +316,17 @@ async def ingest(
             same.confidence = 1.0 if origin == "user" else min(1.0, same.confidence + 0.1)
             same.weight = min(1.0, same.weight + 0.1)
             same.evidence_count += 1
-            same.updated_at = same.last_seen = now
+            # An old conversation confirms it, but doesn't make it look stale.
+            same.last_seen = max(filter(None, [same.last_seen, now]))
+            same.updated_at = utcnow()
             if r.get("fact"):
                 same.fact = r["fact"]
         else:
             same = _relation(user, src, dst, r, chat_id, now, origin=origin)
             db.add(same)
-        if chat_id is not None:
+        if evidence:
             await db.flush()
-            await add_evidence(db, user.id, same.id, chat_id=chat_id)
+            await add_evidence(db, user.id, same.id, **evidence)
 
     targets: list[tuple[dict, list[Entity]]] = []
     if chat_id is not None:
@@ -333,7 +342,11 @@ async def ingest(
                 .on_conflict_do_nothing(constraint="uq_mentions")
             )
     if touched:
-        await db.execute(update(Entity).where(Entity.id.in_(touched)).values(seen_at=now))
+        await db.execute(
+            update(Entity)
+            .where(Entity.id.in_(touched))
+            .values(seen_at=func.greatest(func.coalesce(Entity.seen_at, now), now))
+        )
     await db.flush()
     return len(touched)
 

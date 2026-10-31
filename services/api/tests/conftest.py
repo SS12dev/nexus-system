@@ -20,6 +20,7 @@ class RecordingQueue:
         self.proposal_prs: list[uuid.UUID] = []
         self.recall_checks: list[uuid.UUID] = []
         self.graph_jobs: list[str] = []
+        self.chat_imports: list[uuid.UUID] = []
         self.routines: list[tuple[uuid.UUID, object]] = []
         self.feedback: list[uuid.UUID] = []
         self.trash_purges: list[uuid.UUID] = []
@@ -71,6 +72,9 @@ class RecordingQueue:
 
     async def enqueue_graph(self, job):
         self.graph_jobs.append(job)
+
+    async def enqueue_chat_import(self, import_id):
+        self.chat_imports.append(import_id)
 
     async def enqueue_routine(self, routine_id, scheduled_for):
         self.routines.append((routine_id, scheduled_for))

@@ -51,7 +51,7 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
   };
 
   if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  const waiting = data.backlog.memories + data.backlog.chats + data.backlog.files;
+  const waiting = data.backlog.memories + data.backlog.chats + data.backlog.files + (data.backlog.imported ?? 0);
   const local = data.extractor === "local";
   const o = data.ollama;
 
@@ -138,10 +138,11 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
           )
         }
       >
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Tile label="Memories" value={data.backlog.memories} />
           <Tile label="Finished chats" value={data.backlog.chats} />
           <Tile label="Files" value={data.backlog.files} />
+          <Tile label="Imported chats" value={data.backlog.imported ?? 0} hint="read after everything newer" />
         </div>
         <RunLine run={data.last_extract} what="Last read" empty="Nothing read yet." />
       </Section>

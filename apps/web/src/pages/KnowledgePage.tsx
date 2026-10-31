@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { confirmAction } from "../components/Feedback";
 import { FilePreview } from "../components/FilePreview";
+import { ImportHistory } from "../components/ImportHistory";
 import { QuestionCards } from "../components/QuestionCards";
 import { Guide, GuideHeading } from "../components/Guide";
 import { Select } from "../components/Select";
@@ -112,6 +113,7 @@ export function KnowledgePage() {
           </p>
           <HowItWorks assistant={assistant} />
           {canEdit && <QuestionCards className="mb-4 max-w-xl" />}
+          {canEdit && <ImportHistory assistant={assistant} />}
         </div>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {!graph ? (

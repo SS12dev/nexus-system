@@ -140,9 +140,9 @@ async def _merge(db: AsyncSession, keep: Entity, drop: Entity) -> None:
         text(
             """
             insert into mentions (id, user_id, entity_id, memory_id, episode_id, file_id,
-                                  chat_id, created_at)
+                                  chat_id, imported_chat_id, created_at)
             select gen_random_uuid(), user_id, :keep, memory_id, episode_id, file_id, chat_id,
-                   created_at
+                   imported_chat_id, created_at
             from mentions where entity_id = :drop
             on conflict on constraint uq_mentions do nothing
             """
@@ -182,9 +182,9 @@ async def _fold_relations(db: AsyncSession, entity_id: uuid.UUID) -> None:
             text(
                 """
                 insert into relation_evidence (id, user_id, relation_id, memory_id, episode_id,
-                                               file_id, chat_id, created_at)
+                                               file_id, chat_id, imported_chat_id, created_at)
                 select gen_random_uuid(), user_id, :keep, memory_id, episode_id, file_id,
-                       chat_id, created_at
+                       chat_id, imported_chat_id, created_at
                 from relation_evidence where relation_id = :drop
                 on conflict on constraint uq_relation_evidence do nothing
                 """
