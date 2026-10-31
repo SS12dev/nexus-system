@@ -4,7 +4,10 @@
    one shell, become one; their mentions, relations and evidence move to the survivor.
 2. Fade: relations nothing has confirmed for a month lose a little weight each night; the
    app's own ties (USER built Ledgerly) don't.
-3. Arrange: per user, igraph ranks every entity by personalised PageRank from the user
+3. Strengthen: relations recall walked during the day gain a little weight, more the more
+   they were used (Hebbian: links that fire together wire together), so the paths the
+   assistant keeps taking grow brighter and the ones nobody uses fade.
+4. Arrange: per user, igraph ranks every entity by personalised PageRank from the user
    (salience, which the orb sizes and orders by) and groups them into Leiden communities
    (which the orb clusters).
 
@@ -13,6 +16,7 @@ What it did is kept for Admin > Graph.
 
 import json
 import logging
+import math
 import random
 import uuid
 from collections import defaultdict
@@ -22,7 +26,7 @@ import igraph as ig
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common.graph import norm
+from nexus_common.graph import norm, used_key
 from nexus_common.models import Entity, Mention, Relation, utcnow
 from nexus_orchestrator.turn import TurnDeps
 
@@ -203,6 +207,38 @@ async def fade(db: AsyncSession, user_id: uuid.UUID) -> int:
     return result.rowcount or 0
 
 
+async def strengthen(db: AsyncSession, redis, user_id: uuid.UUID, step: float) -> int:
+    """Relations recall used since last night gain `step` per doubling of their uses, up to 1.
+    Returns how many grew. The counts are taken and cleared in one go, so a turn running now
+    counts toward tomorrow."""
+    key = used_key(user_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hgetall(key)
+        pipe.delete(key)
+        counts, _ = await pipe.execute()
+    if not counts or step <= 0:
+        return 0
+    uses: dict[uuid.UUID, int] = {}
+    for rid, n in counts.items():
+        try:
+            uses[uuid.UUID(rid.decode() if isinstance(rid, bytes) else rid)] = int(n)
+        except ValueError:
+            continue
+    rows = (
+        await db.scalars(
+            select(Relation).where(
+                Relation.id.in_(list(uses)),
+                Relation.user_id == user_id,
+                Relation.valid_to.is_(None),
+            )
+        )
+    ).all()
+    for r in rows:
+        r.weight = round(min(1.0, r.weight + step * math.log2(1 + uses[r.id])), 4)
+    await db.flush()
+    return len(rows)
+
+
 async def arrange(db: AsyncSession, user_id: uuid.UUID) -> int:
     """Salience and communities for one user's graph. Returns the number of communities."""
     entities = (
@@ -257,7 +293,14 @@ async def arrange(db: AsyncSession, user_id: uuid.UUID) -> int:
 
 
 async def consolidate(deps: TurnDeps) -> dict:
-    stats = {"users": 0, "merged": 0, "faded": 0, "communities": 0, "failed": 0}
+    stats = {
+        "users": 0,
+        "merged": 0,
+        "faded": 0,
+        "strengthened": 0,
+        "communities": 0,
+        "failed": 0,
+    }
     async with deps.sessionmaker() as db:
         user_ids = (await db.scalars(select(Entity.user_id).distinct())).all()
     for user_id in user_ids:
@@ -265,6 +308,9 @@ async def consolidate(deps: TurnDeps) -> dict:
             async with deps.sessionmaker() as db:
                 stats["merged"] += await merge_duplicates(db, user_id)
                 stats["faded"] += await fade(db, user_id)
+                stats["strengthened"] += await strengthen(
+                    db, deps.redis, user_id, deps.settings.graph_strengthen_step
+                )
                 stats["communities"] += await arrange(db, user_id)
                 await db.commit()
             stats["users"] += 1
@@ -274,9 +320,11 @@ async def consolidate(deps: TurnDeps) -> dict:
     stats["at"] = utcnow().isoformat()
     await deps.redis.set(STATUS_KEY, json.dumps(stats))
     log.info(
-        "Nightly graph: %d merged, %d relations faded, %d communities over %d users",
+        "Nightly graph: %d merged, %d relations faded, %d strengthened, %d communities over "
+        "%d users",
         stats["merged"],
         stats["faded"],
+        stats["strengthened"],
         stats["communities"],
         stats["users"],
     )

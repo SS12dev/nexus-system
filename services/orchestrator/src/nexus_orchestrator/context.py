@@ -58,6 +58,8 @@ class TurnContext:
     # Connections between what the message is about, as sentences.
     facts: list[str] = field(default_factory=list)
     entities: list[Entity] = field(default_factory=list)
+    path: list[dict] = field(default_factory=list)
+    used: list[uuid.UUID] = field(default_factory=list)
     # Summary of the start of this chat, when the history sent is cut short.
     earlier: str | None = None
     chat_files: list[File] = field(default_factory=list)
@@ -129,6 +131,10 @@ class Recall:
     # among them as sentences.
     entities: list[Entity] = field(default_factory=list)
     facts: list[str] = field(default_factory=list)
+    # How each entity was reached ({"id", "hop", "via"}), for the orb to light hop by hop, and
+    # the relations on those paths, for the nightly pass to strengthen.
+    path: list[dict] = field(default_factory=list)
+    used: list[uuid.UUID] = field(default_factory=list)
 
 
 async def recall(
@@ -143,7 +149,9 @@ async def recall(
 ) -> Recall:
     """The memories, past-chat summaries and connections a turn gets for `question`. The recall
     check on the Admin page scores this same function, with and without the graph.
-    `through_graph` defaults to the GRAPH_RECALL_ENABLED setting."""
+    `through_graph` defaults to the GRAPH_RECALL_ENABLED setting. Left to the default with
+    graph recall off, the graph is still walked to show what the question touched (the orb
+    lights it), but adds nothing to the prompt."""
     found = Recall()
     hits = await hybrid_search(db, "memories", user_id, question, vec, settings.memory_top_k)
     if hits:
@@ -182,8 +190,9 @@ async def recall(
             )
             by_id = {e.id: e for e in rows.all()}
             found.episodes = [by_id[i] for i in close if i in by_id]
-    if settings.graph_recall_enabled if through_graph is None else through_graph:
-        await _through_graph(db, settings, user_id, question, vec, found)
+    use = settings.graph_recall_enabled if through_graph is None else through_graph
+    if use or (through_graph is None and settings.graph_enabled):
+        await _through_graph(db, settings, user_id, question, vec, found, use=use)
     return found
 
 
@@ -194,11 +203,13 @@ async def _through_graph(
     question: str,
     vec: list[float] | None,
     found: Recall,
+    *,
+    use: bool = True,
 ) -> None:
     """Add memories about what the question is about and what that links to, and the
     connections among them. Seeds are entities matching the question and those the closest
     memories mention; the walk scores each entity, and a memory scores as its best entity
-    times its own confidence."""
+    times its own confidence. With `use` off only the entities and their paths are found."""
     # A name in the question is the strongest seed; a close meaning counts for less.
     seeds: dict[uuid.UUID, float] = {
         h.id: 1.0
@@ -222,7 +233,12 @@ async def _through_graph(
             seeds.pop(eid, None)
     if not seeds:
         return
-    scores = await graph.walk(db, user_id, seeds, settings.graph_hops)
+    reached = await graph.spread(db, user_id, seeds, settings.graph_hops)
+    scores = {k: a.score for k, a in reached.items()}
+    if not use:
+        ents = (await db.scalars(select(Entity).where(Entity.id.in_(list(scores))))).all()
+        _lit(found, sorted(ents, key=lambda e: scores[e.id], reverse=True), reached)
+        return
 
     have = {m.id for m in found.memories}
     best: dict[uuid.UUID, float] = {}
@@ -248,7 +264,7 @@ async def _through_graph(
 
     ents = (await db.scalars(select(Entity).where(Entity.id.in_(list(scores))))).all()
     ents = sorted(ents, key=lambda e: scores[e.id], reverse=True)
-    found.entities = ents[:MAX_ENTITIES]
+    _lit(found, ents, reached)
     # Relations that still hold and touch a walked entity, including the user's own ("works
     # at UST"), the strongest first.
     rels = (
@@ -276,6 +292,22 @@ async def _through_graph(
     ]
 
 
+def _lit(found: Recall, ranked: list[Entity], reached: dict[uuid.UUID, graph.Activation]):
+    """The best entities, and the paths that reached them: an entity whose way in was cut by
+    MAX_ENTITIES comes in from the user instead, so the orb never lights a star out of thin
+    air."""
+    found.entities = ranked[:MAX_ENTITIES]
+    hops: dict[uuid.UUID, int] = {}
+    # Best first, so the entity a path came through is placed before the ones it led to.
+    for e in found.entities:
+        a = reached[e.id]
+        via = a.via if a.via in hops else None
+        hops[e.id] = hops[via] + 1 if via else 0
+        found.path.append({"id": str(e.id), "hop": hops[e.id], "via": via and str(via)})
+        if via and a.relation_id:
+            found.used.append(a.relation_id)
+
+
 async def assemble(
     db: AsyncSession,
     settings: Settings,
@@ -298,6 +330,7 @@ async def assemble(
         found = await recall(db, settings, user_id, question, vec, exclude_chat_id=chat.id)
         ctx.memories, ctx.episodes = found.memories, found.episodes
         ctx.facts, ctx.entities = found.facts, found.entities
+        ctx.path, ctx.used = found.path, found.used
 
     if history_truncated:
         ctx.earlier = await db.scalar(select(Episode.content).where(Episode.chat_id == chat.id))

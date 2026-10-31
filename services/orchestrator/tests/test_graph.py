@@ -287,6 +287,21 @@ async def test_recall_through_connections_finds_what_search_misses(
     assert [e.name for e in linked.entities] == ["Nexus", "LangGraph"]
     assert "Nexus uses LangGraph." in linked.facts and "Shivam is building Nexus" in linked.facts
     assert [m.id for m in default.memories] == [other]
+    # With graph recall off the walk still runs, to light the orb, but adds nothing to the
+    # prompt. Recall started from Nexus (named in the question) and came to LangGraph through
+    # the "uses" relation, which is noted for the nightly pass to strengthen.
+    assert default.facts == [] and [e.name for e in default.entities] == ["Nexus", "LangGraph"]
+    nexus, langgraph = (str(e.id) for e in default.entities)
+    assert default.path == [
+        {"id": nexus, "hop": 0, "via": None},
+        {"id": langgraph, "hop": 1, "via": nexus},
+    ]
+    assert linked.path == default.path and len(default.used) == 1
+    async with sessionmaker() as db:
+        uses = await db.get(Relation, default.used[0])
+    assert uses.predicate == "uses"
+    # The recall check measures memory search alone: no walk at all.
+    assert plain.entities == [] and plain.path == []
 
     # An ended relation is not followed.
     async with sessionmaker() as db:

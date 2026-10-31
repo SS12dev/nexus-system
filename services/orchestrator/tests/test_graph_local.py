@@ -316,3 +316,46 @@ async def test_nightly_merges_duplicates_and_arranges_the_graph(
     assert ents["Shivam"].salience == 1.0
     assert 0 < ents["Pune"].salience <= 1.0
     assert ents["Nexus"].community == ents["LangGraph"].community is not None
+
+
+async def test_links_recall_keeps_using_grow_stronger_each_night(
+    deps, sessionmaker, owner, embedder, redis
+):
+    user, chat_id = owner
+    async with sessionmaker() as db:
+        u = await db.get(User, user.id)
+        await graph.ingest(
+            db,
+            embedder,
+            u,
+            graph.parse_graph(
+                {
+                    "entities": [
+                        {"name": "Nexus", "type": "project"},
+                        {"name": "LangGraph", "type": "tool"},
+                        {"name": "Pune", "type": "place"},
+                    ],
+                    "relations": [
+                        {"from": "nexus", "to": "langgraph", "predicate": "uses"},
+                        {"from": "user", "to": "pune", "predicate": "lives in"},
+                    ],
+                }
+            ),
+            chat_id=chat_id,
+        )
+        await db.commit()
+        rels = {r.predicate: r for r in (await db.scalars(select(Relation))).all()}
+    uses, lives = rels["uses"], rels["lives in"]
+    # Recall walked "uses" three times today, and "lives in" never.
+    for _ in range(3):
+        await graph.note_used(redis, user.id, [uses.id])
+    stats = await graph_nightly.consolidate(deps)
+    assert stats["strengthened"] == 1
+    async with sessionmaker() as db:
+        after = {r.predicate: r.weight for r in (await db.scalars(select(Relation))).all()}
+    step = deps.settings.graph_strengthen_step
+    assert after["uses"] == pytest.approx(min(1.0, uses.weight + step * 2), abs=1e-4)
+    assert after["lives in"] == pytest.approx(lives.weight)
+    # The counts are spent: the next night adds nothing.
+    assert await redis.exists(graph.used_key(user.id)) == 0
+    assert (await graph_nightly.consolidate(deps))["strengthened"] == 0

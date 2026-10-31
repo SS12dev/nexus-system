@@ -407,6 +407,17 @@ OPTIONS: tuple[Option, ...] = (
         max=20,
     ),
     Option(
+        "graph_strengthen_step",
+        "Memory and context",
+        "Strengthen links recall uses",
+        "Each night, every connection recall walked during the day gains this much weight per "
+        "doubling of its uses (once: +0.03, four times: +0.07 at 0.03), so the paths the "
+        "assistant keeps taking grow stronger and brighter in the orb. 0 turns it off.",
+        "float",
+        min=0,
+        max=0.2,
+    ),
+    Option(
         "graph_extractor",
         "Memory and context",
         "Who builds the knowledge graph",

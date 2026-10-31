@@ -394,19 +394,34 @@ async def prune(db: AsyncSession, user_id: uuid.UUID | None = None) -> int:
 # --- Reading -----------------------------------------------------------------------------------
 
 
-async def walk(
+@dataclass
+class Activation:
+    """How recall reached an entity: its score, how many links from a seed (0 for a seed) and
+    the entity and relation it came through, so the orb can light the path in order and the
+    nightly pass can strengthen the links recall keeps using."""
+
+    score: float
+    hop: int
+    via: uuid.UUID | None = None
+    relation_id: uuid.UUID | None = None
+
+
+async def spread(
     db: AsyncSession, user_id: uuid.UUID, seeds: dict[uuid.UUID, float], hops: int
-) -> dict[uuid.UUID, float]:
-    """Entities within `hops` of the seeds over relations that still hold, each scored by its
-    best path: the seed's score, halved per hop and weighted by each relation's confidence.
-    The user's own entity is never walked through: everything connects to it."""
-    if not seeds or hops <= 0:
-        return dict(seeds)
+) -> dict[uuid.UUID, Activation]:
+    """Spreading activation: entities within `hops` of the seeds over relations that still
+    hold, each scored by its best path: the seed's score, halved per hop and weighted by each
+    relation's confidence. The user's own entity is never walked through: everything connects
+    to it."""
+    if not seeds:
+        return {}
+    if hops <= 0:
+        return {k: Activation(v, 0) for k, v in seeds.items()}
     rows = await db.execute(
         text(
             """
-            with recursive walk(id, depth, score) as (
-                select s.id, 0, s.score
+            with recursive walk(id, depth, score, via, rel) as (
+                select s.id, 0, s.score, cast(null as uuid), cast(null as uuid)
                 from unnest(cast(:ids as uuid[]), cast(:scores as float[])) as s(id, score)
                 where not exists (
                     select 1 from trash_items t
@@ -418,7 +433,7 @@ async def walk(
                 )
                 union all
                 select case when r.src_id = w.id then r.dst_id else r.src_id end,
-                       w.depth + 1, w.score * 0.5 * r.confidence
+                       w.depth + 1, w.score * 0.5 * r.confidence, w.id, r.id
                 from walk w
                 join relations r on w.id in (r.src_id, r.dst_id)
                 join entities e
@@ -434,7 +449,8 @@ async def walk(
                     where t.kind = 'memories_all' and t.user_id = :user_id
                   )
             )
-            select id, max(score) as score from walk group by id"""
+            select distinct on (id) id, depth, score, via, rel from walk
+            order by id, score desc, depth"""
         ),
         {
             "ids": list(seeds),
@@ -443,7 +459,35 @@ async def walk(
             "user_id": user_id,
         },
     )
-    return {r.id: float(r.score) for r in rows}
+    return {r.id: Activation(float(r.score), r.depth, r.via, r.rel) for r in rows}
+
+
+def used_key(user_id: uuid.UUID) -> str:
+    return f"graph:used:{user_id}"
+
+
+async def note_used(redis, user_id: uuid.UUID, relation_ids: list[uuid.UUID]) -> None:
+    """Count the relations a recall walked, for the nightly pass to strengthen: links that
+    keep being used grow, the way a well-worn path does. A lost count only means a link
+    strengthens a night later, so a Redis hiccup never fails the turn."""
+    if not relation_ids:
+        return
+    key = used_key(user_id)
+    try:
+        async with redis.pipeline(transaction=False) as pipe:
+            for rid in relation_ids:
+                pipe.hincrby(key, str(rid), 1)
+            pipe.expire(key, 7 * 24 * 3600)
+            await pipe.execute()
+    except Exception:
+        log.warning("Couldn't note the relations recall used", exc_info=True)
+
+
+async def walk(
+    db: AsyncSession, user_id: uuid.UUID, seeds: dict[uuid.UUID, float], hops: int
+) -> dict[uuid.UUID, float]:
+    """Each entity `spread` reaches, with its score."""
+    return {k: a.score for k, a in (await spread(db, user_id, seeds, hops)).items()}
 
 
 async def graph_payload(db: AsyncSession, user_id: uuid.UUID) -> dict:

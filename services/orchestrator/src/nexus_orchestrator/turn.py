@@ -19,6 +19,7 @@ from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder
 from nexus_common.events import Event, publish
 from nexus_common.google import get_grant, services_in
+from nexus_common.graph import note_used
 from nexus_common.library import file_payload
 from nexus_common.links import link_payload
 from nexus_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
@@ -483,7 +484,9 @@ async def _generate(
                 entities=[
                     {"id": str(e.id), "name": e.name, "type": e.type} for e in context.entities
                 ],
+                path=context.path,
             )
+            await note_used(deps.redis, user.id, context.used)
         # Outbound and destructive tools are for agents in a system, where every call is approved.
         names = {t.name for t in TOOLS if t.assistant and t.name in allowed} | {"remember"}
         extra = []

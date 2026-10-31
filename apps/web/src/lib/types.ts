@@ -499,6 +499,9 @@ export interface Message {
 export interface Recalled {
   memories: string[];
   entities: { id: string; name: string; type: EntityType }[];
+  /** How recall reached each entity: 0 for what the message is about, then one more per link
+   * it followed, and the entity it came through. The orb lights them in this order. */
+  path?: { id: string; hop: number; via: string | null }[];
 }
 
 export interface ToolStep {
@@ -1249,6 +1252,7 @@ export interface GraphRelation {
 
 /** Admin > Graph: who builds the knowledge graph and how it is doing. Counts only. */
 export interface GraphRun {
+  strengthened?: number;
   at: string;
   seconds?: number;
   items?: number;
