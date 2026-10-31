@@ -17,6 +17,8 @@ import {
   cameraDistance,
   clusterAnchor,
   inside,
+  litAt,
+  litSteps,
   liveSystems,
   memoryPoints,
   ORB_R,
@@ -557,5 +559,36 @@ describe("the concentric constellation", () => {
     const out = inside(graph, [], { stars: 40, memories: 0 });
     expect(out.stars.find((s) => s.id === "ana")).toMatchObject({ shell: 2, domain: "social" });
     expect(out.lines.find((l) => l.a === "me" && l.b === "ana")).toMatchObject({ family: "social", weight: 0.8 });
+  });
+});
+
+describe("lighting a recall", () => {
+  const recall = {
+    memories: ["m1"],
+    entities: [
+      { id: "nexus", name: "Nexus", type: "project" as const },
+      { id: "langgraph", name: "LangGraph", type: "tool" as const },
+      { id: "python", name: "Python", type: "tool" as const },
+    ],
+    path: [
+      { id: "nexus", hop: 0, via: null },
+      { id: "langgraph", hop: 1, via: "nexus" },
+      { id: "python", hop: 2, via: "langgraph" },
+    ],
+  };
+
+  it("lights what the message is about first, then a hop at a time, then the memories", () => {
+    expect(litSteps(recall)).toBe(4);
+    expect([...litAt(recall, 0)]).toEqual(["nexus"]);
+    expect([...litAt(recall, 1)]).toEqual(["nexus", "langgraph"]);
+    expect([...litAt(recall, 2)]).toEqual(["nexus", "langgraph", "python"]);
+    expect([...litAt(recall, 3)]).toEqual(["nexus", "langgraph", "python", "m1"]);
+  });
+
+  it("lights an older reply's things together, then its memories", () => {
+    const old = { memories: ["m1"], entities: recall.entities };
+    expect(litSteps(old)).toBe(2);
+    expect(litAt(old, 1).size).toBe(4);
+    expect(litAt(null, 0).size).toBe(0);
   });
 });

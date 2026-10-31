@@ -15,6 +15,7 @@ import type {
   Memory,
   MemoryKind,
   Project,
+  Recalled,
   Routine,
 } from "../lib/types";
 
@@ -872,4 +873,24 @@ export function cameraDistance(
   // With no teams out, sit closer so the constellation inside the orb is readable.
   const margin = clusterCount === 0 ? 1.15 : 1.08;
   return (extent / Math.min(tanV, tanH)) * margin;
+}
+
+// --- Lighting what a reply recalled -----------------------------------------------------------
+
+/** How many steps lighting a recall takes: one per hop, then the memories. */
+export function litSteps(recall: Recalled | null): number {
+  if (!recall) return 0;
+  const hops = (recall.path ?? []).map((p) => p.hop);
+  return (hops.length ? Math.max(...hops) + 1 : 1) + (recall.memories.length ? 1 : 0);
+}
+
+/** What is lit `step` steps into lighting a recall: what the message is about first, then
+ * each link recall followed from it, a hop at a time, and the memories it drew on last. A
+ * recall without a path (an older reply) lights its things together, then its memories. */
+export function litAt(recall: Recalled | null, step: number): Set<string> {
+  if (!recall) return new Set();
+  const hop = new Map((recall.path ?? []).map((p) => [p.id, p.hop]));
+  const ids = recall.entities.filter((e) => (hop.get(e.id) ?? 0) <= step).map((e) => e.id);
+  const last = litSteps(recall) - 1;
+  return new Set(step >= last ? [...ids, ...recall.memories] : ids);
 }

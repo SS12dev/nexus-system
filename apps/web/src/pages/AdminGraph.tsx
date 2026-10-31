@@ -63,8 +63,9 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
         {local
           ? "A model on this machine reads new memories, finished chats and files for it every ten minutes, at no cost."
           : "The memory model notes it in the same calls that save memories."}{" "}
-        Each night duplicates are merged, links nobody has confirmed for a month fade a little, and everything is ranked
-        and grouped into clusters.
+        Each night duplicates are merged, links nobody has confirmed for a month fade a little, links recall keeps
+        using grow stronger, and everything is ranked and grouped into clusters. When a reply draws on the graph, the
+        orb lights what it touched from the centre outward, a link at a time.
       </p>
       {!data.enabled && (
         <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
@@ -204,7 +205,12 @@ function RunLine({ run, what, empty }: { run: GraphRun | null; what: string; emp
   const parts =
     run.items !== undefined
       ? [`${run.items} items`, `${run.entities} things`, `${run.relations} connections`]
-      : [`${run.merged} duplicates merged`, `${run.faded} connections faded`, `${run.communities} clusters`];
+      : [
+          `${run.merged} duplicates merged`,
+          `${run.faded} connections faded`,
+          `${run.strengthened ?? 0} strengthened by use`,
+          `${run.communities} clusters`,
+        ];
   return (
     <div className="mt-2 text-xs text-slate-400">
       <span title={formatDateTime(run.at)}>

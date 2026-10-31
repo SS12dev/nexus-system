@@ -29,6 +29,8 @@ import {
   inside as layoutInside,
   isArtifact,
   KIND_COLOR,
+  litAt,
+  litSteps,
   liveSystems,
   NODE_COLOR,
   OUTSIDE_TYPES,
@@ -63,8 +65,10 @@ const VIEWS: { id: ScreenMode; label: string; icon: ReactNode; hint: string }[] 
   { id: "dashboard", label: "Widgets", icon: <LayoutGrid size={14} />, hint: "A board of your widgets" },
 ];
 
-/** How long what a reply recalled stays lit in the orb. */
+/** How long what a reply recalled stays lit in the orb, and how long each hop of it takes to
+ * light up. */
 const LIT_MS = 15000;
+const HOP_MS = 450;
 
 /** Nexus as a 3D orb with the live agent network around it and, inside it, who you are: you at
  * the centre, the people, places, interests and tools you've mentioned around you, and
@@ -147,17 +151,21 @@ export function OrbStage({
     return () => window.clearTimeout(t);
   }, [memoryVersion, connected]);
 
-  // Light up what a reply recalled for a while, then let it fade back.
+  // Light up what a reply recalled, from what the message is about outward a hop at a time,
+  // hold it for a while, then let it fade back.
+  const [litStep, setLitStep] = useState(0);
   useEffect(() => {
     if (!recall) return;
     setLit(recall);
-    const t = window.setTimeout(() => setLit(null), LIT_MS);
-    return () => window.clearTimeout(t);
+    setLitStep(0);
+    const steps = litSteps(recall);
+    const timers = Array.from({ length: steps - 1 }, (_, i) =>
+      window.setTimeout(() => setLitStep(i + 1), HOP_MS * (i + 1)),
+    );
+    timers.push(window.setTimeout(() => setLit(null), LIT_MS));
+    return () => timers.forEach((t) => window.clearTimeout(t));
   }, [recall]);
-  const litIds = useMemo(
-    () => new Set(lit ? [...lit.memories, ...lit.entities.map((e) => e.id)] : []),
-    [lit],
-  );
+  const litIds = useMemo(() => litAt(lit, litStep), [lit, litStep]);
 
   const live = useMemo(() => liveSystems(systems), [systems]);
   const clusters = useMemo(

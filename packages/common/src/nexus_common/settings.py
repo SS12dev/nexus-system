@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     graph_recall_enabled: bool = False
     graph_hops: int = 2
     graph_extra_memories: int = 4
+    # Each night, relations recall used gain this much weight per doubling of their uses.
+    graph_strengthen_step: float = 0.03
     # Who reads chats, memories and files for the graph: "local" is a model in Ollama on this
     # machine (free, two passes: entities, then relations), "memory" the memory model in the
     # same call that saves memories.
