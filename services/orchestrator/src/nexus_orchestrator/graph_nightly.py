@@ -10,7 +10,10 @@
 4. Arrange: per user, igraph ranks every entity by personalised PageRank from the user
    (salience, which the orb sizes and orders by) and groups them into Leiden communities
    (which the orb clusters).
-5. Ask: a few question cards where the graph is unsure (nexus_common.questions.plan).
+5. Areas: the communities become life areas (one galaxy each in the universe view), matched to
+   yesterday's so each keeps its place; areas are born, split, merged or end, and the local
+   model names new or changed ones (nexus_common.universe.track).
+6. Ask: a few question cards where the graph is unsure (nexus_common.questions.plan).
 
 What it did is kept for Admin > Graph.
 """
@@ -27,9 +30,10 @@ import igraph as ig
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import questions
+from nexus_common import questions, universe
 from nexus_common.graph import norm, used_key
 from nexus_common.models import Entity, Mention, Relation, utcnow
+from nexus_orchestrator.graph_local import LocalModel, LocalModelError
 from nexus_orchestrator.turn import TurnDeps
 
 log = logging.getLogger(__name__)
@@ -294,6 +298,35 @@ async def arrange(db: AsyncSession, user_id: uuid.UUID) -> int:
     return sum(1 for n in sizes.values() if n > 1)
 
 
+NAME_SYSTEM = (
+    "You name one area of a person's life from the main things in it, for a map of their life. "
+    'Give a short, plain name of one to three words ("Work at UST", "3D printing", '
+    '"Family") and one short sentence saying what the area holds. British spelling. '
+    "No quotes, no emoji."
+)
+NAME_SCHEMA = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "summary": {"type": "string"}},
+    "required": ["name", "summary"],
+}
+
+
+def area_namer(model: LocalModel):
+    """Names areas with the local model; None (the fallback name) when it can't."""
+
+    async def name(top: list[str], domain: str | None) -> tuple[str, str] | None:
+        prompt = "Main things: " + "; ".join(top)
+        if domain:
+            prompt += f"\nPart of life: {domain}"
+        try:
+            got = await model.ask(NAME_SYSTEM, prompt, NAME_SCHEMA)
+        except (LocalModelError, ValueError):
+            return None
+        return str(got.get("name", "")), str(got.get("summary", ""))
+
+    return name
+
+
 async def consolidate(deps: TurnDeps) -> dict:
     stats = {
         "users": 0,
@@ -301,11 +334,16 @@ async def consolidate(deps: TurnDeps) -> dict:
         "faded": 0,
         "strengthened": 0,
         "communities": 0,
+        "areas": 0,
+        "areas_born": 0,
         "questions": 0,
         "failed": 0,
     }
     async with deps.sessionmaker() as db:
         user_ids = (await db.scalars(select(Entity.user_id).distinct())).all()
+    local = deps.settings.graph_extractor == "local"
+    model = LocalModel(deps.settings) if local else None
+    namer = area_namer(model) if model else None
     for user_id in user_ids:
         try:
             async with deps.sessionmaker() as db:
@@ -315,6 +353,9 @@ async def consolidate(deps: TurnDeps) -> dict:
                     db, deps.redis, user_id, deps.settings.graph_strengthen_step
                 )
                 stats["communities"] += await arrange(db, user_id)
+                found = await universe.track(db, user_id, namer)
+                stats["areas"] += found["areas"]
+                stats["areas_born"] += found["born"] + found["split"]
                 stats["questions"] += await questions.plan(
                     db, user_id, deps.settings.graph_question_cards_per_day
                 )
@@ -323,15 +364,19 @@ async def consolidate(deps: TurnDeps) -> dict:
         except Exception:
             stats["failed"] += 1
             log.exception("Nightly graph upkeep failed for %s", user_id)
+    if model:
+        await model.aclose()
     stats["at"] = utcnow().isoformat()
     await deps.redis.set(STATUS_KEY, json.dumps(stats))
     log.info(
-        "Nightly graph: %d merged, %d relations faded, %d strengthened, %d communities over "
-        "%d users",
+        "Nightly graph: %d merged, %d relations faded, %d strengthened, %d communities, "
+        "%d areas (%d new) over %d users",
         stats["merged"],
         stats["faded"],
         stats["strengthened"],
         stats["communities"],
+        stats["areas"],
+        stats["areas_born"],
         stats["users"],
     )
     return stats
