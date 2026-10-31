@@ -10,6 +10,7 @@
 4. Arrange: per user, igraph ranks every entity by personalised PageRank from the user
    (salience, which the orb sizes and orders by) and groups them into Leiden communities
    (which the orb clusters).
+5. Ask: a few question cards where the graph is unsure (nexus_common.questions.plan).
 
 What it did is kept for Admin > Graph.
 """
@@ -26,6 +27,7 @@ import igraph as ig
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexus_common import questions
 from nexus_common.graph import norm, used_key
 from nexus_common.models import Entity, Mention, Relation, utcnow
 from nexus_orchestrator.turn import TurnDeps
@@ -138,9 +140,9 @@ async def _merge(db: AsyncSession, keep: Entity, drop: Entity) -> None:
         text(
             """
             insert into mentions (id, user_id, entity_id, memory_id, episode_id, file_id,
-                                  chat_id, created_at)
+                                  chat_id, imported_chat_id, created_at)
             select gen_random_uuid(), user_id, :keep, memory_id, episode_id, file_id, chat_id,
-                   created_at
+                   imported_chat_id, created_at
             from mentions where entity_id = :drop
             on conflict on constraint uq_mentions do nothing
             """
@@ -180,9 +182,9 @@ async def _fold_relations(db: AsyncSession, entity_id: uuid.UUID) -> None:
             text(
                 """
                 insert into relation_evidence (id, user_id, relation_id, memory_id, episode_id,
-                                               file_id, chat_id, created_at)
+                                               file_id, chat_id, imported_chat_id, created_at)
                 select gen_random_uuid(), user_id, :keep, memory_id, episode_id, file_id,
-                       chat_id, created_at
+                       chat_id, imported_chat_id, created_at
                 from relation_evidence where relation_id = :drop
                 on conflict on constraint uq_relation_evidence do nothing
                 """
@@ -299,6 +301,7 @@ async def consolidate(deps: TurnDeps) -> dict:
         "faded": 0,
         "strengthened": 0,
         "communities": 0,
+        "questions": 0,
         "failed": 0,
     }
     async with deps.sessionmaker() as db:
@@ -312,6 +315,9 @@ async def consolidate(deps: TurnDeps) -> dict:
                     db, deps.redis, user_id, deps.settings.graph_strengthen_step
                 )
                 stats["communities"] += await arrange(db, user_id)
+                stats["questions"] += await questions.plan(
+                    db, user_id, deps.settings.graph_question_cards_per_day
+                )
                 await db.commit()
             stats["users"] += 1
         except Exception:

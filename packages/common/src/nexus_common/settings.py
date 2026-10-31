@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     graph_extra_memories: int = 4
     # Each night, relations recall used gain this much weight per doubling of their uses.
     graph_strengthen_step: float = 0.03
+    # Question cards the nightly pass may add per person per day, where the graph is unsure.
+    graph_question_cards_per_day: int = 3
     # Who reads chats, memories and files for the graph: "local" is a model in Ollama on this
     # machine (free, two passes: entities, then relations), "memory" the memory model in the
     # same call that saves memories.

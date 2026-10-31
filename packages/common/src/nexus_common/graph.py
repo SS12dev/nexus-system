@@ -13,8 +13,9 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -160,8 +161,10 @@ class Resolver:
     """Turns names into a user's entities: by name or alias first, then by meaning within the
     same type, and otherwise a new entity. One per ingest, so a name resolves once."""
 
-    def __init__(self, db: AsyncSession, embedder: CachedEmbedder, user: User):
-        self.db, self.embedder, self.user = db, embedder, user
+    def __init__(
+        self, db: AsyncSession, embedder: CachedEmbedder, user: User, origin: str = "model"
+    ):
+        self.db, self.embedder, self.user, self.origin = db, embedder, user, origin
         self.by_name: dict[str, Entity] = {}
 
     async def load(self) -> None:
@@ -219,6 +222,7 @@ class Resolver:
                     summary=it.get("summary", ""),
                     embedding=vec,
                     embedding_model=model or None,
+                    origin=self.origin,
                 )
                 self.db.add(match)
             for k in [key, *it.get("aliases", [])]:
@@ -266,16 +270,24 @@ async def ingest(
     *,
     chat_id: uuid.UUID | None = None,
     links: list[tuple[dict, list[str]]] = (),
+    origin: str = "model",
+    evidence: dict | None = None,
+    at: datetime | None = None,
 ) -> int:
     """Add what the model found to the user's graph. `links` pairs a mention target, such as
     {"memory_id": id}, with the names it is about; every entity found is also mentioned by
-    `chat_id`. Returns how many entities were touched."""
+    `chat_id`. `origin` is who said it: "user" (a question card) makes new relations certain.
+    `evidence` is what each relation is noted as coming from (default: `chat_id`), and `at`
+    when it was said, for an imported conversation from years ago. Returns how many entities
+    were touched."""
     if not found and not any(names for _t, names in links):
         return 0
-    resolver = Resolver(db, embedder, user)
+    resolver = Resolver(db, embedder, user, origin)
     await resolver.load()
     await resolver.resolve(found.entities)
-    now = utcnow()
+    now = at or utcnow()
+    if evidence is None and chat_id is not None:
+        evidence = {"chat_id": chat_id}
     touched: set[uuid.UUID] = set()
 
     for r in found.relations:
@@ -301,18 +313,20 @@ async def ingest(
                 same = _relation(user, src, dst, r, chat_id, now, ended=True)
                 db.add(same)
         elif same is not None:
-            same.confidence = min(1.0, same.confidence + 0.1)
+            same.confidence = 1.0 if origin == "user" else min(1.0, same.confidence + 0.1)
             same.weight = min(1.0, same.weight + 0.1)
             same.evidence_count += 1
-            same.updated_at = same.last_seen = now
+            # An old conversation confirms it, but doesn't make it look stale.
+            same.last_seen = max(filter(None, [same.last_seen, now]))
+            same.updated_at = utcnow()
             if r.get("fact"):
                 same.fact = r["fact"]
         else:
-            same = _relation(user, src, dst, r, chat_id, now)
+            same = _relation(user, src, dst, r, chat_id, now, origin=origin)
             db.add(same)
-        if chat_id is not None:
+        if evidence:
             await db.flush()
-            await add_evidence(db, user.id, same.id, chat_id=chat_id)
+            await add_evidence(db, user.id, same.id, **evidence)
 
     targets: list[tuple[dict, list[Entity]]] = []
     if chat_id is not None:
@@ -328,12 +342,18 @@ async def ingest(
                 .on_conflict_do_nothing(constraint="uq_mentions")
             )
     if touched:
-        await db.execute(update(Entity).where(Entity.id.in_(touched)).values(seen_at=now))
+        await db.execute(
+            update(Entity)
+            .where(Entity.id.in_(touched))
+            .values(seen_at=func.greatest(func.coalesce(Entity.seen_at, now), now))
+        )
     await db.flush()
     return len(touched)
 
 
-def _relation(user, src, dst, r, chat_id, now, ended: bool = False) -> Relation:
+def _relation(
+    user, src, dst, r, chat_id, now, ended: bool = False, origin: str = "model"
+) -> Relation:
     canon = ontology.canonical(r["predicate"])
     return Relation(
         id=uuid.uuid4(),
@@ -347,7 +367,8 @@ def _relation(user, src, dst, r, chat_id, now, ended: bool = False) -> Relation:
         evidence_count=1,
         last_seen=now,
         fact=r.get("fact") or "",
-        confidence=0.7,
+        confidence=1.0 if origin == "user" else 0.7,
+        origin=origin,
         source_chat_id=chat_id,
         valid_from=now,
         valid_to=now if ended else None,

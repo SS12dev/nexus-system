@@ -23,6 +23,7 @@ from nexus_api.routes import (
     files,
     folders,
     graph_admin,
+    imports,
     improvements,
     instructions,
     links,
@@ -32,6 +33,7 @@ from nexus_api.routes import (
     ops,
     projects,
     push,
+    questions,
     recall,
     routines,
     screen,
@@ -150,6 +152,8 @@ def create_app(
     app.include_router(improvements.router)
     app.include_router(recall.router)
     app.include_router(graph_admin.router)
+    app.include_router(questions.router)
+    app.include_router(imports.router)
     app.include_router(routines.router)
     app.include_router(push.router)
     app.include_router(trash.router)

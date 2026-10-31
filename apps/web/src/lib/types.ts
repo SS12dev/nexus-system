@@ -1250,9 +1250,41 @@ export interface GraphRelation {
   origin?: string;
 }
 
+/** A chat history export from another assistant, being read into the knowledge graph. */
+export interface ChatImportItem {
+  id: string;
+  name: string;
+  source: "chatgpt" | "claude" | null;
+  status: "reading" | "ready" | "failed";
+  conversations: number;
+  /** Conversations kept: the rest were tasks with nothing about you. */
+  kept: number;
+  /** Of those, how many the local model has read into the graph. */
+  read: number;
+  error: string | null;
+  created_at: string;
+}
+
+/** A question card that fills in the knowledge graph (GET /api/questions). */
+export interface GraphCard {
+  id: string;
+  /** starter (the first deck), confirm, still, domain or thin (the nightly ones). */
+  kind: "starter" | "confirm" | "still" | "domain" | "thin";
+  shell: number | null;
+  prompt: string;
+  help: string;
+  form: "one" | "many" | "yesno" | "text";
+  options: string[];
+  /** For "many": how many may be picked. */
+  most: number;
+}
+
+export type CardAnswer = { choice: string } | { choices: string[] } | { yes: boolean } | { text: string };
+
 /** Admin > Graph: who builds the knowledge graph and how it is doing. Counts only. */
 export interface GraphRun {
   strengthened?: number;
+  questions?: number;
   at: string;
   seconds?: number;
   items?: number;
@@ -1278,7 +1310,7 @@ export interface GraphAdmin {
     loaded_gb: number;
     error?: string;
   } | null;
-  backlog: { memories: number; chats: number; files: number };
+  backlog: { memories: number; chats: number; files: number; imported?: number };
   last_extract: GraphRun | null;
   last_nightly: GraphRun | null;
   nightly_utc: string;

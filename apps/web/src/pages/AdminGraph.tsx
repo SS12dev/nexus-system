@@ -51,7 +51,7 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
   };
 
   if (!data) return <p className="text-sm text-slate-400">Loading…</p>;
-  const waiting = data.backlog.memories + data.backlog.chats + data.backlog.files;
+  const waiting = data.backlog.memories + data.backlog.chats + data.backlog.files + (data.backlog.imported ?? 0);
   const local = data.extractor === "local";
   const o = data.ollama;
 
@@ -64,7 +64,8 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
           ? "A model on this machine reads new memories, finished chats and files for it every ten minutes, at no cost."
           : "The memory model notes it in the same calls that save memories."}{" "}
         Each night duplicates are merged, links nobody has confirmed for a month fade a little, links recall keeps
-        using grow stronger, and everything is ranked and grouped into clusters. When a reply draws on the graph, the
+        using grow stronger, everything is ranked and grouped into clusters, and a few question cards go where the
+        graph is unsure. When a reply draws on the graph, the
         orb lights what it touched from the centre outward, a link at a time.
       </p>
       {!data.enabled && (
@@ -137,10 +138,11 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
           )
         }
       >
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Tile label="Memories" value={data.backlog.memories} />
           <Tile label="Finished chats" value={data.backlog.chats} />
           <Tile label="Files" value={data.backlog.files} />
+          <Tile label="Imported chats" value={data.backlog.imported ?? 0} hint="read after everything newer" />
         </div>
         <RunLine run={data.last_extract} what="Last read" empty="Nothing read yet." />
       </Section>
@@ -210,6 +212,7 @@ function RunLine({ run, what, empty }: { run: GraphRun | null; what: string; emp
           `${run.faded} connections faded`,
           `${run.strengthened ?? 0} strengthened by use`,
           `${run.communities} clusters`,
+          `${run.questions ?? 0} question cards`,
         ];
   return (
     <div className="mt-2 text-xs text-slate-400">

@@ -15,7 +15,16 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_common import ontology
-from nexus_common.models import AuditLog, Entity, Episode, File, FileStatus, Memory, Relation
+from nexus_common.models import (
+    AuditLog,
+    Entity,
+    Episode,
+    File,
+    FileStatus,
+    ImportedChat,
+    Memory,
+    Relation,
+)
 
 router = APIRouter(prefix="/api/admin/graph", tags=["admin"])
 
@@ -76,6 +85,11 @@ async def graph_status(actor: OwnerUser, db: DbDep, redis: RedisDep, settings: S
                 select(func.count())
                 .select_from(File)
                 .where(File.graph_at.is_(None), File.status == FileStatus.ready)
+            ),
+            "imported": await db.scalar(
+                select(func.count())
+                .select_from(ImportedChat)
+                .where(ImportedChat.graph_at.is_(None))
             ),
         },
         "last_extract": await _last(redis, EXTRACT_KEY),

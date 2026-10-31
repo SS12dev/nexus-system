@@ -863,9 +863,9 @@ class Relation(Base):
 
 
 class Mention(Base):
-    """Ties an entity to one memory, past-chat summary, file or chat that is about it. Exactly
-    one of the four is set; deleting that row deletes the mention, and an entity nothing
-    mentions any more is pruned (nexus_common.graph.prune)."""
+    """Ties an entity to one memory, past-chat summary, file, chat or imported conversation that
+    is about it. Exactly one of the five is set; deleting that row deletes the mention, and an
+    entity nothing mentions any more is pruned (nexus_common.graph.prune)."""
 
     __tablename__ = "mentions"
 
@@ -880,6 +880,10 @@ class Mention(Base):
     )
     file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
     chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    # A conversation from another assistant's export (ChatGPT, Claude).
+    imported_chat_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("imported_chats.id", ondelete="CASCADE")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
@@ -889,6 +893,7 @@ class Mention(Base):
             "episode_id",
             "file_id",
             "chat_id",
+            "imported_chat_id",
             name="uq_mentions",
             postgresql_nulls_not_distinct=True,
         ),
@@ -896,6 +901,7 @@ class Mention(Base):
         Index("ix_mentions_episode", "episode_id"),
         Index("ix_mentions_file", "file_id"),
         Index("ix_mentions_chat", "chat_id"),
+        Index("ix_mentions_imported_chat", "imported_chat_id"),
     )
 
 
@@ -916,6 +922,10 @@ class RelationEvidence(Base):
     )
     file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
     chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    # A conversation from another assistant's export (ChatGPT, Claude).
+    imported_chat_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("imported_chats.id", ondelete="CASCADE")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
@@ -925,6 +935,7 @@ class RelationEvidence(Base):
             "episode_id",
             "file_id",
             "chat_id",
+            "imported_chat_id",
             name="uq_relation_evidence",
             postgresql_nulls_not_distinct=True,
         ),
@@ -957,6 +968,89 @@ class OntologyPredicate(Base):
     description: Mapped[str] = mapped_column(Text, default="", server_default="")
     builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ChatImport(Base):
+    """A chat history export from another assistant (ChatGPT or Claude) the user uploaded. The
+    raw export is read once and deleted; only the user's own words of each conversation are
+    kept (ImportedChat), for the local model to read into the graph over the next nights.
+    Deleting the import takes back everything it taught the graph."""
+
+    __tablename__ = "chat_imports"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # chatgpt or claude, once read
+    source: Mapped[str | None] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(255))
+    # reading, ready or failed
+    status: Mapped[str] = mapped_column(String(16), default="reading", server_default="reading")
+    conversations: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Kept for the graph; the rest were tasks with nothing about the user in them.
+    kept: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_chat_imports_user", "user_id"),)
+
+
+class ImportedChat(Base):
+    """One conversation from an import: its title, when it happened and the user's own messages
+    (pasted code and logs stripped). The assistant's side is not kept: it says nothing about the
+    user. Facts from it enter the graph with the conversation's own date."""
+
+    __tablename__ = "imported_chats"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    import_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_imports.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    external_id: Mapped[str] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    text: Mapped[str] = mapped_column(Text)
+    messages: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("import_id", "external_id", name="uq_imported_chats_external"),
+        Index("ix_imported_chats_pending", "user_id", "graph_at"),
+    )
+
+
+class GraphQuestion(Base):
+    """A short question card that fills in the knowledge graph: the starter deck (who you are,
+    the people and places in your life, what you do, what you learn) and the nightly cards
+    where the graph is unsure (two names that may be one thing, a link with no recent sign,
+    a thing with no part of life). `key` makes each one asked at most once; skipped and
+    answered cards stay so they are not asked again."""
+
+    __tablename__ = "graph_questions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(String(160))
+    # starter, confirm, still, domain or thin
+    kind: Mapped[str] = mapped_column(String(16))
+    shell: Mapped[int | None] = mapped_column(Integer)
+    prompt: Mapped[str] = mapped_column(Text)
+    help: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # one, many, yesno or text
+    form: Mapped[str] = mapped_column(String(8))
+    options: Mapped[list] = mapped_column(JSON, default=list)
+    # What the answer applies to: entity or relation ids, the starter card's id.
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    # open, answered or skipped
+    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open")
+    answer: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_graph_questions_key"),
+        Index("ix_graph_questions_open", "user_id", "status"),
+    )
 
 
 class RecallQuestion(Base):
