@@ -1257,7 +1257,7 @@ export interface ChatImportItem {
   source: "chatgpt" | "claude" | null;
   status: "reading" | "ready" | "failed";
   conversations: number;
-  /** Conversations kept: the rest were tasks with nothing about you. */
+  /** Conversations kept: the rest were empty, very short or had nothing about the user. */
   kept: number;
   /** Of those, how many the local model has read into the graph. */
   read: number;
