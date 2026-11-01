@@ -43,6 +43,8 @@ log = logging.getLogger(__name__)
 MERGE_DISTANCE = 0.08
 FADE_AFTER = timedelta(days=30)
 FADE_FACTOR = 0.97
+# At most once in this long per user, however often the upkeep runs (seconds).
+FADE_EVERY = 20 * 3600
 MIN_WEIGHT = 0.1
 STATUS_KEY = "graph:nightly:last"
 
@@ -274,8 +276,13 @@ async def arrange(db: AsyncSession, user_id: uuid.UUID) -> int:
         )
         # Leiden's result depends on the order it visits nodes; a fixed seed keeps the orb's
         # clusters from reshuffling every night when nothing changed.
+        # Communities without the user: everything links to them, so with them in, Leiden
+        # tends to pour most of a life into one community (one giant galaxy).
+        apart = g.copy()
+        if me is not None:
+            apart.delete_edges(apart.incident(me))
         random.seed(0)
-        membership = g.community_leiden(
+        membership = apart.community_leiden(
             objective_function="modularity", weights="weight", n_iterations=-1
         ).membership
     else:
@@ -348,7 +355,9 @@ async def consolidate(deps: TurnDeps) -> dict:
         try:
             async with deps.sessionmaker() as db:
                 stats["merged"] += await merge_duplicates(db, user_id)
-                stats["faded"] += await fade(db, user_id)
+                # Fading is per day: running the upkeep again by hand doesn't fade twice.
+                if await deps.redis.set(f"graph:faded:{user_id}", "1", nx=True, ex=FADE_EVERY):
+                    stats["faded"] += await fade(db, user_id)
                 stats["strengthened"] += await strengthen(
                     db, deps.redis, user_id, deps.settings.graph_strengthen_step
                 )

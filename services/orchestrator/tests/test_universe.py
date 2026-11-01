@@ -226,3 +226,93 @@ async def test_the_payload_never_names_the_core(sessionmaker, owner):
     # The user works at UST: a root from the core to that galaxy.
     assert out["roots"] == [{"area": area["id"], "w": 0.8}]
     assert uuid.UUID(out["self_id"])
+
+
+async def test_loose_things_join_their_part_of_life_not_the_biggest_area(sessionmaker, owner):
+    user, _chat = owner
+    async with sessionmaker() as db:
+        await _graph(
+            db,
+            user.id,
+            {
+                "work": ["UST", "Rahul", "Priya", "Nexus", "Orion"],
+                "hobbies": ["Bambu", "PLA", "Rocket", "Drone"],
+            },
+        )
+        loose = [
+            ("Gym", "health"),
+            ("Yoga", "health"),
+            ("Run club", "health"),
+            ("Physio", "health"),
+        ]
+        loose += [("Payroll", "work"), ("Mum", "social")]
+        for name, domain in loose:
+            db.add(
+                Entity(
+                    user_id=user.id,
+                    type="topic",
+                    shell=3,
+                    name=name,
+                    summary="",
+                    aliases=[],
+                    domain=domain,
+                )
+            )
+        await db.commit()
+
+        names = iter(["Work at UST", "Work at UST", "Fitness"])
+
+        async def namer(top, domain):
+            return (next(names), "")
+
+        await universe.track(db, user.id, namer)
+        await db.commit()
+        areas = {a.id: a for a in (await db.scalars(select(Area))).all()}
+        where = {
+            e.name: areas[e.area_id].name if e.area_id else None
+            for e in (await db.scalars(select(Entity))).all()
+        }
+    # The biggest area doesn't swallow everything: health gets its own, payroll joins work,
+    # one lone family member stays loose.
+    assert where["Payroll"] == where["UST"] == "Work at UST"
+    assert where["Gym"] == where["Physio"] and where["Gym"] not in (where["UST"], where["Bambu"])
+    assert where["Mum"] is None
+    # Two areas never share a name.
+    assert len({a.name for a in areas.values()}) == len(areas) == 3
+
+
+async def test_communities_are_found_without_the_user_at_the_middle(sessionmaker, owner):
+    from nexus_orchestrator import graph_nightly
+
+    user, _chat = owner
+    async with sessionmaker() as db:
+        made = await _graph(
+            db,
+            user.id,
+            {
+                "work": ["UST", "Rahul", "Priya", "Meera"],
+                "hobbies": ["Bambu", "PLA", "Rocket", "Drone"],
+            },
+        )
+        u = await db.get(User, user.id)
+        me = await graph.self_entity(db, u)
+        # The user is linked to everything, which used to pull it all into one community.
+        for e in made.values():
+            db.add(
+                Relation(
+                    user_id=user.id,
+                    src_id=me.id,
+                    dst_id=e.id,
+                    predicate="knows",
+                    family="social",
+                    label="knows",
+                    fact="",
+                    weight=1.0,
+                )
+            )
+        await db.commit()
+        await graph_nightly.arrange(db, user.id)
+        await db.commit()
+        comm = {e.name: e.community for e in (await db.scalars(select(Entity))).all()}
+    assert comm["UST"] == comm["Meera"] and comm["Bambu"] == comm["Drone"]
+    assert comm["UST"] != comm["Bambu"]

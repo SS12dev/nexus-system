@@ -131,3 +131,34 @@ async def test_cards_where_the_graph_is_unsure(owner, sessionmaker):
         assert await questions.plan(db, me["id"], per_day=10) == 0
         keys = (await db.scalars(select(GraphQuestion.key))).all()
     assert f"still:{stale.id}" in keys
+
+
+async def test_saying_two_names_are_the_same_thing_queues_a_merge(owner, sessionmaker):
+    me = (await owner.get("/api/me")).json()
+    async with sessionmaker() as db:
+        a = Entity(user_id=me["id"], type="tool", shell=4, name="OpenAI", aliases=[], summary="")
+        b = Entity(
+            user_id=me["id"], type="tool", shell=4, name="Azure OpenAI", aliases=[], summary=""
+        )
+        c = Entity(user_id=me["id"], type="tool", shell=4, name="Ollama", aliases=[], summary="")
+        db.add_all([a, b, c])
+        await db.flush()
+        cards = [
+            GraphQuestion(
+                user_id=me["id"],
+                key=f"confirm:{x.id}:{y.id}",
+                kind="confirm",
+                shell=4,
+                prompt="Same?",
+                form="yesno",
+                data={"entities": [str(x.id), str(y.id)]},
+            )
+            for x, y in [(a, b), (a, c)]
+        ]
+        db.add_all(cards)
+        await db.commit()
+    yes = await owner.post(f"/api/questions/{cards[0].id}/answer", json={"answer": {"yes": True}})
+    no = await owner.post(f"/api/questions/{cards[1].id}/answer", json={"answer": {"yes": False}})
+    assert yes.status_code == 200 and no.status_code == 200
+    async with sessionmaker() as db:
+        assert (await db.get(Entity, a.id)).aliases == ["azure openai"]

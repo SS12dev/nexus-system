@@ -111,6 +111,7 @@ async def _groups(
     loose entities joined to the group they link to most. With no big communities yet (a new
     user), the domains seed the areas."""
     ids = {e.id for e in members}
+    by_id = {e.id: e for e in members}
     by_comm: dict[int, set[uuid.UUID]] = defaultdict(set)
     for e in members:
         if e.community is not None:
@@ -152,18 +153,31 @@ async def _groups(
                     pull[home[other]] += w
             if pull:
                 home[e.id] = max(pull, key=pull.get)
-    # Still loose: the group most of its domain went to.
-    domain_home: dict[str, Counter] = defaultdict(Counter)
+    # Still loose but with a part of life: the group that part of life is the main one in.
+    # A part of life no group is mostly about gets an area of its own when there's enough
+    # of it; the rest stays loose (dust between the galaxies). Joining loose things to
+    # whichever group has the most of their domain would pour them all into the biggest.
+    main_domain: dict[str, int] = {}
+    for i, g in enumerate(groups):
+        counts = Counter(by_id[x].domain for x in g if by_id[x].domain)
+        if counts:
+            d, n = counts.most_common(1)[0]
+            if n >= len(g) / 3 and (d not in main_domain or len(g) > len(groups[main_domain[d]])):
+                main_domain[d] = i
+    unplaced: dict[str, set[uuid.UUID]] = defaultdict(set)
     for e in members:
-        if e.id in home and e.domain:
-            domain_home[e.domain][home[e.id]] += 1
-    for e in members:
-        if e.id not in home and e.domain and domain_home[e.domain]:
-            home[e.id] = domain_home[e.domain].most_common(1)[0][0]
+        if e.id in home or not e.domain:
+            continue
+        if e.domain in main_domain:
+            home[e.id] = main_domain[e.domain]
+        else:
+            unplaced[e.domain].add(e.id)
     out: list[set[uuid.UUID]] = [set() for _ in groups]
     for eid, i in home.items():
         out[i].add(eid)
-    return [g for g in out if g]
+    out += [g for g in unplaced.values() if len(g) >= MIN_AREA]
+    out = sorted((g for g in out if g), key=len, reverse=True)
+    return out[:MAX_AREAS]
 
 
 async def track(db: AsyncSession, user_id: uuid.UUID, namer: Namer | None = None) -> dict:
@@ -279,6 +293,7 @@ async def track(db: AsyncSession, user_id: uuid.UUID, namer: Namer | None = None
             a.hue = round((a.hue + d / 3) % 1, 4)
         if changed or not a.name:
             top = [e.name for e in ents[:8]]
+            others = names_in_use - {a.name}
             named = None
             if namer is not None:
                 try:
@@ -287,8 +302,11 @@ async def track(db: AsyncSession, user_id: uuid.UUID, namer: Namer | None = None
                     named = None
             if named and named[0].strip():
                 a.name, a.summary = named[0].strip()[:80], named[1].strip()
+                # Two areas never share a name: the second says what it is about.
+                if a.name in others and top:
+                    a.name = f"{a.name}: {top[0]}"[:80]
             else:
-                a.name = fallback_name(top, a.domain, names_in_use - {a.name})[:80]
+                a.name = fallback_name(top, a.domain, others)[:80]
             names_in_use.add(a.name)
         a.updated_at = now
 
