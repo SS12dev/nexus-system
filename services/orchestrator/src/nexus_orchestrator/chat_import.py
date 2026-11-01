@@ -52,16 +52,28 @@ class ExportError(ValueError):
     pass
 
 
+# ChatGPT's newer exports split the conversations over conversations-000.json,
+# conversations-001.json...; older ones and Claude's have a single conversations.json.
+_CONV_FILE = re.compile(r"conversations(-\d+)?\.json")
+
+
 def _conversations_json(data: bytes) -> list:
     if data[:2] == b"PK":
         try:
             z = zipfile.ZipFile(io.BytesIO(data))
         except zipfile.BadZipFile as exc:
             raise ExportError("That zip file is damaged.") from exc
-        name = next((n for n in z.namelist() if n.rsplit("/", 1)[-1] == "conversations.json"), None)
-        if name is None:
+        names = sorted(n for n in z.namelist() if _CONV_FILE.fullmatch(n.rsplit("/", 1)[-1]))
+        if not names:
             raise ExportError("There is no conversations.json in that zip.")
-        data = z.read(name)
+        out: list = []
+        for name in names:
+            out.extend(_json_list(z.read(name)))
+        return out
+    return _json_list(data)
+
+
+def _json_list(data: bytes) -> list:
     try:
         parsed = json.loads(data)
     except ValueError as exc:
