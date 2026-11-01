@@ -278,7 +278,9 @@ async def _apply(db, embedder, user, q, answer, graph_enabled) -> Applied:
     if not isinstance(yes, bool):
         raise AnswerError("Answer yes or no.")
     if q.kind == "confirm":
-        a, b = (await db.get(Entity, uuid.UUID(i)) for i in q.data["entities"])
+        first, second = q.data["entities"]
+        a = await db.get(Entity, uuid.UUID(first))
+        b = await db.get(Entity, uuid.UUID(second))
         if yes and a is not None and b is not None and a.user_id == b.user_id == user.id:
             # The same thing under two names: the second becomes an alias of the first, and
             # tonight's upkeep merges them (it merges entities that share a name or alias).
