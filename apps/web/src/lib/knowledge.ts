@@ -1,11 +1,11 @@
-import type { EntityType, GraphEntity, GraphRelation } from "./types";
+import type { EntityType, GraphEntity, GraphRelation, Universe, UniverseArea, UniverseStar } from "./types";
 
 export type KnowledgeSort = "mentions" | "recent" | "name";
 
 /** How often something comes up: memories, chats (live and summarised) and files. */
 export const mentions = (e: GraphEntity) => e.memories + e.chats + e.past_chats + e.files;
 
-/** The Knowledge page's list: what matches the search (name, other names or summary) and the
+/** The Mind page's search: what matches the search (name, other names or summary) and the
  * type filter, sorted. "You" stays first whatever the sort, and only when nothing filters it out. */
 export function filterEntities(
   entities: GraphEntity[],
@@ -50,41 +50,80 @@ export function linksOf(id: string, relations: GraphRelation[]): { current: Link
   };
 }
 
-export interface EgoNode {
-  id: string;
-  x: number;
-  y: number;
-  /** Every link to it ended. */
-  past: boolean;
-  /** The predicates linking it, for the line's label. */
-  label: string;
+// --- The Mind page ----------------------------------------------------------------------------
+
+/** The parts of your core, deepest first, and the ontology kinds each holds. */
+export const CORE_GROUPS: { id: string; label: string; help: string; kinds: string[] }[] = [
+  { id: "values", label: "Values and beliefs", help: "What matters to you and what you hold true", kinds: ["value", "belief"] },
+  { id: "goals", label: "Goals", help: "What you're working towards", kinds: ["goal"] },
+  { id: "traits", label: "Traits and skills", help: "How you are and what you're good at", kinds: ["trait", "skill"] },
+  { id: "interests", label: "Interests", help: "What you like spending time on", kinds: ["interest"] },
+  { id: "habits", label: "Preferences and habits", help: "How you like things and what you do often", kinds: ["preference", "habit", "state"] },
+  { id: "style", label: "How you communicate", help: "How you like to talk and be talked to", kinds: ["communication_style"] },
+];
+
+const CORE_KINDS = new Set(CORE_GROUPS.flatMap((g) => g.kinds));
+export const isCore = (e: GraphEntity) => !e.is_self && !!e.kind && CORE_KINDS.has(e.kind);
+
+/** Your core, grouped, most mentioned first in each group; empty groups left out. */
+export function coreGroups(entities: GraphEntity[]) {
+  return CORE_GROUPS.map((g) => ({
+    ...g,
+    items: entities
+      .filter((e) => !e.is_self && e.kind && g.kinds.includes(e.kind))
+      .sort((a, b) => mentions(b) - mentions(a) || a.name.localeCompare(b.name)),
+  })).filter((g) => g.items.length);
 }
 
-/** The small graph on the detail panel: the picked entity in the middle and up to `max`
- * neighbours on a ring around it, current links before past ones. Several relations to the same
- * neighbour share one line. Coordinates are in a 0..1 box. */
-export function egoLayout(id: string, relations: GraphRelation[], max = 14): { nodes: EgoNode[]; more: number } {
-  const { current, past } = linksOf(id, relations);
-  const byOther = new Map<string, { past: boolean; preds: string[] }>();
-  for (const l of [...current, ...past]) {
-    if (l.other === id) continue;
-    const n = byOther.get(l.other) ?? { past: true, preds: [] };
-    n.past &&= !!l.relation.valid_to;
-    if (!n.preds.includes(l.relation.predicate)) n.preds.push(l.relation.predicate);
-    byOther.set(l.other, n);
-  }
-  const all = [...byOther.entries()];
-  const shown = all.slice(0, max);
-  const nodes = shown.map(([other, n], i) => {
-    // Start at the top and go round; a ring of one or two still reads left to right.
-    const a = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(shown.length, 1);
-    return {
-      id: other,
-      x: 0.5 + 0.38 * Math.cos(a),
-      y: 0.5 + 0.38 * Math.sin(a),
-      past: n.past,
-      label: n.preds.join(", "),
-    };
-  });
-  return { nodes, more: all.length - shown.length };
+/** How sure Nexus is of something, from how often it has come up. */
+export function sureness(e: GraphEntity): { label: string; level: 1 | 2 | 3 } {
+  const n = mentions(e);
+  if (n >= 5) return { label: "Sure", level: 3 };
+  if (n >= 2) return { label: "Fairly sure", level: 2 };
+  return { label: "A hunch", level: 1 };
+}
+
+const WEEK = 7 * 24 * 3600 * 1000;
+
+export interface AreaCard {
+  area: UniverseArea;
+  count: number;
+  /** Its most central things. */
+  top: UniverseStar[];
+  isNew: boolean;
+  fading: boolean;
+}
+
+/** One card per live area, biggest first. */
+export function areaCards(u: Universe | null, now = Date.now(), topN = 4): AreaCard[] {
+  if (!u) return [];
+  return u.areas
+    .filter((a) => !a.ended_at)
+    .map((area) => {
+      const stars = u.stars.filter((s) => s.area === area.id).sort((a, b) => b.salience - a.salience);
+      return {
+        area,
+        count: stars.length,
+        top: stars.slice(0, topN),
+        isNew: now - Date.parse(area.born_at) < WEEK,
+        fading: area.activity < 0.1,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.area.name.localeCompare(b.area.name));
+}
+
+/** An area's things grouped by kind ("person", "project"...), biggest group first, each
+ * group's most central first. */
+export function byKind(stars: UniverseStar[]): [string, UniverseStar[]][] {
+  const groups = new Map<string, UniverseStar[]>();
+  for (const s of stars) groups.set(s.kind, [...(groups.get(s.kind) ?? []), s]);
+  for (const list of groups.values()) list.sort((a, b) => b.salience - a.salience || a.name.localeCompare(b.name));
+  return [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+}
+
+/** "communication_style" -> "Communication styles". */
+export function kindLabel(kind: string, plural = true): string {
+  const w = kind.replace(/_/g, " ");
+  const p = !plural ? w : w === "person" ? "people" : /(s|x|ch|sh)$/.test(w) ? `${w}es` : /[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : `${w}s`;
+  return p[0].toUpperCase() + p.slice(1);
 }

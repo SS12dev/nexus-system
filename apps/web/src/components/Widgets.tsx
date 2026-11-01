@@ -319,7 +319,7 @@ export function WidgetDock({ compact = false, board = false }: { compact?: boole
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <AddWidget empty={list.length === 0} compact={false} board />
           <p className="text-xs text-slate-400">
-            Your widgets, big. Ask {assistant} for a timer, alarm, reminder, clock or note, or switch back to the orb above.
+            Your widgets, big. Ask {assistant} for a timer, alarm, reminder, clock or note, or switch back to the universe above.
           </p>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] items-start gap-3" aria-label="Widgets">

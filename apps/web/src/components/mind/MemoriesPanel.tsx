@@ -1,25 +1,24 @@
-import { Brain, History, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
+import { Brain, History, Pin, PinOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, Navigate, useSearchParams } from "react-router";
-import { Guide, GuideHeading } from "../components/Guide";
-import { Markdown } from "../components/Markdown";
-import { Select } from "../components/Select";
-import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
-import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../lib/types";
-import { useStore } from "../store/chat";
-import { useAssistantName } from "../lib/assistant";
-import { confirmAction } from "../components/Feedback";
+import { Link, useSearchParams } from "react-router";
+import { Markdown } from "../Markdown";
+import { Select } from "../Select";
+import { api } from "../../lib/api";
+import { formatDate } from "../../lib/format";
+import { hasRole, type Memory, type MemoryEvent, type MemoryKind, type Profile } from "../../lib/types";
+import { useStore } from "../../store/chat";
+import { useAssistantName } from "../../lib/assistant";
+import { confirmAction } from "../Feedback";
 
-const KINDS: MemoryKind[] = ["preference", "fact", "goal", "instruction"];
-const KIND_STYLE: Record<MemoryKind, string> = {
+export const KINDS: MemoryKind[] = ["preference", "fact", "goal", "instruction"];
+export const KIND_STYLE: Record<MemoryKind, string> = {
   preference: "bg-sky-500/15 text-sky-300",
   fact: "bg-slate-500/20 text-slate-300",
   goal: "bg-emerald-500/15 text-emerald-300",
   instruction: "bg-amber-500/15 text-amber-300",
 };
 /** What each kind of memory is for, shown on the chips and in the add form. */
-const KIND_INFO: Record<MemoryKind, { label: string; help: string }> = {
+export const KIND_INFO: Record<MemoryKind, { label: string; help: string }> = {
   preference: {
     label: "Preference",
     help: "How you like things: tone, formats, tools, brands.",
@@ -38,7 +37,9 @@ const KIND_INFO: Record<MemoryKind, { label: string; help: string }> = {
   },
 };
 
-export function MemoryPage() {
+/** The memories tab of the Mind page: your profile, what has been learned, and adding, editing,
+ * pinning or forgetting any of it. ?memory=<id> opens one. */
+export function MemoriesPanel() {
   const assistant = useAssistantName();
   const user = useStore((s) => s.user)!;
   const canEdit = hasRole(user, "member");
@@ -49,9 +50,9 @@ export function MemoryPage() {
   const [kind, setKind] = useState<MemoryKind>("preference");
   const [error, setError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
-  // Tapping a memory in the orb or on the Knowledge page opens it here.
+  // A memory linked from elsewhere on the Mind page opens here.
   const [params] = useSearchParams();
-  const focus = params.get("focus");
+  const focus = params.get("memory");
 
   const load = useCallback(async (q?: string) => {
     const [p, list] = await Promise.all([api.profile(), api.memories(q)]);
@@ -124,27 +125,8 @@ export function MemoryPage() {
     });
   };
 
-  // The old Connections tab is the Knowledge page now; keep its links working.
-  if (params.get("view") === "connections") return <Navigate to="/knowledge" replace />;
-
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-4 py-6">
-        <div className="mb-1 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold">Memory</h1>
-          <Link
-            to="/knowledge"
-            className="ml-auto flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge/60"
-            title="The people, projects, places and topics in your memories, and how they link"
-          >
-            <Share2 size={14} /> Knowledge
-          </Link>
-        </div>
-        <p className="mb-3 text-sm text-slate-400">
-          What {assistant} has learned about you from your chats, and the profile it builds from it. Edit, pin
-          or delete anything; deleting is permanent. Only you can see this.
-        </p>
-        <HowItWorks assistant={assistant} />
+    <div>
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
 
         {profile && (
@@ -282,7 +264,6 @@ export function MemoryPage() {
             Forget everything
           </button>
         )}
-      </div>
     </div>
   );
 }
@@ -447,55 +428,5 @@ function MemoryRow({
         </div>
       </div>
     </div>
-  );
-}
-
-/** A short guide to what this page holds and how it changes answers. */
-function HowItWorks({ assistant }: { assistant: string }) {
-  return (
-    <Guide title="How memory works">
-      <div>
-        <GuideHeading>What gets saved</GuideHeading>
-        <p>
-          After each chat {assistant} keeps anything lasting you said about yourself. One-off requests and
-          small talk are skipped. You can also add memories yourself below. Each has a type:
-        </p>
-        <ul className="mt-2 space-y-1">
-          {KINDS.map((k) => (
-            <li key={k}>
-              <span className={`mr-1.5 rounded px-1.5 py-0.5 text-xs ${KIND_STYLE[k]}`}>
-                {KIND_INFO[k].label}
-              </span>
-              {KIND_INFO[k].help}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div>
-        <GuideHeading>How it's used</GuideHeading>
-        <ul className="list-disc space-y-1 pl-4">
-          <li>Your profile goes into every chat and every team {assistant} builds.</li>
-          <li>
-            The memories closest to your question, and summaries of related past chats, are looked up for each
-            reply.
-          </li>
-          <li>
-            <b>Pin</b> a memory to keep it in your profile and stop {assistant} rewording, merging or fading
-            it.
-          </li>
-          <li>
-            Unpinned memories fade if nothing confirms them for 60 days; near duplicates are merged overnight.
-          </li>
-          <li>
-            <b>Knowledge</b> (its own page) shows who and what your memories are about, people, projects,
-            places, topics and tools, and how they relate, noted from the same chats.
-          </li>
-          <li>
-            The clock icon shows a memory's history. <b>Forget everything</b> at the bottom wipes memories,
-            past-chat summaries and the profile.
-          </li>
-        </ul>
-      </div>
-    </Guide>
   );
 }

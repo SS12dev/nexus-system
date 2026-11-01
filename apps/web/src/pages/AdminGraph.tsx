@@ -7,7 +7,7 @@ import { formatAgo, formatDateTime } from "../lib/format";
 import type { GraphAdmin, GraphRun } from "../lib/types";
 import { Section, Tile } from "./AdminParts";
 
-/** What each relation family means, in the words the orb will use for its edge colours. */
+/** What each relation family means, in the words the universe uses for its edge colours. */
 const FAMILY_HELP: Record<string, string> = {
   identity: "who you are: traits, values, likes",
   social: "people and how they relate",
@@ -60,15 +60,15 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
   return (
     <div>
       <p className="mb-4 text-sm text-slate-400">
-        The knowledge graph is the map of each person's world that the orb and the Knowledge page draw: who they are,
+        The knowledge graph is the map of each person's world that the universe and the Mind page draw: who they are,
         the people and places in their life, what they work on and what they know, and how those connect.{" "}
         {local
           ? "A model on this machine reads new memories, finished chats and files for it every ten minutes, at no cost."
           : "The memory model notes it in the same calls that save memories."}{" "}
         Each night duplicates are merged, links nobody has confirmed for a month fade a little, links recall keeps
-        using grow stronger, everything is ranked and grouped into clusters, and a few question cards go where the
-        graph is unsure. When a reply draws on the graph, the
-        orb lights what it touched from the centre outward, a link at a time.
+        using grow stronger, everything is ranked and grouped into clusters that become the life areas (galaxies) in the universe, and a few
+        question cards go where the graph is unsure. When a reply draws on the graph, the universe
+        lights what it touched, a link at a time.
       </p>
       {!data.enabled && (
         <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">

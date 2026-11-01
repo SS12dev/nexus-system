@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { feedFromEvents } from "../lib/feed";
 import { AGENT_LABEL, currentStage, stepDetail, toolLabel } from "../lib/tools";
 import type { AgentSystem, FeedItem } from "../lib/types";
-import { NODE_COLOR } from "../orb/model";
+import { NODE_COLOR } from "../universe/teams";
 import { useStore } from "../store/chat";
 import { isLive, money, RUN_LABEL, RUN_STYLE, RunControls } from "./RunControls";
 import { StepRow } from "./ToolSteps";

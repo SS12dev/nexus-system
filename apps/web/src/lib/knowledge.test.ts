@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { egoLayout, filterEntities, linksOf } from "./knowledge";
-import type { GraphEntity, GraphRelation } from "./types";
+import { areaCards, byKind, coreGroups, filterEntities, kindLabel, linksOf, sureness } from "./knowledge";
+import type { GraphEntity, GraphRelation, Universe, UniverseStar } from "./types";
 
 const ent = (id: string, over: Partial<GraphEntity> = {}): GraphEntity => ({
   id,
@@ -82,25 +82,77 @@ describe("an entity's links", () => {
     ]);
     expect(past.map((l) => l.other)).toEqual(["Acme"]);
   });
+});
 
-  it("lays neighbours out on a ring, marking ones whose links all ended", () => {
-    const { nodes, more } = egoLayout("me", rels);
-    expect(nodes.map((n) => n.id)).toEqual(["Nexus", "UST", "Acme"]);
-    expect(nodes.find((n) => n.id === "Acme")!.past).toBe(true);
-    expect(nodes.find((n) => n.id === "UST")!.past).toBe(false);
-    for (const n of nodes) expect(Math.hypot(n.x - 0.5, n.y - 0.5)).toBeCloseTo(0.38);
-    expect(more).toBe(0);
+describe("the Mind page", () => {
+  it("groups your core deepest first and leaves out what isn't in it", () => {
+    const groups = coreGroups([
+      ent("me", { is_self: true, kind: "person" }),
+      ent("honesty", { kind: "value", memories: 1 }),
+      ent("curious", { kind: "trait", memories: 6 }),
+      ent("python", { kind: "skill", memories: 2 }),
+      ent("nexus", { kind: "project" }),
+    ]);
+    expect(groups.map((g) => [g.id, g.items.map((e) => e.id)])).toEqual([
+      ["values", ["honesty"]],
+      ["traits", ["curious", "python"]],
+    ]);
+    expect(groups[1].items.map((e) => sureness(e).label)).toEqual(["Sure", "Fairly sure"]);
   });
 
-  it("joins several links to one neighbour and caps how many are drawn", () => {
-    const many = [
-      rel("a", "me", "UST", { predicate: "works at" }),
-      rel("b", "me", "UST", { predicate: "likes" }),
-      ...Array.from({ length: 20 }, (_, i) => rel(`x${i}`, "me", `e${i}`)),
-    ];
-    const { nodes, more } = egoLayout("me", many, 14);
-    expect(nodes).toHaveLength(14);
-    expect(more).toBe(7);
-    expect(nodes.find((n) => n.id === "UST")?.label).toBe("works at, likes");
+  const star = (id: string, area: string | null, salience: number, kind = "project"): UniverseStar => ({
+    id,
+    name: id,
+    kind,
+    summary: "",
+    area,
+    pos: [0.5, 0, 0],
+    salience,
+    mentions: 1,
+    seen_at: "",
+    created_at: "",
+    source: null,
+  });
+  const area = (id: string, born_at: string, activity: number, ended_at: string | null = null) => ({
+    id,
+    name: id,
+    summary: "",
+    domain: null,
+    hue: 0,
+    color: "#fff",
+    angle: 0,
+    tilt: 0,
+    size: 1,
+    activity,
+    parent: null,
+    merged_into: null,
+    born_at,
+    ended_at,
+  });
+
+  it("makes a card per live area, biggest first, with its most central things", () => {
+    const u = {
+      areas: [
+        area("health", "2026-10-30T00:00:00Z", 0.05),
+        area("work", "2026-09-01T00:00:00Z", 0.6),
+        area("gone", "2026-09-01T00:00:00Z", 0, "2026-10-31T00:00:00Z"),
+      ],
+      stars: [star("gym", "health", 0.2), star("ust", "work", 0.9), star("rahul", "work", 0.3, "person"), star("x", null, 1)],
+    } as unknown as Universe;
+    const cards = areaCards(u, Date.parse("2026-11-01T00:00:00Z"));
+    expect(cards.map((c) => [c.area.id, c.count, c.top.map((s) => s.id), c.isNew, c.fading])).toEqual([
+      ["work", 2, ["ust", "rahul"], false, false],
+      ["health", 1, ["gym"], true, true],
+    ]);
+    expect(byKind(u.stars.filter((s) => s.area === "work")).map(([k]) => k)).toEqual(["person", "project"]);
+  });
+
+  it("names kinds in plain words", () => {
+    expect(["person", "communication_style", "activity", "tool"].map((k) => kindLabel(k))).toEqual([
+      "People",
+      "Communication styles",
+      "Activities",
+      "Tools",
+    ]);
   });
 });

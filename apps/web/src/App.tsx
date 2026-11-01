@@ -16,8 +16,7 @@ import { OrbLayout } from "./pages/OrbLayout";
 import { AppsPage } from "./pages/AppsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
-import { MemoryPage } from "./pages/MemoryPage";
-import { KnowledgePage } from "./pages/KnowledgePage";
+import { MindPage, MindRedirect } from "./pages/MindPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PeoplePage } from "./pages/PeoplePage";
 import { RoutinesPage } from "./pages/RoutinesPage";
@@ -90,8 +89,9 @@ export function App() {
         </Route>
         <Route path="library" element={<LibraryPage />} />
         <Route path="apps" element={<AppsPage />} />
-        <Route path="memory" element={<MemoryPage />} />
-        <Route path="knowledge" element={<KnowledgePage />} />
+        <Route path="mind" element={<MindPage />} />
+        <Route path="memory" element={<MindRedirect from="memory" />} />
+        <Route path="knowledge" element={<MindRedirect from="knowledge" />} />
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:systemId" element={<AgentsPage />} />

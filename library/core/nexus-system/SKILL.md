@@ -15,15 +15,15 @@ cover the question, say so rather than assuming. The repository is SS12dev/nexus
 
 A personal supervisor assistant. Each person names their own assistant. It answers quick
 things itself and gives all real work to agent teams, which it designs, runs and removes.
-Web app for laptop and phone, with a 3D orb home page (teams around it; inside, a
-constellation of the people, projects and topics it knows, lighting up what each reply
+Web app for laptop and phone, with a 3D universe home page (the user's core at the centre, life areas as
+galaxies, the assistant as a hub station, teams as ships, lighting up what each reply
 recalled). It runs with Docker Compose on one machine, reached through a Cloudflare tunnel at nexus.servhub.cc.
 
 ## Services (compose.yaml)
 
 | Service | Code | Job |
 | --- | --- | --- |
-| web | apps/web | React + Vite PWA: setup interview, orb, chat, Library, Routines, Memory, Agents, Skills, People, Admin |
+| web | apps/web | React + Vite PWA: setup interview, orb, chat, Library, Routines, Mind, Agents, Skills, People, Admin |
 | api | services/api | FastAPI: auth (Google sign-in), chats, files, memories, skills, teams, approvals, admin, WebSocket |
 | orchestrator | services/orchestrator | arq worker: the assistant's LangGraph graph, tools, agent teams, routines, memory jobs, self-review |
 | doc-worker | services/doc-worker | parses uploads (Docling), chunks and embeds them |
@@ -86,7 +86,7 @@ deploy.
   places, topics, tools, plus one for the user), relations between them with valid_from and
   valid_to, and mentions tying each to the memories, past chats, files and chats about it.
   Extracted in the same memory-model call; `link_graph` backfills the rest every ten minutes;
-  entities nothing mentions are pruned. People browse it on the Knowledge page (/knowledge).
+  entities nothing mentions are pruned. People browse it on the Mind page (/mind), with their core, life areas and memories; the home screen draws it as a universe (`nexus_common/universe.py`: areas found nightly, stable positions).
 - Skills: SKILL.md folders. Core skills ship in `library/core` and sync on start; learned
   skills are drafted from runs and stay off until approved.
 - Instructions: layered (global, role, user) from `library/instructions` and the database.
@@ -123,7 +123,7 @@ overrides are stored in the database and win over `.env`. Secrets live in
 | widget library, resizing, search box | `nexus_common/widgets.py` (`put_away`, `restore`, `prune_library`, `check_size`), `api/routes/widgets.py` (`/library`, restore/forget), `LibraryPane` and `startResize` in `web/src/components/Widgets.tsx` |
 | web search results and the reading view | `nexus_common/web.py` (`cached_search`, `read_page`; the orchestrator's `web.py` re-exports it), `api/routes/web.py`, `SearchCard` in `Widgets.tsx`, `web/src/components/Reader.tsx` |
 | forking a chat, second chat window | `POST /api/chats/{id}/fork` in `api/routes/chats.py`, `web/src/lib/chatActions.ts`, `SideChat` in `web/src/pages/OrbLayout.tsx` |
-| the orb's layout (stars, memories, moons outside) | `web/src/orb/model.ts`; drawing in `orb/Inside.tsx`, `Network.tsx`, `Satellites.tsx` |
+| the home universe (core, hub, galaxies, ships) | `web/src/universe/model.ts`, `teams.ts`; drawing in `universe/kit.ts`, `UniverseScene.tsx`; data from `nexus_common/universe.py` |
 | the logo | `web/src/components/Orb.tsx` (`NexusMark`), `web/public/icon.svg` |
 | checking one account | `api/inspect_user.py`, `scripts/inspect-user.sh` |
 | what Langfuse stores | `orchestrator/llm.py` (`private`), `nexus_common/embeddings.py` |

@@ -13,7 +13,7 @@ const STEPS: Step[] = [
     anchor: "composer",
     title: "Ask anything",
     body: (a) =>
-      `Type here, or tap one of the suggestions. Attach files with the clip. For bigger jobs ${a} puts a small team of agents on it and shows them working in the orb.`,
+      `Type here, or tap one of the suggestions. Attach files with the clip. For bigger jobs ${a} puts a small team of agents on it and shows them flying out from the hub in your universe.`,
   },
   {
     anchor: "routines",
@@ -23,9 +23,9 @@ const STEPS: Step[] = [
   },
   {
     anchor: "memory",
-    title: "What it remembers",
+    title: "Your mind",
     body: (a) =>
-      `Everything ${a} knows about you is here: your setup answers and what it learns in chats. Edit or delete anything.`,
+      `Everything ${a} knows about you is here: who you are, the areas of your life and the memories underneath. Correct or forget anything.`,
   },
   {
     anchor: "settings",

@@ -1,10 +1,11 @@
 import {
   Bot,
   Brain,
-  CalendarClock,
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Eye,
+  EyeOff,
   FolderGit2,
   FolderOpen,
   LayoutGrid,
@@ -12,40 +13,22 @@ import {
   Maximize2,
   Minimize2,
   Orbit,
-  Share2,
+  Rocket,
+  Satellite,
+  Sparkles,
   X,
 } from "lucide-react";
-import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router";
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router";
 import { api } from "../lib/api";
 import { AGENT_LABEL, toolLabel } from "../lib/tools";
-import { DOMAIN_COLOR, ENTITY_COLOR, ENTITY_TYPES, FAMILIES, RECALL_COLOR, relationText, SHELLS } from "../lib/entities";
-import { formatInZone } from "../lib/schedule";
-import type { FileItem, Folder, KnowledgeGraph, Memory, Profiles, Project, Recalled, Routine, Run } from "../lib/types";
-import { formatDate } from "../lib/format";
-import {
-  buildClusters,
-  DEFAULT_VIEW,
-  inside as layoutInside,
-  isArtifact,
-  KIND_COLOR,
-  litAt,
-  litSteps,
-  liveSystems,
-  NODE_COLOR,
-  OUTSIDE_TYPES,
-  plain,
-  profileEntities,
-  satellites,
-  SATELLITE_COLOR,
-  works,
-  type OrbCluster,
-  type OrbView,
-  type Work,
-} from "../orb/model";
-import { StarLabels } from "../orb/StarLabels";
-import type { Selection } from "../orb/OrbScene";
-import { hasWebGL, usePerf } from "../orb/perf";
+import { FAMILIES, relationText } from "../lib/entities";
+import { hasRole, type KnowledgeGraph, type Memory, type Project, type Routine, type Run, type Universe } from "../lib/types";
+import type { FileItem, Folder } from "../lib/types";
+import { buildClusters, isArtifact, litAt, litSteps, liveSystems, NODE_COLOR, works, type OrbCluster, type Work } from "../universe/teams";
+import { hasWebGL, usePerf } from "../universe/perf";
+import { areaLine, DECKS, deckActivity, isEmpty } from "../universe/model";
+import type { Selection } from "../universe/UniverseScene";
 import { useStore } from "../store/chat";
 import { NoticeBell } from "./Notices";
 import { FloatingWidgets, WidgetDock } from "./Widgets";
@@ -53,30 +36,28 @@ import { Orb } from "./Orb";
 import { QuestionCards } from "./QuestionCards";
 import { RUN_LABEL, RUN_STYLE } from "./RunControls";
 import { useAssistantName } from "../lib/assistant";
-import type { ScreenMode } from "../lib/types";
+import type { Recalled, ScreenMode } from "../lib/types";
 import { setScreenMode } from "./Screen";
 
-const OrbScene = lazy(() => import("../orb/OrbScene"));
+const UniverseScene = lazy(() => import("../universe/UniverseScene"));
 
 /** The main screen's layouts. The assistant can switch them too ("show me my widgets"), but a
  * switch made here is yours and it leaves it alone for a while. */
 const VIEWS: { id: ScreenMode; label: string; icon: ReactNode; hint: string }[] = [
-  { id: "orb", label: "Orb", icon: <Orbit size={14} />, hint: "The 3D orb: teams at work and what Nexus knows" },
+  { id: "orb", label: "Universe", icon: <Orbit size={14} />, hint: "Your universe: who you are, your life areas and teams at work" },
   { id: "list", label: "List", icon: <List size={14} />, hint: "The same as plain lists" },
   { id: "dashboard", label: "Widgets", icon: <LayoutGrid size={14} />, hint: "A board of your widgets" },
 ];
 
-/** How long what a reply recalled stays lit in the orb, and how long each hop of it takes to
- * light up. */
+/** How long what a reply recalled stays lit, and how long each hop of it takes to light up. */
 const LIT_MS = 15000;
 const HOP_MS = 450;
+const PRIVATE_KEY = "nexus.universe.private";
 
-/** Nexus as a 3D orb with the live agent network around it and, inside it, who you are: you at
- * the centre, the people, places, interests and tools you've mentioned around you, and
- * memories as their satellites. Just outside the shell, on a ring, what it does and has made
- * for you: routines, and projects (an app, or a folder of files made for one piece of work,
- * as one moon each). Or the same as plain lists. Fills the home screen, and stays beside a
- * chat (above it on phones) so you can watch Nexus and its teams work while you talk. */
+/** The main screen: your universe. Your core (who you are, never named) at the centre, the
+ * Nexus hub beside it, a galaxy for each part of your life that Nexus has found, and a ship for
+ * each team at work. Or the same as plain lists. Fills the home screen, and stays beside a chat
+ * (above it on phones) so you can watch Nexus and its teams work while you talk. */
 export function OrbStage({
   mode,
   collapsed = false,
@@ -102,22 +83,19 @@ export function OrbStage({
   const view = useStore((s) => s.screen.mode);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
+  const [universe, setUniverse] = useState<Universe | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const foldersVersion = useStore((s) => s.foldersVersion);
   const projectsVersion = useStore((s) => s.projectsVersion);
-  const [packInfo, setPackInfo] = useState<Pick<Profiles, "packs" | "interests">>({
-    packs: [],
-    interests: [],
-  });
   const routinesVersion = useStore((s) => s.routinesVersion);
   const recall = useStore((s) => s.recall);
   const [lit, setLit] = useState<Recalled | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
-  const [orbView, setOrbView] = useOrbView();
-  const tags = useRef(new Map<string, HTMLElement>());
+  const [privateMode, setPrivate] = usePrivateMode();
+  const admin = hasRole(user, "admin");
 
   // Fresh lists on open and after a reconnect, in case events were missed meanwhile.
   useEffect(() => {
@@ -127,13 +105,9 @@ export function OrbStage({
     api.approvals().then(upsertApprovals).catch(() => {});
   }, [connected]);
 
-  // Routines and projects ride the ring outside the orb.
   useEffect(() => {
     api.routines().then(setRoutines).catch(() => {});
   }, [routinesVersion, connected]);
-  useEffect(() => {
-    api.profiles().then(setPackInfo).catch(() => {});
-  }, []);
   useEffect(() => {
     api.projects().then(setProjects).catch(() => {});
   }, [connected, Object.keys(files).length, projectsVersion]);
@@ -148,6 +122,7 @@ export function OrbStage({
     const t = window.setTimeout(() => {
       api.memories().then(setMemories).catch(() => {});
       api.knowledgeGraph().then(setGraph).catch(() => {});
+      api.universe().then(setUniverse).catch(() => {});
     }, 300);
     return () => window.clearTimeout(t);
   }, [memoryVersion, connected]);
@@ -169,50 +144,38 @@ export function OrbStage({
   const litIds = useMemo(() => litAt(lit, litStep), [lit, litStep]);
 
   const live = useMemo(() => liveSystems(systems), [systems]);
-  const clusters = useMemo(
-    () => buildClusters(live, Object.values(approvals), perf.portrait),
-    [live, approvals, perf.portrait],
-  );
+  const clusters = useMemo(() => buildClusters(live, Object.values(approvals), perf.portrait), [live, approvals, perf.portrait]);
   const fileList = useMemo(() => Object.values(files), [files]);
   const artifactCount = useMemo(() => fileList.filter(isArtifact).length, [fileList]);
-  const insideData = useMemo(
-    () => layoutInside(graph, memories, { stars: perf.maxStars, memories: perf.maxMemories }, litIds, orbView),
-    [graph, memories, perf.maxStars, perf.maxMemories, litIds, orbView],
-  );
-  const known = useMemo(() => profileEntities(graph).length, [graph]);
   const projectList = useMemo(() => works(projects, folders, fileList), [projects, folders, fileList]);
-  // Each moon's thread goes to its topic: a routine from a profile pack to that pack's
-  // profession or interest; a project to what the project Nexus knows by that name relates
-  // to (the rocket model to 3D printing, say).
-  const homes = useMemo(() => {
-    const labels = new Map<string, string[]>();
-    const interest = new Map(packInfo.interests.map((i) => [i.id, i.label]));
-    for (const p of packInfo.packs) {
-      const names = [p.label, ...[p.id, ...p.match].flatMap((id) => interest.get(id) ?? [])];
-      labels.set(`pack:${p.id}`, names);
+  const areas = universe?.areas.filter((a) => !a.ended_at).length ?? 0;
+  const known = universe?.stars.length ?? 0;
+
+  // "Show in universe" on the Mind page lands here with ?focus=<id>: fly to that star.
+  const [params, setParams] = useSearchParams();
+  const focusId = params.get("focus");
+  useEffect(() => {
+    if (!focusId || !universe) return;
+    const star = universe.stars.find((s) => s.id === focusId && s.pos);
+    if (star) {
+      if (view !== "orb") setScreenMode("orb");
+      setSelected({ type: "star", star });
     }
-    const byId = new Map(graph?.entities.map((e) => [e.id, e]) ?? []);
-    for (const e of graph?.entities ?? []) {
-      if (!OUTSIDE_TYPES.has(e.type)) continue;
-      const near = (graph?.relations ?? [])
-        .filter((r) => !r.valid_to && (r.src === e.id || r.dst === e.id))
-        .map((r) => byId.get(r.src === e.id ? r.dst : r.src))
-        .filter((x) => x && !x.is_self && !OUTSIDE_TYPES.has(x.type))
-        .map((x) => x!.name);
-      if (near.length) labels.set(`work:${plain(e.name)}`, near);
-    }
-    return (key: string) => labels.get(key) ?? labels.get(`work:${plain(key)}`) ?? [];
-  }, [packInfo, graph]);
-  const sats = useMemo(
-    () => satellites(routines, projectList, insideData.stars, homes, perf.lite ? 12 : 24),
-    [routines, projectList, insideData.stars, homes, perf.lite],
-  );
+    setParams((p) => {
+      p.delete("focus");
+      return p;
+    }, { replace: true });
+  }, [focusId, universe, view, setParams]);
 
   // Drop a selection whose object went away.
   useEffect(() => {
-    if (selected?.type === "agent" && !clusters.some((c) => c.id === selected.node.systemId))
-      setSelected(null);
+    if (selected?.type === "team" && !clusters.some((c) => c.id === selected.cluster.id)) setSelected(null);
   }, [clusters, selected]);
+  useEffect(() => {
+    const close = (e: KeyboardEvent) => e.key === "Escape" && setSelected(null);
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
 
   const changeView = (v: ScreenMode) => {
     setSelected(null);
@@ -229,7 +192,7 @@ export function OrbStage({
       ? (activity ?? (state === "thinking" ? "Thinking…" : "Answering…"))
       : lit
         ? remembered(lit)
-        : summary(clusters.length, agentCount, working, memories.length, known, projectList.length, artifactCount, routines.length);
+        : summary(clusters.length, agentCount, working, memories.length, areas, known, projectList.length, artifactCount, routines.length);
 
   if (chat && collapsed) {
     return (
@@ -261,7 +224,7 @@ export function OrbStage({
 
   return (
     <div
-      // The 3D scene is a night sky in both themes, so what floats over it stays dark.
+      // Space is dark in both themes, so what floats over it stays dark.
       data-theme={showOrb ? "dark" : undefined}
       className={`relative flex min-h-0 flex-col overflow-hidden ${className}`}
     >
@@ -275,29 +238,28 @@ export function OrbStage({
                 </div>
               }
             >
-              <OrbScene
-                assistantState={state}
-                activity={state !== "idle" ? activity : null}
+              <UniverseScene
+                universe={universe}
                 clusters={clusters}
-                inside={insideData}
-                sats={sats}
+                assistantState={state}
                 lit={litIds}
                 litSeq={recall?.seq ?? 0}
-                labels={chat ? 3 : perf.lite ? 5 : 8}
-                tags={tags.current}
+                memorySeq={memoryVersion}
                 perf={perf}
+                admin={admin}
+                privateMode={privateMode}
+                compact={chat}
                 selected={selected}
                 onSelect={setSelected}
               />
             </Suspense>
           </SceneBoundary>
-          <StarLabels stars={insideData.stars} lit={litIds} tags={tags.current} />
         </div>
       )}
 
       {/* Above the widget dock and placed widgets, so the Notices tray opens over them. */}
       <div className={`pointer-events-none relative z-40 flex items-start gap-3 ${chat ? "px-3 pt-2" : "px-4 pt-4"}`}>
-        {/* A soft backdrop keeps the greeting and status readable over the bright shell. */}
+        {/* A soft backdrop keeps the greeting and status readable over bright galaxies. */}
         <div className={`min-w-0 max-w-full rounded-lg bg-ink/60 backdrop-blur-sm ${chat ? "px-2 py-0.5" : "px-3 py-1.5"}`}>
           {!chat && (
             <p className="text-lg text-slate-200">
@@ -310,6 +272,17 @@ export function OrbStage({
         </div>
         <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1">
           <NoticeBell />
+          {showOrb && (
+            <button
+              onClick={() => setPrivate(!privateMode)}
+              className={`rounded-lg border border-edge bg-panel/80 p-1.5 backdrop-blur ${privateMode ? "text-amber-300" : "text-slate-400 hover:text-white"}`}
+              aria-pressed={privateMode}
+              aria-label={privateMode ? "Private mode on: names are hidden" : "Hide all names (private mode)"}
+              title={privateMode ? "Private mode on: names are hidden. Click to show them" : "Hide all names, for screen sharing"}
+            >
+              {privateMode ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          )}
           <div
             className="flex rounded-lg border border-edge bg-panel/80 p-0.5 text-sm backdrop-blur"
             role="group"
@@ -364,21 +337,33 @@ export function OrbStage({
       {board ? null : showOrb ? (
         <div className="pointer-events-none relative z-10 flex flex-1 flex-col justify-end px-4 pb-2">
           {!chat && <QuestionCards className="mx-auto mb-2 w-full max-w-md" />}
-          {!chat && <Legend view={orbView} onView={setOrbView} />}
+          {!chat && !selected && isEmpty(universe) && (
+            <p className="mx-auto mb-2 max-w-md rounded-xl bg-ink/70 px-4 py-2 text-center text-sm text-slate-300 backdrop-blur">
+              Your universe starts here. As you chat, {assistant} learns who you are (the core) and finds the parts of
+              your life, each becoming a galaxy. Bring your chat history on the Mind page to start faster.
+            </p>
+          )}
+          {!chat && !selected && !isEmpty(universe) && (
+            <p className="mx-auto mb-1 hidden text-center text-xs text-slate-400 sm:block">
+              Tap a galaxy, a star, the hub or a ship to look closer. Drag to look around.
+            </p>
+          )}
         </div>
       ) : (
-        <ListView clusters={clusters} memories={memories} known={known} projects={projectList} />
+        <ListView clusters={clusters} memories={memories} areas={areas} known={known} projects={projectList} />
       )}
 
       {selected && (
-        <div className={chat ? "absolute inset-x-2 bottom-2 z-20" : "relative z-10 px-3 pb-2"}>
+        <div className={chat ? "absolute inset-x-2 bottom-2 z-20" : "absolute bottom-3 left-3 right-3 z-30 sm:left-auto sm:right-4 sm:top-20 sm:bottom-auto sm:w-96"}>
           <SelectionCard
             selection={selected}
-            clusters={clusters}
+            universe={universe}
             graph={graph}
-            routines={routines}
-            projects={projects}
-            files={fileList}
+            clusters={clusters}
+            state={state}
+            admin={admin}
+            privateMode={privateMode}
+            onSelect={setSelected}
             onClose={() => setSelected(null)}
           />
         </div>
@@ -392,6 +377,7 @@ function summary(
   agents: number,
   working: number,
   memories: number,
+  areas: number,
   known: number,
   projects: number,
   artifacts: number,
@@ -401,7 +387,8 @@ function summary(
     teams ? `${teams} team${teams > 1 ? "s" : ""} (${agents} agents${working ? `, ${working} working` : ""})` : "No teams right now",
     ...(routines ? [`${routines} routine${routines === 1 ? "" : "s"}`] : []),
     `${memories} memor${memories === 1 ? "y" : "ies"}`,
-    ...(known ? [`${known} connection${known === 1 ? "" : "s"}`] : []),
+    ...(areas ? [`${areas} life area${areas === 1 ? "" : "s"}`] : []),
+    ...(known ? [`${known} thing${known === 1 ? "" : "s"} known`] : []),
     projects
       ? `${projects} project${projects === 1 ? "" : "s"}`
       : `${artifacts} artifact${artifacts === 1 ? "" : "s"}`,
@@ -419,320 +406,252 @@ export function remembered(r: Recalled): string {
   return `Remembered ${list}`;
 }
 
-const VIEW_KEY = "nexus.orb.view";
-
-/** How the viewer likes the constellation drawn, kept in this browser only. */
-function useOrbView(): [OrbView, (v: OrbView) => void] {
-  const [view, setView] = useState<OrbView>(() => {
+/** Private mode hides every name in the universe, for screen sharing; kept in this browser. */
+function usePrivateMode(): [boolean, (v: boolean) => void] {
+  const [on, setOn] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null");
-      if (saved && ["connections", "importance", "mentions"].includes(saved.size) && typeof saved.gravity === "number")
-        return { size: saved.size, gravity: Math.min(1, Math.max(0, saved.gravity)) };
+      return localStorage.getItem(PRIVATE_KEY) === "1";
     } catch {
-      // Private window or blocked storage: the default is fine.
+      return false;
     }
-    return DEFAULT_VIEW;
   });
-  const save = (v: OrbView) => {
-    setView(v);
+  const save = (v: boolean) => {
+    setOn(v);
     try {
-      localStorage.setItem(VIEW_KEY, JSON.stringify(v));
+      localStorage.setItem(PRIVATE_KEY, v ? "1" : "0");
     } catch {
       // Not remembered; it still applies now.
     }
   };
-  return [view, save];
+  return [on, save];
 }
 
-const SIZE_HELP: Record<OrbView["size"], string> = {
-  connections: "how many things it connects to",
-  importance: "how central it is to you (ranked each night)",
-  mentions: "how often memories, chats and files mention it",
+const KIND_LABEL: Record<string, string> = {
+  person: "Person",
+  pet: "Pet",
+  organisation: "Organisation",
+  group: "Group",
+  place: "Place",
+  role: "Role",
+  life_event: "Life event",
+  project: "Project",
+  app: "App",
+  routine: "Routine",
+  task: "Task",
+  decision: "Decision",
+  topic: "Topic",
+  tool: "Tool",
+  document: "Document",
+  source: "Source",
 };
 
-function Legend({ view, onView }: { view: OrbView; onView: (v: OrbView) => void }) {
-  const [open, setOpen] = useState(false);
-  const dot = (c: string) => <span className="inline-block size-2 shrink-0 rounded-full" style={{ background: c }} />;
-  const item = "flex items-center gap-1.5 whitespace-nowrap";
-  const group = "text-[10px] font-semibold uppercase tracking-wider text-slate-500";
-  const shape = (cls: string, c = "#cbd5e1") => <span className={`inline-block size-2 shrink-0 ${cls}`} style={{ background: c }} />;
-  return (
-    <div className="pointer-events-auto mx-auto hidden max-w-full flex-col gap-1 rounded-2xl border border-edge bg-ink/75 px-4 py-2 text-xs text-slate-300 backdrop-blur sm:flex">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className={group}>Outside</span>
-        <span className={item}>{dot(NODE_COLOR.running)} team working</span>
-        <span className={item}>{dot(NODE_COLOR.working)} using a tool</span>
-        <span className={item}>{dot(NODE_COLOR.waiting)} needs approval</span>
-        <span className={item}>{dot(SATELLITE_COLOR.routine)} routines</span>
-        <span className={item}>
-          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.files }} /> projects
-          and their files
-        </span>
-        <span className={item}>
-          <span className="inline-block size-2 rotate-45" style={{ background: SATELLITE_COLOR.project }} /> apps
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className={group}>Inside</span>
-        <span className={item}>{dot("#f8fafc")} you</span>
-        <span className={item}>{dot(ENTITY_COLOR.person)} what Nexus knows about you</span>
-        <span className={item}>
-          <span className="inline-block h-px w-3 bg-slate-300" /> how they relate
-        </span>
-        <span className={item}>{dot(KIND_COLOR.preference)} memories</span>
-        <span className={item}>{dot(RECALL_COLOR)} just remembered</span>
-        <button onClick={() => setOpen(!open)} className="ml-auto text-sky-300 hover:text-sky-200" aria-expanded={open}>
-          {open ? "Less" : "Key and view"}
-        </button>
-      </div>
-      {open && (
-        <div className="mt-1 space-y-1.5 border-t border-edge pt-2">
-          <p className="max-w-2xl text-slate-400">
-            Inside, the nearer the centre the closer a thing is to who you are. Each part of life has its own side of
-            the orb, and things that belong together cluster.
-          </p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className={group}>Rings</span>
-            <span className={item} title={SHELLS[1].help}>{shape("rotate-45")} {SHELLS[1].label.toLowerCase()}</span>
-            <span className={item} title={SHELLS[2].help}>{shape("rounded-full")} {SHELLS[2].label.toLowerCase()}</span>
-            <span className={item} title={SHELLS[3].help}>{shape("")} {SHELLS[3].label.toLowerCase()}</span>
-            <span className={item} title={SHELLS[4].help}>
-              <span className="inline-block size-0 border-x-4 border-b-8 border-x-transparent border-b-slate-300" />{" "}
-              {SHELLS[4].label.toLowerCase()}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className={group}>Parts of life</span>
-            {Object.entries(DOMAIN_COLOR).map(([d, c]) => (
-              <span key={d} className={item}>
-                {dot(c)} {d}
-              </span>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className={group}>Links</span>
-            {Object.entries(FAMILIES).map(([f, x]) => (
-              <span key={f} className={item} title={x.help}>
-                <span className="inline-block h-0.5 w-3" style={{ background: x.color }} /> {x.label.toLowerCase()}
-              </span>
-            ))}
-            <span className={item}>
-              <span className="inline-block w-3 border-t border-dashed border-slate-400" /> ended or implied
-            </span>
-            <span className="text-slate-500">thicker is stronger</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <label className={item}>
-              <span className={group}>Size by</span>
-              <select
-                value={view.size}
-                onChange={(e) => onView({ ...view, size: e.target.value as OrbView["size"] })}
-                className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-xs"
-              >
-                <option value="connections">connections</option>
-                <option value="importance">importance</option>
-                <option value="mentions">mentions</option>
-              </select>
-              <span className="text-slate-500">{SIZE_HELP[view.size]}</span>
-            </label>
-            <label className={item} title="How tightly things that belong together pull into clusters">
-              <span className={group}>Gravity</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={view.gravity}
-                onChange={(e) => onView({ ...view, gravity: Number(e.target.value) })}
-                className="w-24 accent-sky-400"
-              />
-              <span className="text-slate-500">{view.gravity < 0.2 ? "loose" : view.gravity > 0.8 ? "tight" : "medium"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const card = "text-xs uppercase tracking-wider";
 
+/** The words for what was picked: the universe is for seeing, the card is for reading. */
 function SelectionCard({
   selection,
-  clusters,
+  universe,
   graph,
-  routines,
-  projects,
-  files,
+  clusters,
+  state,
+  admin,
+  privateMode,
+  onSelect,
   onClose,
 }: {
   selection: Selection;
-  clusters: OrbCluster[];
+  universe: Universe | null;
   graph: KnowledgeGraph | null;
-  routines: Routine[];
-  projects: Project[];
-  files: FileItem[];
+  clusters: OrbCluster[];
+  state: string;
+  admin: boolean;
+  privateMode: boolean;
+  onSelect: (s: Selection) => void;
   onClose: () => void;
 }) {
+  const assistant = useAssistantName();
   let body: ReactNode;
-  if (selection.type === "entity") {
-    const st = selection.star;
-    const e = graph?.entities.find((x) => x.id === st.id);
-    const names = new Map(graph?.entities.map((x) => [x.id, x.is_self ? "You" : x.name]) ?? []);
-    const facts = (graph?.relations ?? []).filter((r) => !r.valid_to && (r.src === st.id || r.dst === st.id));
-    const t = ENTITY_TYPES[st.type] ?? ENTITY_TYPES.other;
+  const areaOf = (id: string | null) => universe?.areas.find((a) => a.id === id);
+  if (privateMode && selection.type !== "hub") {
+    body = (
+      <p className="text-sm text-slate-300">
+        Private mode is on, so nothing is named. Turn it off with the eye button to read about this.
+      </p>
+    );
+  } else if (selection.type === "core") {
     body = (
       <>
-        <div
-          className="flex items-center gap-2 text-xs"
-          style={{ color: st.self ? "#f8fafc" : (st.domain && DOMAIN_COLOR[st.domain]) || ENTITY_COLOR[st.type] }}
-        >
-          <Share2 size={14} /> {st.self ? "You" : t.label}
+        <div className={`${card} flex items-center gap-2 text-sky-300`}>
+          <Brain size={14} /> Your core
+        </div>
+        <p className="mt-1 text-sm text-slate-300">
+          Who you are, as {assistant} understands it: your values deepest, then goals, traits and skills, with habits
+          and preferences near the surface. Nothing in here is ever named on screen.
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          {universe?.core.neurons.length ?? 0} things about you, linked by how often they show up together.
+        </p>
+        <Link to="/mind#core" className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
+          Open your core to read and correct it <ExternalLink size={13} />
+        </Link>
+      </>
+    );
+  } else if (selection.type === "area") {
+    const a = selection.area;
+    const inside = (universe?.stars ?? []).filter((s) => s.area === a.id).sort((x, y) => y.salience - x.salience);
+    body = (
+      <>
+        <div className={`${card} flex items-center gap-2`} style={{ color: a.color }}>
+          <Sparkles size={14} /> Life area
+        </div>
+        <div className="mt-1 font-medium">{a.name}</div>
+        {a.summary && <p className="mt-0.5 text-sm text-slate-400">{a.summary}</p>}
+        <p className="mt-0.5 text-xs text-slate-500">{areaLine(a, universe?.stars ?? [])}</p>
+        {inside.length > 0 && (
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {inside.slice(0, 12).map((s) => (
+              <li key={s.id}>
+                <button
+                  onClick={() => onSelect({ type: "star", star: s })}
+                  className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-slate-200 hover:bg-white/10"
+                >
+                  {s.name}
+                </button>
+              </li>
+            ))}
+            {inside.length > 12 && <li className="px-1 text-xs text-slate-500">and {inside.length - 12} more</li>}
+          </ul>
+        )}
+        <Link to={`/mind?area=${a.id}`} className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
+          Open in Mind <ExternalLink size={13} />
+        </Link>
+      </>
+    );
+  } else if (selection.type === "star") {
+    const st = selection.star;
+    const area = areaOf(st.area);
+    const names = new Map(graph?.entities.map((x) => [x.id, x.is_self ? "You" : x.name]) ?? []);
+    const facts = (graph?.relations ?? []).filter((r) => !r.valid_to && (r.src === st.id || r.dst === st.id));
+    const e = graph?.entities.find((x) => x.id === st.id);
+    body = (
+      <>
+        <div className={`${card} flex items-center gap-2`} style={{ color: area?.color ?? "#cbd5e1" }}>
+          <Sparkles size={14} /> {KIND_LABEL[st.kind] ?? "Thing"}
+          {area && <span className="normal-case tracking-normal text-slate-500">· {area.name}</span>}
         </div>
         <div className="mt-1 font-medium">{st.name}</div>
         {st.summary && <p className="mt-0.5 text-sm text-slate-400">{st.summary}</p>}
-        {!st.self && st.shell && (
-          <p className="mt-0.5 text-xs text-slate-500">
-            {SHELLS[st.shell]?.label}
-            {st.domain && <> · {st.domain}</>}
-          </p>
-        )}
         {facts.length > 0 && (
           <ul className="mt-1.5 space-y-0.5 text-sm text-slate-300">
-            {facts.slice(0, 3).map((r) => (
+            {facts.slice(0, 4).map((r) => (
               <li key={r.id} className="flex items-baseline gap-1.5">
-                {r.family && (
-                  <span
-                    className="inline-block size-1.5 shrink-0 -translate-y-px rounded-full"
-                    style={{ background: FAMILIES[r.family]?.color }}
-                    title={FAMILIES[r.family]?.label}
-                  />
-                )}
+                <span
+                  className="inline-block size-1.5 shrink-0 -translate-y-px rounded-full"
+                  style={{ background: FAMILIES[r.family ?? "association"]?.color }}
+                  title={FAMILIES[r.family ?? "association"]?.label}
+                />
                 <span>{relationText(r, names)}</span>
               </li>
             ))}
-            {facts.length > 3 && <li className="text-xs text-slate-500">and {facts.length - 3} more</li>}
+            {facts.length > 4 && <li className="text-xs text-slate-500">and {facts.length - 4} more</li>}
           </ul>
         )}
-        {e && !st.self && (
+        {e && (
           <p className="mt-1.5 text-xs text-slate-500">
             In {e.memories} memor{e.memories === 1 ? "y" : "ies"}, {e.chats + e.past_chats} chat
             {e.chats + e.past_chats === 1 ? "" : "s"} and {e.files} file{e.files === 1 ? "" : "s"}
           </p>
         )}
-        <Link
-          to={`/knowledge?focus=${st.id}`}
-          className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200"
-        >
-          Open in Knowledge <ExternalLink size={13} />
-        </Link>
-      </>
-    );
-  } else if (selection.type === "agent") {
-    const n = selection.node;
-    const team = clusters.find((c) => c.id === n.systemId);
-    body = (
-      <>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Bot size={14} /> {team?.name ?? "Team"}
-          {team && team.status in RUN_LABEL && (
-            <span className={RUN_STYLE[team.status as Run["status"]]}>· {RUN_LABEL[team.status as Run["status"]]}</span>
+        <div className="mt-2 flex flex-wrap gap-4 text-sm">
+          <Link to={`/mind?focus=${st.id}`} className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
+            Open in Mind <ExternalLink size={13} />
+          </Link>
+          {area && (
+            <button onClick={() => onSelect({ type: "area", area })} className="text-slate-300 hover:text-white">
+              Whole area
+            </button>
           )}
         </div>
-        <div className="mt-1 font-medium">
-          {n.name} <span className="text-sm font-normal text-slate-400">({n.role}, {n.tier})</span>
+      </>
+    );
+  } else if (selection.type === "hub") {
+    const act = deckActivity({ assistant: state, teams: clusters, recalling: false, routinesDue: false });
+    body = (
+      <>
+        <div className={`${card} flex items-center gap-2 text-sky-300`}>
+          <Satellite size={14} /> Nexus hub · {assistant}
         </div>
-        <div className="mt-0.5 text-sm" style={{ color: NODE_COLOR[n.status] }}>
-          {n.tool && ["working", "waiting"].includes(n.status)
-            ? `${AGENT_LABEL[n.status]} · ${toolLabel(n.tool)}`
-            : (AGENT_LABEL[n.status] ?? n.status)}
+        <p className="mt-1 text-sm text-slate-400">
+          The station is {assistant}. Each deck is a layer of Nexus and lights up while that layer works.
+        </p>
+        <ul className="mt-2 space-y-1 text-sm">
+          {DECKS.filter((d) => admin || !d.admin).map((d) => {
+            const level = act[d.id];
+            const row = (
+              <>
+                <span
+                  className="inline-block size-2 shrink-0 rounded-full"
+                  style={{ background: level > 0.8 ? "#5fe3ff" : level > 0.45 ? "#5fb4ff" : "#3b4560" }}
+                />
+                <span className="font-medium text-slate-200">{d.label}</span>
+                <span className="truncate text-xs text-slate-500">{d.layer}</span>
+                {d.admin && <span className="ml-auto shrink-0 text-[10px] uppercase text-pink-300">admin</span>}
+              </>
+            );
+            return (
+              <li key={d.id}>
+                {d.link ? (
+                  <Link to={d.link} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/5">
+                    {row}
+                  </Link>
+                ) : (
+                  <div className="flex items-center gap-2 px-1 py-0.5">{row}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </>
+    );
+  } else {
+    const team = selection.type === "team" ? selection.cluster : clusters.find((c) => c.id === selection.node.systemId);
+    body = team ? (
+      <>
+        <div className={`${card} flex items-center gap-2 text-slate-400`}>
+          <Rocket size={14} /> Team ship
+          {team.status in RUN_LABEL && (
+            <span className={`normal-case tracking-normal ${RUN_STYLE[team.status as Run["status"]]}`}>
+              · {RUN_LABEL[team.status as Run["status"]]}
+            </span>
+          )}
         </div>
-        <Link to={`/agents/${n.systemId}`} className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
+        <div className="mt-1 font-medium">{team.name}</div>
+        <ul className="mt-1.5 space-y-0.5 text-sm">
+          {team.nodes.map((n) => (
+            <li key={n.key} className="flex items-baseline gap-2">
+              <span className="inline-block size-1.5 shrink-0 -translate-y-px rounded-full" style={{ background: NODE_COLOR[n.status] }} />
+              <span className="text-slate-200">{n.name}</span>
+              <span className="truncate text-xs text-slate-500">
+                {n.role}, {n.tier} ·{" "}
+                {n.tool && ["working", "waiting"].includes(n.status)
+                  ? `${AGENT_LABEL[n.status]} · ${toolLabel(n.tool)}`
+                  : (AGENT_LABEL[n.status] ?? n.status)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <Link to={`/agents/${team.id}`} className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
           Open team <ExternalLink size={13} />
         </Link>
       </>
-    );
-  } else if (selection.type === "memory") {
-    const m = selection.point;
-    body = (
-      <>
-        <div className="flex items-center gap-2 text-xs" style={{ color: KIND_COLOR[m.kind] }}>
-          <Brain size={14} /> {m.kind}
-          {m.pinned && <span className="text-slate-400">· pinned</span>}
-        </div>
-        <p className="mt-1 text-sm text-slate-200">{m.content}</p>
-        <Link to={`/memory?focus=${m.id}`} className="mt-2 inline-flex items-center gap-1 text-sm text-sky-300 hover:text-sky-200">
-          Open in Memory <ExternalLink size={13} />
-        </Link>
-      </>
-    );
-  } else if (selection.type === "satellite") {
-    const sat = selection.sat;
-    const r = sat.kind === "routine" ? routines.find((x) => x.id === sat.id) : undefined;
-    const p = sat.kind === "project" && sat.app ? projects.find((x) => x.id === sat.id) : undefined;
-    const inside = latestVersions(files.filter((f) => f.folder_id && sat.folderIds.includes(f.folder_id)));
-    body = (
-      <>
-        <div className="flex items-center gap-2 text-xs" style={{ color: sat.color }}>
-          {sat.kind === "routine" ? <CalendarClock size={14} /> : sat.app ? <FolderGit2 size={14} /> : <FolderOpen size={14} />}
-          {sat.kind === "routine" ? (r?.enabled === false ? "Routine · paused" : "Routine") : sat.app ? "App" : "Project"}
-        </div>
-        <div className="mt-1 font-medium">{sat.name}</div>
-        <p className="mt-0.5 text-sm text-slate-400">
-          {sat.detail}
-          {r?.next_run_at && ` · next ${formatInZone(r.next_run_at, r.timezone)}`}
-          {p?.app_state === "running" && " · live"}
-        </p>
-        {inside.length > 0 && (
-          <ul className="mt-1.5 max-h-36 space-y-0.5 overflow-y-auto text-sm">
-            {inside.slice(0, 8).map((f) => (
-              <li key={f.id} className="flex items-center gap-2">
-                <a
-                  href={api.fileUrl(f.id, true)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-0 flex-1 truncate text-slate-200 hover:text-sky-300"
-                  title={f.name}
-                >
-                  {f.name}
-                  {(f.version ?? 1) > 1 && <span className="text-slate-500"> v{f.version}</span>}
-                </a>
-                <span className="shrink-0 text-xs text-slate-500">{formatDate(f.created_at)}</span>
-              </li>
-            ))}
-            {inside.length > 8 && <li className="text-xs text-slate-500">and {inside.length - 8} more</li>}
-          </ul>
-        )}
-        <div className="mt-2 flex gap-4 text-sm">
-          {r?.chat_id && (
-            <Link to={`/c/${r.chat_id}`} className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
-              Open chat <ExternalLink size={13} />
-            </Link>
-          )}
-          {r && (
-            <Link to="/routines" className="text-slate-300 hover:text-white">
-              Routines
-            </Link>
-          )}
-          {p?.live_url && (
-            <a href={p.live_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200">
-              Open app <ExternalLink size={13} />
-            </a>
-          )}
-          {sat.kind === "project" && (
-            <Link
-              to={sat.folderIds.length ? `/library?folder=${sat.folderIds[0]}` : "/library"}
-              className="text-slate-300 hover:text-white"
-            >
-              Open in Library
-            </Link>
-          )}
-        </div>
-      </>
+    ) : (
+      <p className="text-sm text-slate-400">This team has finished.</p>
     );
   }
   return (
-    <div className="relative mx-auto max-w-md rounded-xl border border-edge bg-panel/90 p-3 pr-9 shadow-xl backdrop-blur">
+    <div className="relative max-h-[60vh] overflow-y-auto rounded-xl border border-edge bg-panel/90 p-3 pr-9 shadow-xl backdrop-blur">
       {body}
-      <button onClick={onClose} className="absolute right-2 top-2 p-1 text-slate-400 hover:text-white" aria-label="Close">
+      <button onClick={onClose} className="absolute right-2 top-2 p-1 text-slate-400 hover:text-white" aria-label="Back to the universe" title="Back (Esc)">
         <X size={16} />
       </button>
     </div>
@@ -744,11 +663,13 @@ function SelectionCard({
 function ListView({
   clusters,
   memories,
+  areas,
   known,
   projects,
 }: {
   clusters: OrbCluster[];
   memories: Memory[];
+  areas: number;
   known: number;
   projects: Work[];
 }) {
@@ -790,19 +711,18 @@ function ListView({
         </section>
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
-            <Brain size={15} /> Memory
+            <Brain size={15} /> Mind
           </h2>
-          <Link to="/memory" className="block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40">
+          <Link to="/mind" className="block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40">
             {memories.length === 0
               ? `Nothing yet. ${assistant} learns as you chat.`
               : kinds.map(([k, n]) => `${n} ${k}${n > 1 ? "s" : ""}`).join(" · ")}
           </Link>
           {known > 0 && (
-            <Link
-              to="/knowledge"
-              className="mt-2 block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40"
-            >
-              {known} thing{known === 1 ? "" : "s"} known about you: the people, places and interests, and how they link
+            <Link to="/mind" className="mt-2 block rounded-lg border border-edge bg-panel px-3 py-2 text-sm hover:bg-edge/40">
+              {known} thing{known === 1 ? "" : "s"} known about you
+              {areas > 0 && ` across ${areas} life area${areas === 1 ? "" : "s"}`}: the people, places and interests, and
+              how they link
             </Link>
           )}
         </section>
