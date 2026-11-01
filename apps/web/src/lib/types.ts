@@ -1296,6 +1296,8 @@ export interface GraphRun {
   merged?: number;
   faded?: number;
   communities?: number;
+  areas?: number;
+  areas_born?: number;
   failed?: number;
 }
 
@@ -1482,3 +1484,62 @@ export type WidgetAction =
 
 /** A call from a custom widget's page (window.nexus) that the app forwards to the server. */
 export type BridgeCall = "state.get" | "state.set" | "fetch" | "data" | "notify";
+
+/** The universe view (GET /api/memories/universe): who you are as an unnamed core, each life
+ * area as a galaxy with its stars, and how they link. */
+export interface UniverseNeuron {
+  id: string;
+  /** 0 deepest (values) to 2 surface (habits). */
+  layer: number;
+  /** Inside the unit sphere. */
+  pos: [number, number, number];
+  size: number;
+  glow: number;
+}
+
+export interface UniverseArea {
+  id: string;
+  name: string;
+  summary: string;
+  domain: string | null;
+  hue: number;
+  color: string;
+  /** Its place on the ring around the core, in radians, and its disc's tilt. */
+  angle: number;
+  tilt: number;
+  size: number;
+  /** 0..1: how much of it came up this month. */
+  activity: number;
+  parent: string | null;
+  merged_into: string | null;
+  born_at: string;
+  /** Set for a day or two after it merged away or emptied. */
+  ended_at: string | null;
+}
+
+export interface UniverseStar {
+  id: string;
+  name: string;
+  /** The ontology type: person, place, topic, project, app, routine... */
+  kind: string;
+  summary: string;
+  area: string | null;
+  /** In its galaxy: radius 0..1, angle, height. */
+  pos: [number, number, number] | null;
+  salience: number;
+  mentions: number;
+  seen_at: string;
+  created_at: string;
+  /** The app record it stands for (a project, folder or routine). */
+  source: { kind: string; id: string } | null;
+}
+
+export interface Universe {
+  core: { hue: number; neurons: UniverseNeuron[]; links: [number, number, number][] };
+  self_id: string | null;
+  areas: UniverseArea[];
+  stars: UniverseStar[];
+  lanes: { a: string; b: string; w: number; family: string }[];
+  filaments: { a: string; b: string; w: number }[];
+  roots: { area: string; w: number }[];
+}

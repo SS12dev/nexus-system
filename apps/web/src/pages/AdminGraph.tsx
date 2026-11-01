@@ -1,12 +1,13 @@
-import { CheckCircle2, Loader2, Play, RefreshCw, Shuffle, XCircle } from "lucide-react";
+import { CheckCircle2, Eraser, Loader2, Play, RefreshCw, Shuffle, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "../components/Feedback";
+import { TextPromptDialog } from "../components/TextPromptDialog";
 import { api } from "../lib/api";
 import { formatAgo, formatDateTime } from "../lib/format";
 import type { GraphAdmin, GraphRun } from "../lib/types";
 import { Section, Tile } from "./AdminParts";
 
-/** What each relation family means, in the words the orb will use for its edge colours. */
+/** What each relation family means, in the words the universe uses for its edge colours. */
 const FAMILY_HELP: Record<string, string> = {
   identity: "who you are: traits, values, likes",
   social: "people and how they relate",
@@ -30,6 +31,7 @@ const SHELL_HELP: Record<string, string> = {
 export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) => void; onOpenConfig: () => void }) {
   const [data, setData] = useState<GraphAdmin | null>(null);
   const [busy, setBusy] = useState<"" | "extract" | "rearrange">("");
+  const [rebuilding, setRebuilding] = useState(false);
 
   const load = useCallback(() => api.graphAdmin().then(setData).catch((e) => onError(e.message)), [onError]);
   useEffect(() => {
@@ -58,15 +60,15 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
   return (
     <div>
       <p className="mb-4 text-sm text-slate-400">
-        The knowledge graph is the map of each person's world that the orb and the Knowledge page draw: who they are,
+        The knowledge graph is the map of each person's world that the universe and the Mind page draw: who they are,
         the people and places in their life, what they work on and what they know, and how those connect.{" "}
         {local
           ? "A model on this machine reads new memories, finished chats and files for it every ten minutes, at no cost."
           : "The memory model notes it in the same calls that save memories."}{" "}
         Each night duplicates are merged, links nobody has confirmed for a month fade a little, links recall keeps
-        using grow stronger, everything is ranked and grouped into clusters, and a few question cards go where the
-        graph is unsure. When a reply draws on the graph, the
-        orb lights what it touched from the centre outward, a link at a time.
+        using grow stronger, everything is ranked and grouped into clusters that become the life areas (galaxies) in the universe, and a few
+        question cards go where the graph is unsure. When a reply draws on the graph, the universe
+        lights what it touched, a link at a time.
       </p>
       {!data.enabled && (
         <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
@@ -193,6 +195,41 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
           “app” ones come from your projects, apps and routines and leave when those are deleted.
         </p>
       </Section>
+
+      <Section
+        title="Start the graph again"
+        action={
+          <button
+            onClick={() => setRebuilding(true)}
+            className="flex items-center gap-1.5 rounded-md border border-rose-500/40 px-2.5 py-1 text-xs text-rose-200 hover:bg-rose-500/10"
+          >
+            <Eraser size={13} /> Rebuild
+          </button>
+        }
+      >
+        <p className="text-xs text-slate-400">
+          Clears every person, place, topic and connection a model pulled out of memories, chats and files, for
+          everyone, including what the first cloud extractor made, and has the local model read it all again. Kept:
+          each person's own entry, the app's projects, folders and routines, what people said outright, and what came
+          from imported chat history. Memories, chats and files aren't touched. Reading everything again takes a while;
+          the universe view fills back in as it goes.
+        </p>
+      </Section>
+      {rebuilding && (
+        <TextPromptDialog
+          title="Rebuild the knowledge graph?"
+          description='This removes what models extracted for every user and reads everything again with the local model. Type "rebuild" to confirm.'
+          fields={[{ key: "confirm", label: "Type rebuild", value: "", placeholder: "rebuild" }]}
+          confirmLabel="Rebuild"
+          danger
+          onSubmit={async ({ confirm }) => {
+            const r = await api.graphRebuild(confirm);
+            toast(`Cleared ${r.entities} things and ${r.relations} connections; reading everything again`);
+            load();
+          }}
+          onClose={() => setRebuilding(false)}
+        />
+      )}
     </div>
   );
 }
@@ -212,6 +249,7 @@ function RunLine({ run, what, empty }: { run: GraphRun | null; what: string; emp
           `${run.faded} connections faded`,
           `${run.strengthened ?? 0} strengthened by use`,
           `${run.communities} clusters`,
+          ...(run.areas !== undefined ? [`${run.areas} life areas (${run.areas_born ?? 0} new)`] : []),
           `${run.questions ?? 0} question cards`,
         ];
   return (

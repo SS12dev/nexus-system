@@ -12,9 +12,9 @@ past chats) and a document library: upload PDF, Word, PowerPoint, Excel and more
 the Library page and ask Nexus about them. Phase 3 lets Nexus build teams of sub-agents for
 bigger jobs, with web search, a code sandbox that makes PDF, Word, PowerPoint and Excel files, a
 shared skills library, per-run budgets, and your approval before anything risky. Phase 4 makes
-the home screen a 3D orb: Nexus in the middle, its live agent teams growing out of it and
-pulling back in, and inside it what it knows about you as a constellation of people, projects
-and topics, with memories and artifacts attached and what it recalls lighting up. Phase 5 makes it safe to invite
+the home screen a 3D universe: who you are as a glowing core, the areas of your life as
+galaxies, Nexus as a station beside them and its live agent teams as ships flying out to work,
+with what it recalls lighting up. Phase 5 makes it safe to invite
 people: rate limits, security headers and cross-site checks, two API replicas behind Traefik,
 nightly backups with a restore script, and an Admin page with service health, traffic, usage,
 the audit log, backups and a maintenance switch. Since then it has gained structured logs with
@@ -200,7 +200,7 @@ candidate research and the evaluation criteria required before changing aliases.
 | Profile | A short impression of you, in sections | Nightly, on "Rebuild now", and soon after your first memories | Every turn, at the top of the prompt |
 | Memories | Preferences, facts, goals and standing instructions, with confidence and source | After each turn | Every turn, the closest few to your message |
 | Past chats | A summary of each chat | Once a chat has been quiet for 20 minutes, or grows a lot | When one is close to your message; also the start of a chat too long to send whole |
-| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Knowledge page |
+| Connections | The people, projects, organisations, places, topics and tools your memories, chats and files are about, and how they relate | With each memory and summary; files and memories you add yourself within ten minutes | On the Mind page |
 
 After each turn `nexus-nano` proposes memories from the exchange. Each is compared with its
 nearest existing memories and becomes ADD, UPDATE or NOOP (the Mem0 pattern); repeats raise a
@@ -209,8 +209,8 @@ never changed by Nexus. Each night, memories no chat has confirmed in 60 days lo
 (and go below 0.2), near duplicates are merged, and stale profiles are rebuilt; set the time with
 `MEMORY_NIGHTLY_HOUR_UTC` (default 21:30 UTC, 03:00 IST).
 
-On the **Memory** page you see the profile and every memory with where it came from and its
-history, and can add, edit, pin and delete them. Deleting is real deletion; you can also turn
+On the **Mind** page (`/mind`) the **Memories** tab shows the profile and every memory with where
+it came from and its history, and you can add, edit, pin and delete them. Deleting is real deletion; you can also turn
 learning off or forget everything.
 
 **Connections** (the knowledge graph, `nexus_common/graph.py`) sit in three tables beside the
@@ -222,11 +222,14 @@ proposes memories proposes them, so chats cost nothing extra; names resolve to a
 entity by name or alias, then by meaning within the same type. Memories you add or edit
 yourself, files, and anything from before are linked by a background job every ten minutes
 (one call per twenty items). Deleting a memory, chat or file deletes its mentions, and an
-entity nothing mentions any more goes with its relations. The **Knowledge** page explores them:
-search, filter by type and sort the list; pick one to see a small graph of what it's linked to
-(tap a neighbour to move to it), each link with the date it started (and ended, for ones no
-longer true), and the memories, chats and files that mention it. Removing one keeps its
-memories. `?focus=<entity id>` opens one, which is where the orb's "Open in Knowledge" goes. `GRAPH_ENABLED=false`
+entity nothing mentions any more goes with its relations. The Mind page's **Overview** shows
+them: your core grouped (values and beliefs, goals, traits and skills, interests, preferences and
+habits, how you communicate) with how sure Nexus is of each, your life areas as cards (new this
+week, quiet lately, main things), and one search box across areas, things and memories. Open an
+area (`?area=<id>`) for its things grouped by kind, or a thing (`?focus=<id>`) for what it's
+linked to, each link with the date it started (and ended, for ones no longer true), and the
+memories, chats and files that mention it. Forgetting one keeps its memories. The old `/memory`
+and `/knowledge` links redirect there. `GRAPH_ENABLED=false`
 (Admin › Configuration) stops adding to it.
 
 With **Recall through connections** on (`GRAPH_RECALL_ENABLED`, off by default), each turn
@@ -285,7 +288,7 @@ from Settings › Run setup again). Every step after the first can be skipped:
    email or WhatsApp.
 
 The answers become memories with source `onboarding` (pinned where they were direct answers),
-so they show on the Memory page and can be edited or deleted like any other. Professions and
+so they show on the Mind page and can be edited or deleted like any other. Professions and
 interests also go straight into the knowledge graph as topics linked to the person ("works in
 Teaching", "wants help with Cooking"), with their memories attached, so the orb shows them at
 once. The profile rebuild immediately extracts entities and relations from free-text answers too,
@@ -531,59 +534,50 @@ in order: the shipped safety rules and house conventions
 ([library/instructions](library/instructions)), global and per-role instructions (admins), then
 your own house style. Nexus's own chat follows the conventions, global instructions and yours.
 
-## The orb
+## The universe
 
-The home screen is a React Three Fiber scene ([apps/web/src/orb](apps/web/src/orb)) with the chat
-box docked underneath; sending a message opens the chat.
+The home screen is a React Three Fiber scene ([apps/web/src/universe](apps/web/src/universe))
+with the chat box docked underneath; sending a message opens the chat. It draws your mind as a
+small universe from `GET /api/memories/universe` (`nexus_common/universe.py`).
 
-- **The orb** is a shader sphere whose colour, churn and pulse follow what Nexus is doing: blue
-  and calm when idle, violet while thinking, bright and pulsing while answering.
-- **Around it**, every team that isn't archived is a cluster tied to the orb by an edge: the
-  lead hangs from the orb, workers from the lead (a pipeline is a chain). Agents are coloured
-  by their live status (working, using a tool, waiting for your approval, done), and a spark
-  runs down the edge to a busy agent. A new team grows out of the orb, agent by agent; when a
-  team is deleted, or archived after its run, its agents pull back in and fade. Agents move on
-  springs, so nothing jumps.
-- **Just outside the shell**, like moons, is what Nexus does and has made for you: routines as
-  soft violet moons (grey when paused, red after a failed run), software projects as small
-  amber crystals (bright while running as an app), and each project of files as one violet
-  crystal that grows with how many files it holds: a rocket model's .3mf, .step and .stl are
-  one moon, not three. Each drifts on an orbit of its own, at its own distance, tilt and speed.
-  A routine has a faint curved thread to what it is about inside (its profile pack's profession
-  or interest, else you); a project has one only when Nexus knows what it relates to (the rocket
-  model to 3D printing), so many projects never crowd the centre with lines. Tapping a moon
-  opens a card: a routine's chat, a project's files (newest version of each) with a link to it
-  in the Library, or the app. Inside is who you are; outside, what Nexus does and has made.
-- **Inside it** is who you are, as a constellation: you at the centre, and around you the
-  people, organisations, places, interests (topics) and tools from your memories, chats and
-  files (the Knowledge page), spread loosely around you with each type kept together and
-  tinted by type, joined by gently curved lines. Projects and files are never inside: they are
-  the moons. The more something is mentioned, the bigger and nearer the centre it sits. You
-  are at the centre from the first minute, before anything is connected. Lines are relations
-  ("Shivam works at UST"), fainter once they stopped being true. Memories are small dots
-  circling what they're about; memories only about you (or a project) circle the centre.
-  Before anything is connected, memories cluster by kind.
-  Names show for the most mentioned first, more as you zoom in, and never on top of each
-  other; hovering a star shows its name. Zoomed in close, the orb's shell fades back so the
-  lines and names stay readable.
-- **Recall lights up.** When Nexus answers, what it remembered (the `memory.recalled` event)
-  glows yellow in the orb for 15 seconds with a short pulse, its line to you lights, and the
-  status line says it in words ("Remembered Nexus, LangGraph and 2 memories"). The reply keeps
-  a **Remembered** row of chips (stored on the message as `recalled`); tapping it lights them
-  again.
-- **Tap** an agent, star, memory or moon for a card: a team opens on the Agents page, a
-  star shows what it is, how it relates to the rest and how often it comes up, a memory opens
-  on the Memory page, and a project lists its files to open. Drag to turn, pinch or scroll to zoom.
-- **Phones** get fewer particles, no bloom, a lower pixel ratio and a 30 fps cap, and teams sit
-  on a tighter band on portrait screens. **List** (top right) shows the same teams, memories and
-  projects as plain lists; it is also what shows when the device has no WebGL. With
-  reduced motion turned on in the OS, nothing spins or pulses and objects snap into place.
+- **Your core** sits at the centre: a glowing, unlabelled network of who you are (values and
+  beliefs deepest, then goals, traits, skills and interests, then preferences, habits and how
+  you communicate). Its colour drifts with what it holds. It is never named in the scene; "Open
+  your core" goes to the Mind page.
+- **Life areas are galaxies** on a ring around the core. Each night (`graph_nightly`) the
+  graph's communities are matched to yesterday's areas (Jaccard), so each keeps its place,
+  colour and name; an area is born when a new community appears, splits when one pulls apart,
+  merges when two come together and fades when it empties. New areas are named by the local
+  model from their main members; until a user has communities, areas are seeded from domains
+  (work, health, social...). Each thing has a stable spot in its galaxy (`entities.pos`), the
+  more central the nearer the middle. Projects and apps show as structures, routines as pulsars,
+  loose things as dust between galaxies. Faint roots run from the core to the areas you are
+  tied to, filaments between areas that share links.
+- **The hub** is the station beside the core: it *is* the assistant. Its decks are its parts
+  (comms, bridge, hangar, workshop, archive, clock, reactor with one cell per model tier,
+  foundation), lit by what is going on; admins see an extra admin deck. Tapping it lists the
+  decks with links to the pages behind them.
+- **Teams are ships.** Each live team leaves the hub as a ship chosen by its crew (scout for
+  research, freighter for builders, cutter for review, shuttle for deploys, carrier for big
+  teams), with a robot or astronaut per agent dressed for its role. It flies to the star it is
+  working on (matched by name) and circles it; its trail shows its state, and it blinks amber
+  and holds still while it waits for your approval.
+- **Live events**: a message sends a ripple from the hub, a new memory a spark into the core,
+  and recall lights what was remembered, a hop at a time, for 15 seconds (the Remembered chips
+  under a reply light it again).
+- **Tap** anything for a card: an area lists its main things and opens in Mind, a star shows
+  how it relates to the rest, a ship or crew member opens its team. Drag to turn, pinch or
+  scroll to zoom, Esc to step back. **Private mode** (the eye) hides every name, for screens
+  others can see. `/?focus=<entity id>` flies to a star ("Show in universe" on the Mind page).
+- **Phones** get fewer particles, no bloom and a lower pixel ratio. **List** (top right) shows
+  the same as plain lists; it is also what shows without WebGL. With reduced motion on, nothing
+  drifts or pulses.
 
-Everything is driven by the existing WebSocket events (`assistant.state`, `system.*`, `run.updated`,
-`agent.status`, `approval.*`, `memory.updated`, `memory.recalled`, `artifact.created`, `file.*`,
-`folder.*`), with the knowledge graph from `GET /api/memories/graph` and project folders from
-`GET /api/folders`, and a fresh fetch
-on open and after a reconnect. three.js loads only on the home screen, as its own chunk.
+Everything is driven by the existing WebSocket events (`assistant.state`, `system.*`,
+`run.updated`, `agent.status`, `approval.*`, `memory.updated`, `memory.recalled`, `file.*`,
+`folder.*`) with a fresh fetch on open and after a reconnect. three.js loads only on the home
+screen, as its own chunk. Admin › Graph can **Rebuild** the graph: it clears what models
+extracted (keeping imported history and what you added) and reads everything again locally.
 
 ## The main screen
 

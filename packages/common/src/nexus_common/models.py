@@ -760,6 +760,38 @@ class Episode(Base):
 # --- Knowledge graph ---------------------------------------------------------------------------
 
 
+class Area(Base):
+    """A part of the user's life, found from their own graph: one galaxy in the universe view.
+    The nightly pass groups entities into communities and matches them to yesterday's areas,
+    so an area keeps its id, place and colour while its members drift; areas are born, split
+    from a parent, merged into a neighbour or ended as the data changes."""
+
+    __tablename__ = "areas"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(80), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # The life domain most of it belongs to (ontology.DOMAINS), None when mixed or unknown.
+    domain: Mapped[str | None] = mapped_column(String(16))
+    # 0..1 colour wheel position, from what fills it.
+    hue: Mapped[float] = mapped_column(Float, default=0.6)
+    # Where it sits on the ring around the core (radians), and its disc's tilt; kept for life.
+    angle: Mapped[float] = mapped_column(Float, default=0.0)
+    tilt: Mapped[float] = mapped_column(Float, default=0.0)
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    # 0..1: how much of it came up in the last month.
+    activity: Mapped[float] = mapped_column(Float, default=0.0)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    born_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Set when it merged into another or emptied out; kept so the view can show it going.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_areas_user", "user_id"),)
+
+
 class Entity(Base):
     """Someone or something in a user's world: a person, a trait, a project, a topic and so on
     (nexus_common.ontology.TYPES). Each user has one entity for themselves (is_self), which
@@ -796,7 +828,11 @@ class Entity(Base):
     salience: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     # Its cluster in the user's graph (nightly Leiden; 0 is the biggest), None when alone.
     community: Mapped[int | None] = mapped_column(Integer)
-    pos: Mapped[list | None] = mapped_column(JSON)
+    # Where the nightly layout put it: in its galaxy {"r", "a", "y"} (radius 0..1 from the
+    # centre, angle, height) or, in the core, {"x", "y", "z"} inside the unit sphere.
+    pos: Mapped[dict | None] = mapped_column(JSON)
+    # The galaxy it lives in; None for the core (shell 0 and 1) and for loose things.
+    area_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("areas.id", ondelete="SET NULL"))
     # Where it came from: model (extracted from text), app (one of the app's own records),
     # user (said outright, such as onboarding) or inferred.
     origin: Mapped[str] = mapped_column(String(16), default="model", server_default="model")

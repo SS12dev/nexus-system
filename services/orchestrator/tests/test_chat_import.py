@@ -108,6 +108,18 @@ def test_a_chatgpt_export_keeps_the_branch_the_user_ended_on():
     assert chat_import.own_words(convs[1]) is None
 
 
+def test_a_newer_chatgpt_export_split_over_several_files_is_read_whole():
+    first, second = chatgpt_export()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("conversations-001.json", json.dumps([second]))
+        z.writestr("conversations-000.json", json.dumps([first]))
+        z.writestr("shared_conversations.json", json.dumps([{"id": "x"}]))
+        z.writestr("sectioned_conversations.json", "[]")
+    source, convs = parse(buf.getvalue())
+    assert source == "chatgpt" and [c.title for c in convs] == ["Moving", "French"]
+
+
 def test_a_claude_export_reads_the_users_text_parts():
     source, convs = parse(json.dumps(claude_export()).encode())
     assert source == "claude"

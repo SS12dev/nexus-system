@@ -94,7 +94,7 @@ const SERVICE_LABEL: Record<string, string> = {
 };
 
 /** The setup interview after first sign-in, and again from Settings › Re-run setup. Every
- * step can be skipped; the answers become memories (editable on the Memory page), routines
+ * step can be skipped; the answers become memories (editable on the Mind page), routines
  * from the matching profile packs, and a welcome chat. */
 export function OnboardingPage({ onDone }: { onDone?: () => void }) {
   const user = useStore((s) => s.user)!;
@@ -646,9 +646,9 @@ function HistoryUpload({ assistant }: { assistant: string }) {
         {sent?.state === "sending"
           ? `Uploading ${sent.name} in the background. Carry on, there's no need to wait.`
           : sent?.state === "in"
-            ? `${sent.name} is in. ${assistant} reads it in the background and you can follow along on the Knowledge page.`
+            ? `${sent.name} is in. ${assistant} reads it in the background and you can follow along on the Mind page.`
             : sent?.state === "failed"
-              ? `${sent.name} didn't upload. You can try again later on the Knowledge page.`
+              ? `${sent.name} didn't upload. You can try again later on the Mind page.`
               : "The zip from Settings, then Export, in either app. Only your own messages are kept, read on this machine."}
       </p>
     </div>

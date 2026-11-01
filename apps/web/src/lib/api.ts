@@ -1,5 +1,6 @@
 import type { TuneId } from "./tunes";
 import type {
+  Universe,
   AccessRequest,
   AccessRequestList,
   AccessState,
@@ -333,6 +334,7 @@ export const api = {
     request<void>(`/api/memories/${id}${rebuild ? "?rebuild=true" : ""}`, { method: "DELETE" }),
   memoryEvents: (id: string) => request<MemoryEvent[]>(`/api/memories/${id}/events`),
   knowledgeGraph: () => request<KnowledgeGraph>("/api/memories/graph"),
+  universe: () => request<Universe>("/api/memories/universe"),
   questionCards: () => request<GraphCard[]>("/api/questions"),
   answerCard: (id: string, answer: CardAnswer) =>
     request<{ note: string; entities: string[]; memories: number }>(`/api/questions/${id}/answer`, {
@@ -489,6 +491,11 @@ export const api = {
   graphAdmin: () => request<GraphAdmin>("/api/admin/graph"),
   runGraph: (what: "extract" | "rearrange") =>
     request<{ queued: string }>("/api/admin/graph/run", { method: "POST", body: json({ what }) }),
+  graphRebuild: (confirm: string) =>
+    request<{ relations: number; entities: number }>("/api/admin/graph/rebuild", {
+      method: "POST",
+      body: json({ confirm }),
+    }),
   approveProposal: (id: string, note?: string) =>
     request<Proposal>(`/api/admin/improvements/${id}/approve`, { method: "POST", body: json({ note: note || null }) }),
   denyProposal: (id: string, note?: string) =>

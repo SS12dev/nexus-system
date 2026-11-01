@@ -3,7 +3,8 @@ Ollama answers, what is waiting for it, what the last runs did, and how the grap
 (by shell, relation family and origin). Owners only; counts, never content.
 
 The work itself runs in the orchestrator: graph_local every ten minutes, graph_nightly each
-night. "Run now" queues either of them.
+night. "Run now" queues either of them. "Rebuild" clears what a model extracted (the
+first-generation cloud graph among it) and has the local model read everything again.
 """
 
 import json
@@ -11,11 +12,12 @@ import json
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text, update
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_common import ontology
 from nexus_common.models import (
+    Area,
     AuditLog,
     Entity,
     Episode,
@@ -126,3 +128,68 @@ async def run_now(body: GraphRunIn, actor: OwnerUser, db: DbDep, queue: QueueDep
     db.add(AuditLog(actor_id=actor.id, action=f"graph.{body.what}", target=job))
     await db.commit()
     return {"queued": job}
+
+
+class RebuildIn(BaseModel):
+    # Typed by the owner to show they mean it.
+    confirm: str
+
+
+REBUILD_WORD = "rebuild"
+
+
+@router.post("/rebuild", status_code=status.HTTP_202_ACCEPTED)
+async def rebuild(body: RebuildIn, actor: OwnerUser, db: DbDep, queue: QueueDep):
+    """Clear everything a model extracted from memories, chats and files, for every user, and
+    have the local model read them all again. Kept: each user's own entity, the app's records
+    (projects, folders, routines), what people said outright, and what came from an imported
+    chat history (already read by the local model). Memories, chats and files are untouched."""
+    if body.confirm.strip().lower() != REBUILD_WORD:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f'Type "{REBUILD_WORD}" to confirm')
+    # Relations a model made, unless an imported chat backs them.
+    rels = await db.execute(
+        text(
+            """
+            delete from relations r
+            where r.origin in ('model', 'inferred')
+              and not exists (
+                  select 1 from relation_evidence v
+                  where v.relation_id = r.id and v.imported_chat_id is not null
+              )
+            """
+        )
+    )
+    # Entities a model made that nothing else holds up: no import mentions it and no relation
+    # is left on it.
+    ents = await db.execute(
+        text(
+            """
+            delete from entities e
+            where e.origin in ('model', 'inferred') and not e.is_self
+              and e.source_kind is null
+              and not exists (
+                  select 1 from mentions m
+                  where m.entity_id = e.id and m.imported_chat_id is not null
+              )
+              and not exists (
+                  select 1 from relations r where r.src_id = e.id or r.dst_id = e.id
+              )
+            """
+        )
+    )
+    # Mentions from memories, chats and files go too: the new pass adds them back.
+    await db.execute(text("delete from mentions where imported_chat_id is null"))
+    await db.execute(update(Area).values(ended_at=func.now()).where(Area.ended_at.is_(None)))
+    await db.execute(update(Entity).values(area_id=None, pos=None, community=None))
+    for model in (Memory, Episode, File):
+        await db.execute(update(model).values(graph_at=None))
+    db.add(
+        AuditLog(
+            actor_id=actor.id,
+            action="graph.rebuild",
+            target=f"{rels.rowcount} relations, {ents.rowcount} entities",
+        )
+    )
+    await db.commit()
+    await queue.enqueue_graph(JOBS["extract"])
+    return {"relations": rels.rowcount, "entities": ents.rowcount}

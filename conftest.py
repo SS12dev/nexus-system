@@ -32,7 +32,7 @@ TABLES = (
     "improvement_proposals, improvement_reviews, "
     "message_links, links, projects, approvals, run_events, agent_runs, agent_systems, "
     "skill_usages, skill_versions, "
-    "skills, instructions, tool_grants, mentions, relations, entities, recall_evals, "
+    "skills, instructions, tool_grants, mentions, relations, entities, areas, recall_evals, "
     "recall_questions, memory_events, memories, "
     "episodes, profiles, attachments, "
     "file_chunks, files, folders, backups, app_settings, access_requests, "

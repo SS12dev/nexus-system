@@ -41,7 +41,7 @@ const TOPOLOGY_HELP: Record<AgentSystem["topology"], string> = {
 const LIFETIME: Record<AgentSystem["lifetime"], { label: string; help: string }> = {
   ephemeral: {
     label: "One-off",
-    help: "Built for one request. It's archived when the run finishes and drops off the orb.",
+    help: "Built for one request. It's archived when the run finishes and leaves the universe.",
   },
   persistent: {
     label: "Saved",

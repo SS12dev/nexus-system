@@ -5,7 +5,7 @@ a change that adds a doc, a service or a major module adds a line here too.
 
 | Doc | What it covers |
 | --- | --- |
-| [README.md](../README.md) | The manual: quick start, sign-in, people and budgets, models, how a message flows, memory and the knowledge graph, documents, onboarding and routines, agent teams, the sandbox and workbench, software teams, skills, the orb, Admin (alerts, models, improvements, recall, monitoring, configuration), self-review, settings, logs and job retries, privacy, security, caching, secrets, backups, repository layout, developing and pinned images |
+| [README.md](../README.md) | The manual: quick start, sign-in, people and budgets, models, how a message flows, memory and the knowledge graph, documents, onboarding and routines, agent teams, the sandbox and workbench, software teams, skills, the universe, Admin (alerts, models, improvements, recall, monitoring, configuration), self-review, settings, logs and job retries, privacy, security, caching, secrets, backups, repository layout, developing and pinned images |
 | [library/core/nexus-system/SKILL.md](../library/core/nexus-system/SKILL.md) | The architecture brief: services, stores, a turn, agent teams, memory, Admin, and where to change things. Agents load it for tasks about Nexus itself, and the self-review reads it before proposing changes |
 | [docs/containers.md](containers.md) | Every container in compose.yaml and what it does |
 | [docs/app-urls.md](app-urls.md) | How built apps get their `<app>.servhub.cc` address and who can open them |
@@ -22,7 +22,7 @@ a change that adds a doc, a service or a major module adds a line here too.
 
 | Area | Code |
 | --- | --- |
-| Web app | `apps/web/src` (pages in `pages/`, the orb in `orb/`) |
+| Web app | `apps/web/src` (pages in `pages/`, the home universe in `universe/`) |
 | API | `services/api/src/nexus_api` (routes in `routes/`, migrations in `services/api/alembic`) |
 | Assistant, tools, teams | `services/orchestrator/src/nexus_orchestrator` (teams in `systems/`) |
 | Shared models and settings | `packages/common/src/nexus_common` (`models.py`, `settings.py`, `config.py`, `spec.py`) |

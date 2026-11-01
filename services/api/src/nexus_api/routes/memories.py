@@ -18,7 +18,7 @@ from nexus_api.schemas import (
     ProfileOut,
     ProfileUpdateIn,
 )
-from nexus_common import graph
+from nexus_common import graph, universe
 from nexus_common.events import Event, publish
 from nexus_common.memory import get_profile, mark_profile_stale, record
 from nexus_common.models import Entity, Memory, MemoryEvent, TrashItem, User, utcnow
@@ -176,6 +176,23 @@ async def get_graph(user: CurrentUser, db: DbDep):
     ):
         return {"entities": [], "relations": []}
     return await graph.graph_payload(db, user.id)
+
+
+@router.get("/universe")
+async def get_universe(user: CurrentUser, db: DbDep):
+    """The graph as the universe view draws it: the core (no names), the life areas as
+    galaxies, the stars in them and the links between."""
+    if await universe.hidden(db, user.id):
+        return {
+            "core": {"hue": 0.58, "neurons": [], "links": []},
+            "self_id": None,
+            "areas": [],
+            "stars": [],
+            "lanes": [],
+            "filaments": [],
+            "roots": [],
+        }
+    return await universe.payload(db, user.id, await graph.graph_payload(db, user.id))
 
 
 @router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
