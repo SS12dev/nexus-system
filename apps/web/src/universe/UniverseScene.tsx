@@ -180,7 +180,8 @@ function build(u: Universe | null, perf: Perf, admin: boolean): Built {
     if (g.ending) gx.material.uniforms.uDim.value = 0.3;
     root.add(gx.group);
     galaxies.set(a.id, { layout: g, material: gx.material });
-    if (!g.ending) picks.add(pickSphere(g.radius * 0.9, { type: "area", id: a.id }, g.center));
+    // An area that merged away or emptied still answers a tap while it fades, to say where it went.
+    picks.add(pickSphere(g.radius * 0.9, { type: "area", id: a.id }, g.center));
     // One soft root from the core to each galaxy, brighter the more of you is in it.
     const c = new THREE.Vector3(...g.center);
     const from = c.clone().normalize().multiplyScalar(CORE_R * 1.02);

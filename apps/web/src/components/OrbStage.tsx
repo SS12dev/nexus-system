@@ -506,7 +506,11 @@ function SelectionCard({
         </div>
         <div className="mt-1 font-medium">{a.name}</div>
         {a.summary && <p className="mt-0.5 text-sm text-slate-400">{a.summary}</p>}
-        <p className="mt-0.5 text-xs text-slate-500">{areaLine(a, universe?.stars ?? [])}</p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {a.ended_at
+            ? `${a.merged_into ? `Merged into ${universe?.areas.find((x) => x.id === a.merged_into)?.name ?? "another area"}` : "Emptied"}; it fades away in a day or two.`
+            : areaLine(a, universe?.stars ?? [])}
+        </p>
         {inside.length > 0 && (
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {inside.slice(0, 12).map((s) => (
