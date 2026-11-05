@@ -104,3 +104,57 @@ async def test_embedders_are_scored_on_pairs_the_judge_labels(monkeypatch):
 async def test_bare_names_instead_of_objects_count_as_nothing_not_a_crash():
     got, detail = await gb.run_one(Fake(["Nexus", "Postgres"], []), "text")
     assert not got.error and detail["entities"] == []
+
+
+async def test_gleaning_adds_only_what_the_first_pass_missed():
+    class Gleaner(Fake):
+        async def ask(self, system, prompt, schema):
+            if "ENTITIES:" in prompt:
+                return {"relations": [rel("USER", "cooks", "Biryani")]}
+            if "ALREADY FOUND" in prompt:
+                assert '"Nexus"' in prompt
+                return {"entities": [ent("nexus"), ent("Biryani", "topic")]}
+            return {"entities": [ent("Nexus")]}
+
+    got, detail = await gb.run_one(Gleaner([], []), "text", glean=True)
+    assert [e["name"] for e in detail["entities"]] == ["Nexus", "Biryani"]
+    assert len(detail["relations"]) == 1
+    plain, detail = await gb.run_one(Gleaner([], []), "text")
+    assert [e["name"] for e in detail["entities"]] == ["Nexus"]
+
+
+def test_export_chats_are_read_like_the_importer_and_skip_picked_ones(tmp_path):
+    import json as _json
+
+    def conv(cid, title, text):
+        return {
+            "id": cid,
+            "title": title,
+            "create_time": 1700000000,
+            "current_node": "a",
+            "mapping": {
+                "a": {
+                    "message": {
+                        "author": {"role": "user"},
+                        "content": {"content_type": "text", "parts": [text]},
+                        "create_time": 1700000000,
+                    }
+                }
+            },
+        }
+
+    recipe = "Slow-cooked mutton biryani recipe for six people with saffron, step by step. " * 6
+    path = tmp_path / "conversations.json"
+    path.write_text(
+        _json.dumps(
+            [
+                conv("1", "Biryani", recipe),
+                conv("2", "Picked", recipe),
+                conv("3", "Tiny", "hi"),
+            ]
+        )
+    )
+    got, kept = gb.load_export([str(path)], 10, 7, {"Picked"})
+    assert kept == 2
+    assert [t for t, _ in got] == ["Biryani"]
+    assert got[0][1].startswith("A request the user made to another assistant")

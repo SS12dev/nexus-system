@@ -307,14 +307,43 @@ class Found:
     calls: int = 0
 
 
+GLEAN_NOTE = """ALREADY FOUND: {names}
+
+Read the items again. List only the things they show that ALREADY FOUND misses: everyday \
+life (food, sport, games, music, shows, travel, shopping, family, money) as much as work. \
+Same rules as before. An empty list if nothing was missed."""
+
+
 async def extract(
-    model: LocalModel, items: list[Item], entity_prompt: str = ENTITY_PROMPT
+    model: LocalModel, items: list[Item], entity_prompt: str = ENTITY_PROMPT, glean: bool = False
 ) -> Found:
-    """Both passes over one batch. `entity_prompt` lets the baseline try another first pass."""
+    """Both passes over one batch. `entity_prompt` lets the baseline try another first pass;
+    `glean` asks once more for what the first pass missed (one more call, more recall)."""
     listing = "\n\n".join(f"{i}: {it.text}" for i, it in enumerate(items))
     data = await model.ask(entity_prompt, f"Items:\n\n{listing}", entity_schema())
+    calls = 1
+    if glean:
+        first = [str(e.get("name")) for e in data.get("entities") or [] if isinstance(e, dict)]
+        more = await model.ask(
+            entity_prompt,
+            f"Items:\n\n{listing}\n\n"
+            + GLEAN_NOTE.format(names=json.dumps(first, ensure_ascii=False)),
+            entity_schema(),
+        )
+        calls = 2
+        seen = {graph.norm(n) for n in first}
+        data = {
+            "entities": [
+                *(data.get("entities") or []),
+                *(
+                    e
+                    for e in more.get("entities") or []
+                    if isinstance(e, dict) and graph.norm(str(e.get("name") or "")) not in seen
+                ),
+            ]
+        }
     found = graph.parse_graph(data)
-    out = Found(found=found, calls=1)
+    out = Found(found=found, calls=calls)
     # A model may answer with bare names instead of objects: those count as nothing.
     raw = {
         graph.norm(str(e.get("name") or "")): e
@@ -335,7 +364,7 @@ async def extract(
         relation_schema(names),
     )
     found.relations = graph.parse_graph({"relations": rel.get("relations")}).relations
-    out.calls = 2
+    out.calls = calls + 1
     return out
 
 

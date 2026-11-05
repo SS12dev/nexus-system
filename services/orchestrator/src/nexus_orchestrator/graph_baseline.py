@@ -11,6 +11,11 @@ report can say what a full re-extraction of every imported conversation would co
 
     ./scripts/graph-baseline.sh someone@example.com --reference nexus-max \
         --models qwen3.5:9b,nexus-pro,nexus-mini --chats 40
+
+A model name can carry variants: "+wide" (a first pass that casts a wider net) and "+glean"
+(one more call asking for what the first pass missed), e.g. "gemma4:26b+wide+glean".
+`--export` adds conversations straight from a ChatGPT or Claude export file, read the way the
+importer reads them now, so chats the app never kept can be tested too.
 """
 
 import argparse
@@ -32,7 +37,7 @@ from nexus_common import graph
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.models import ImportedChat, User
 from nexus_common.settings import Settings
-from nexus_orchestrator import graph_local
+from nexus_orchestrator import chat_import, graph_local
 from nexus_orchestrator.graph_bakeoff import Models, Result, Tally, parse, score_chat
 from nexus_orchestrator.llm import parse_json
 
@@ -111,6 +116,7 @@ class Shape:
     predicates: Counter = field(default_factory=Counter)
     domains: Counter = field(default_factory=Counter)
     seconds: float = 0.0
+    timed: int = 0  # answers read in this run (reused ones carry no time)
     errors: int = 0
 
     def add(self, r: Result) -> None:
@@ -118,6 +124,7 @@ class Shape:
             self.errors += 1
             return
         self.seconds += r.seconds
+        self.timed += r.seconds > 0
         self.entities += len(r.entities)
         self.domains.update(e["domain"] or "none" for e in r.entities)
         self.relations += len(r.relations)
@@ -147,11 +154,13 @@ def to_result(found: graph_local.Found, seconds: float) -> Result:
     return res
 
 
-async def run_one(model, text: str, prompt: str = graph_local.ENTITY_PROMPT) -> tuple[Result, dict]:
+async def run_one(
+    model, text: str, prompt: str = graph_local.ENTITY_PROMPT, glean: bool = False
+) -> tuple[Result, dict]:
     item = graph_local.Item({}, text, None)  # type: ignore[arg-type]
     start = time.perf_counter()
     try:
-        found = await graph_local.extract(model, [item], prompt)
+        found = await graph_local.extract(model, [item], prompt, glean)
     except (
         graph_local.LocalModelError,
         httpx.HTTPError,
@@ -326,6 +335,30 @@ async def load_imported(database_url: str, email: str, count: int, seed: int) ->
         await engine.dispose()
 
 
+def load_export(paths: list[str], count: int, seed: int, skip: set[str]) -> tuple[list, int]:
+    """A spread of conversations straight from export files, read as the importer reads them
+    (requests kept as "asked", long ones from their first piece), leaving out titles already
+    picked; and how many the exports keep in all."""
+    kept: list[tuple[str, str]] = []
+    for path in paths:
+        _, convs = chat_import.parse(Path(path).read_bytes())
+        for conv in convs:
+            got = chat_import.own_words(conv)
+            if got is None:
+                continue
+            text, kind = got
+            row = ImportedChat(
+                external_id=conv.external_id,
+                title=conv.title,
+                started_at=conv.started_at,
+                text=text,
+                kind=kind,
+            )
+            kept.append((conv.title or conv.external_id, graph_local._imported_text(row)))
+    fresh = [c for c in kept if c[0] not in skip and len(c[1]) >= 300]
+    return random.Random(seed).sample(fresh, min(count, len(fresh))), len(kept)
+
+
 def pct(x: float) -> str:
     return f"{100 * x:.0f}%"
 
@@ -351,7 +384,8 @@ def report(args, chats, total, models, shapes, tallies, details, embeds=None) ->
         lines.append(
             f"| {m} | {s.entities / ok:.1f} | {s.relations / ok:.1f} | "
             f"{s.relations / max(1, s.entities):.2f} | {pct(1 - s.linked / max(1, s.entities))} | "
-            f"{pct(s.between / max(1, s.relations))} | {s.errors} | {s.seconds / ok:.0f}s | "
+            f"{pct(s.between / max(1, s.relations))} | {s.errors} | "
+            f"{s.seconds / max(1, s.timed):.0f}s | "
             f"${models[m].cost:.2f} |"
         )
     lines += [
@@ -375,11 +409,19 @@ def report(args, chats, total, models, shapes, tallies, details, embeds=None) ->
     lines += ["", "## Cost of re-reading every imported conversation", ""]
     for m in shapes:
         if models[m].cost:
-            each = models[m].cost / n
+            each = models[m].cost / max(1, getattr(models[m], "read", n))
             lines.append(
                 f"- {m}: ${each:.3f} a conversation, about **${each * total:.2f}** for all "
                 f"{total} ({models[m].tokens['in']:,} tokens in, {models[m].tokens['out']:,} out "
                 "in this run)"
+            )
+    lines += ["", "## Time to re-read every conversation on this machine", ""]
+    for m, s in shapes.items():
+        if not models[m].cost and s.seconds:
+            each = s.seconds / max(1, s.timed)
+            lines.append(
+                f"- {m}: {each:.0f}s a conversation, about **{each * total / 3600:.1f} hours** "
+                f"for all {total} (long ones take a few pieces, so a little more)"
             )
     lines += ["", "## Most used predicates", ""]
     for m, s in shapes.items():
@@ -452,25 +494,36 @@ async def run(args: argparse.Namespace) -> Path:
     chats, total = await load_imported(
         args.database_url or settings.database_url, args.email, args.chats, args.seed
     )
-    # --reuse: the same chats as an earlier run, and that run's answers from models that
-    # finished, so a run cut short (credits, a crash) only redoes what is missing.
+    # --reuse: the same chats as an earlier run, and every answer it has, so a run cut short
+    # (credits, a crash) or one with chats added only asks for what is missing.
     earlier: dict[str, list[dict]] = {}
     if args.reuse:
         saved = json.loads(await asyncio.to_thread(Path(args.reuse).read_text))
         chats = [(c["title"], c["text"]) for c in saved]
-        for m in saved[0]["answers"] if saved else []:
-            got = [c["answers"].get(m) or {} for c in saved]
-            if sum(1 for g in got if g) >= len(got) * 0.9:  # finished, bar a stray timeout
-                earlier[m] = got
-        print(f"Reusing {', '.join(earlier) or 'nothing'} from {args.reuse}", flush=True)
-    print(f"{len(chats)} of {total} imported conversations picked", flush=True)
+        for m in {m for c in saved for m in c["answers"]}:
+            earlier[m] = [c["answers"].get(m) or {} for c in saved]
+        print(f"Reusing answers of {', '.join(sorted(earlier)) or 'nothing'}", flush=True)
+    if args.export:
+        added, kept = await asyncio.to_thread(
+            load_export,
+            [p.strip() for p in args.export.split(",") if p.strip()],
+            args.add,
+            args.seed,
+            {t for t, _ in chats},
+        )
+        chats += added
+        total = max(total, kept)
+        for m in earlier:
+            earlier[m] += [{} for _ in added]
+        print(f"{len(added)} added from the export ({kept} kept in all)", flush=True)
+    print(f"{len(chats)} conversations, of {total}", flush=True)
     out = Path(args.out) / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out.mkdir(parents=True, exist_ok=True)
     http = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=10))
     names = [args.reference, *[m.strip() for m in args.models.split(",") if m.strip()]]
 
     def build(name: str):
-        base = name.removesuffix("+wide")
+        base = name.split("+")[0]
         if base.startswith("nexus-"):
             return CloudModel(settings, base, http)
         return OllamaModel(settings, base, http)
@@ -479,33 +532,40 @@ async def run(args: argparse.Namespace) -> Path:
     results: dict[str, list[Result]] = {}
     details: dict[str, list[dict]] = {}
     for m, model in models.items():
-        if m in earlier:
-            details[m] = earlier[m]
-            results[m] = [
-                parse(json.dumps(d)) if d else Result(valid=False, error="no answer earlier")
-                for d in earlier[m]
-            ]
-            print(f"{m}: reused", flush=True)
-            continue
-        print(f"{m}", flush=True)
+        had = earlier.get(m) or [{} for _ in chats]
+        todo = [i for i, d in enumerate(had) if not d]
+        print(f"{m}: {len(chats) - len(todo)} reused, {len(todo)} to read", flush=True)
+        model.read = len(todo)
         gate = asyncio.Semaphore(4 if isinstance(model, CloudModel) else 1)
         done = 0
+        prompt = WIDE_ENTITY_PROMPT if "+wide" in m else graph_local.ENTITY_PROMPT
+        glean = "+glean" in m
 
-        prompt = WIDE_ENTITY_PROMPT if m.endswith("+wide") else graph_local.ENTITY_PROMPT
-
-        async def one(text: str, model=model, gate=gate, prompt=prompt) -> tuple[Result, dict]:
+        async def one(
+            text: str, model=model, gate=gate, prompt=prompt, glean=glean, of=len(todo)
+        ) -> tuple[Result, dict]:
             nonlocal done
             async with gate:
-                got = await run_one(model, text, prompt)
+                got = await run_one(model, text, prompt, glean)
             done += 1
-            print(f"  {done}/{len(chats)} {got[0].seconds:.0f}s {got[0].error[:80]}", flush=True)
+            print(f"  {done}/{of} {got[0].seconds:.0f}s {got[0].error[:80]}", flush=True)
             return got
 
-        pairs = await asyncio.gather(*(one(t) for _, t in chats))
+        fresh = dict(
+            zip(todo, await asyncio.gather(*(one(chats[i][1]) for i in todo)), strict=True)
+        )
+        pairs = [
+            fresh.get(i)
+            or (
+                parse(json.dumps(d)) if d else Result(valid=False, error="no answer earlier"),
+                d,
+            )
+            for i, d in enumerate(had)
+        ]
         results[m], details[m] = [p[0] for p in pairs], [p[1] for p in pairs]
         save_chats(out, chats, details)  # after each model: a crash later keeps this one
         if isinstance(model, OllamaModel) and not any(
-            n != m and n.removesuffix("+wide") == model.model for n in names[names.index(m) + 1 :]
+            n != m and n.split("+")[0] == model.model for n in names[names.index(m) + 1 :]
         ):
             await http.post(
                 f"{settings.ollama_base_url.rstrip('/')}/api/generate",
@@ -573,6 +633,13 @@ def main() -> None:
         default="",
         help="chats.json of an earlier run: same chats, and its finished models' answers are kept",
     )
+    p.add_argument(
+        "--export",
+        default="",
+        help="comma-separated ChatGPT/Claude export files (.zip or conversations.json) to add "
+        "conversations from, read the way the importer reads them now",
+    )
+    p.add_argument("--add", type=int, default=20, help="how many to add from --export")
     p.add_argument("--ollama", default="")
     p.add_argument("--database-url", default="")
     p.add_argument("--out", default="/tmp/graph-baseline")
