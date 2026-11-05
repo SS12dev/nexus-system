@@ -20,6 +20,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from nexus_common.models import ChatImport, ImportedChat, utcnow
@@ -28,10 +29,13 @@ from nexus_orchestrator.turn import TurnDeps
 
 log = logging.getLogger(__name__)
 
-# What a conversation keeps of the user's words; the extractor reads the latest part of it.
-KEEP_CHARS = 20000
-# Fewer of the user's own words than this, or none in the first person, is a task, not a talk.
-MIN_WORDS = 15
+# What a conversation keeps of the user's words; the extractor reads it in pieces.
+KEEP_CHARS = 54000
+# Fewer words than this says nothing at all ("thanks", "continue").
+MIN_WORDS = 4
+# Fewer than this, or none in the first person, is a request ("onion masala rice recipe"): kept,
+# since what someone asks about shows what they are into, but read as light evidence.
+TALK_WORDS = 15
 FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'd|i'll|me|my|mine|myself|we|our|us)\b", re.I)
 
 
@@ -166,14 +170,17 @@ def parse(data: bytes) -> tuple[str, list[Conversation]]:
     raise ExportError("That isn't a ChatGPT or Claude export.")
 
 
-def own_words(conv: Conversation) -> str | None:
-    """The user's words with pastes stripped, or None when there is nothing about them."""
+def own_words(conv: Conversation) -> tuple[str, str] | None:
+    """The user's words with pastes stripped, and whether the conversation is a "talk" (they
+    said something about themselves) or "asked" (a request); None when it says nothing."""
     kept = [strip_pastes(s) for s in conv.said]
     text = "\n\n".join(f"USER: {k}" for k in kept if k.strip())
-    plain = re.sub(r"\[pasted[^\]]*\]|\[… long paste trimmed\]", " ", text)
-    if len(plain.split()) < MIN_WORDS or not FIRST_PERSON.search(plain):
+    plain = re.sub(r"\[pasted[^\]]*\]|\[… long paste trimmed\]", " ", "\n\n".join(kept))
+    words = len(plain.split())
+    if words < MIN_WORDS:
         return None
-    return text[-KEEP_CHARS:]
+    kind = "talk" if words >= TALK_WORDS and FIRST_PERSON.search(plain) else "asked"
+    return text[-KEEP_CHARS:], kind
 
 
 async def read_import(deps: TurnDeps, import_id: uuid.UUID) -> None:
@@ -194,10 +201,26 @@ async def read_import(deps: TurnDeps, import_id: uuid.UUID) -> None:
                 if not isinstance(exc, ExportError):
                     log.exception("Reading import %s failed", import_id)
                 return
+            # The same export uploaded again only adds what is new; a conversation that now
+            # keeps more of the user's words (an older import cut it short) is read again.
+            had = {
+                r.external_id: r
+                for r in (
+                    await db.scalars(
+                        select(ImportedChat).where(ImportedChat.user_id == imp.user_id)
+                    )
+                ).all()
+            }
             kept = 0
             for c in convs:
-                text = own_words(c)
-                if text is None:
+                got = own_words(c)
+                if got is None:
+                    continue
+                text, kind = got
+                old = had.get(c.external_id[:64])
+                if old is not None:
+                    if len(text) > len(old.text):
+                        old.text, old.kind, old.graph_at = text, kind, None
                     continue
                 kept += 1
                 await db.execute(
@@ -210,6 +233,7 @@ async def read_import(deps: TurnDeps, import_id: uuid.UUID) -> None:
                         title=c.title[:255],
                         started_at=c.started_at,
                         text=text,
+                        kind=kind,
                         messages=len(c.said),
                         created_at=utcnow(),
                     )

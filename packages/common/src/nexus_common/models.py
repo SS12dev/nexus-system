@@ -1045,6 +1045,9 @@ class ImportedChat(Base):
     title: Mapped[str] = mapped_column(String(255), default="", server_default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     text: Mapped[str] = mapped_column(Text)
+    # "talk": the user said things about themselves; "asked": a request, read as light evidence
+    # of what they are into.
+    kind: Mapped[str] = mapped_column(String(8), default="talk", server_default="talk")
     messages: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     graph_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
