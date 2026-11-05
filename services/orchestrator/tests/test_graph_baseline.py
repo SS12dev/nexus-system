@@ -54,3 +54,48 @@ async def test_the_real_two_passes_are_scored_and_described():
     )
     assert "about **$450.00** for all 900" in text
     assert "| small |" in text
+
+
+def test_the_wide_prompt_only_changes_how_wide_the_net_is():
+    assert "Cast a wide net" in gb.WIDE_ENTITY_PROMPT
+    assert "Usually there are only a few" not in gb.WIDE_ENTITY_PROMPT
+    assert (
+        gb.WIDE_ENTITY_PROMPT.split("Rules:")[0] == gb.graph_local.ENTITY_PROMPT.split("Rules:")[0]
+    )
+
+
+def test_an_embedder_that_puts_same_names_close_ranks_well():
+    same, other = [0.05, 0.1, 0.12], [0.3, 0.5, 0.11]
+    assert gb.auc(same, other) == 8 / 9
+    f1, cut = gb.best_f1(same, other)
+    assert f1 == 1.0 or cut <= 0.12
+    assert gb.auc([0.5], [0.1]) == 0.0
+
+
+async def test_embedders_are_scored_on_pairs_the_judge_labels(monkeypatch):
+    names = ["Raspberry Pi", "my Raspberry Pi", "cooking", "biryani"]
+    good = {0: [1, 0, 0], 1: [0.99, 0.1, 0], 2: [0, 1, 0], 3: [0, 0.8, 0.6]}
+
+    async def fake_embed(http, base, model, texts):
+        return [gb.unit(good[i]) for i in range(len(texts))]
+
+    class Judge:
+        cost = 0.0
+
+        async def ask(self, system, prompt, schema):
+            rows = prompt.splitlines()
+            return {
+                "answers": [
+                    {"i": n, "same": "Raspberry" in r and r.count("Raspberry") == 2}
+                    for n, r in enumerate(rows)
+                ]
+            }
+
+    class Http:
+        async def post(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(gb, "ollama_embed", fake_embed)
+    got = await gb.test_embedders(Http(), "http://x", Judge(), names, ["e1"], 1)
+    assert got["same"] == 1
+    assert got["scores"]["e1"]["auc"] == 1.0

@@ -256,10 +256,12 @@ class Found:
     items: dict[str, list[int]] = field(default_factory=dict)  # entity name -> item numbers
 
 
-async def extract(model: LocalModel, items: list[Item]) -> Found:
-    """Both passes over one batch."""
+async def extract(
+    model: LocalModel, items: list[Item], entity_prompt: str = ENTITY_PROMPT
+) -> Found:
+    """Both passes over one batch. `entity_prompt` lets the baseline try another first pass."""
     listing = "\n\n".join(f"{i}: {it.text}" for i, it in enumerate(items))
-    data = await model.ask(ENTITY_PROMPT, f"Items:\n\n{listing}", entity_schema())
+    data = await model.ask(entity_prompt, f"Items:\n\n{listing}", entity_schema())
     found = graph.parse_graph(data)
     out = Found(found=found)
     raw = {graph.norm(str(e.get("name") or "")): e for e in data.get("entities") or []}

@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import random
 import time
 from collections import Counter
@@ -34,6 +35,19 @@ from nexus_common.settings import Settings
 from nexus_orchestrator import graph_local
 from nexus_orchestrator.graph_bakeoff import Models, Result, Tally, parse, score_chat
 from nexus_orchestrator.llm import parse_json
+
+# A first pass that casts the widest net: everyday life counts as much as work. Tried as
+# "<model>+wide" next to the production prompt, to see what the graph misses today.
+WIDE_ENTITY_PROMPT = graph_local.ENTITY_PROMPT.replace(
+    "- Usually there are only a few. An empty list is fine.",
+    "- Cast a wide net. Everyday life counts as much as work: food and cooking, recipes, "
+    "sports and fitness, games, music, films and shows, books, travel, shopping, cars, "
+    "gadgets, family events, pets, chores, money habits. A thing the user does, plans, asks "
+    "about for themselves or cares about belongs, even if mentioned once. Prefer the specific "
+    'thing ("biryani", "Raspberry Pi 5") over a vague one, and add the broader interest too '
+    '("cooking"). An empty list only when the item says nothing about the user.',
+)
+assert WIDE_ENTITY_PROMPT != graph_local.ENTITY_PROMPT
 
 
 class CloudModel:
@@ -95,6 +109,7 @@ class Shape:
     to_user: int = 0  # relations with USER at one end
     between: int = 0  # relations between two entities
     predicates: Counter = field(default_factory=Counter)
+    domains: Counter = field(default_factory=Counter)
     seconds: float = 0.0
     errors: int = 0
 
@@ -104,6 +119,7 @@ class Shape:
             return
         self.seconds += r.seconds
         self.entities += len(r.entities)
+        self.domains.update(e["domain"] or "none" for e in r.entities)
         self.relations += len(r.relations)
         ends = {x for rel in r.relations for x in (rel["from"], rel["to"])}
         self.linked += sum(1 for e in r.entities if e["key"] in ends)
@@ -131,11 +147,11 @@ def to_result(found: graph_local.Found, seconds: float) -> Result:
     return res
 
 
-async def run_one(model, text: str) -> tuple[Result, dict]:
+async def run_one(model, text: str, prompt: str = graph_local.ENTITY_PROMPT) -> tuple[Result, dict]:
     item = graph_local.Item({}, text, None)  # type: ignore[arg-type]
     start = time.perf_counter()
     try:
-        found = await graph_local.extract(model, [item])
+        found = await graph_local.extract(model, [item], prompt)
     except (graph_local.LocalModelError, httpx.HTTPError, KeyError, ValueError) as exc:
         return Result(valid=False, error=str(exc)[:200], seconds=time.perf_counter() - start), {}
     seconds = time.perf_counter() - start
@@ -149,6 +165,124 @@ async def run_one(model, text: str) -> tuple[Result, dict]:
         ],
     }
     return to_result(found, seconds), detail
+
+
+# --- Embedding models -------------------------------------------------------------------------
+
+JUDGE_PROMPT = """Each numbered line is a pair of names from one person's knowledge graph. \
+Say whether both name the same thing: the same person, place, project, tool or topic, \
+including spelling variants, abbreviations, translations and a name with or without a \
+qualifier ("Raspberry Pi" and "my Raspberry Pi"). Related but different things are not the \
+same ("Python" and "Pandas", "cooking" and "biryani")."""
+
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"i": {"type": "integer"}, "same": {"type": "boolean"}},
+                "required": ["i", "same"],
+            },
+        }
+    },
+    "required": ["answers"],
+}
+
+
+def unit(v: list[float]) -> list[float]:
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / n for x in v]
+
+
+def distance(a: list[float], b: list[float]) -> float:
+    return 1.0 - sum(x * y for x, y in zip(a, b, strict=True))
+
+
+def auc(same: list[float], other: list[float]) -> float:
+    """How often a same pair is closer than a different pair (ties count half)."""
+    if not same or not other:
+        return 0.0
+    wins = sum((d < o) + 0.5 * (d == o) for d in same for o in other)
+    return wins / (len(same) * len(other))
+
+
+def best_f1(same: list[float], other: list[float]) -> tuple[float, float]:
+    best = (0.0, 0.0)
+    for cut in sorted(set(same + other)):
+        tp = sum(d <= cut for d in same)
+        fp = sum(d <= cut for d in other)
+        p, r = tp / max(1, tp + fp), tp / max(1, len(same))
+        f = 2 * p * r / (p + r) if p + r else 0.0
+        best = max(best, (f, cut))
+    return best
+
+
+async def ollama_embed(http: httpx.AsyncClient, base: str, model: str, texts: list[str]):
+    out: list[list[float]] = []
+    for i in range(0, len(texts), 64):
+        r = await http.post(f"{base}/api/embed", json={"model": model, "input": texts[i : i + 64]})
+        if r.status_code != 200:
+            raise ValueError(f"{r.status_code} {r.text[:160]}")
+        out += [unit(v) for v in r.json()["embeddings"]]
+    return out
+
+
+async def test_embedders(
+    http: httpx.AsyncClient, base: str, judge, names: list[str], embedders: list[str], seed: int
+) -> dict:
+    """Each embedder proposes its closest pairs; the reference model judges every proposed pair
+    (plus random ones); each embedder is then scored on all judged pairs."""
+    vectors: dict[str, list[list[float]]] = {}
+    scores: dict[str, dict] = {}
+    pairs: set[tuple[int, int]] = set()
+    for e in embedders:
+        start = time.perf_counter()
+        try:
+            vecs = await ollama_embed(http, base, e, names)
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            scores[e] = {"error": str(exc)[:120]}
+            continue
+        vectors[e] = vecs
+        scores[e] = {"seconds": time.perf_counter() - start}
+        for i, v in enumerate(vecs):
+            near = sorted((distance(v, w), j) for j, w in enumerate(vecs) if j != i)[:2]
+            pairs.update((min(i, j), max(i, j)) for _, j in near)
+        await http.post(f"{base}/api/generate", json={"model": e, "keep_alive": 0})
+    rng = random.Random(seed)
+    want = len(pairs) // 3
+    while want > 0 and len(names) > 1:
+        i, j = rng.sample(range(len(names)), 2)
+        pairs.add((min(i, j), max(i, j)))
+        want -= 1
+    judged = sorted(pairs)
+    rng.shuffle(judged)
+    judged = judged[:420]
+    verdict: dict[tuple[int, int], bool] = {}
+    for k in range(0, len(judged), 35):
+        chunk = judged[k : k + 35]
+        listing = "\n".join(f"{n}: {names[i]!r} | {names[j]!r}" for n, (i, j) in enumerate(chunk))
+        try:
+            got = await judge.ask(JUDGE_PROMPT, listing, JUDGE_SCHEMA)
+        except (graph_local.LocalModelError, httpx.HTTPError, ValueError):
+            continue
+        for a in got.get("answers") or []:
+            if isinstance(a, dict) and isinstance(a.get("i"), int) and 0 <= a["i"] < len(chunk):
+                verdict[chunk[a["i"]]] = bool(a.get("same"))
+    for e, vecs in vectors.items():
+        same = [distance(vecs[i], vecs[j]) for (i, j), v in verdict.items() if v]
+        other = [distance(vecs[i], vecs[j]) for (i, j), v in verdict.items() if not v]
+        f, cut = best_f1(same, other)
+        scores[e].update(auc=auc(same, other), f1=f, cut=cut)
+    return {
+        "pairs": len(verdict),
+        "same": sum(verdict.values()),
+        "scores": scores,
+        "examples": [
+            {"a": names[i], "b": names[j], "same": v} for (i, j), v in list(verdict.items())[:60]
+        ],
+    }
 
 
 async def load_imported(database_url: str, email: str, count: int, seed: int) -> tuple[list, int]:
@@ -189,7 +323,7 @@ def pct(x: float) -> str:
     return f"{100 * x:.0f}%"
 
 
-def report(args, chats, total, models, shapes, tallies, details) -> str:
+def report(args, chats, total, models, shapes, tallies, details, embeds=None) -> str:
     ref = args.reference
     lines = [
         "# Knowledge graph baseline",
@@ -244,6 +378,33 @@ def report(args, chats, total, models, shapes, tallies, details) -> str:
     for m, s in shapes.items():
         top = ", ".join(f"{p} {c}" for p, c in s.predicates.most_common(8)) or "none"
         lines.append(f"- {m}: {top}")
+    lines += ["", "## Parts of life covered (entities per domain, all chats)", ""]
+    doms = sorted({d for s in shapes.values() for d in s.domains})
+    lines += ["| Model | " + " | ".join(doms) + " |", "|---|" + "---|" * len(doms)]
+    for m, s in shapes.items():
+        lines.append(f"| {m} | " + " | ".join(str(s.domains[d]) for d in doms) + " |")
+    if embeds:
+        lines += [
+            "",
+            "## Embedding models: telling the same thing from different things",
+            "",
+            f"{embeds['pairs']} pairs of names the reference model found (each name's nearest "
+            f"neighbours under every embedder, plus random pairs), judged same or different by "
+            f"{ref} ({embeds['same']} same). Ranking: how often a same pair is closer than a "
+            "different pair (1.0 is perfect). Best F1: at the best distance cut-off. Judging "
+            f"cost ${embeds.get('judge_cost', 0):.2f}.",
+            "",
+            "| Embedder | Ranking (AUC) | Best F1 | At distance | Time |",
+            "|---|---|---|---|---|",
+        ]
+        for name, e in embeds["scores"].items():
+            if e.get("error"):
+                lines.append(f"| {name} | error: {e['error']} | | | |")
+                continue
+            lines.append(
+                f"| {name} | {e['auc']:.3f} | {pct(e['f1'])} | {e['cut']:.2f} | "
+                f"{e['seconds']:.0f}s |"
+            )
     lines += ["", "## Samples", ""]
     picks = range(0, len(chats), max(1, len(chats) // args.samples))[: args.samples]
     for i in picks:
@@ -275,12 +436,14 @@ async def run(args: argparse.Namespace) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     http = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=10))
     names = [args.reference, *[m.strip() for m in args.models.split(",") if m.strip()]]
-    models = {
-        m: CloudModel(settings, m, http)
-        if m.startswith("nexus-")
-        else OllamaModel(settings, m, http)
-        for m in names
-    }
+
+    def build(name: str):
+        base = name.removesuffix("+wide")
+        if base.startswith("nexus-"):
+            return CloudModel(settings, base, http)
+        return OllamaModel(settings, base, http)
+
+    models = {m: build(m) for m in names}
     results: dict[str, list[Result]] = {}
     details: dict[str, list[dict]] = {}
     for m, model in models.items():
@@ -288,20 +451,24 @@ async def run(args: argparse.Namespace) -> Path:
         gate = asyncio.Semaphore(4 if isinstance(model, CloudModel) else 1)
         done = 0
 
-        async def one(text: str, model=model, gate=gate) -> tuple[Result, dict]:
+        prompt = WIDE_ENTITY_PROMPT if m.endswith("+wide") else graph_local.ENTITY_PROMPT
+
+        async def one(text: str, model=model, gate=gate, prompt=prompt) -> tuple[Result, dict]:
             nonlocal done
             async with gate:
-                got = await run_one(model, text)
+                got = await run_one(model, text, prompt)
             done += 1
             print(f"  {done}/{len(chats)} {got[0].seconds:.0f}s {got[0].error[:80]}", flush=True)
             return got
 
         pairs = await asyncio.gather(*(one(t) for _, t in chats))
         results[m], details[m] = [p[0] for p in pairs], [p[1] for p in pairs]
-        if isinstance(model, OllamaModel):
+        if isinstance(model, OllamaModel) and not any(
+            n != m and n.removesuffix("+wide") == model.model for n in names[names.index(m) + 1 :]
+        ):
             await http.post(
                 f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-                json={"model": m, "keep_alive": 0},
+                json={"model": model.model, "keep_alive": 0},
             )
     shapes = {m: Shape() for m in models}
     for m, rs in results.items():
@@ -315,6 +482,27 @@ async def run(args: argparse.Namespace) -> Path:
     for m in names[1:]:
         for r0, r1 in zip(results[args.reference], results[m], strict=True):
             tallies[m].add(score_chat(r0, r1, vectors), r1)
+    embeds = None
+    if args.embedders:
+        seen: dict[str, str] = {}
+        for d in details[args.reference]:
+            for e in (d or {}).get("entities", []):
+                seen.setdefault(graph.norm(e["name"]), e["name"])
+        ents = list(seen.values())
+        random.Random(args.seed).shuffle(ents)
+        ents = ents[: args.embed_names]
+        print(f"Embedders on {len(ents)} names", flush=True)
+        judge = build(args.reference)  # its own meter: judging is not part of a re-read
+        embeds = await test_embedders(
+            http,
+            settings.ollama_base_url.rstrip("/"),
+            judge,
+            ents,
+            [e.strip() for e in args.embedders.split(",") if e.strip()],
+            args.seed,
+        )
+        embeds["judge_cost"] = judge.cost
+        (out / "embeddings.json").write_text(json.dumps(embeds, indent=1, ensure_ascii=False))
     (out / "chats.json").write_text(
         json.dumps(
             [
@@ -325,7 +513,9 @@ async def run(args: argparse.Namespace) -> Path:
             ensure_ascii=False,
         )
     )
-    (out / "report.md").write_text(report(args, chats, total, models, shapes, tallies, details))
+    (out / "report.md").write_text(
+        report(args, chats, total, models, shapes, tallies, details, embeds)
+    )
     await http.aclose()
     return out
 
@@ -338,6 +528,12 @@ def main() -> None:
     p.add_argument("--chats", type=int, default=40)
     p.add_argument("--samples", type=int, default=8)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument(
+        "--embedders",
+        default="",
+        help="comma-separated Ollama embedding models to compare, e.g. bge-m3,qwen3-embedding:4b",
+    )
+    p.add_argument("--embed-names", type=int, default=250)
     p.add_argument("--ollama", default="")
     p.add_argument("--database-url", default="")
     p.add_argument("--out", default="/tmp/graph-baseline")
