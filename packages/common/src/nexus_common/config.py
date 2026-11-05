@@ -453,6 +453,16 @@ OPTIONS: tuple[Option, ...] = (
         allow_empty=False,
     ),
     Option(
+        "graph_cloud_model",
+        "Memory and context",
+        "Cloud graph model",
+        "A cloud model that builds the graph in place of the local one, with the local model "
+        "kept for when it fails. The 5 Nov baseline on real chats: nexus-pro (GPT-5.4) links "
+        "things to each other like the best model (36% of links) at about 1.5 cents a chat; "
+        "the local model links everything only to you. Empty keeps it local and free.",
+        "text",
+    ),
+    Option(
         "memory_nightly_hour_utc",
         "Memory and context",
         "Nightly memory upkeep hour (UTC)",

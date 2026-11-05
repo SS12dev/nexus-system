@@ -1289,6 +1289,8 @@ export interface GraphRun {
   seconds?: number;
   items?: number;
   calls?: number;
+  cloud_calls?: number;
+  local_calls?: number;
   entities?: number;
   relations?: number;
   error?: string;
@@ -1304,6 +1306,8 @@ export interface GraphRun {
 export interface GraphAdmin {
   enabled: boolean;
   extractor: "local" | "memory";
+  /** LiteLLM alias that reads for the graph first (the local model is the fallback), if set. */
+  cloud_model?: string | null;
   ollama: {
     url: string;
     model: string;

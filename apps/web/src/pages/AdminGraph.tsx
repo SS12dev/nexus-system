@@ -93,6 +93,26 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
         }
       >
         <div className="rounded-lg border border-edge bg-panel p-4 text-sm">
+          {local && data.cloud_model && (
+            <div className="mb-3 border-b border-edge pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                <span className="font-medium">Cloud model {data.cloud_model}</span>
+                <span className="text-slate-500">reads first, through LiteLLM</span>
+              </div>
+              <p className="mt-1 text-slate-400">
+                It finds more and links things better than the local model, at about 1.5 cents a conversation. If a
+                call fails (no credit, network down) the local model below reads that item instead.
+                {data.last_extract?.cloud_calls != null &&
+                  ` Last run: ${data.last_extract.cloud_calls} cloud calls, ${data.last_extract.local_calls ?? 0} local.`}{" "}
+                Clear “Cloud graph model” in{" "}
+                <button className="underline" onClick={onOpenConfig}>
+                  Configuration
+                </button>{" "}
+                to go back to local only.
+              </p>
+            </div>
+          )}
           {local && o ? (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -209,16 +229,17 @@ export function GraphPanel({ onError, onOpenConfig }: { onError: (msg: string) =
       >
         <p className="text-xs text-slate-400">
           Clears every person, place, topic and connection a model pulled out of memories, chats and files, for
-          everyone, including what the first cloud extractor made, and has the local model read it all again. Kept:
+          everyone, including what the first cloud extractor made, and has it all read again. Kept:
           each person's own entry, the app's projects, folders and routines, what people said outright, and what came
-          from imported chat history. Memories, chats and files aren't touched. Reading everything again takes a while;
-          the universe view fills back in as it goes.
+          from imported chat history. Type “rebuild all” instead to clear what imported chats gave too and read them
+          again (worth it after changing who builds the graph). Memories, chats, files and the imported chats
+          themselves aren't touched. Reading everything again takes a while; the universe view fills back in as it goes.
         </p>
       </Section>
       {rebuilding && (
         <TextPromptDialog
           title="Rebuild the knowledge graph?"
-          description='This removes what models extracted for every user and reads everything again with the local model. Type "rebuild" to confirm.'
+          description='This removes what models extracted for every user and reads everything again. Type "rebuild" to confirm, or "rebuild all" to read imported chat histories again too.'
           fields={[{ key: "confirm", label: "Type rebuild", value: "", placeholder: "rebuild" }]}
           confirmLabel="Rebuild"
           danger

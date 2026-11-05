@@ -75,6 +75,7 @@ async def graph_status(actor: OwnerUser, db: DbDep, redis: RedisDep, settings: S
     return {
         "enabled": settings.graph_enabled,
         "extractor": settings.graph_extractor,
+        "cloud_model": (settings.graph_cloud_model or "").strip() or None,
         "ollama": await _ollama(settings) if local else None,
         "backlog": {
             "memories": await db.scalar(
@@ -136,6 +137,9 @@ class RebuildIn(BaseModel):
 
 
 REBUILD_WORD = "rebuild"
+# Also clears what imported chat histories gave and reads them again (with the cloud graph
+# model, if one is set, that costs money: about 1.5 cents a conversation with nexus-pro).
+REBUILD_ALL_WORD = "rebuild all"
 
 
 @router.post("/rebuild", status_code=status.HTTP_202_ACCEPTED)
@@ -143,13 +147,24 @@ async def rebuild(body: RebuildIn, actor: OwnerUser, db: DbDep, queue: QueueDep)
     """Clear everything a model extracted from memories, chats and files, for every user, and
     have the local model read them all again. Kept: each user's own entity, the app's records
     (projects, folders, routines), what people said outright, and what came from an imported
-    chat history (already read by the local model). Memories, chats and files are untouched."""
-    if body.confirm.strip().lower() != REBUILD_WORD:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f'Type "{REBUILD_WORD}" to confirm')
-    # Relations a model made, unless an imported chat backs them.
+    chat history, unless the word is "rebuild all", which reads imported chats again too.
+    Memories, chats, files and the imported chats themselves are untouched."""
+    word = " ".join(body.confirm.strip().lower().split())
+    if word not in (REBUILD_WORD, REBUILD_ALL_WORD):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f'Type "{REBUILD_WORD}", or "{REBUILD_ALL_WORD}" to read imported chats again too',
+        )
+    everything = word == REBUILD_ALL_WORD
+    # Relations a model made, unless an imported chat backs them (all of them, with "all").
     rels = await db.execute(
         text(
             """
+            delete from relations r
+            where r.origin in ('model', 'inferred', 'import')
+            """
+            if everything
+            else """
             delete from relations r
             where r.origin in ('model', 'inferred')
               and not exists (
@@ -159,13 +174,20 @@ async def rebuild(body: RebuildIn, actor: OwnerUser, db: DbDep, queue: QueueDep)
             """
         )
     )
+    # Mentions from memories, chats and files go too (and from imports, with "all"): the new
+    # pass adds them back. Cleared before entities, so the import check below sees what is left.
+    if everything:
+        await db.execute(text("delete from mentions"))
+        await db.execute(update(ImportedChat).values(graph_at=None))
+    else:
+        await db.execute(text("delete from mentions where imported_chat_id is null"))
     # Entities a model made that nothing else holds up: no import mentions it and no relation
     # is left on it.
     ents = await db.execute(
         text(
             """
             delete from entities e
-            where e.origin in ('model', 'inferred') and not e.is_self
+            where e.origin in ('model', 'inferred', :imp) and not e.is_self
               and e.source_kind is null
               and not exists (
                   select 1 from mentions m
@@ -175,10 +197,9 @@ async def rebuild(body: RebuildIn, actor: OwnerUser, db: DbDep, queue: QueueDep)
                   select 1 from relations r where r.src_id = e.id or r.dst_id = e.id
               )
             """
-        )
+        ),
+        {"imp": "import" if everything else "model"},
     )
-    # Mentions from memories, chats and files go too: the new pass adds them back.
-    await db.execute(text("delete from mentions where imported_chat_id is null"))
     await db.execute(update(Area).values(ended_at=func.now()).where(Area.ended_at.is_(None)))
     await db.execute(update(Entity).values(area_id=None, pos=None, community=None))
     for model in (Memory, Episode, File):
@@ -186,7 +207,7 @@ async def rebuild(body: RebuildIn, actor: OwnerUser, db: DbDep, queue: QueueDep)
     db.add(
         AuditLog(
             actor_id=actor.id,
-            action="graph.rebuild",
+            action="graph.rebuild_all" if everything else "graph.rebuild",
             target=f"{rels.rowcount} relations, {ents.rowcount} entities",
         )
     )

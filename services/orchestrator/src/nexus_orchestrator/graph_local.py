@@ -187,14 +187,58 @@ class LocalModelError(Exception):
 
 
 class LocalModel:
-    """One structured-output call to the model in Ollama."""
+    """One structured-output call: to the cloud graph model through LiteLLM when one is set,
+    else (or when that fails) to the model in Ollama."""
 
     def __init__(self, settings: Settings, http: httpx.AsyncClient | None = None):
         self.base = settings.ollama_base_url.rstrip("/")
         self.model = settings.graph_local_model
+        self.cloud = (settings.graph_cloud_model or "").strip()
+        self.gateway = settings.litellm_base_url.rstrip("/")
+        self.key = settings.litellm_master_key or settings.litellm_api_key
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(240, connect=5))
+        self.cloud_calls = self.local_calls = 0
 
     async def ask(self, system: str, prompt: str, schema: dict) -> dict:
+        if self.cloud:
+            try:
+                got = await self._cloud(system, prompt, schema)
+                self.cloud_calls += 1
+                return got
+            except LocalModelError as exc:
+                log.warning("Cloud graph model failed, using the local one: %s", exc)
+        got = await self._ollama(system, prompt, schema)
+        self.local_calls += 1
+        return got
+
+    async def _cloud(self, system: str, prompt: str, schema: dict) -> dict:
+        try:
+            r = await self.http.post(
+                f"{self.gateway}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.key}"},
+                json={
+                    "model": self.cloud,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": "graph", "schema": schema},
+                    },
+                    "metadata": {"tags": ["nexus", "graph"]},
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise LocalModelError(f"{self.cloud} did not answer: {exc}") from exc
+        if r.status_code != 200:
+            raise LocalModelError(f"{self.cloud}: {r.status_code} {r.text[:200]}")
+        try:
+            return parse_json(r.json()["choices"][0]["message"]["content"] or "")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise LocalModelError(f"{self.cloud}: unreadable answer") from exc
+
+    async def _ollama(self, system: str, prompt: str, schema: dict) -> dict:
         body = {
             "model": self.model,
             "stream": False,
@@ -545,6 +589,9 @@ async def extract_pending(
             await model.aclose()
         stats["seconds"] = round(time.monotonic() - start, 1)
         stats["at"] = utcnow().isoformat()
+        # Which model answered: the cloud one, or the local one (on its own or as fallback).
+        stats["cloud_calls"] = getattr(model, "cloud_calls", 0)
+        stats["local_calls"] = getattr(model, "local_calls", 0)
         if stats["items"] or stats["error"]:
             await deps.redis.set(STATUS_KEY, json.dumps(stats))
     return stats

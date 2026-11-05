@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     # same call that saves memories.
     graph_extractor: str = "local"
     graph_local_model: str = "qwen3.5:9b"
+    # A LiteLLM alias (nexus-pro) that builds the graph instead; the local model then only
+    # answers when the cloud one fails. Empty: local only.
+    graph_cloud_model: str = ""
     ollama_base_url: str = "http://host.docker.internal:11434"
     # Nightly memory upkeep (decay, merge, profile rebuild), in UTC. 21:30 UTC is 03:00 IST.
     memory_nightly_hour_utc: int = 21
