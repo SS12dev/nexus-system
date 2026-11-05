@@ -271,7 +271,12 @@ async def extract(
     data = await model.ask(entity_prompt, f"Items:\n\n{listing}", entity_schema())
     found = graph.parse_graph(data)
     out = Found(found=found, calls=1)
-    raw = {graph.norm(str(e.get("name") or "")): e for e in data.get("entities") or []}
+    # A model may answer with bare names instead of objects: those count as nothing.
+    raw = {
+        graph.norm(str(e.get("name") or "")): e
+        for e in data.get("entities") or []
+        if isinstance(e, dict)
+    }
     for e in found.entities:
         nums = (raw.get(graph.norm(e["name"])) or {}).get("items") or []
         out.items[graph.norm(e["name"])] = [

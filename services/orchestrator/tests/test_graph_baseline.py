@@ -99,3 +99,8 @@ async def test_embedders_are_scored_on_pairs_the_judge_labels(monkeypatch):
     got = await gb.test_embedders(Http(), "http://x", Judge(), names, ["e1"], 1)
     assert got["same"] == 1
     assert got["scores"]["e1"]["auc"] == 1.0
+
+
+async def test_bare_names_instead_of_objects_count_as_nothing_not_a_crash():
+    got, detail = await gb.run_one(Fake(["Nexus", "Postgres"], []), "text")
+    assert not got.error and detail["entities"] == []

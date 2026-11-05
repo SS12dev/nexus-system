@@ -152,7 +152,14 @@ async def run_one(model, text: str, prompt: str = graph_local.ENTITY_PROMPT) -> 
     start = time.perf_counter()
     try:
         found = await graph_local.extract(model, [item], prompt)
-    except (graph_local.LocalModelError, httpx.HTTPError, KeyError, ValueError) as exc:
+    except (
+        graph_local.LocalModelError,
+        httpx.HTTPError,
+        LookupError,
+        ValueError,
+        TypeError,
+        AttributeError,
+    ) as exc:
         return Result(valid=False, error=str(exc)[:200], seconds=time.perf_counter() - start), {}
     seconds = time.perf_counter() - start
     detail = {
@@ -424,6 +431,20 @@ def report(args, chats, total, models, shapes, tallies, details, embeds=None) ->
     return "\n".join(lines)
 
 
+def save_chats(out: Path, chats: list, details: dict[str, list[dict]]) -> None:
+    """Every answer so far, in the shape --reuse reads back."""
+    (out / "chats.json").write_text(
+        json.dumps(
+            [
+                {"title": t, "text": x, "answers": {m: d[i] for m, d in details.items()}}
+                for i, (t, x) in enumerate(chats)
+            ],
+            indent=1,
+            ensure_ascii=False,
+        )
+    )
+
+
 async def run(args: argparse.Namespace) -> Path:
     settings = Settings()
     if args.ollama:
@@ -482,6 +503,7 @@ async def run(args: argparse.Namespace) -> Path:
 
         pairs = await asyncio.gather(*(one(t) for _, t in chats))
         results[m], details[m] = [p[0] for p in pairs], [p[1] for p in pairs]
+        save_chats(out, chats, details)  # after each model: a crash later keeps this one
         if isinstance(model, OllamaModel) and not any(
             n != m and n.removesuffix("+wide") == model.model for n in names[names.index(m) + 1 :]
         ):
@@ -522,16 +544,7 @@ async def run(args: argparse.Namespace) -> Path:
         )
         embeds["judge_cost"] = judge.cost
         (out / "embeddings.json").write_text(json.dumps(embeds, indent=1, ensure_ascii=False))
-    (out / "chats.json").write_text(
-        json.dumps(
-            [
-                {"title": t, "text": x, "answers": {m: details[m][i] for m in models}}
-                for i, (t, x) in enumerate(chats)
-            ],
-            indent=1,
-            ensure_ascii=False,
-        )
-    )
+    save_chats(out, chats, details)
     (out / "report.md").write_text(
         report(args, chats, total, models, shapes, tallies, details, embeds)
     )
