@@ -431,6 +431,17 @@ async def run(args: argparse.Namespace) -> Path:
     chats, total = await load_imported(
         args.database_url or settings.database_url, args.email, args.chats, args.seed
     )
+    # --reuse: the same chats as an earlier run, and that run's answers from models that
+    # finished, so a run cut short (credits, a crash) only redoes what is missing.
+    earlier: dict[str, list[dict]] = {}
+    if args.reuse:
+        saved = json.loads(await asyncio.to_thread(Path(args.reuse).read_text))
+        chats = [(c["title"], c["text"]) for c in saved]
+        for m in saved[0]["answers"] if saved else []:
+            got = [c["answers"].get(m) or {} for c in saved]
+            if sum(1 for g in got if g) >= len(got) * 0.9:  # finished, bar a stray timeout
+                earlier[m] = got
+        print(f"Reusing {', '.join(earlier) or 'nothing'} from {args.reuse}", flush=True)
     print(f"{len(chats)} of {total} imported conversations picked", flush=True)
     out = Path(args.out) / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out.mkdir(parents=True, exist_ok=True)
@@ -447,6 +458,14 @@ async def run(args: argparse.Namespace) -> Path:
     results: dict[str, list[Result]] = {}
     details: dict[str, list[dict]] = {}
     for m, model in models.items():
+        if m in earlier:
+            details[m] = earlier[m]
+            results[m] = [
+                parse(json.dumps(d)) if d else Result(valid=False, error="no answer earlier")
+                for d in earlier[m]
+            ]
+            print(f"{m}: reused", flush=True)
+            continue
         print(f"{m}", flush=True)
         gate = asyncio.Semaphore(4 if isinstance(model, CloudModel) else 1)
         done = 0
@@ -534,6 +553,11 @@ def main() -> None:
         help="comma-separated Ollama embedding models to compare, e.g. bge-m3,qwen3-embedding:4b",
     )
     p.add_argument("--embed-names", type=int, default=250)
+    p.add_argument(
+        "--reuse",
+        default="",
+        help="chats.json of an earlier run: same chats, and its finished models' answers are kept",
+    )
     p.add_argument("--ollama", default="")
     p.add_argument("--database-url", default="")
     p.add_argument("--out", default="/tmp/graph-baseline")
