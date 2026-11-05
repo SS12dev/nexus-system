@@ -359,3 +359,39 @@ async def test_links_recall_keeps_using_grow_stronger_each_night(
     # The counts are spent: the next night adds nothing.
     assert await redis.exists(graph.used_key(user.id)) == 0
     assert (await graph_nightly.consolidate(deps))["strengthened"] == 0
+
+
+async def test_the_cloud_graph_model_reads_first_and_ollama_steps_in_when_it_fails(local):
+    import httpx
+
+    settings = local.settings.model_copy(update={"graph_cloud_model": "nexus-pro"})
+    seen: list[str] = []
+    cloud_up = True
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/v1/chat/completions":
+            body = json.loads(request.content)
+            assert body["model"] == "nexus-pro"
+            assert body["response_format"]["type"] == "json_schema"
+            if not cloud_up:
+                return httpx.Response(429, text="insufficient_quota")
+            content = json.dumps({"entities": [{"name": "Miso"}]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        return httpx.Response(200, json={"message": {"content": '{"entities": []}'}})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    model = graph_local.LocalModel(settings, http)
+    assert await model.ask("s", "p", {"type": "object"}) == {"entities": [{"name": "Miso"}]}
+    cloud_up = False
+    assert await model.ask("s", "p", {"type": "object"}) == {"entities": []}
+    assert seen == ["/v1/chat/completions", "/v1/chat/completions", "/api/chat"]
+    assert (model.cloud_calls, model.local_calls) == (1, 1)
+
+    # With no cloud model set, only Ollama is asked.
+    seen.clear()
+    plain = graph_local.LocalModel(
+        local.settings, httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    )
+    await plain.ask("s", "p", {"type": "object"})
+    assert seen == ["/api/chat"]

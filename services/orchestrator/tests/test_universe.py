@@ -316,3 +316,27 @@ async def test_communities_are_found_without_the_user_at_the_middle(sessionmaker
         comm = {e.name: e.community for e in (await db.scalars(select(Entity))).all()}
     assert comm["UST"] == comm["Meera"] and comm["Bambu"] == comm["Drone"]
     assert comm["UST"] != comm["Bambu"]
+
+
+async def test_galaxies_crowded_on_the_ring_move_apart(sessionmaker, owner):
+    user, _chat = owner
+    groups = {f"g{i}": [f"{i}-{k}" for k in range(4)] for i in range(5)}
+    async with sessionmaker() as db:
+        await _graph(db, user.id, groups)
+        await universe.track(db, user.id)
+        await db.commit()
+        # As older layouts left them: every galaxy squeezed into one side of the ring.
+        areas = (await db.scalars(select(Area))).all()
+        for n, a in enumerate(areas):
+            a.angle = 0.1 * n
+        await db.commit()
+        await universe.track(db, user.id)
+        await db.commit()
+        angles = sorted(a.angle for a in (await db.scalars(select(Area))).all())
+        await universe.track(db, user.id)
+        await db.commit()
+        again = sorted(a.angle for a in (await db.scalars(select(Area))).all())
+    gaps = [(b - a) % (2 * math.pi) for a, b in zip(angles, angles[1:] + angles[:1], strict=True)]
+    assert min(gaps) > 0.6
+    # And once apart they stay put.
+    assert again == angles

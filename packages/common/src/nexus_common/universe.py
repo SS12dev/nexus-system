@@ -83,17 +83,31 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a or b else 0.0
 
 
-def _gap_angle(taken: list[float]) -> float:
-    """The middle of the widest gap on the ring."""
+def _gaps(taken: list[float]) -> list[tuple[float, float]]:
+    """The gaps on the ring as (width, middle), widest first."""
     if not taken:
-        return 0.0
+        return [(2 * math.pi, 0.0)]
     ring = sorted(a % (2 * math.pi) for a in taken)
     gaps = [
         ((ring[(i + 1) % len(ring)] - a) % (2 * math.pi) or 2 * math.pi, a)
         for i, a in enumerate(ring)
     ]
-    width, start = max(gaps)
-    return (start + width / 2) % (2 * math.pi)
+    return sorted(((w, (start + w / 2) % (2 * math.pi)) for w, start in gaps), reverse=True)
+
+
+def _gap_angle(taken: list[float], near: float | None = None) -> float:
+    """The middle of the widest gap on the ring; with `near`, of the gap nearest that angle
+    among those at least half as wide as the widest, so a split lands by its parent without
+    crowding it."""
+    gaps = _gaps(taken)
+    if near is None:
+        return gaps[0][1]
+    wide = [g for g in gaps if g[0] >= gaps[0][0] / 2]
+    return min(wide, key=lambda g: abs((g[1] - near + math.pi) % (2 * math.pi) - math.pi))[1]
+
+
+def _arc(a: float, b: float) -> float:
+    return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
 
 
 def fallback_name(names: list[str], domain: str | None, others: set[str]) -> str:
@@ -228,11 +242,7 @@ async def track(db: AsyncSession, user_id: uuid.UUID, namer: Namer | None = None
             pid, n = origin.most_common(1)[0]
             if n / len(g) >= SPLIT_SHARE:
                 parent = next(a for a in areas if a.id == pid)
-        angle = (
-            (parent.angle + 0.45 + 0.3 * _unit(str(i), "split")) % (2 * math.pi)
-            if parent
-            else _gap_angle(taken)
-        )
+        angle = _gap_angle(taken, parent.angle if parent else None)
         a = Area(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -247,6 +257,18 @@ async def track(db: AsyncSession, user_id: uuid.UUID, namer: Namer | None = None
         fresh.add(a.id)
         taken.append(angle)
         stats["split" if parent else "born"] += 1
+
+    # Galaxies too close on the ring (older layouts put every split of one area next to it)
+    # move apart: the oldest keep their place, a crowded newer one moves to a free gap.
+    live = sorted(match.values(), key=lambda a: (a.born_at or now, str(a.id)))
+    room = min(0.6, 2 * math.pi / (1.3 * max(1, len(live))))
+    placed: list[float] = []
+    for a in live:
+        if any(_arc(a.angle, b) < room for b in placed):
+            gaps = _gaps(placed)
+            fits = [g for g in gaps if g[0] >= 2 * room] or gaps[:1]
+            a.angle = min(fits, key=lambda g: _arc(g[1], a.angle))[1]
+        placed.append(a.angle)
 
     # Areas no group kept merged into where most of their members went, or ended.
     kept = {a.id: i for i, a in match.items()}

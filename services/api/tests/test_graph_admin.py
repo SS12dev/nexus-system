@@ -4,7 +4,16 @@ import httpx
 from sqlalchemy import select
 
 from nexus_api.routes import graph_admin
-from nexus_common.models import Entity, Memory, MemoryKind, Relation, utcnow
+from nexus_common.models import (
+    ChatImport,
+    Entity,
+    ImportedChat,
+    Memory,
+    MemoryKind,
+    Mention,
+    Relation,
+    utcnow,
+)
 
 
 async def test_graph_tab_counts_what_waits_and_queues_runs(owner, queue, redis, sessionmaker):
@@ -94,3 +103,41 @@ async def test_rebuild_clears_what_models_made_and_rereads_everything(owner, que
         names = {e.name for e in (await db.scalars(select(Entity))).all()}
         assert names == {"Pune"}
         assert (await db.scalar(select(Memory))).graph_at is None
+
+
+async def test_rebuild_all_reads_imported_chats_again_too(owner, queue, sessionmaker):
+    me = (await owner.get("/api/me")).json()
+    async with sessionmaker() as db:
+        imp = ChatImport(user_id=me["id"], source="chatgpt", name="export.zip")
+        db.add(imp)
+        await db.flush()
+        chat = ImportedChat(
+            import_id=imp.id,
+            user_id=me["id"],
+            external_id="c1",
+            text="USER: I love making biryani",
+            graph_at=utcnow(),
+        )
+        food = Entity(
+            user_id=me["id"],
+            type="topic",
+            shell=2,
+            name="Biryani",
+            aliases=[],
+            summary="",
+            origin="import",
+        )
+        db.add_all([chat, food])
+        await db.flush()
+        db.add(Mention(user_id=me["id"], entity_id=food.id, imported_chat_id=chat.id))
+        await db.commit()
+
+    # A plain rebuild keeps what imported chats gave.
+    r = await owner.post("/api/admin/graph/rebuild", json={"confirm": "rebuild"})
+    assert r.status_code == 202 and r.json()["entities"] == 0
+    r = await owner.post("/api/admin/graph/rebuild", json={"confirm": " Rebuild  ALL "})
+    assert r.status_code == 202 and r.json()["entities"] == 1
+    async with sessionmaker() as db:
+        assert (await db.scalars(select(Entity).where(Entity.name == "Biryani"))).first() is None
+        assert (await db.scalar(select(ImportedChat))).graph_at is None
+        assert (await db.scalars(select(Mention))).first() is None

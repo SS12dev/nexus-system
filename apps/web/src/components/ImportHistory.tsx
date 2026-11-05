@@ -95,7 +95,8 @@ export function ImportHistory({ assistant }: { assistant: string }) {
       <p className="mt-1 text-xs text-slate-400">
         Upload the data export from ChatGPT (Settings, Data controls, Export) or Claude (Settings, Privacy, Export),
         either the zip or the conversations.json inside it. Only your own messages are kept, with pasted code and
-        logs left out; the export itself is deleted once read. A model on this machine reads it into what{" "}
+        logs left out; the export itself is deleted once read. Quick requests (a recipe, a car question) count too,
+        as light hints of what you're into. Uploading the same export again only adds what's new. A model on this machine reads it into what{" "}
         {assistant} knows in the background, newest first, as fast as this machine goes: a few hundred
         conversations take a couple of hours while it's awake. Nothing goes to a cloud model.
       </p>
@@ -113,7 +114,7 @@ export function ImportHistory({ assistant }: { assistant: string }) {
                 ) : (
                   <span className="text-slate-400">
                     {i.read} of {i.kept} conversations read
-                    {i.conversations > i.kept && <> ({i.conversations - i.kept} skipped as empty, very short or with nothing about you)</>}
+                    {i.conversations > i.kept && <> ({i.conversations - i.kept} skipped as empty, a word or two, or already imported)</>}
                   </span>
                 )}
                 {i.status === "ready" && i.kept > 0 && (

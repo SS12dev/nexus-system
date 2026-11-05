@@ -17,3 +17,4 @@ secrets/*
 # Valkey/Redis snapshots from running redis-server in the repo
 dump.rdb
 graph-bakeoff/
+graph-baseline/

@@ -101,11 +101,12 @@ def test_a_chatgpt_export_keeps_the_branch_the_user_ended_on():
     moving = convs[0]
     assert moving.said[0] == PERSONAL and "Mumbai" not in " ".join(moving.said)
     assert moving.started_at == datetime.fromtimestamp(1710000000, UTC)
-    words = chat_import.own_words(moving)
+    words, kind = chat_import.own_words(moving)
     # The user's own words, with the paste left out; the assistant's never.
     assert "Pune" in words and "Raj" in words and "Elon" not in words and "Lovely" not in words
-    # A task with nothing about the user is dropped.
-    assert chat_import.own_words(convs[1]) is None
+    assert kind == "talk"
+    # A request is kept as one: what someone asks about shows what they are into.
+    assert chat_import.own_words(convs[1])[1] == "asked"
 
 
 def test_a_newer_chatgpt_export_split_over_several_files_is_read_whole():
@@ -167,8 +168,13 @@ async def test_an_import_is_read_then_built_into_the_graph_with_its_own_dates(
     async with sessionmaker() as db:
         imp = await db.get(ChatImport, imp.id)
         kept = (await db.scalars(select(ImportedChat))).all()
-    assert (imp.status, imp.source, imp.conversations, imp.kept) == ("ready", "chatgpt", 2, 1)
-    assert [c.title for c in kept] == ["Moving"]
+    assert (imp.status, imp.source, imp.conversations, imp.kept) == ("ready", "chatgpt", 2, 2)
+    assert sorted((c.title, c.kind) for c in kept) == [("French", "asked"), ("Moving", "talk")]
+    async with sessionmaker() as db:  # only the talk is read below; the request waits
+        french = (await db.scalars(select(ImportedChat).where(ImportedChat.kind == "asked"))).one()
+        french.graph_at = datetime.now(UTC)
+        await db.commit()
+    kept = [c for c in kept if c.kind == "talk"]
 
     fake = FakeLocal(
         [
@@ -277,3 +283,66 @@ async def test_a_run_out_of_time_says_more_is_waiting_and_runs_never_overlap(
         assert fake.calls == []
     finally:
         await redis.delete(graph_local.LOCK_KEY)
+
+
+def test_a_request_or_a_short_ask_is_kept_as_light_evidence_and_a_word_or_two_is_not():
+    def conv(*said):
+        return chat_import.Conversation("x", "Recipe", None, list(said))
+
+    assert chat_import.own_words(conv("onion masala rice recipe for two"))[1] == "asked"
+    assert chat_import.own_words(conv("thanks", "ok")) is None
+
+
+async def test_uploading_the_same_export_again_only_adds_what_is_new(deps, sessionmaker, owner):
+    user, _chat = owner
+    deps.storage = MemoryStorage()
+    ids = []
+    for _ in range(2):
+        async with sessionmaker() as db:
+            imp = ChatImport(user_id=user.id, name="chatgpt.zip")
+            db.add(imp)
+            await db.commit()
+        ids.append(imp.id)
+        await deps.storage.put(chat_import.storage_key(imp.id), zipped(chatgpt_export()), "x")
+        await chat_import.read_import(deps, imp.id)
+    async with sessionmaker() as db:
+        second = await db.get(ChatImport, ids[1])
+        rows = (await db.scalars(select(ImportedChat))).all()
+    assert len(rows) == 2 and second.kept == 0
+
+
+async def test_a_long_conversation_is_read_in_pieces_and_saved_once(deps, sessionmaker, owner):
+    user, _chat = owner
+    deps.settings = deps.settings.model_copy(update={"graph_extractor": "local"})
+    piece = "USER: " + ("I cook biryani on Sundays. " * 200)
+    async with sessionmaker() as db:
+        imp = ChatImport(user_id=user.id, name="x.zip", status="ready", kept=1)
+        db.add(imp)
+        await db.flush()
+        db.add(
+            ImportedChat(
+                import_id=imp.id,
+                user_id=user.id,
+                external_id="long",
+                title="Cooking",
+                text="\n\n".join([piece] * 3),
+                messages=3,
+            )
+        )
+        await db.commit()
+
+    def ent(name):
+        return {
+            "entities": [
+                {"name": name, "type": "interest", "domain": "hobbies", "summary": "", "items": [0]}
+            ]
+        }
+
+    rel = {"relations": []}
+    fake = FakeLocal([ent("cooking"), rel, ent("biryani"), rel, ent("cooking"), rel])
+    stats = await graph_local.extract_pending(deps, model=fake)
+    assert stats["items"] == 1 and stats["calls"] == 6
+    assert "part 1 of 3" in fake.calls[0] and "part 3 of 3" in fake.calls[4]
+    async with sessionmaker() as db:
+        names = sorted(e.name for e in (await db.scalars(select(Entity))).all() if not e.is_self)
+    assert names == ["biryani", "cooking"]
