@@ -517,7 +517,9 @@ async def run(args: argparse.Namespace) -> Path:
             shapes[m].add(r)
     embed = Models(settings, settings.ollama_base_url)
     keys = sorted({e["key"] for rs in results.values() for r in rs for e in r.entities})
-    vectors = await embed.embed(keys)
+    vectors: dict[str, list[float]] = {}
+    for i in range(0, len(keys), 64):  # Ollama drops one request with thousands of names
+        vectors.update(await embed.embed(keys[i : i + 64]))
     await embed.http.aclose()
     tallies = {m: Tally() for m in names[1:]}
     for m in names[1:]:
