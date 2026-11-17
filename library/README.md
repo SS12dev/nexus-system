@@ -30,7 +30,7 @@ library/
 | work | `lesson-planning`, `study-plan`, `meeting-prep`, `proposal-writing`, `creative-brief`, `clinical-evidence`, `job-application`, `sales-outreach` |
 | life | `meal-planning`, `trip-planning`, `training-plan`, `budgeting` |
 | agents | `prompt-writing` |
-| engineering | `code-review`, `3d-modeling` |
+| engineering | `technical-design`, `test-driven-development`, `systematic-debugging`, `api-design`, `data-modelling`, `security-review`, `frontend-design`, `testing-strategy`, `production-readiness`, `code-review`, `3d-modeling` |
 
 A skill names its shelf in frontmatter:
 

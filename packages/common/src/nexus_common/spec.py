@@ -349,7 +349,14 @@ def check_spec(spec: AgentSystemSpec, allowed_tools: set[str], skills: set[str])
     """Problems that make a valid-looking spec unusable for this user, in words Nexus can fix."""
     problems = []
     for a in spec.agents:
-        bad = [t for t in a.tools if t not in allowed_tools]
+        # The software team needs only its workbench tools (checked when it is designed);
+        # its other tools, like web search or view_image, are dropped at run time for a user
+        # who hasn't got them.
+        bad = [
+            t
+            for t in a.tools
+            if t not in allowed_tools and not (spec.topology == "dev_project" and a.id in DEV_IDS)
+        ]
         if bad:
             problems.append(
                 f"agent {a.id}: tools not available to this user: {', '.join(bad)} "

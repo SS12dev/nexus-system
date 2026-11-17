@@ -121,23 +121,24 @@ for (const [name, viewport] of Object.entries(sizes)) {{
 }}
 """
 
-# Added only when a project has no ESLint config of its own; a builder may change the rules.
-ESLINT_CONFIG = """// Added by Nexus so the project has a linter; adjust the rules if needed.
-import js from '@eslint/js'
-import globals from 'globals'
-import tseslint from 'typescript-eslint'
-
-export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'coverage', 'playwright-report', 'test-results'] },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ['**/*.{ts,tsx,js,jsx,mjs}'],
-    languageOptions: {
-      ecmaVersion: 2022,
-      globals: { ...globals.browser, ...globals.node },
-    },
+# The linter for a front end that brought none: Biome, one binary that reads TypeScript itself,
+# so it works whatever TypeScript version the project is on. A builder may change the rules.
+BIOME_CONFIG = """{
+  "files": {
+    "includes": [
+      "**",
+      "!dist",
+      "!node_modules",
+      "!coverage",
+      "!playwright-report",
+      "!test-results",
+      "!.nexus",
+      "!public"
+    ]
   },
-)
+  "linter": { "enabled": true },
+  "formatter": { "enabled": false }
+}
 """
 # Ruff rules for a back end: errors, likely bugs, security and outdated syntax. Line length is
 # the formatter's business; asserts are fine in tests; FastAPI puts Depends() in defaults.
@@ -290,7 +291,12 @@ async def wire(wb, user: str, project: str, stack: str) -> list[str]:
     front, back = FOLDERS.get(stack, (".", None))
     done: list[str] = []
     d = _dir(front)
-    found = await _yes(wb, user, project, f"cd {d} && test -f package.json && ls vite.config.*")
+    found = await _yes(
+        wb,
+        user,
+        project,
+        f"cd {d} && test -f package.json && {{ ls vite.config.* 2>/dev/null; true; }}",
+    )
     if found is not None:
         names = [n for n in found.split() if n.startswith("vite.config.")]
         vite_config = next((n for n in names if n.endswith(".ts")), names[0] if names else None)
@@ -365,18 +371,18 @@ async def wire(wb, user: str, project: str, stack: str) -> list[str]:
 
 
 async def _wire_lint(wb, user: str, project: str, front: str) -> None:
-    """A linter for a front end that has none: ESLint with the recommended TypeScript rules.
-    A project that brought its own config keeps it."""
+    """A linter for a front end that has none. A project that brought its own ESLint or Biome
+    config keeps it."""
     d = _dir(front)
-    has = f"cd {d} && ls eslint.config.* .eslintrc* 2>/dev/null | grep -q ."
+    has = f"cd {d} && ls eslint.config.* .eslintrc* biome.json biome.jsonc 2>/dev/null | grep -q ."
     if await _yes(wb, user, project, has) is not None:
         return
-    await wb.write(user, project, _path(front, "eslint.config.mjs"), ESLINT_CONFIG)
+    await wb.write(user, project, _path(front, "biome.json"), BIOME_CONFIG)
     out = await wb.run(
         user,
         project,
-        f"cd {d} && npm install -D --no-fund --no-audit eslint @eslint/js typescript-eslint "
-        "globals && npm pkg set 'scripts.lint=eslint .'",
+        f"cd {d} && npm install -D --no-fund --no-audit @biomejs/biome && "
+        "npm pkg set 'scripts.lint=biome lint .'",
         timeout_s=SETUP_TIMEOUT_S,
     )
     if out.exit_code != 0:
@@ -521,6 +527,7 @@ async def run_gates(wb, user: str, project: str, stack: str) -> Gates:
             'echo "$out" | head -n 40; echo NEXUS_GATE $(echo "$out" | grep -c "error TS")',
         )
     )
+    # The project's own ESLint when it has one, else Biome (the house linter).
     eslint = (
         "node -e \"const r=require('./.nexus/eslint.json');let e=0,w=0;const m=[];"
         "for(const f of r){e+=f.errorCount;w+=f.warningCount;for(const x of f.messages)"
@@ -528,15 +535,25 @@ async def run_gates(wb, user: str, project: str, stack: str) -> Gates:
         "+(x.severity>1?'error':'warning')+' '+x.message+' ('+x.ruleId+')')}"
         "console.log(m.join('\\n'));console.log('NEXUS_GATE',e,w)\""
     )
+    biome = (
+        "node -e \"const r=require('./.nexus/biome.json');const m=[];"
+        "for(const x of r.diagnostics||[])if(m.length<25)m.push(x.location.path+':'"
+        "+((x.location.start||{}).line||0)+' '+x.severity+' '+x.message+' ('+x.category+')');"
+        "console.log(m.join('\\n'));console.log('NEXUS_GATE',r.summary.errors,"
+        'r.summary.warnings)"'
+    )
     gates.gates.append(
         await _gate(
             wb,
             user,
             project,
             "lint",
-            f"cd {d} && ls eslint.config.* >/dev/null 2>&1 && test -d node_modules/eslint",
-            f"cd {d} && mkdir -p .nexus && rm -f .nexus/eslint.json; npx eslint . -f json "
-            f"-o .nexus/eslint.json >/dev/null 2>&1; {eslint}",
+            f"cd {d} && {{ {{ ls eslint.config.* >/dev/null 2>&1 && "
+            "test -d node_modules/eslint; } || test -d node_modules/@biomejs/biome; }",
+            f"cd {d} && mkdir -p .nexus && rm -f .nexus/eslint.json .nexus/biome.json; "
+            "if ls eslint.config.* >/dev/null 2>&1 && test -d node_modules/eslint; then "
+            f"npx eslint . -f json -o .nexus/eslint.json >/dev/null 2>&1; {eslint}; else "
+            f"npx biome lint --reporter=json . > .nexus/biome.json 2>/dev/null; {biome}; fi",
         )
     )
     audit = (
@@ -578,7 +595,7 @@ async def run_gates(wb, user: str, project: str, stack: str) -> Gates:
         count = (
             'uv run --quiet python -c "import json;'
             "d=json.load(open('.nexus/pip-audit.json'))['dependencies'];"
-            "v=[(x['name'],y['id']) for x in d for y in x.get('vulns',[])];"
+            "v=sorted({(x['name'],y['id']) for x in d for y in x.get('vulns',[])});"
             "[print(n+': '+i) for n,i in v];print('NEXUS_GATE',len(v))\""
         )
         gates.gates.append(

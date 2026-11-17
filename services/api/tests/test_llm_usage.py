@@ -170,7 +170,7 @@ async def test_model_failures_spend_and_budgets_raise_alerts(
     async with sessionmaker() as db:
         db.add(ApiKey(user_id=uuid.UUID(me["id"]), provider="litellm", secret="sk-owner"))
         await db.commit()
-    gateway.keys["sk-owner"] = {"spend": 48.0}  # of the owner's $50
+    gateway.keys["sk-owner"] = {"spend": 480.0}  # of the owner's $500
     for _ in range(2):
         await spend_logs(status="failure")
     await spend_logs(spend=3.0)

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # Budgets in USD per budget period, applied when a user's gateway key is created.
     default_budget_usd: float = 5.0
-    owner_budget_usd: float = 50.0
+    owner_budget_usd: float = 500.0
 
     # Auth
     secret_key: str = Field(default="change-me", min_length=8)
