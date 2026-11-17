@@ -164,14 +164,19 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 
 | Alias | Model | Used for |
 | --- | --- | --- |
-| `nexus-nano` | gpt-5.4-nano | routing, extraction, titles, summaries |
-| `nexus-mini` | gpt-5.4-mini | simple lookups and mechanical steps |
-| `nexus-pro` | gpt-5.4 | plain chat (`CHAT_MODEL`), most sub-agents, the software team's builders and tester |
-| `nexus-max` | gpt-5.5 | designing agent systems (`DESIGN_MODEL`), leads, planners and reviewers |
+| `nexus-nano` | Claude Haiku 5.5 | routing, extraction, titles, summaries |
+| `nexus-mini` | Gemini 3.8 Flash | quick tool use and long inputs |
+| `nexus-pro` | Claude Sonnet 5.5 | plain chat (`CHAT_MODEL`), most sub-agents, the software team's builders and tester |
+| `nexus-max` | Claude Opus 5.5 | designing agent systems (`DESIGN_MODEL`), leads, planners and reviewers |
+| `nexus-embed` | bge-m3 in Ollama on the host | memory and document search |
+
+Each chat alias falls back to an OpenAI model (GPT-5.4 nano, GPT-5.4 mini, GPT-5.4, GPT-5.5)
+when its provider fails or its key is missing. Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY` (`./scripts/secrets.sh set NAME`). The app shows the real model name, not the
+alias.
 
 Quality comes first: the defaults favour the stronger tiers, and budgets are generous (team run
 $5, software run $25, any run at most $100). Lower them in Admin › Configuration to save money.
-| `nexus-embed` | bge-m3 in Ollama on the host | memory and document search |
 
 LiteLLM runs in Compose with an exact-match Redis cache and sends every generation to Langfuse.
 To use another LiteLLM (for example on a server later), set `LITELLM_BASE_URL` and its

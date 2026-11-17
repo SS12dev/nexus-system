@@ -549,6 +549,8 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY missing, use ./scripts/compose.sh or set it in .env}
       DATABASE_URL: postgresql://nexus:${POSTGRES_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
