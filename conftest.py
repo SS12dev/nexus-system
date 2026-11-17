@@ -105,6 +105,19 @@ class FakeGateway:
         self.keys: dict[str, dict] = {}
         self.calls: list[tuple] = []
 
+    async def model_info(self) -> dict:
+        return {
+            "data": [
+                {"model_name": f"nexus-{t}", "litellm_params": {"model": f"openai/{m}"}}
+                for t, m in (
+                    ("nano", "gpt-5.4-nano"),
+                    ("mini", "gpt-5.4-mini"),
+                    ("pro", "gpt-5.4"),
+                    ("max", "gpt-5.5"),
+                )
+            ]
+        }
+
     async def generate_key(self, user, max_usd: Decimal, duration: str) -> str:
         key = f"sk-{uuid.uuid4().hex[:12]}"
         self.keys[key] = {"user_id": str(user.id), "max_usd": max_usd, "blocked": False}

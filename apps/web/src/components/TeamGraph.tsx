@@ -1,4 +1,5 @@
 import { TEAM_W, teamLayout } from "../lib/teamLayout";
+import { useModelLabel } from "../lib/models";
 import type { AgentEdge, AgentLive, AgentNode, Topology } from "../lib/types";
 
 const STATUS_FILL: Record<string, string> = {
@@ -28,6 +29,7 @@ export function TeamGraph({
   live?: Record<string, AgentLive>;
   compact?: boolean;
 }) {
+  const modelName = useModelLabel();
   const { pos, height } = teamLayout(nodes, topology);
   const curved = topology === "critic_loop";
   // A software team's fixes, and a flow checker's, loop back to the work under the row.
@@ -97,7 +99,7 @@ export function TeamGraph({
               strokeWidth={n.lead ? 2 : 1}
             >
               <title>
-                {n.name} ({n.role}, {live[n.id]?.tier ?? n.tier}): {st}
+                {n.name} ({n.role}, {modelName(live[n.id]?.tier ?? n.tier)}): {st}
                 {live[n.id]?.tool ? `, ${live[n.id]?.tool}` : ""}
               </title>
             </circle>
@@ -115,7 +117,7 @@ export function TeamGraph({
             {!compact && (
               <text x={p.x} y={p.y + NODE_R + 27} textAnchor="middle" className="fill-slate-500 text-[10px]">
                 {n.stage ? `${n.stage} · ` : ""}
-                {live[n.id]?.tier ?? n.tier}
+                {modelName(live[n.id]?.tier ?? n.tier)}
                 {live[n.id]?.tool && ["working", "waiting"].includes(st) ? ` · ${live[n.id]?.tool}` : ""}
               </text>
             )}

@@ -1,4 +1,5 @@
 import { Bot, ChevronDown, ChevronRight, Flag, Play, X } from "lucide-react";
+import { useModelLabel } from "../lib/models";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
@@ -19,6 +20,7 @@ const FEED_SHOWN = 8;
 export function SystemCard({ system }: { system: AgentSystem }) {
   const run = system.run;
   const live = isLive(run);
+  const modelName = useModelLabel();
   const feed = useStore((s) => (run ? (s.runFeed[run.id] ?? EMPTY) : EMPTY));
   const [open, setOpen] = useState<boolean | null>(null);
   const [all, setAll] = useState(false);
@@ -73,7 +75,7 @@ export function SystemCard({ system }: { system: AgentSystem }) {
                   <span className="shrink-0 text-slate-200">{n.name}</span>
                   <span className="shrink-0 text-xs text-slate-500">
                     {n.stage ? `${n.stage} · ` : ""}
-                    {n.role} · {a?.tier ?? n.tier}
+                    {n.role} · {modelName(a?.tier ?? n.tier)}
                   </span>
                   <span className="ml-auto truncate text-xs text-slate-400" title={a?.item}>
                     {doing}
