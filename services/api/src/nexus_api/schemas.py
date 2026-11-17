@@ -64,6 +64,9 @@ class MeOut(UserOut):
     terms_version: str | None = None
     terms_current: str = ""
     terms_needed: bool = False
+    # The real model behind each model alias, so the app can say "GPT-5.4" instead of
+    # "nexus-pro": {"nexus-pro": {"model": "gpt-5.4", "label": "GPT-5.4", "provider": "OpenAI"}}.
+    models: dict[str, dict[str, str]] = {}
 
 
 def _assistant_name(value: str) -> str:

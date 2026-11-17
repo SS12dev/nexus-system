@@ -210,11 +210,12 @@ core/widget-builder: draws it in one HTML file, saves it, fixes what the check r
 - "Summarise each of these 12 papers": parallel_map_reduce.
 
 ## Model tiers (cost rises about 5x per step)
+Quality comes first: pick the tier that does the step well, not the cheapest that might.
 - nano: classify, extract, short summaries.
-- mini: the default: tool use, research, writing from sources, making files.
-- pro: planning, leading a team, hard reasoning, reviewing. Use for leads and checkers only \
-when it matters.
-- max: only for the lead, and only when the user asked for the best model.
+- mini: simple lookups and mechanical steps (fetch, convert, reformat).
+- pro: the default for real work: research, writing, analysis, code, making files, 3D.
+- max: planning a hard task, leading a team, and checking or reviewing work that matters; \
+always when the user asked for the best model.
 
 ## Rules
 - Agent ids: short lowercase words (researcher, writer). role: one of ROLES; it picks the \
@@ -233,8 +234,8 @@ tool or framework with it, changing it), give every agent core/nexus-system so i
 the facts instead of guessing.
 - 3D models, CAD and 3D printing: one agent (topology single, role coder) with run_code and \
 view_image, plus web_search when the subject is a thing or character it may need to look up \
-and list_documents to find an earlier version, and skill core/3d-modeling; max_steps 24. \
-Tier mini for a functional part (a bracket, a box, a mount); pro for a shaped model people \
+and list_documents to find an earlier version, and skill core/3d-modeling; max_steps 60. \
+Tier pro for a functional part (a bracket, a box, a mount); max for a shaped model people \
 must recognise (a vehicle, a figurine, a character). Its deliverables are the STL, STEP, 3MF \
 and preview PNG.
 - An agent that makes something visual (a chart, a render, a slide image) gets view_image to \
@@ -324,7 +325,7 @@ def design_request(
     if files:
         parts.append("USER FILES FOR THIS TASK:\n" + "\n".join(f"- {n} (id {i})" for i, n in files))
     if best_model:
-        parts.append("The user asked for the best model: the lead may use tier max.")
+        parts.append("The user asked for the best model: use tier max for every agent.")
     if profile:
         parts.append(f"ABOUT THE USER (for tone and format):\n{profile[:1500]}")
     parts.append(

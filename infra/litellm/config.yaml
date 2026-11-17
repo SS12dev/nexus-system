@@ -1,21 +1,55 @@
 # LiteLLM proxy for Nexus. Agents only ever name the nexus-* aliases, so swapping a model is a
 # change here, not in code. Candidate research: docs/model-selection.md.
 # Screenshots in chat are sent to the model as images, so every chat-facing alias must be a
-# model that reads images; all four GPT-5.4/5.5 tiers do, including the nano fallback.
+# model that reads images; every model below does.
+#
+# Lineup (thread "Plan professional-grade Nexus upgrade", 2026-11-17): Claude for chat,
+# building, planning and review; Gemini Flash for quick work with long inputs; OpenAI as the
+# automatic fallback for each alias (see fallbacks below), so Nexus keeps answering when a
+# provider is down, out of credit or its key is missing. Prices are USD per token from each
+# provider's price list on 2026-11-17; they are set here so budgets count correctly even if
+# LiteLLM's own price map doesn't know a model yet. The app reads the first deployment of each
+# alias from /model/info to show its real name.
 model_list:
   - model_name: nexus-nano     # routing, intent, memory extraction, titles, summaries
     litellm_params:
+      model: anthropic/claude-haiku-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points: [{location: message, role: system}]
+    model_info: {input_cost_per_token: 0.0000001, output_cost_per_token: 0.0000005}
+  - model_name: nexus-mini     # quick tool use, long documents, self-review topics
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/GEMINI_API_KEY
+    # Doubles to $1.50 / $7.50 per million on 2027-01-01.
+    model_info: {input_cost_per_token: 0.00000075, output_cost_per_token: 0.00000375}
+  - model_name: nexus-pro      # the default: chat, research, writing, building code
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points: [{location: message, role: system}]
+    model_info: {input_cost_per_token: 0.000002, output_cost_per_token: 0.00001}
+  - model_name: nexus-max      # planning, architecture, design, code review
+    litellm_params:
+      model: anthropic/claude-opus-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points: [{location: message, role: system}]
+    model_info: {input_cost_per_token: 0.000004, output_cost_per_token: 0.00002}
+
+  # OpenAI fallbacks, one per alias. Agents never name these; LiteLLM switches to them itself.
+  - model_name: nexus-nano-fallback
+    litellm_params:
       model: openai/gpt-5.4-nano
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: nexus-mini     # most sub-agents, tool calling, RAG answers, plain chat
+  - model_name: nexus-mini-fallback
     litellm_params:
       model: openai/gpt-5.4-mini
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: nexus-pro      # planning, designing agent systems, hard reasoning
+  - model_name: nexus-pro-fallback
     litellm_params:
       model: openai/gpt-5.4
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: nexus-max      # escalation only
+  - model_name: nexus-max-fallback
     litellm_params:
       model: openai/gpt-5.5
       api_key: os.environ/OPENAI_API_KEY
@@ -46,8 +80,12 @@ litellm_settings:
     namespace: litellm.cache
     ttl: 3600
   drop_params: true
-  # nexus-mini falls back to nexus-nano if it is down.
-  fallbacks: [{"nexus-mini": ["nexus-nano"]}]
+  # Each alias falls back to its OpenAI model when its own provider fails after retries.
+  fallbacks:
+    - {"nexus-nano": ["nexus-nano-fallback"]}
+    - {"nexus-mini": ["nexus-mini-fallback"]}
+    - {"nexus-pro": ["nexus-pro-fallback"]}
+    - {"nexus-max": ["nexus-max-fallback"]}
 
 router_settings:
   num_retries: 2

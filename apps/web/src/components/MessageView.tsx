@@ -1,4 +1,5 @@
 import type { Message } from "../lib/types";
+import { useModelLabel } from "../lib/models";
 import { isPicture } from "../lib/format";
 import { FileChip, PictureThumb } from "./FileChip";
 import { LinkChip } from "./LinkChip";
@@ -10,6 +11,7 @@ import { parseClarification } from "../lib/clarification";
 
 export function MessageView({ message, activity }: { message: Message; activity?: string | null }) {
   const assistant = useAssistantName();
+  const modelName = useModelLabel();
   if (message.role === "user") {
     const pictures = (message.attachments ?? []).filter((f) => isPicture(f.name));
     const others = (message.attachments ?? []).filter((f) => !isPicture(f.name));
@@ -78,7 +80,7 @@ export function MessageView({ message, activity }: { message: Message; activity?
       )}
       {message.status === "complete" && message.output_tokens != null && (
         <p className="mt-1 text-xs text-slate-600">
-          {message.model} · {message.input_tokens} in / {message.output_tokens} out
+          {modelName(message.model)} · {message.input_tokens} in / {message.output_tokens} out
         </p>
       )}
     </div>

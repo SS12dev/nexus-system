@@ -18,6 +18,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useModelLabel } from "../lib/models";
 import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api } from "../lib/api";
@@ -470,6 +471,7 @@ function SelectionCard({
   onClose: () => void;
 }) {
   const assistant = useAssistantName();
+  const modelName = useModelLabel();
   let body: ReactNode;
   const areaOf = (id: string | null) => universe?.areas.find((a) => a.id === id);
   if (privateMode && selection.type !== "hub") {
@@ -632,7 +634,7 @@ function SelectionCard({
               <span className="inline-block size-1.5 shrink-0 -translate-y-px rounded-full" style={{ background: NODE_COLOR[n.status] }} />
               <span className="text-slate-200">{n.name}</span>
               <span className="truncate text-xs text-slate-500">
-                {n.role}, {n.tier} ·{" "}
+                {n.role}, {modelName(n.tier)} ·{" "}
                 {n.tool && ["working", "waiting"].includes(n.status)
                   ? `${AGENT_LABEL[n.status]} · ${toolLabel(n.tool)}`
                   : (AGENT_LABEL[n.status] ?? n.status)}

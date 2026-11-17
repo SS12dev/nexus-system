@@ -444,8 +444,8 @@ async def test_budget_check_refuses_expensive_spec(sdeps, owner):
 
 
 async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
-    """max is only for the lead of an owner/admin; a model error retries one tier up; a
-    non-lead agent drops a tier once 80% of the budget is spent."""
+    """max is for any agent of an owner/admin; a model error retries one tier up; a non-lead
+    agent drops a tier once 80% of the budget is spent."""
     import openai
 
     def error():
@@ -468,8 +468,8 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
     await runner.run_system(sdeps, run_id)
     models = seen["models"]
     assert models[0] == ("lead", "nexus-mini") and models[1] == ("lead", "nexus-pro")
-    # The helper asked for max but isn't the lead: capped at pro.
-    assert ("helper", "nexus-pro") in models
+    # An owner's team may use max for any agent, not only the lead.
+    assert ("helper", "nexus-max") in models
 
     seen.clear()
     scripts["lead"] = ["lead ok"]
@@ -481,7 +481,7 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
 
     async def spent_key(*a, **k):
         key = await real(*a, **k)
-        gateway.keys[key]["spend"] = 0.45  # of a $0.50 budget
+        gateway.keys[key]["spend"] = 4.5  # of a $5 budget
         return key
 
     gateway.generate_run_key = spent_key
@@ -489,7 +489,7 @@ async def test_tier_policy(sdeps, owner, scripts, seen, gateway):
     assert ("lead", "nexus-max") in seen["models"]
     assert ("helper", "nexus-mini") in seen["models"]
     run, _ = await load(sdeps, run_id)
-    assert run.cost_usd == Decimal("0.45")
+    assert run.cost_usd == Decimal("4.5")
 
 
 async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqueued):
@@ -549,10 +549,10 @@ async def test_build_agent_system_designs_and_queues(sdeps, owner, scripts, enqu
     "asked,budget,expected",
     [
         # Nexus's own small figure (the user named no sum): the owner's default stands.
-        ("Make me a 3D printable rocket, keep it cheap", 0.25, "0.5000"),
+        ("Make me a 3D printable rocket, keep it cheap", 0.25, "5.0000"),
         ("Make me a 3D printable rocket for $0.20", 0.2, "0.2000"),  # the user's sum
         ("yes, go up to 2 dollars", 2.0, "2.0000"),
-        ("go ahead", 1.0, "1.0000"),  # more than the default is never cut back
+        ("go ahead", 6.0, "6.0000"),  # more than the default is never cut back
     ],
 )
 async def test_a_team_budget_is_the_users_sum_or_the_owners_default(
@@ -580,7 +580,7 @@ async def test_a_team_budget_is_the_users_sum_or_the_owners_default(
         run = await db.scalar(select(AgentRun))
     assert run.budget_usd == Decimal(expected)
     # Nexus is told where the figure came from, so it can say so.
-    source = "the default from Admin" if expected == "0.5000" else "the user's figure"
+    source = "the default from Admin" if expected == "5.0000" else "the user's figure"
     assert source in out
 
 

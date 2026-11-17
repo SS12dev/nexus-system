@@ -99,7 +99,7 @@ Reply with JSON only: {"items": [{"i": <number>, "topic": str, "gap": str or nul
 PROPOSE = """You improve an AI assistant platform called Nexus, from a report of how it was \
 used. Nexus is a supervisor assistant that answers simple requests itself and builds teams of \
 sub-agents with tools, shared skills (SKILL.md playbooks), standing instructions per role, and \
-model tiers (nexus-nano < mini < pro < max) behind LiteLLM.
+model tiers (nexus-nano < mini < pro < max) behind LiteLLM; the app shows the real model names.
 
 Propose the few changes that would help most, based only on evidence in the report: \
 feedback people sent (problems first), frequent topics with no fitting skill, capability \

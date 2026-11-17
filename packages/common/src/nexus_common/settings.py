@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     litellm_virtual_keys: bool = True
     litellm_api_key: str = ""
     litellm_budget_duration: str = "30d"
-    chat_model: str = "nexus-mini"
+    chat_model: str = "nexus-pro"
 
     # Budgets in USD per budget period, applied when a user's gateway key is created.
     default_budget_usd: float = 5.0
-    owner_budget_usd: float = 50.0
+    owner_budget_usd: float = 500.0
 
     # Auth
     secret_key: str = Field(default="change-me", min_length=8)
@@ -126,23 +126,23 @@ class Settings(BaseSettings):
     # Skills library: shipped skills and instructions, read at startup (library/ in the repo).
     library_path: str = "library"
 
-    # Agent systems. Nexus designs them with nexus-pro; each run gets its own LiteLLM key.
-    design_model: str = "nexus-pro"
+    # Agent systems. Nexus designs them with nexus-max; each run gets its own LiteLLM key.
+    design_model: str = "nexus-max"
     # Before Nexus answers, this model decides whether the message is work for a team (empty
     # turns the router off). Messages shorter than route_min_chars ("hi", "thanks") skip it.
     route_model: str = "nexus-nano"
     route_min_chars: int = 15
-    default_run_budget_usd: float = 0.50
+    default_run_budget_usd: float = 5.00
     # Software teams (dev_project) plan, build, test and review in rounds, so they get more.
-    dev_run_budget_usd: float = 3.00
-    max_run_budget_usd: float = 5.00
+    dev_run_budget_usd: float = 25.00
+    max_run_budget_usd: float = 100.00
     # Agents working at once in a parallel_map_reduce system or a flow, and items a map may fan
     # out to.
     max_parallel_agents: int = 4
     max_map_items: int = 8
     # Model calls one agent may make in one turn of a run before it has to stop.
-    agent_max_steps: int = 12
-    # Roles whose systems may use nexus-max for the lead agent when asked for the best model.
+    agent_max_steps: int = 40
+    # Roles whose teams may use nexus-max (leads, planners and reviewers).
     max_tier_roles: str = "owner,admin"
     # After a run with at least this many tool calls, Nexus offers to save what it learned
     # as a skill (0 turns it off).

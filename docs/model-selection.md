@@ -7,11 +7,24 @@ the linked pages before deployment.
 ## Current setup
 
 Nexus calls LiteLLM through `ChatOpenAI` and its OpenAI-compatible Chat Completions endpoint.
-The four `nexus-*` aliases are configured in `infra/litellm/config.yaml`; the current
-OpenAI GPT-5.4/5.5 aliases have not been changed. This keeps model choices out of application
-code, but does not make every provider model interchangeable: streaming, tool calls, image
-messages, reasoning parameters, and structured output must all work through this endpoint and
-our LangChain integration.
+The four `nexus-*` aliases are configured in `infra/litellm/config.yaml`. Since 2026-11-17
+(Shivam chose a mixed lineup, quality first; the evaluation harness confirms or changes it):
+
+| Alias | Model | Price in / out per million | Used for | OpenAI fallback |
+| --- | --- | --- | --- | --- |
+| `nexus-nano` | Claude Haiku 5.5 | $0.10 / $0.50 | routing, extraction, memory, titles | GPT-5.4 nano |
+| `nexus-mini` | Gemini 3.8 Flash | $0.75 / $3.75 (doubles 2027-01-01) | quick tool use, long inputs | GPT-5.4 mini |
+| `nexus-pro` | Claude Sonnet 5.5 | $2 / $10 | default: chat, research, building | GPT-5.4 |
+| `nexus-max` | Claude Opus 5.5 | $4 / $20 | planning, architecture, review | GPT-5.5 |
+
+LiteLLM translates tool calls, image parts and system prompts for Anthropic and Gemini, and
+injects Anthropic prompt caching on the system prompt. Each alias falls back to its OpenAI
+model when its provider fails after retries, including a missing key. `response_format`
+JSON mode is not native on every provider; `parse_json` already strips fences and finds the
+object. The app shows the real model name (from `/model/info`), never the alias.
+
+Keys: `./scripts/secrets.sh set ANTHROPIC_API_KEY` and `GEMINI_API_KEY`. Use Gemini on a paid
+(billing-enabled) key: the free tier may use prompts to improve Google's products.
 
 ## Candidates
 
