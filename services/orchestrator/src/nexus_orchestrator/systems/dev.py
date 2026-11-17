@@ -136,6 +136,7 @@ def answer(name: str, dev: dict) -> str:
         summary,
         f"- Stack: {STACKS.get(dev.get('stack', ''), 'not chosen')}",
         f"- Tests: {result}",
+        *([f"- Code checks: {tests['checks']}"] if tests.get("checks") else []),
         f"- Review: {review}",
         f"- Repo: {repo_line(release)}",
         f"- Live link: {live_line(release)}",
@@ -365,8 +366,8 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 else "Build your part of PLAN.md."
             )
             tests = dev.get("tests") or {}
-            if fixes and int(tests.get("failed") or 0):
-                todo += f"\n\nThe last test run:\n{tests.get('summary', '')[:3000]}"
+            if fixes and (int(tests.get("failed") or 0) or int(tests.get("check_problems") or 0)):
+                todo += f"\n\nThe last test run and code checks:\n{tests.get('summary', '')[:4000]}"
             st = await run_agent(
                 rc,
                 graphs,
@@ -424,6 +425,15 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 line=measured.line(),
                 summary=f"{measured.report()}\n\nThe tester said: {tests['summary']}",
             )
+        # The checks a professional team gates on, and pictures of the app for the reviewer.
+        gates = await suites.run_gates(wb, user, project, dev["stack"])
+        if gates.ran:
+            tests.update(
+                checks=gates.line(),
+                check_problems=gates.problems,
+                summary=f"{tests['summary']}\n\n{gates.report()}",
+            )
+        tests["shots"] = await suites.screenshots(wb, user, project, dev["stack"])
         return {"outputs": {"tester": tests["summary"]}, "dev": {"tests": tests}}
 
     async def review(state: SystemState) -> dict:
@@ -440,6 +450,12 @@ def add_dev_project(rc: RunContext, g: StateGraph, task: str, request: str) -> N
                 f"Review round {rounds} of {spec.max_rounds}. See the changes with "
                 f'ws_diff(ref="{dev.get("base", "HEAD")}"). Test report: {tests.get("passed", 0)} '
                 f"passed, {tests.get('failed', 0)} failed. {tests.get('summary', '')}"
+                + (
+                    "\nScreenshots of the built app as Nexus photographed it; open each with "
+                    "view_image and judge how it looks: " + ", ".join(tests["shots"])
+                    if tests.get("shots")
+                    else ""
+                )
                 + (
                     "\nThis run changes an existing app: every item under 'Problems found' in "
                     "BRIEF.md must work now; send back any that doesn't."

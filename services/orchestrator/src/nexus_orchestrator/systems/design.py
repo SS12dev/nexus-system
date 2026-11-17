@@ -323,8 +323,6 @@ async def design(
                 if spec.project and spec.project not in {p for p, *_ in known}:
                     # Only the user's own projects can be continued.
                     spec.project = None
-                if spec.lead.tier == "max" and not best_model:
-                    spec.lead.tier = "pro"
                 base = past_runs.get(str(raw.get("based_on") or "").strip())
                 if raw.get("based_on") and base is None:
                     log.info("Design named an unknown based_on %s; ignored", raw["based_on"])
