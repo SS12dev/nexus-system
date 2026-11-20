@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { AssistantNameForm } from "../components/AssistantNameForm";
 import { PushSettings } from "../components/PushSettings";
+import { TelegramSettings } from "../components/TelegramSettings";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { useAssistantName } from "../lib/assistant";
@@ -62,7 +63,7 @@ export function SettingsPage() {
       <div className="mx-auto max-w-2xl px-4 py-6">
         <h1 className="mb-1 text-xl font-semibold">Settings</h1>
         <p className="mb-6 text-sm text-slate-400">
-          Your assistant's name, your time zone and setup, the Google services you let{" "}
+          Your assistant's name, your time zone and setup, Telegram, the Google services you let{" "}
           {assistant} and its agents use, the devices you're signed in on, and your data. Only you can see
           this.
         </p>
@@ -75,6 +76,7 @@ export function SettingsPage() {
         </section>
         <AboutYou onError={setError} />
         <PushSettings onError={setError} />
+        <TelegramSettings onError={setError} />
         <Appearance />
         {error && <p className="mb-4 text-sm text-rose-400">{error}</p>}
         {access && !access.available && (

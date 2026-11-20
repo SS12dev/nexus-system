@@ -28,6 +28,7 @@ class JobQueue(Protocol):
     async def enqueue_account_recovery_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
     async def enqueue_invite_notice(self, user_id: uuid.UUID) -> None: ...
     async def enqueue_account_purge(self, user_id: uuid.UUID) -> None: ...
+    async def enqueue_telegram(self, update: dict) -> None: ...
 
 
 class ArqJobQueue:
@@ -134,4 +135,10 @@ class ArqJobQueue:
     async def enqueue_account_purge(self, user_id: uuid.UUID) -> None:
         await self.enqueue_job(
             "purge_deleted_account", str(user_id), _job_id=f"account-purge:{user_id}"
+        )
+
+    async def enqueue_telegram(self, update: dict) -> None:
+        """One Telegram update; the job id drops a repeat the API's own check missed."""
+        await self.enqueue_job(
+            "telegram_update", update, _job_id=f"telegram:{update.get('update_id')}"
         )

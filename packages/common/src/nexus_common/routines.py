@@ -205,7 +205,7 @@ def describe(schedule: str) -> str:
 
 # --- Storing routines (shared by the API and the assistant's routine tools) ------------------
 
-DELIVERY = ("push", "email", "whatsapp")
+DELIVERY = ("push", "email", "whatsapp", "telegram")
 # Chat.kind of the chat a routine runs in: kept out of the chat list and memory summaries.
 ROUTINE_CHAT = "routine"
 NAME_MAX = 80

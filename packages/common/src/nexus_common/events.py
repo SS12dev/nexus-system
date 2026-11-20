@@ -14,6 +14,8 @@ EventType = Literal[
     "message.failed",
     "chat.updated",
     "chat.deleted",
+    # A Telegram chat was linked to the account (Settings shows it without a reload).
+    "telegram.linked",
     "tool.call",
     "tool.done",
     "file.updated",

@@ -131,7 +131,7 @@ class OnboardingIn(BaseModel):
     day_start: Time | None = None
     style: StyleIn | None = None
     routines: list[OnboardingRoutineIn] = Field(default=[], max_length=20)
-    delivery: list[Literal["push", "email", "whatsapp"]] = []
+    delivery: list[Literal["push", "email", "whatsapp", "telegram"]] = []
     phone: Phone | None = None
 
 
@@ -185,7 +185,7 @@ class RoutineIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     schedule: str = Field(min_length=1, max_length=300)
     timezone: str | None = Field(default=None, max_length=64)
-    delivery: list[Literal["push", "email", "whatsapp"]] = []
+    delivery: list[Literal["push", "email", "whatsapp", "telegram"]] = []
     only_if_new: bool = False
     enabled: bool = True
 
@@ -195,7 +195,7 @@ class RoutineUpdateIn(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=4000)
     schedule: str | None = Field(default=None, min_length=1, max_length=300)
     timezone: str | None = Field(default=None, max_length=64)
-    delivery: list[Literal["push", "email", "whatsapp"]] | None = None
+    delivery: list[Literal["push", "email", "whatsapp", "telegram"]] | None = None
     only_if_new: bool | None = None
     enabled: bool | None = None
 

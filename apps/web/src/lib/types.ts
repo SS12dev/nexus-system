@@ -39,7 +39,7 @@ export interface User {
   phone?: string | null;
   /** May the self-review count the anonymous topics of their requests? */
   share_usage?: boolean;
-  /** Routine notice channels this Nexus can send on: "push", "email", "whatsapp". */
+  /** Routine notice channels this Nexus can send on: "push", "email", "whatsapp", "telegram". */
   channels?: Channel[];
   /** The Terms and Privacy Policy version they agreed to, the current one, and whether the app
    * must ask (never for owners). */
@@ -48,7 +48,7 @@ export interface User {
   terms_needed?: boolean;
 }
 
-export type Channel = "push" | "email" | "whatsapp";
+export type Channel = "push" | "email" | "whatsapp" | "telegram";
 
 export type FeedbackKind = "problem" | "idea" | "praise";
 
@@ -1579,4 +1579,17 @@ export interface FindResponse {
   took_ms: number;
   /** Kinds with more hits than were returned. */
   more: FindKind[];
+}
+
+export interface TelegramStatus {
+  /** Whether the owner has set Telegram up on this Nexus. */
+  enabled: boolean;
+  bot_username: string | null;
+  link: {
+    tg_username: string | null;
+    tg_name: string | null;
+    chat_id: string | null;
+    linked_at: string;
+    last_message_at: string | null;
+  } | null;
 }

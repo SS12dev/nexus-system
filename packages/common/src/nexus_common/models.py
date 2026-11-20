@@ -1907,3 +1907,23 @@ class ScreenState(Base):
     # [{"key": "mode" | "move:<widget>" | "focus:file:<id>", "at": iso}], newest last.
     overrides: Mapped[list] = mapped_column(JSONB, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TelegramLink(Base):
+    """A Telegram chat linked to a Nexus account (nexus_common/telegram.py). One per person and
+    one per Telegram chat: messages there go to the person's assistant, in a Nexus chat of its
+    own, and routines can deliver to it."""
+
+    __tablename__ = "telegram_links"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Telegram's chat id: 64-bit, and the only address the bot needs to reply.
+    tg_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    tg_username: Mapped[str | None] = mapped_column(String(64))
+    tg_name: Mapped[str | None] = mapped_column(String(128))
+    # The Nexus chat Telegram messages go to; "/new" starts another.
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

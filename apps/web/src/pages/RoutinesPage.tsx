@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Mail,
   MessageCircle,
+  Send,
   Pause,
   Pencil,
   Play,
@@ -45,6 +46,7 @@ const CHANNELS: { id: Channel; label: string; icon: typeof Mail }[] = [
   { id: "push", label: "Push", icon: Bell },
   { id: "email", label: "Email", icon: Mail },
   { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+  { id: "telegram", label: "Telegram", icon: Send },
 ];
 
 /** Prompts that run on a schedule as you. They stay out of the chat list: each run's result is
@@ -424,6 +426,16 @@ function RoutineEditor({
   onCancel: () => void;
   onSaved: () => void;
 }) {
+  // Telegram delivery needs a connected Telegram account; say so next to the box if not.
+  const [telegramLinked, setTelegramLinked] = useState(true);
+  const telegramOn = channels.includes("telegram");
+  useEffect(() => {
+    if (telegramOn)
+      api
+        .telegram()
+        .then((s) => setTelegramLinked(!!s.link))
+        .catch(() => {});
+  }, [telegramOn]);
   const [draft, setDraft] = useState<RoutineInput>(
     routine
       ? {
@@ -497,7 +509,8 @@ function RoutineEditor({
         <span className="text-slate-400">Also send it by</span>
         {CHANNELS.map((c) => {
           const available = channels.includes(c.id);
-          const needsPhone = c.id === "whatsapp" && !hasPhone;
+          const needsPhone =
+            (c.id === "whatsapp" && !hasPhone) || (c.id === "telegram" && !telegramLinked);
           return (
             <label
               key={c.id}
@@ -530,7 +543,7 @@ function RoutineEditor({
               {c.label}
               {available && needsPhone && draft.delivery.includes(c.id) && (
                 <Link to="/settings" className="text-xs text-amber-300 hover:underline">
-                  add your number
+                  {c.id === "telegram" ? "connect Telegram" : "add your number"}
                 </Link>
               )}
             </label>

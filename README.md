@@ -290,6 +290,43 @@ hit's score is a plain sum (title match, word rank, meaning, a small recency nud
 is easy to reason about. Everything is scoped to the signed-in person and skips Trash; queries are
 never logged (the `search.done` log line has counts and timings only).
 
+## Telegram
+
+Your assistant on Telegram, two-way: text, voice notes, photos and documents, with the same
+memory, tools and teams as in the app. Nothing to install on the phone, and the Bot API is free.
+
+**Setting it up (owner, once):**
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, pick a name and a
+   username ending in `bot`. It replies with a token.
+2. Store the token and a random webhook secret, then restart so both services read them:
+
+   ```sh
+   ./scripts/secrets.sh set TELEGRAM_BOT_TOKEN          # paste the token
+   openssl rand -hex 32 | ./scripts/secrets.sh set TELEGRAM_WEBHOOK_SECRET
+   ./scripts/compose.sh --profile tunnel up -d
+   ```
+
+3. The orchestrator registers `NEXUS_URL/api/telegram/webhook` with Telegram when it starts
+   (`telegram.webhook_set` in its log). `NEXUS_URL` must be the public `https://` address, and
+   if Cloudflare Access ever fronts it, that one path needs a bypass rule.
+
+**Connecting your account:** Settings › Telegram › Connect opens the bot with a one-time code
+(ten minutes); tap Start and the chat is linked. `/new` starts a fresh chat, `/unlink`
+disconnects, `/help` lists both. Only private chats are answered, never groups.
+
+**How it works:** Telegram posts each update to the webhook with the secret header; the API
+checks it in constant time, drops repeats by update id, queues the update and answers at once.
+The orchestrator's `telegram_update` job (never retried, so no reply is sent twice) runs the
+message as a normal turn in a Nexus chat called **Telegram**, shows "typing…" while it works,
+then sends the reply as Telegram HTML (converted from Markdown in `nexus_common/telegram.py`,
+split over several messages when long). One message is answered at a time per person; the
+next waits its turn. Voice notes go through the `nexus-transcribe` LiteLLM alias
+(`gpt-4o-mini-transcribe`, about US$0.003 a minute on the OpenAI key, billed to your budget)
+and the transcript is echoed first so a mishearing shows. Photos and documents are saved to the
+Library like uploads in a chat. Routines can deliver to Telegram as well (the routine's
+"Tell me on" options). Message text is never logged.
+
 ## Onboarding and routines
 
 ### The setup interview

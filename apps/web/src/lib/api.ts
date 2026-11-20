@@ -21,6 +21,7 @@ import type {
   FileItem,
   FindKind,
   FindResponse,
+  TelegramStatus,
   Folder,
   GoogleAccess,
   LinkItem,
@@ -313,6 +314,10 @@ export const api = {
     request<{ text: string; offset: number; total_chars: number }>(
       `/api/files/${id}/text?offset=${offset}`,
     ),
+  telegram: () => request<TelegramStatus>("/api/telegram"),
+  telegramLink: () =>
+    request<{ code: string; url: string | null; expires_at: string }>("/api/telegram/link", { method: "POST" }),
+  telegramUnlink: () => request<void>("/api/telegram/link", { method: "DELETE" }),
   /** Search across everything; `limit` is per kind. */
   find: (
     q: string,

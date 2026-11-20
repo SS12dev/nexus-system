@@ -219,6 +219,18 @@ class Settings(BaseSettings):
     whatsapp_template_language: str = "en"
     whatsapp_api_url: str = "https://graph.facebook.com/v25.0"
 
+    # Telegram: a two-way bot (nexus_common/telegram.py). Make a bot with @BotFather, then
+    # `./scripts/secrets.sh set TELEGRAM_BOT_TOKEN` and `... set TELEGRAM_WEBHOOK_SECRET` (any
+    # long random string). Telegram posts updates to NEXUS_URL/api/telegram/webhook through the
+    # tunnel; the orchestrator registers that address at start. Empty token turns Telegram off.
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_api_url: str = "https://api.telegram.org"
+    # Speech to text for voice notes, through LiteLLM (infra/litellm/config.yaml).
+    transcribe_model: str = "nexus-transcribe"
+    # Longest voice note Nexus transcribes, in seconds.
+    telegram_max_voice_s: int = 600
+
     # Web push to phones and browsers (nexus_common/push.py). Make the pair once with
     # `uv run python -m nexus_common.push`; the subject is a mailto: or https: contact the push
     # services can reach (empty uses SMTP_FROM). Empty keys turn push off.
@@ -324,6 +336,11 @@ class Settings(BaseSettings):
     @property
     def whatsapp_enabled(self) -> bool:
         return bool(self.whatsapp_token and self.whatsapp_phone_number_id)
+
+    @property
+    def telegram_enabled(self) -> bool:
+        # The secret is not optional: without it anyone could post fake updates.
+        return bool(self.telegram_bot_token and len(self.telegram_webhook_secret) >= 16)
 
     @property
     def access_requests_open(self) -> bool:
