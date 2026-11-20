@@ -16,6 +16,7 @@ from nexus_common.models import (
     Folder,
     Link,
     Memory,
+    OrgItem,
     Profile,
     Project,
     Routine,
@@ -105,6 +106,25 @@ async def purge_item(deps: TurnDeps, item_id: uuid.UUID, *, force: bool = False)
                 delete(TrashItem).where(
                     TrashItem.user_id == user_id,
                     TrashItem.parent_id == item_id,
+                )
+            )
+            await db.commit()
+    elif kind == "org_item":
+        # A project, area or resource goes with the notes and tasks that were inside it when
+        # it was deleted (held as child entries of this one).
+        async with deps.sessionmaker() as db:
+            children = select(TrashItem.entity_id).where(
+                TrashItem.user_id == user_id, TrashItem.parent_id == item_id
+            )
+            await db.execute(
+                delete(OrgItem).where(
+                    OrgItem.user_id == user_id,
+                    (OrgItem.id == entity_id) | OrgItem.id.in_(children),
+                )
+            )
+            await db.execute(
+                delete(TrashItem).where(
+                    TrashItem.user_id == user_id, TrashItem.parent_id == item_id
                 )
             )
             await db.commit()

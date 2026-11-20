@@ -20,6 +20,7 @@ import { MindPage, MindRedirect } from "./pages/MindPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PeoplePage } from "./pages/PeoplePage";
 import { RoutinesPage } from "./pages/RoutinesPage";
+import { OrganiserPage } from "./pages/OrganiserPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { TermsPage } from "./pages/TermsPage";
@@ -89,6 +90,7 @@ export function App() {
           <Route path="c/:chatId" element={<ChatPage />} />
         </Route>
         <Route path="search" element={<SearchPage />} />
+        <Route path="organiser/*" element={<OrganiserPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="apps" element={<AppsPage />} />
         <Route path="mind" element={<MindPage />} />

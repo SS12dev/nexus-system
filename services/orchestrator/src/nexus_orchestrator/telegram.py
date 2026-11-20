@@ -5,14 +5,16 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import re
 import uuid
 from datetime import timedelta
 from pathlib import PurePath
+from types import SimpleNamespace
 
 import httpx
 from sqlalchemy import delete, select
 
-from nexus_common import logs, telegram
+from nexus_common import logs, organiser, telegram
 from nexus_common.events import Event, publish
 from nexus_common.library import MODEL_EXTENSIONS, SUPPORTED_EXTENSIONS, content_type_for
 from nexus_common.litellm import ensure_user_key
@@ -33,6 +35,7 @@ from nexus_common.models import (
 from nexus_common.queues import DOCS_QUEUE
 from nexus_common.storage import file_key
 from nexus_common.telegram import Bot, Incoming, TelegramError
+from nexus_orchestrator.organiser_tools import build_organiser_tools
 from nexus_orchestrator.turn import TurnDeps, run_turn
 
 log = logging.getLogger(__name__)
@@ -49,6 +52,9 @@ MAX_DOWNLOAD = 20 * 1024 * 1024
 HELP = (
     "Send me anything, as text, a voice note, a photo or a document, and I'll answer here. "
     "Everything also shows in Nexus, in the chat called Telegram.\n\n"
+    "/in <text> drops a note or to-do in your organiser's Inbox, no reply needed "
+    "(start with [ ] for a to-do; add #tags or a day like tomorrow)\n"
+    "/today shows what's due today\n"
     "/new starts a fresh chat\n/unlink disconnects this Telegram account\n/help shows this"
 )
 
@@ -132,6 +138,12 @@ async def handle_update(deps: TurnDeps, update: dict) -> None:
                 "Disconnected. Connect again any time from Settings › Telegram in Nexus.",
             )
             return
+        if command in ("/in", "/inbox", "/note", "/todo"):
+            await _capture(deps, bot, inc, user, arg, task=command == "/todo")
+            return
+        if command == "/today":
+            await _today(deps, bot, inc, user)
+            return
         if inc.kind == "other":
             await bot.send(
                 inc.tg_chat_id, "I can read text, voice notes, photos and documents for now."
@@ -148,6 +160,42 @@ async def handle_update(deps: TurnDeps, update: dict) -> None:
         finally:
             with contextlib.suppress(Exception):
                 await lock.release()
+
+
+async def _capture(
+    deps: TurnDeps, bot: Bot, inc: Incoming, user: User, text: str, *, task: bool
+) -> None:
+    """Straight into the organiser's Inbox, without a model turn: fast and free."""
+    text = text.strip()
+    if not text:
+        await bot.send(inc.tg_chat_id, "Add the text after the command, e.g. /in call the bank.")
+        return
+    if task and not text.startswith("["):
+        text = f"[ ] {text}"
+    async with deps.sessionmaker() as db:
+        try:
+            item = await organiser.capture(db, user, text, source="telegram", redis=deps.redis)
+        except organiser.OrganiserError as exc:
+            await bot.send(inc.tg_chat_id, str(exc))
+            return
+    if deps.enqueue is not None:
+        await deps.enqueue(
+            "organiser_suggest", str(item.id), _job_id=f"organiser-suggest:{item.id}"
+        )
+    due = f", due {item.due_on:%a %d %b}" if item.due_on else ""
+    await bot.send(inc.tg_chat_id, f"In your Inbox: {item.type} “{item.title}”{due}.")
+
+
+async def _today(deps: TurnDeps, bot: Bot, inc: Incoming, user: User) -> None:
+    ctx = SimpleNamespace(deps=deps, user_id=user.id)
+
+    async def quiet(*_a, **_k) -> None:
+        return None
+
+    agenda = await build_organiser_tools(ctx, quiet)["organiser_today"]()
+    # The assistant's version carries ids for its own follow-up calls; people don't need them.
+    agenda = re.sub(r"\(id [0-9a-f-]{36}(?:; |\))", "(", agenda.split("\n\nDaily note")[0])
+    await bot.send(inc.tg_chat_id, agenda.replace(" ()", ""))
 
 
 async def _start(deps: TurnDeps, bot: Bot, inc: Incoming, code: str) -> None:

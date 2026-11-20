@@ -32,6 +32,7 @@ from nexus_api.routes import (
     memories,
     notifications,
     ops,
+    organiser,
     projects,
     push,
     questions,
@@ -134,6 +135,7 @@ def create_app(
     app.include_router(chats.router)
     app.include_router(files.router)
     app.include_router(find.router)
+    app.include_router(organiser.router)
     app.include_router(links.router)
     app.include_router(notifications.router)
     app.include_router(widgets.router)

@@ -90,6 +90,11 @@ class Settings(BaseSettings):
 
     # Memory. Extraction, summaries and the profile use the cheapest tier.
     memory_model: str = "nexus-nano"
+    # Organiser: the model that suggests where an Inbox item belongs, the local hour on
+    # Sunday the weekly-review reminder goes out, and whether the vault is exported nightly.
+    organiser_model: str = "nexus-nano"
+    organiser_review_hour: int = 18
+    organiser_nightly_export: bool = True
     # Memories, past-chat summaries and document chunks put in the prompt each turn.
     memory_top_k: int = 8
     # Memories further than this (cosine distance) from the message are left out unless a word

@@ -2,7 +2,7 @@
 
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
@@ -11,6 +11,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Computed,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -1927,3 +1928,121 @@ class TelegramLink(Base):
     chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- Organiser (nexus_common/organiser.py) ------------------------------------------------------
+
+
+class OrgItem(Base):
+    """One thing in the life organiser: a note, task, project, area, resource or daily note.
+    PARA: projects have an end, areas don't, resources are topics; anything archived is the
+    Archive. Notes and tasks sit under a project, area or resource through parent_id. New
+    captures wait in the Inbox (status "inbox") until filed."""
+
+    __tablename__ = "org_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # note, task, project, area, resource, daily (organiser.TYPES).
+    type: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    # Markdown, with [[wikilinks]] to other items.
+    body: Mapped[str] = mapped_column(Text, default="")
+    # Per type (organiser.STATUSES): inbox, todo, doing, done, dropped, active, paused, archived.
+    status: Mapped[str] = mapped_column(String(16))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("org_items.id", ondelete="SET NULL")
+    )
+    due_on: Mapped[date | None] = mapped_column(Date)
+    # 0 none, 1 low, 2 medium, 3 high.
+    priority: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # The day a daily note is for (one per person per day).
+    day: Mapped[date | None] = mapped_column(Date)
+    # user, assistant, telegram, review.
+    source: Mapped[str] = mapped_column(String(16), default="user", server_default="user")
+    # Where the assistant thinks an inbox item belongs: {type, title, parent_id, due_on, why}.
+    suggestion: Mapped[dict | None] = mapped_column(JSON)
+    # Bumped on every change; a save naming an older version is refused (laptop vs phone).
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
+    tsv = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', title || ' ' || body)", persisted=True),
+        deferred=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_org_items_user_type", "user_id", "type", "status"),
+        Index("ix_org_items_parent", "parent_id"),
+        Index("ix_org_items_due", "user_id", "due_on"),
+        Index(
+            "uq_org_items_daily",
+            "user_id",
+            "day",
+            unique=True,
+            postgresql_where=text("type = 'daily'"),
+        ),
+        Index("ix_org_items_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_org_items_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class OrgLink(Base):
+    """A [[wikilink]] from one item's text to another, for backlinks."""
+
+    __tablename__ = "org_links"
+
+    src_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("org_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    dst_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("org_items.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("ix_org_links_dst", "dst_id"),)
+
+
+class OrgRevision(Base):
+    """An earlier version of an item's text, kept so a bad edit can be undone."""
+
+    __tablename__ = "org_revisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("org_items.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    # user or assistant: who made the version that followed this one.
+    actor: Mapped[str] = mapped_column(String(16), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_org_revisions_item", "item_id", "created_at"),)
+
+
+class OrgReview(Base):
+    """One weekly review: when it was done, what the week's focus is, and a few counts."""
+
+    __tablename__ = "org_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The Monday of the week being planned.
+    week_of: Mapped[date] = mapped_column(Date)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    focus: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "week_of"),)

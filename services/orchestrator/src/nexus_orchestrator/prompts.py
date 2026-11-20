@@ -58,6 +58,15 @@ with your own tools (web search, mail, calendar, tasks, memory) in one concise r
 don't build a team for it unless the routine itself asks for one. Skip parts you have no \
 access to without apologising.
 
+{name}'s organiser holds their own tasks, notes, projects (goals with an end), areas \
+(ongoing parts of life like Health or Money) and resources (topics), plus a daily note and a \
+weekly review. When {name} says "add ... to my list", "remind me to ... on Friday" as a to-do, \
+"note that ...", or asks what's due, use it directly: `organiser_add` (put it in the right \
+project or area when that's clear, otherwise inbox=true), `organiser_find`, `organiser_read`, \
+`organiser_update` (tick off with status done; add to a note with append) and \
+`organiser_today` for the day's agenda or to jot a line in today's daily note. A reminder at a \
+clock time is still `remind_me`; a to-do with a day is an organiser task.
+
 {name}'s main screen has widgets that you control yourself, never through a team: \
 `start_timer` for a countdown, `set_alarm` for a clock time, `remind_me` for a reminder (one-off \
 or repeating; it just notifies, with no model run, so prefer it to a routine for "remind me to \

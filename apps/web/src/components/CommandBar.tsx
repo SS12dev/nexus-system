@@ -4,11 +4,15 @@ import {
   Bot,
   Brain,
   CalendarClock,
+  CheckSquare,
   CornerDownLeft,
+  FolderKanban,
+  Inbox,
   FileText,
   Link2,
   Loader2,
   MessageSquare,
+  NotebookPen,
   Search,
   Sparkles,
   User as UserIcon,
@@ -19,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { useNavigate } from "react-router";
 import { create } from "zustand";
 import { api } from "../lib/api";
+import { toast } from "./Feedback";
 import { useAssistantName } from "../lib/assistant";
 import { COMMANDS, KIND_LABELS, groupResults, matchCommands, snippetParts } from "../lib/find";
 import { hasRole, isOwner, type FindKind, type FindResponse } from "../lib/types";
@@ -33,6 +38,9 @@ export const useCommandBar = create<{ open: boolean; setOpen: (open: boolean) =>
 
 export const KIND_ICONS: Record<FindKind, LucideIcon> = {
   chat: MessageSquare,
+  task: CheckSquare,
+  note: NotebookPen,
+  project: FolderKanban,
   file: FileText,
   memory: Brain,
   person: UserIcon,
@@ -198,6 +206,24 @@ function Bar({ onClose }: { onClose: () => void }) {
     }
     for (const c of commands)
       out.push({ key: c.id, section: "Pages and actions", icon: ArrowRight, label: c.label, run: () => go(c.to!) });
+    if (hasRole(user, "member"))
+      // A to-do typed straight in ("[ ] call the bank") goes first, so Enter captures it.
+      out[/^\s*(\[\s?\]|todo:?\s|task:)/i.test(q) ? "unshift" : "push"]({
+        key: "capture",
+        section: "Organiser",
+        icon: Inbox,
+        label: `Capture to Inbox: “${q}”`,
+        detail: "Saved in the Organiser to file later",
+        run: () => {
+          onClose();
+          api
+            .orgCapture(q)
+            .then((item) =>
+              toast(`In your Inbox: ${item.type} “${item.title}”${item.due_on ? `, due ${item.due_on}` : ""}`),
+            )
+            .catch((e: Error) => toast(`Not captured: ${e.message}`, "error"));
+        },
+      });
     if (hasRole(user, "member"))
       out.push({
         key: "ask",

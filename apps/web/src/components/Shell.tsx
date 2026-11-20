@@ -7,6 +7,7 @@ import {
   Brain,
   CalendarClock,
   FolderOpen,
+  LayoutList,
   LogOut,
   Menu,
   MessageSquareHeart,
@@ -27,6 +28,7 @@ import { useAssistantName } from "../lib/assistant";
 import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { useOrgOverview } from "./organiser/parts";
 import { NoticeToasts, useNoticeTray } from "./Notices";
 import { RingOverlay, useWidgetsLoader } from "./Widgets";
 import { useScreenLoader } from "./Screen";
@@ -60,6 +62,7 @@ export function Shell() {
   );
   const upsertApprovals = useStore((s) => s.upsertApprovals);
   const pendingAccess = useStore((s) => s.pendingAccess) ?? 0;
+  const orgInbox = useOrgOverview()?.inbox ?? 0;
   const pendingRecovery = useStore((s) => s.pendingRecovery) ?? 0;
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState(false);
@@ -221,6 +224,14 @@ export function Shell() {
           ))}
         </nav>
         <div className={`border-t border-edge p-3 text-sm ${collapsed ? "md:px-2" : ""}`}>
+          <NavLink to="/organiser" className={(p) => `relative ${navClass(p)}`} title={tip("Organiser")}>
+            <LayoutList size={16} className="shrink-0" /> <span className={label}>Organiser</span>
+            {orgInbox > 0 && (
+              <Badge collapsed={collapsed} title={`${orgInbox} in your Inbox to sort`}>
+                {orgInbox}
+              </Badge>
+            )}
+          </NavLink>
           <NavLink to="/library" className={navClass} title={tip("Library")}>
             <FolderOpen size={16} className="shrink-0" /> <span className={label}>Library</span>
           </NavLink>

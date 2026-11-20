@@ -48,6 +48,10 @@ export interface ChatState {
   runFeed: Record<string, FeedItem[]>;
   /** Bumped when a routine is added, changed or runs, so the Routines page and orb reload. */
   routinesVersion: number;
+  /** Bumped when anything in the organiser changes (here, on another device or by the
+   * assistant); organiserChange says what, so an open editor can tell it's its own item. */
+  organiserVersion: number;
+  organiserChange: { id: string; op: string } | null;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;
   /** Owners and admins: recovery requests waiting for a decision; null for everyone else. */
@@ -90,6 +94,8 @@ export const initialState: ChatState = {
   foldersVersion: 0,
   runFeed: {},
   routinesVersion: 0,
+  organiserVersion: 0,
+  organiserChange: null,
   pendingAccess: null,
   pendingRecovery: null,
   recall: null,
@@ -343,6 +349,13 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         linksVersion: state.linksVersion + 1,
         foldersVersion: state.foldersVersion + 1,
         routinesVersion: state.routinesVersion + 1,
+        organiserVersion: state.organiserVersion + 1,
+      };
+    case "organiser.changed":
+      return {
+        ...state,
+        organiserVersion: state.organiserVersion + 1,
+        organiserChange: { id: event.data.id, op: event.data.op },
       };
     case "skill.updated":
       return { ...state, skillsVersion: state.skillsVersion + 1 };

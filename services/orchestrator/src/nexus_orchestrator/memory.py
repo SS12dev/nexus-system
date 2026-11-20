@@ -36,6 +36,7 @@ from nexus_common.models import (
     Message,
     MessageRole,
     MessageStatus,
+    OrgItem,
     Profile,
     Skill,
     TrashItem,
@@ -775,6 +776,8 @@ async def embed_missing(deps: TurnDeps, limit: int = 256) -> int:
             AgentSystem: lambda r: f"{r.name}: {r.goal}",
             # Entities are matched by name, so their vector is of the name alone.
             Entity: lambda r: r.name,
+            # Organiser items lose their vector when their text changes (organiser.update).
+            OrgItem: lambda r: f"{r.title}\n{r.body[:6000]}",
         }
         for table, text_of in texts.items():
             rows = (

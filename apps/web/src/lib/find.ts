@@ -3,6 +3,9 @@ import type { FindKind, FindResult } from "./types";
 /** Group headings, in the order groups show when they score the same. */
 export const KIND_LABELS: Record<FindKind, string> = {
   chat: "Chats",
+  task: "Tasks",
+  note: "Notes",
+  project: "Projects and areas",
   file: "Files",
   memory: "Memories",
   person: "People",
@@ -63,10 +66,14 @@ export interface Command {
 
 export const COMMANDS: Command[] = [
   { id: "new-chat", label: "New chat", keywords: "ask talk message start", section: "Actions", to: "/" },
+  { id: "capture", label: "Capture to Inbox", keywords: "note todo task add jot organiser", hint: "Type it after, e.g. “[ ] call the bank tomorrow”", section: "Actions", to: "/organiser/inbox" },
   { id: "upload", label: "Upload a file", keywords: "add document pdf library", section: "Actions", to: "/library?upload=1" },
   { id: "new-routine", label: "New routine", keywords: "schedule brief daily remind", section: "Actions", to: "/routines?new=1" },
   { id: "home", label: "Home", keywords: "universe orb", section: "Go to", to: "/" },
   { id: "search", label: "Search", keywords: "find everything", section: "Go to", to: "/search" },
+  { id: "organiser", label: "Organiser", keywords: "today tasks notes projects areas daily", section: "Go to", to: "/organiser" },
+  { id: "org-tasks", label: "Tasks", keywords: "todo due organiser", section: "Go to", to: "/organiser/tasks" },
+  { id: "org-review", label: "Weekly review", keywords: "sunday plan organiser", section: "Go to", to: "/organiser/review" },
   { id: "library", label: "Library", keywords: "files documents links folders", section: "Go to", to: "/library" },
   { id: "apps", label: "Apps", keywords: "deployed projects", section: "Go to", to: "/apps" },
   { id: "routines", label: "Routines", keywords: "schedule automation", section: "Go to", to: "/routines" },

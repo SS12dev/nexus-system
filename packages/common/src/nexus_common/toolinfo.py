@@ -74,6 +74,32 @@ TOOLS: list[ToolInfo] = [
     ),
     ToolInfo("list_routines", "List routines", "read", "List the user's scheduled routines."),
     ToolInfo(
+        "organiser_add",
+        "Add to the organiser",
+        "write",
+        "Add a task, note, project, area or resource to the user's organiser, or capture "
+        "something to its Inbox.",
+    ),
+    ToolInfo(
+        "organiser_find",
+        "Find in the organiser",
+        "read",
+        "List the user's tasks, notes, projects, areas and resources, by words, place or due date.",
+    ),
+    ToolInfo("organiser_read", "Read an organiser item", "read", "Read a note or task in full."),
+    ToolInfo(
+        "organiser_update",
+        "Change an organiser item",
+        "write",
+        "Tick off, reschedule, move, archive or add to a task, note or project.",
+    ),
+    ToolInfo(
+        "organiser_today",
+        "Today in the organiser",
+        "read",
+        "Overdue and due tasks, the week's focus and today's daily note (and add a line to it).",
+    ),
+    ToolInfo(
         "start_timer",
         "Start a timer",
         "write",

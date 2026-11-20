@@ -33,6 +33,7 @@ from nexus_orchestrator import (
     links,
     memory,
     notify,
+    organiser,
     recall_eval,
     routines,
     telegram,
@@ -134,6 +135,22 @@ async def run_turn(ctx: dict, chat_id: str, assistant_message_id: str) -> None:
 @traced_job
 async def telegram_update(ctx: dict, update: dict) -> None:
     await telegram.handle_update(ctx["deps"], update)
+
+
+@traced_job
+async def organiser_suggest(ctx: dict, item_id: str) -> None:
+    await organiser.suggest_filing(ctx["deps"], uuid.UUID(item_id))
+
+
+@traced_job
+async def organiser_hourly(ctx: dict) -> None:
+    """The Sunday-evening weekly-review reminder (does nothing most hours)."""
+    await organiser.review_reminders(ctx["deps"])
+
+
+@traced_job
+async def organiser_export(ctx: dict) -> None:
+    await organiser.nightly_exports(ctx["deps"])
 
 
 @traced_job
@@ -380,6 +397,8 @@ class WorkerSettings:
         # A Telegram message: maybe a wait for the previous one, a transcription and a turn.
         # Never retried, so a reply is never sent twice.
         func(telegram_update, timeout=900, keep_result=0, max_tries=1),
+        # A filing suggestion is a nice-to-have: one try, and the item is fine without it.
+        func(organiser_suggest, timeout=90, keep_result=0, max_tries=1),
     ]
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
@@ -387,6 +406,9 @@ class WorkerSettings:
         cron(expire_trash, hour=3, minute=10, unique=True, timeout=60),
         cron(expire_deleted_accounts, hour=3, minute=20, unique=True, timeout=60),
         cron(every_ten_minutes, minute=set(range(0, 60, 10)), unique=True),
+        # On the hour, so "Sunday at 6 pm" lands at 6 pm in every time zone that has whole hours.
+        cron(organiser_hourly, minute=0, second=30, unique=True, timeout=120),
+        cron(organiser_export, hour=2, minute=40, unique=True, timeout=900),
         # Five minutes after, so a chat summarised at :00 is in the graph by :05.
         cron(
             graph_extract,

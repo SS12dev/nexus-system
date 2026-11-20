@@ -205,3 +205,31 @@ async def test_routines_deliver_to_telegram(deps, bot, owner, sessionmaker):
     text = bot.texts()[-1]
     assert text.startswith("<b>Morning brief</b>\n\nThree meetings today.")
     assert '<a href="' in text and "Open in Nexus" in text
+
+
+async def test_in_drops_straight_into_the_organiser_inbox(
+    deps, bot, owner, model, sessionmaker, enqueued
+):
+    from nexus_common.models import OrgItem
+
+    user, _ = owner
+    await link(deps, owner)
+    await telegram.handle_update(deps, update(2, text="/in [ ] call the bank tomorrow #money"))
+    assert bot.texts()[-1].startswith("In your Inbox: task “call the bank”, due ")
+    await telegram.handle_update(deps, update(3, text="/todo renew passport"))
+    await telegram.handle_update(deps, update(4, text="/in"))
+    assert "Add the text" in bot.texts()[-1]
+    async with sessionmaker() as db:
+        rows = (await db.scalars(select(OrgItem).order_by(OrgItem.created_at))).all()
+    assert [(r.type, r.title, r.status, r.source, r.tags) for r in rows] == [
+        ("task", "call the bank", "inbox", "telegram", ["money"]),
+        ("task", "renew passport", "inbox", "telegram", []),
+    ]
+    assert [j[0] for j in enqueued.jobs].count("organiser_suggest") == 2
+    # No model turn for a capture.
+    assert model.seen == []
+
+    await telegram.handle_update(deps, update(5, text="/today"))
+    agenda = bot.texts()[-1]
+    assert agenda.startswith("Today is") and "2 item(s) waiting in the Inbox" in agenda
+    assert "(id " not in agenda

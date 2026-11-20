@@ -21,6 +21,14 @@ import type {
   FileItem,
   FindKind,
   FindResponse,
+  OrgItem,
+  OrgItemDetail,
+  OrgItemInput,
+  OrgListQuery,
+  OrgOverview,
+  OrgReview,
+  OrgRevision,
+  OrgToday,
   TelegramStatus,
   Folder,
   GoogleAccess,
@@ -139,7 +147,79 @@ function forUsers(ids: string[]): URLSearchParams {
   return q;
 }
 
+/** A save based on an older version: the server's current copy comes with it. */
+export class OrgConflict extends ApiError {
+  constructor(
+    message: string,
+    public current: OrgItem,
+  ) {
+    super(409, message);
+  }
+}
+
+async function orgSave(path: string, method: string, body: unknown): Promise<OrgItem> {
+  const resp = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: json(body),
+  });
+  if (resp.status === 409) {
+    const data = await resp.json();
+    throw new OrgConflict(data.detail, data.current);
+  }
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try {
+      const data = await resp.json();
+      detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(resp.status, detail);
+  }
+  return resp.json();
+}
+
+function orgQuery(q: OrgListQuery): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((x) => p.append(k, String(x)));
+    else p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
+  orgOverview: () => request<OrgOverview>("/api/organiser/overview"),
+  orgToday: () => request<OrgToday>("/api/organiser/today"),
+  orgDaily: (day: string) => request<OrgItem>(`/api/organiser/daily/${day}`),
+  orgItems: (q: OrgListQuery = {}) => request<OrgItem[]>(`/api/organiser/items${orgQuery(q)}`),
+  orgItem: (id: string) => request<OrgItemDetail>(`/api/organiser/items/${id}`),
+  orgCreate: (body: OrgItemInput) =>
+    request<OrgItem>("/api/organiser/items", { method: "POST", body: json(body) }),
+  /** Quick capture; to the Inbox unless `inbox: false`. */
+  orgCapture: (text: string, opts: { inbox?: boolean; task?: boolean; parent_id?: string } = {}) =>
+    request<OrgItem>("/api/organiser/capture", { method: "POST", body: json({ text, ...opts }) }),
+  /** Throws OrgConflict when `version` is outdated. */
+  orgUpdate: (id: string, changes: OrgItemInput & { version?: number }) =>
+    orgSave(`/api/organiser/items/${id}`, "PATCH", changes),
+  orgDelete: (id: string) => request<void>(`/api/organiser/items/${id}`, { method: "DELETE" }),
+  orgMakeTasks: (id: string) =>
+    request<{ item: OrgItem; made: OrgItem[] }>(`/api/organiser/items/${id}/tasks`, {
+      method: "POST",
+    }),
+  orgRevisions: (id: string) => request<OrgRevision[]>(`/api/organiser/items/${id}/revisions`),
+  orgRevision: (id: string, rev: string) =>
+    request<OrgRevision>(`/api/organiser/items/${id}/revisions/${rev}`),
+  orgRestore: (id: string, rev: string) =>
+    request<OrgItem>(`/api/organiser/items/${id}/revisions/${rev}/restore`, { method: "POST" }),
+  orgReview: () => request<OrgReview>("/api/organiser/review"),
+  orgFinishReview: (focus: string[], notes: string) =>
+    request<OrgReview>("/api/organiser/review", { method: "POST", body: json({ focus, notes }) }),
+  orgExportUrl: "/api/organiser/export.zip",
   authConfig: () => request<AuthConfig>("/auth/config"),
   accessState: () => request<AccessState>("/auth/access-request"),
   requestAccess: (note: string) =>

@@ -38,10 +38,15 @@ from nexus_common.search import vector_literal
 log = logging.getLogger(__name__)
 
 Kind = Literal[
-    "chat", "file", "memory", "person", "thing", "link", "routine", "app", "system", "skill"
-]
+    "chat", "task", "note", "project", "file", "memory", "person", "thing", "link", "routine",
+    "app", "system", "skill"
+]  # fmt: skip
 KINDS: tuple[str, ...] = (
     "chat",
+    # Organiser: tasks; notes and daily notes; projects, areas and resources.
+    "task",
+    "note",
+    "project",
     "file",
     "memory",
     "person",
@@ -608,10 +613,92 @@ async def _skills(c: Ctx) -> list[Result]:
     )
 
 
+_ORG_KIND = {"task": "task", "note": "note", "daily": "note"}
+_ORG_LABEL = {
+    "task": "Task",
+    "note": "Note",
+    "daily": "Daily note",
+    "project": "Project",
+    "area": "Area",
+    "resource": "Resource",
+}
+_ORG_STATUS = {"inbox": "in Inbox", "done": "done", "dropped": "dropped", "archived": "archived"}
+
+
+async def _organiser(c: Ctx) -> list[Result]:
+    """Organiser items by title, by the words in their text, and by meaning."""
+    visible = _not_trashed("org_item", "o.id")
+    clauses = [f"select o.id, 'title' as how, 0.0 as rank, null::float as d from org_items o "
+               f"where o.user_id = :uid and o.title ilike :like and {visible}"]  # fmt: skip
+    if c.q.tsquery:
+        clauses.append(
+            "select o.id, 'words', ts_rank_cd(o.tsv, to_tsquery('english', :tsq)), null "
+            f"from org_items o where o.user_id = :uid and {visible} "
+            "and o.tsv @@ to_tsquery('english', :tsq)"
+        )
+    if c.vec is not None:
+        clauses.append(
+            "(select o.id, 'meaning', 0.0, o.embedding <=> cast(:vec as vector) "
+            f"from org_items o where o.user_id = :uid and o.embedding is not null and {visible} "
+            "order by o.embedding <=> cast(:vec as vector) limit :n)"
+        )
+    union = " union all ".join(f"({x})" for x in clauses)
+    rows = await c.db.execute(
+        text(f"""
+        with h as ({union}), q as (select to_tsquery('english', :tsq_or_blank) as query)
+        select h.how, h.rank, h.d, o.id, o.type, o.title, o.status, o.day, o.due_on,
+               o.updated_at,
+               case when h.how = 'words' then
+                   ts_headline('english', left(o.body, :hlchars), q.query, :hl)
+               else left(o.body, 300) end as snippet
+        from h join org_items o on o.id = h.id, q
+        order by h.how = 'title' desc, h.rank desc, h.d asc nulls last
+        limit :n"""),
+        {**c.params, "tsq_or_blank": c.q.tsquery or ""},
+    )
+    out: list[Result] = []
+    for r in rows:
+        if r.how == "meaning" and (r.d is None or r.d > MAX_DISTANCE):
+            continue
+        if r.how == "title":
+            score = title_score(r.title, c.q)
+        elif r.how == "words":
+            score = words_score(r.rank)
+        else:
+            score = meaning_score(r.d)
+        bits = [_ORG_LABEL.get(r.type, "Item")]
+        if r.status in _ORG_STATUS:
+            bits.append(_ORG_STATUS[r.status])
+        if r.due_on:
+            bits.append(f"due {r.due_on.day} {r.due_on:%b}")
+        else:
+            bits.append(_short_date(r.updated_at))
+        url = (
+            f"/organiser/daily/{r.day.isoformat()}"
+            if r.type == "daily" and r.day
+            else f"/organiser/item/{r.id}"
+        )
+        out.append(
+            Result(
+                kind=_ORG_KIND.get(r.type, "project"),
+                id=str(r.id),
+                title=r.title,
+                url=url,
+                snippet=clean_snippet(r.snippet) if r.how != "title" else "",
+                detail=" · ".join(bits),
+                at=r.updated_at,
+                score=score,
+                matched=[r.how],
+            )
+        )
+    return out
+
+
 Source = Callable[[Ctx], Awaitable[list[Result]]]
 SOURCES: dict[str, tuple[Source, tuple[str, ...]]] = {
     # name: (function, kinds it can return)
     "chats": (_chats, ("chat",)),
+    "organiser": (_organiser, ("task", "note", "project")),
     "files": (_files, ("file",)),
     "memories": (_memories, ("memory",)),
     "entities": (_entities, ("person", "thing")),

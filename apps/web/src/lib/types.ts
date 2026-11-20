@@ -775,6 +775,7 @@ export type ServerEvent =
   | { type: "notification.created"; chat_id?: string | null; data: { notification: Notice } }
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
   | { type: "trash.changed"; chat_id?: null; data: { kind: string } }
+  | { type: "organiser.changed"; chat_id?: null; data: { id: string; op: string; type: OrgType } }
   | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }
   | { type: "widget.deleted"; chat_id?: null; data: { id: string } }
   | { type: "screen.op"; chat_id?: string | null; data: ScreenOpData }
@@ -1547,6 +1548,9 @@ export interface Universe {
 /** What search across everything can find (nexus_common/find.py). */
 export type FindKind =
   | "chat"
+  | "task"
+  | "note"
+  | "project"
   | "file"
   | "memory"
   | "person"
@@ -1592,4 +1596,142 @@ export interface TelegramStatus {
     linked_at: string;
     last_message_at: string | null;
   } | null;
+}
+
+// --- Organiser (/api/organiser) -------------------------------------------------------------
+
+export type OrgType = "note" | "task" | "project" | "area" | "resource" | "daily";
+export type OrgStatus =
+  | "inbox"
+  | "todo"
+  | "doing"
+  | "done"
+  | "dropped"
+  | "active"
+  | "paused"
+  | "archived";
+
+/** Where the assistant thinks an Inbox item belongs. Only a suggestion until it's accepted. */
+export interface OrgSuggestion {
+  type: "note" | "task";
+  parent_id: string | null;
+  parent_title: string | null;
+  parent_type: OrgType | null;
+  due_on: string | null;
+  why: string;
+}
+
+export interface OrgItem {
+  id: string;
+  type: OrgType;
+  title: string;
+  status: OrgStatus;
+  parent_id: string | null;
+  due_on: string | null;
+  priority: number;
+  tags: string[];
+  pinned: boolean;
+  day: string | null;
+  source: string;
+  suggestion: OrgSuggestion | null;
+  version: number;
+  done_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Full text on single-item reads; lists carry an excerpt instead. */
+  body?: string | null;
+  excerpt?: string | null;
+}
+
+export interface OrgRef {
+  id: string;
+  type: OrgType;
+  title: string;
+  status: OrgStatus;
+}
+
+export interface OrgItemDetail extends OrgItem {
+  body: string;
+  parent: OrgRef | null;
+  children: OrgItem[];
+  backlinks: OrgRef[];
+  /** Items this one's [[links]] point at. */
+  links: OrgRef[];
+  /** [[Links]] with no item of that title yet. */
+  unresolved: string[];
+}
+
+export interface OrgOverview {
+  today: string;
+  inbox: number;
+  overdue: number;
+  due_today: number;
+  open_tasks: number;
+  projects: number;
+  areas: number;
+  resources: number;
+  notes: number;
+  archived: number;
+  review: { week_of: string; completed_at: string | null; due: boolean };
+}
+
+export interface OrgToday {
+  day: string;
+  daily: OrgItem;
+  overdue: OrgItem[];
+  due_today: OrgItem[];
+  doing: OrgItem[];
+  focus: OrgItem[];
+  upcoming: OrgItem[];
+}
+
+export interface OrgReview {
+  week_of: string;
+  completed_at: string | null;
+  focus: string[];
+  notes: string;
+  inbox: OrgItem[];
+  overdue: OrgItem[];
+  stalled: OrgItem[];
+  done_this_week: OrgItem[];
+  upcoming: OrgItem[];
+  candidates: OrgItem[];
+}
+
+export interface OrgRevision {
+  id: string;
+  version: number;
+  title: string;
+  actor: string;
+  created_at: string;
+  body?: string | null;
+}
+
+export interface OrgItemInput {
+  type?: Exclude<OrgType, "daily">;
+  title?: string;
+  body?: string;
+  status?: OrgStatus;
+  parent_id?: string | null;
+  due_on?: string | null;
+  priority?: number;
+  tags?: string[];
+  pinned?: boolean;
+  inbox?: boolean;
+  /** On a save over a conflicting edit: keep the replaced text in the history. */
+  keep_revision?: boolean;
+}
+
+export interface OrgListQuery {
+  type?: OrgType[];
+  status?: OrgStatus[];
+  parent_id?: string;
+  unfiled?: boolean;
+  pinned?: boolean;
+  tag?: string;
+  due_before?: string;
+  due_after?: string;
+  q?: string;
+  order?: "updated" | "created" | "due" | "title" | "priority";
+  limit?: number;
 }
