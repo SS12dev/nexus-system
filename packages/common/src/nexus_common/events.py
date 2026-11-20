@@ -49,6 +49,8 @@ EventType = Literal[
     "trash.changed",
     # Something in the organiser was made, changed or removed (nexus_common.organiser).
     "organiser.changed",
+    # New transactions or holdings arrived in Money (counts only, never amounts).
+    "money.changed",
     # Sent to owners and admins: how many access requests are waiting.
     "access.pending",
     "account.recovery.pending",

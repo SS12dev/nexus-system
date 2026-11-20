@@ -50,6 +50,7 @@ from nexus_orchestrator.context import recall
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.google_tools import build_google_tools
 from nexus_orchestrator.links import keep_link
+from nexus_orchestrator.money_tools import build_money_tools
 from nexus_orchestrator.organiser_tools import build_organiser_tools
 from nexus_orchestrator.routine_tools import build_routine_tools
 from nexus_orchestrator.sandbox import SandboxError
@@ -988,6 +989,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         **build_google_tools(ctx, note),
         **build_routine_tools(ctx, note),
         **build_organiser_tools(ctx, note),
+        **build_money_tools(ctx, note),
         **build_widget_tools(ctx, note),
         **build_screen_tools(ctx, note),
     }

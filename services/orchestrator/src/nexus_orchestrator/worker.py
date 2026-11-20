@@ -32,6 +32,7 @@ from nexus_orchestrator import (
     improve,
     links,
     memory,
+    money,
     notify,
     organiser,
     recall_eval,
@@ -151,6 +152,22 @@ async def organiser_hourly(ctx: dict) -> None:
 @traced_job
 async def organiser_export(ctx: dict) -> None:
     await organiser.nightly_exports(ctx["deps"])
+
+
+@traced_job
+async def money_sync(ctx: dict, user_id: str) -> None:
+    """Money's "Check now": new alert emails and the newest CAS for one person."""
+    await money.sync_user(ctx["deps"], uuid.UUID(user_id))
+
+
+@traced_job
+async def money_hourly(ctx: dict) -> None:
+    await money.sync_all(ctx["deps"])
+
+
+@traced_job
+async def money_navs(ctx: dict) -> None:
+    await money.revalue_holdings(ctx["deps"])
 
 
 @traced_job
@@ -399,6 +416,7 @@ class WorkerSettings:
         func(telegram_update, timeout=900, keep_result=0, max_tries=1),
         # A filing suggestion is a nice-to-have: one try, and the item is fine without it.
         func(organiser_suggest, timeout=90, keep_result=0, max_tries=1),
+        func(money_sync, timeout=900, keep_result=0, max_tries=1),
     ]
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
@@ -409,6 +427,9 @@ class WorkerSettings:
         # On the hour, so "Sunday at 6 pm" lands at 6 pm in every time zone that has whole hours.
         cron(organiser_hourly, minute=0, second=30, unique=True, timeout=120),
         cron(organiser_export, hour=2, minute=40, unique=True, timeout=900),
+        cron(money_hourly, minute=20, unique=True, timeout=1800),
+        # AMFI publishes the day's NAVs by about 11 pm IST (17:30 UTC); read them after.
+        cron(money_navs, hour=19, minute=15, unique=True, timeout=300),
         # Five minutes after, so a chat summarised at :00 is in the graph by :05.
         cron(
             graph_extract,

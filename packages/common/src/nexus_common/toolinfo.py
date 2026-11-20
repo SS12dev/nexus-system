@@ -100,6 +100,14 @@ TOOLS: list[ToolInfo] = [
         "Overdue and due tasks, the week's focus and today's daily note (and add a line to it).",
     ),
     ToolInfo(
+        "money_summary",
+        "Money totals",
+        "read",
+        "A month's spending by category, budgets, repeating payments and fund value (only when "
+        "allowed in Money's settings).",
+        owner_only=True,
+    ),
+    ToolInfo(
         "start_timer",
         "Start a timer",
         "write",

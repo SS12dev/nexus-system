@@ -1,0 +1,246 @@
+"""Background work for Money (nexus_common/money.py, money_store.py):
+
+- `sync_user`: read new bank and card alert emails from Gmail into transactions, and the newest
+  CAMS / KFintech consolidated statement (when its password is saved) into holdings. Runs
+  hourly for everyone who switched it on, and when they press "Check now".
+- `revalue_holdings`: each night, value every holding at AMFI's latest published NAV.
+
+No model sees any of it: alerts and statements are read with plain rules on this machine.
+Logs carry counts and ids only, never amounts, merchants, subjects or senders.
+"""
+
+import asyncio
+import logging
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import httpx
+from sqlalchemy import select
+
+from nexus_common import money
+from nexus_common import money_store as store
+from nexus_common.models import MoneyHolding, MoneySettings, User, UserStatus, utcnow
+from nexus_common.organiser import zone
+from nexus_orchestrator.google_tools import GMAIL, Google, GoogleError, _b64decode, message_body
+from nexus_orchestrator.turn import TurnDeps
+
+log = logging.getLogger(__name__)
+
+# On the first sync, read this far back.
+FIRST_SYNC = timedelta(days=90)
+# Read again a little before the last sync, for mail that arrived late.
+OVERLAP = timedelta(days=1)
+MAX_MESSAGES = 1500
+PARALLEL = 5
+CAS_QUERY = (
+    "from:(camsonline.com OR kfintech.com OR karvy.com) has:attachment filename:pdf newer_than:120d"
+)
+
+
+async def _list_ids(g: Google, query: str, cap: int) -> list[str]:
+    ids: list[str] = []
+    token = None
+    while len(ids) < cap:
+        params = {"q": query, "maxResults": min(500, cap - len(ids))}
+        if token:
+            params["pageToken"] = token
+        page = await g.call("gmail", "GET", f"{GMAIL}/messages", params=params)
+        ids += [m["id"] for m in page.get("messages", [])]
+        token = page.get("nextPageToken")
+        if not token:
+            break
+    return ids
+
+
+def _header(msg: dict, name: str) -> str:
+    for h in (msg.get("payload") or {}).get("headers", []):
+        if h.get("name", "").lower() == name:
+            return h.get("value", "")
+    return ""
+
+
+async def _read_alerts(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings) -> dict:
+    since = (prefs.gmail_synced_until or utcnow() - FIRST_SYNC) - OVERLAP
+    query = f"{money.ALERT_QUERY} after:{int(since.timestamp())}"
+    ids = await _list_ids(g, query, MAX_MESSAGES)
+    tz = zone(user)
+    parsed: list[tuple[money.Parsed, str]] = []
+    newest = prefs.gmail_synced_until
+    gate = asyncio.Semaphore(PARALLEL)
+
+    async def one(mid: str) -> None:
+        nonlocal newest
+        async with gate:
+            msg = await g.call("gmail", "GET", f"{GMAIL}/messages/{mid}", params={"format": "full"})
+        received = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000, UTC)
+        newest = max(newest or received, received)
+        body, _ = message_body(msg.get("payload") or {})
+        p = money.parse_alert(
+            _header(msg, "subject"),
+            body,
+            received.astimezone(tz).date(),
+            sender=_header(msg, "from"),
+        )
+        if p is not None:
+            parsed.append((p, mid))
+
+    await asyncio.gather(*(one(m) for m in ids))
+    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0}
+    async with deps.sessionmaker() as db:
+        # Oldest first, so an account's rows arrive in order.
+        for p, mid in sorted(parsed, key=lambda x: x[0].occurred_on):
+            got = await store.ingest(
+                db, deps.settings, user.id, [p], source="alert", source_ref=mid
+            )
+            for k, v in got.items():
+                counts[k] += v
+        row = await store.settings_for(db, user.id)
+        row.gmail_synced_until = newest or utcnow()
+        row.gmail_synced_at = utcnow()
+        row.last_error = None
+        await db.commit()
+    return counts
+
+
+def _pdf_part(payload: dict) -> dict | None:
+    stack = [payload]
+    while stack:
+        part = stack.pop()
+        name = (part.get("filename") or "").lower()
+        if name.endswith(".pdf") and (part.get("body") or {}).get("attachmentId"):
+            return part
+        stack += part.get("parts") or []
+    return None
+
+
+async def _read_cas(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings) -> int | None:
+    """The newest CAS email's holdings. None when there's nothing new to read."""
+    password = money.unseal(deps.settings, prefs.cas_password_enc)
+    if not password:
+        return None
+    ids = await _list_ids(g, CAS_QUERY, 1)
+    if not ids or ids[0] == prefs.cas_message_id:
+        return None
+    mid = ids[0]
+    msg = await g.call("gmail", "GET", f"{GMAIL}/messages/{mid}", params={"format": "full"})
+    part = _pdf_part(msg.get("payload") or {})
+    async with deps.sessionmaker() as db:
+        row = await store.settings_for(db, user.id)
+        row.cas_message_id = mid
+        if part is None:
+            await db.commit()
+            return None
+        att = await g.call(
+            "gmail",
+            "GET",
+            f"{GMAIL}/messages/{mid}/attachments/{part['body']['attachmentId']}",
+        )
+        data = _b64decode(att.get("data", ""))
+        try:
+            holdings, as_of = await asyncio.to_thread(money.read_cas, data, password)
+        except money.StatementError as exc:
+            row.last_error = f"The statement emailed by CAMS couldn't be read: {exc}"[:300]
+            await store.record_import(
+                db, deps.settings, user.id, kind="cas", origin="gmail",
+                filename=part.get("filename") or "CAS.pdf", status="failed", error=str(exc),
+            )  # fmt: skip
+            await db.commit()
+            log.info("money.cas_failed", extra={"user_id": str(user.id)})
+            return None
+        saved = await store.save_holdings(db, user.id, holdings, as_of)
+        await store.record_import(
+            db, deps.settings, user.id, kind="cas", origin="gmail",
+            filename=part.get("filename") or "CAS.pdf", status="done", counts={"holdings": saved},
+        )  # fmt: skip
+        row.cas_synced_at = utcnow()
+        await db.commit()
+    return saved
+
+
+async def sync_user(deps: TurnDeps, user_id: uuid.UUID) -> dict | None:
+    """Read new alerts and the newest CAS for one person. None when they haven't switched it on."""
+    async with deps.sessionmaker() as db:
+        user = await db.get(User, user_id)
+        prefs = await db.get(MoneySettings, user_id)
+        if (
+            user is None
+            or user.status != UserStatus.active
+            or prefs is None
+            or not prefs.gmail_sync
+        ):
+            return None
+        db.expunge(prefs)
+        db.expunge(user)
+    g = Google(deps, user_id)
+    try:
+        counts = await _read_alerts(deps, g, user, prefs)
+        holdings = await _read_cas(deps, g, user, prefs)
+    except GoogleError as exc:
+        # The text is about the connection (not connected, API off), never the mail itself.
+        async with deps.sessionmaker() as db:
+            row = await store.settings_for(db, user_id)
+            row.last_error = str(exc)[:300]
+            await db.commit()
+        log.warning(
+            "money.sync_failed", extra={"user_id": str(user_id), "error": type(exc).__name__}
+        )
+        return None
+    if holdings is not None:
+        counts["holdings"] = holdings
+    log.info("money.synced", extra={"user_id": str(user_id), **counts})
+    if counts.get("added") or counts.get("matched") or holdings:
+        await store.changed(deps.redis, user_id, **counts)
+    return counts
+
+
+async def sync_all(deps: TurnDeps) -> int:
+    async with deps.sessionmaker() as db:
+        ids = list(
+            (
+                await db.scalars(
+                    select(MoneySettings.user_id)
+                    .join(User, User.id == MoneySettings.user_id)
+                    .where(MoneySettings.gmail_sync, User.status == UserStatus.active)
+                )
+            ).all()
+        )
+    done = 0
+    for uid in ids:
+        try:
+            if await sync_user(deps, uid) is not None:
+                done += 1
+        except Exception:
+            log.exception("money.sync_crashed", extra={"user_id": str(uid)})
+    return done
+
+
+async def fetch_navs(client: httpx.AsyncClient | None = None) -> dict:
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=60, follow_redirects=True)
+    try:
+        resp = await client.get(money.AMFI_NAV_URL)
+        resp.raise_for_status()
+        return money.parse_amfi_navs(resp.text)
+    finally:
+        if own:
+            await client.aclose()
+
+
+async def revalue_holdings(deps: TurnDeps, navs: dict | None = None) -> int:
+    """Value every holding at AMFI's latest NAV. Returns how many changed."""
+    async with deps.sessionmaker() as db:
+        holdings = (await db.scalars(select(MoneyHolding))).all()
+        if not holdings:
+            return 0
+        if navs is None:
+            try:
+                navs = await fetch_navs()
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("money.navs_unavailable", extra={"error": type(exc).__name__})
+                return 0
+        changed = [h for h in holdings if store.revalue(h, navs)]
+        await db.commit()
+    for uid in {h.user_id for h in changed}:
+        await store.changed(deps.redis, uid)
+    log.info("money.revalued", extra={"count": len(changed), "navs": len(navs)})
+    return len(changed)

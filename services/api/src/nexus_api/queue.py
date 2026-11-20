@@ -30,6 +30,7 @@ class JobQueue(Protocol):
     async def enqueue_account_purge(self, user_id: uuid.UUID) -> None: ...
     async def enqueue_telegram(self, update: dict) -> None: ...
     async def enqueue_organiser_suggest(self, item_id: uuid.UUID) -> None: ...
+    async def enqueue_money_sync(self, user_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -149,3 +150,7 @@ class ArqJobQueue:
         await self.enqueue_job(
             "organiser_suggest", str(item_id), _job_id=f"organiser-suggest:{item_id}"
         )
+
+    async def enqueue_money_sync(self, user_id: uuid.UUID) -> None:
+        """Read new bank alert and CAS emails for one person now. One at a time per person."""
+        await self.enqueue_job("money_sync", str(user_id), _job_id=f"money-sync:{user_id}")

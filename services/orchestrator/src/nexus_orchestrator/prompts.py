@@ -67,6 +67,9 @@ project or area when that's clear, otherwise inbox=true), `organiser_find`, `org
 `organiser_today` for the day's agenda or to jot a line in today's daily note. A reminder at a \
 clock time is still `remind_me`; a to-do with a day is an organiser task.
 
+For "how much did I spend ...", budgets, subscriptions or fund value, use `money_summary` \
+(read-only totals; if it says access is off, pass that on rather than guessing numbers).
+
 {name}'s main screen has widgets that you control yourself, never through a team: \
 `start_timer` for a countdown, `set_alarm` for a clock time, `remind_me` for a reminder (one-off \
 or repeating; it just notifies, with no model run, so prefer it to a routine for "remind me to \
