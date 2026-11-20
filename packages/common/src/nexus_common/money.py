@@ -167,8 +167,11 @@ _HANDLE_NAMES = {
     "swiggy": "Swiggy", "zomato": "Zomato", "amazon": "Amazon", "flipkart": "Flipkart",
     "uber": "Uber", "olacabs": "Ola", "netflix": "Netflix", "spotify": "Spotify",
     "bigbasket": "BigBasket", "blinkit": "Blinkit", "zepto": "Zepto", "irctc": "IRCTC",
-    "airtel": "Airtel", "jio": "Jio", "myntra": "Myntra", "bookmyshow": "BookMyShow",
+    "airtel": "Airtel", "jiomart": "JioMart", "jio": "Jio", "myntra": "Myntra",
+    "bookmyshow": "BookMyShow",
     "zerodha": "Zerodha", "groww": "Groww", "phonepe": "PhonePe", "paytm": "Paytm",
+    "openai": "OpenAI", "anthropic": "Anthropic", "github": "GitHub", "youtube": "YouTube",
+    "nobroker": "NoBroker", "makemytrip": "MakeMyTrip", "dmart": "DMart",
 }  # fmt: skip
 
 
@@ -179,7 +182,7 @@ def clean_merchant(raw: str) -> str:
     text = re.sub(r"^(?:vpa|upi|to|at|from|by)\s+", "", text, flags=re.I)
     lowered = text.lower()
     for key, name in _HANDLE_NAMES.items():
-        if key in lowered:
+        if re.search(rf"(?<![a-z]){re.escape(key)}", lowered):
             return name
     handle = re.match(r"^([\w.-]+@[\w.-]+)", text)
     if handle:
@@ -764,20 +767,32 @@ def counted(t: Txn) -> bool:
     return not t.excluded and t.category != "Transfers"
 
 
+def spending(t: Txn) -> bool:
+    """Money out that is spent: not a transfer, a hidden row, or money put into investments
+    (that is counted on its own, as invested)."""
+    return t.direction == "debit" and counted(t) and t.category != "Investments"
+
+
 def summarise(txns: list[Txn]) -> dict:
-    spent = sum(t.amount_paise for t in txns if t.direction == "debit" and counted(t))
+    spent = sum(t.amount_paise for t in txns if spending(t))
     income = sum(t.amount_paise for t in txns if t.direction == "credit" and counted(t))
+    invested = sum(
+        t.amount_paise
+        for t in txns
+        if t.direction == "debit" and counted(t) and t.category == "Investments"
+    )
     by_cat: dict[str, int] = defaultdict(int)
     by_merchant: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for t in txns:
-        if t.direction == "debit" and counted(t):
+        if spending(t):
             by_cat[t.category] += t.amount_paise
             by_merchant[t.merchant][0] += t.amount_paise
             by_merchant[t.merchant][1] += 1
     return {
         "spent_paise": spent,
         "income_paise": income,
-        "net_paise": income - spent,
+        "invested_paise": invested,
+        "net_paise": income - spent - invested,
         "categories": sorted(
             ({"category": c, "spent_paise": v} for c, v in by_cat.items()),
             key=lambda x: -x["spent_paise"],
@@ -803,12 +818,17 @@ class Subscription:
 
 
 def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
-    """Payments that repeat: the same merchant, at least three times about a month apart (or
-    twice about a year apart), for about the same amount (within 15%). Lapsed ones (no payment
-    for two cycles) are left out."""
+    """Payments that repeat (subscriptions, rent, bills, SIPs): the same merchant at least
+    three times about a month apart (or twice about a year apart), for about the same amount
+    (within 15%). Lapsed ones (no payment for two cycles) and card bill payments are left out."""
     by: dict[str, list[Txn]] = defaultdict(list)
     for t in txns:
-        if t.direction == "debit" and not t.excluded and t.merchant != "Unknown":
+        if (
+            t.direction == "debit"
+            and not t.excluded
+            and t.merchant != "Unknown"
+            and t.category not in ("Transfers", "Income")
+        ):
             by[t.merchant].append(t)
     found: list[Subscription] = []
     for merchant, items in by.items():

@@ -15,7 +15,7 @@ Account No : 50100123451234
 Date,Narration,Chq./Ref.No.,Value Dt,Withdrawal Amt.,Deposit Amt.,Closing Balance
 01/11/26,NEFT CR-ACME TECHNOLOGIES PVT LTD-SALARY NOV,N305260000123,01/11/26,,125000.00,210000.00
 03/11/26,UPI-SWIGGY-swiggy@icici-ICIC0000001-430712345678-UPI,0000430712345678,03/11/26,450.00,,209550.00
-05/11/26,UPI-CRED CLUB-cred.club@axisb-UTIB0000001-430700001111-CC BILL,0000430700001111,05/11/26,"9,000.00",,200550.00
+05/11/26,UPI-CRED CLUB-cred.club@axisb-UTIB01,4307001111,05/11/26,"9,000.00",,200550.00
 06/11/26,POS 512345XXXXXX6789 AMAZON PAY IN,000000000000,06/11/26,"1,299.00",,199251.00
 """
 
@@ -49,6 +49,8 @@ async def test_statement_import_is_stored_encrypted_and_never_logged(owner, sess
 
     page = (await owner.get("/api/money/transactions", params={"month": "2026-11"})).json()
     assert page["total"] == 4
+    # The card bill payment is a transfer: not spending, the same as the overview.
+    assert (page["spent_paise"], page["income_paise"]) == (45000 + 129900, 12500000)
     by = {t["merchant"]: t for t in page["items"]}
     assert by["Swiggy"]["category"] == "Food and dining"
     assert by["Cred Club"]["category"] == "Transfers"

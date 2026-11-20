@@ -237,14 +237,19 @@ async def list_transactions(
             select(
                 func.count(),
                 func.coalesce(
+                    # Spending and income the way the overview counts them (money.spending).
                     func.sum(MoneyTxn.amount_paise).filter(
-                        MoneyTxn.direction == "debit", ~MoneyTxn.excluded
+                        MoneyTxn.direction == "debit",
+                        ~MoneyTxn.excluded,
+                        MoneyTxn.category.not_in(("Transfers", "Investments")),
                     ),
                     0,
                 ),
                 func.coalesce(
                     func.sum(MoneyTxn.amount_paise).filter(
-                        MoneyTxn.direction == "credit", ~MoneyTxn.excluded
+                        MoneyTxn.direction == "credit",
+                        ~MoneyTxn.excluded,
+                        MoneyTxn.category != "Transfers",
                     ),
                     0,
                 ),

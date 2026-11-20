@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -232,6 +233,11 @@ export function Shell() {
               </Badge>
             )}
           </NavLink>
+          {isOwner(user) && (
+            <NavLink to="/money" className={navClass} title={tip("Money")}>
+              <Wallet size={16} className="shrink-0" /> <span className={label}>Money</span>
+            </NavLink>
+          )}
           <NavLink to="/library" className={navClass} title={tip("Library")}>
             <FolderOpen size={16} className="shrink-0" /> <span className={label}>Library</span>
           </NavLink>

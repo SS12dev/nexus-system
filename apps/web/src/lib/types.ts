@@ -776,6 +776,7 @@ export type ServerEvent =
   | { type: "notification.read"; chat_id?: null; data: { ids: string[] | null } }
   | { type: "trash.changed"; chat_id?: null; data: { kind: string } }
   | { type: "organiser.changed"; chat_id?: null; data: { id: string; op: string; type: OrgType } }
+  | { type: "money.changed"; chat_id?: null; data: Record<string, number> }
   | { type: "widget.updated"; chat_id?: null; data: { widget: Widget } }
   | { type: "widget.deleted"; chat_id?: null; data: { id: string } }
   | { type: "screen.op"; chat_id?: string | null; data: ScreenOpData }

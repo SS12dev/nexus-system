@@ -51,8 +51,9 @@ def build_money_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         lines = [
             f"<money month='{month}'>",
             f"Spent {r(ov['spent_paise'])}, income {r(ov['income_paise'])}, "
-            f"net {r(ov['net_paise'])} ({ov['count']} transactions; transfers between the "
-            "user's own accounts and hidden rows are left out).",
+            f"invested {r(ov['invested_paise'])}, left over {r(ov['net_paise'])} "
+            f"({ov['count']} transactions; transfers between the user's own accounts and hidden "
+            "rows are left out).",
             "By category: "
             + (
                 "; ".join(f"{c['category']} {r(c['spent_paise'])}" for c in ov["categories"])
@@ -84,10 +85,10 @@ def build_money_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
                     for s in subs[:10]
                 )
             )
-        if ov["invested_paise"]:
+        if ov["funds_value_paise"]:
             lines.append(
-                f"Mutual funds worth {r(ov['invested_paise'])}"
-                + (f" (cost {r(ov['invested_cost_paise'])})" if ov["invested_cost_paise"] else "")
+                f"Mutual funds worth {r(ov['funds_value_paise'])}"
+                + (f" (cost {r(ov['funds_cost_paise'])})" if ov["funds_cost_paise"] else "")
             )
         lines.append("</money>")
         return "\n".join(lines)

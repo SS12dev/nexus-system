@@ -1,3 +1,14 @@
+import type {
+  Investments,
+  MoneyAccount,
+  MoneyImport,
+  MoneyOverview,
+  MoneySettings,
+  MoneyTxn,
+  Subscription,
+  TxnPage,
+  TxnQuery,
+} from "./money";
 import type { TuneId } from "./tunes";
 import type {
   Universe,
@@ -181,7 +192,7 @@ async function orgSave(path: string, method: string, body: unknown): Promise<Org
   return resp.json();
 }
 
-function orgQuery(q: OrgListQuery): string {
+function orgQuery(q: OrgListQuery | TxnQuery | { month?: string }): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) {
     if (v === undefined || v === null || v === "") continue;
@@ -220,6 +231,61 @@ export const api = {
   orgFinishReview: (focus: string[], notes: string) =>
     request<OrgReview>("/api/organiser/review", { method: "POST", body: json({ focus, notes }) }),
   orgExportUrl: "/api/organiser/export.zip",
+
+  moneySettings: () => request<MoneySettings>("/api/money/settings"),
+  moneyUpdateSettings: (body: { gmail_sync?: boolean; assistant_access?: boolean; cas_password?: string }) =>
+    request<MoneySettings>("/api/money/settings", { method: "PATCH", body: json(body) }),
+  moneySync: () => request<{ queued: boolean }>("/api/money/sync", { method: "POST" }),
+  moneyOverview: (month?: string) =>
+    request<MoneyOverview>(`/api/money/overview${orgQuery({ month })}`),
+  moneyTxns: (q: TxnQuery = {}) =>
+    request<TxnPage>(`/api/money/transactions${orgQuery(q)}`),
+  moneyTxn: (id: string) => request<MoneyTxn>(`/api/money/transactions/${id}`),
+  moneyUpdateTxn: (
+    id: string,
+    body: { category?: string; for_merchant?: boolean; excluded?: boolean; note?: string },
+  ) =>
+    request<{ txn: MoneyTxn; also_changed: number }>(`/api/money/transactions/${id}`, {
+      method: "PATCH",
+      body: json(body),
+    }),
+  moneyAddTxn: (body: {
+    occurred_on: string;
+    amount: string;
+    direction: "debit" | "credit";
+    merchant: string;
+    category?: string;
+    account_id?: string;
+    note?: string;
+  }) => request<MoneyTxn>("/api/money/transactions", { method: "POST", body: json(body) }),
+  moneyDeleteTxn: (id: string) =>
+    request<void>(`/api/money/transactions/${id}`, { method: "DELETE" }),
+  moneyAccounts: () => request<MoneyAccount[]>("/api/money/accounts"),
+  moneyRenameAccount: (id: string, name: string) =>
+    request<MoneyAccount>(`/api/money/accounts/${id}`, { method: "PATCH", body: json({ name }) }),
+  moneySetBudget: (category: string, monthly_paise: number) =>
+    request<void>(`/api/money/budgets/${encodeURIComponent(category)}`, {
+      method: "PUT",
+      body: json({ monthly_paise }),
+    }),
+  moneyDeleteBudget: (category: string) =>
+    request<void>(`/api/money/budgets/${encodeURIComponent(category)}`, { method: "DELETE" }),
+  moneySubscriptions: () =>
+    request<{ items: Subscription[]; monthly_paise: number; yearly_paise: number }>(
+      "/api/money/subscriptions",
+    ),
+  moneyInvestments: () => request<Investments>("/api/money/investments"),
+  moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
+  moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string } = {}) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.password) form.append("password", opts.password);
+    form.append("remember_password", String(opts.remember ?? true));
+    if (opts.account_id) form.append("account_id", opts.account_id);
+    return request<MoneyImport>("/api/money/imports", { method: "POST", body: form });
+  },
+  moneyDeleteAll: () =>
+    request<void>("/api/money/delete-all", { method: "POST", body: json({ confirm: "delete" }) }),
   authConfig: () => request<AuthConfig>("/auth/config"),
   accessState: () => request<AccessState>("/auth/access-request"),
   requestAccess: (note: string) =>

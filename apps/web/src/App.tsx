@@ -20,6 +20,7 @@ import { MindPage, MindRedirect } from "./pages/MindPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PeoplePage } from "./pages/PeoplePage";
 import { RoutinesPage } from "./pages/RoutinesPage";
+import { MoneyPage } from "./pages/MoneyPage";
 import { OrganiserPage } from "./pages/OrganiserPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -91,6 +92,7 @@ export function App() {
         </Route>
         <Route path="search" element={<SearchPage />} />
         <Route path="organiser/*" element={<OrganiserPage />} />
+        <Route path="money/*" element={<MoneyPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="apps" element={<AppsPage />} />
         <Route path="mind" element={<MindPage />} />

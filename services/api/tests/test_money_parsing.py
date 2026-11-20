@@ -335,11 +335,13 @@ def test_summarise_skips_transfers_and_hidden_rows():
             _t("2026-11-04", 129900, "Amazon", "Shopping"),
             _t("2026-11-05", 5000000, "me@okicici", "Transfers"),
             _t("2026-11-06", 99900, "Croma", "Shopping", excluded=True),
+            _t("2026-11-07", 1000000, "Groww", "Investments"),
         ]
     )
     assert s["spent_paise"] == 204900
     assert s["income_paise"] == 12500000
-    assert s["net_paise"] == 12500000 - 204900
+    assert s["invested_paise"] == 1000000
+    assert s["net_paise"] == 12500000 - 204900 - 1000000
     assert [c["category"] for c in s["categories"]] == ["Shopping", "Food and dining"]
     assert s["merchants"][1] == {"merchant": "Swiggy", "spent_paise": 75000, "count": 2}
 
@@ -361,6 +363,10 @@ def test_find_subscriptions():
         _t("2026-04-10", 11900, "Spotify", "Subscriptions"),
         _t("2026-05-10", 11900, "Spotify", "Subscriptions"),
         _t("2026-06-10", 11900, "Spotify", "Subscriptions"),
+        # Paying off a card isn't a subscription, however regular.
+        _t("2026-09-20", 1400000, "Cred Club", "Transfers"),
+        _t("2026-10-20", 1400000, "Cred Club", "Transfers"),
+        _t("2026-11-19", 1400000, "Cred Club", "Transfers"),
         # Wildly different amounts
         _t("2026-09-01", 10000, "Airtel", "Bills and utilities"),
         _t("2026-10-01", 90000, "Airtel", "Bills and utilities"),
@@ -392,3 +398,9 @@ def test_card_bill_payment_is_a_transfer():
 def test_read_cas_rejects_non_pdf():
     with pytest.raises(money.StatementError):
         money.read_cas(b"not a pdf", "ABCDE1234F")
+
+
+def test_brand_names():
+    assert money.clean_merchant("JIOMART GROCERY") == "JioMart"
+    assert money.clean_merchant("OPENAI *CHATGPT SUBSCR") == "OpenAI"
+    assert money.clean_merchant("nobroker.rent@hdfcbank") == "NoBroker"

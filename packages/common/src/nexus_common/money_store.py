@@ -279,8 +279,8 @@ async def overview(db: AsyncSession, user_id: uuid.UUID, month: str, today: date
         "upcoming": [
             subscription_out(s) for s in subs if today <= s.next_on <= today + timedelta(days=14)
         ],
-        "invested_paise": sum(h.value_paise or 0 for h in holdings),
-        "invested_cost_paise": sum(h.cost_paise or 0 for h in holdings),
+        "funds_value_paise": sum(h.value_paise or 0 for h in holdings),
+        "funds_cost_paise": sum(h.cost_paise or 0 for h in holdings),
         "has_data": bool(txns) or bool(holdings),
         "gmail_sync": prefs.gmail_sync,
         "gmail_synced_at": prefs.gmail_synced_at,

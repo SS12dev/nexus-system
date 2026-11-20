@@ -52,6 +52,8 @@ export interface ChatState {
    * assistant); organiserChange says what, so an open editor can tell it's its own item. */
   organiserVersion: number;
   organiserChange: { id: string; op: string } | null;
+  /** Bumped when Money gets new transactions or holdings (a sync, an import, an edit). */
+  moneyVersion: number;
   /** Owners and admins: access requests waiting for a decision; null for everyone else. */
   pendingAccess: number | null;
   /** Owners and admins: recovery requests waiting for a decision; null for everyone else. */
@@ -96,6 +98,7 @@ export const initialState: ChatState = {
   routinesVersion: 0,
   organiserVersion: 0,
   organiserChange: null,
+  moneyVersion: 0,
   pendingAccess: null,
   pendingRecovery: null,
   recall: null,
@@ -351,6 +354,8 @@ export function applyEvent(state: ChatState, event: ServerEvent): ChatState {
         routinesVersion: state.routinesVersion + 1,
         organiserVersion: state.organiserVersion + 1,
       };
+    case "money.changed":
+      return { ...state, moneyVersion: state.moneyVersion + 1 };
     case "organiser.changed":
       return {
         ...state,

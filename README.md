@@ -368,6 +368,38 @@ Data: `org_items` (one table for every kind, with a generated `tsv` and an embed
 live in `nexus_common/organiser.py`, shared by the API and the orchestrator. Logs carry ids, kinds
 and counts, never titles or text.
 
+## Money
+
+A read-only view of the owner's finances (`/money`, owner only): where money goes, budgets,
+repeating payments and mutual funds. No bank login, no aggregator, nothing paid, and nothing can
+move money.
+
+- **Alert emails.** With "Bank and card alert emails" on (needs Gmail allowed in Settings), the
+  `money_hourly` job reads new debit and credit alerts (`ALERT_QUERY`, first run 90 days back)
+  and turns them into transactions with fixed rules (`nexus_common/money.py`: HDFC, ICICI, SBI,
+  Axis, Kotak and most Indian banks and cards). OTPs, due-date reminders, mandates and declined
+  payments are skipped. "Check now" queues `money_sync` for one person.
+- **Statements.** Upload a CSV or .xlsx export from net banking; the header row is found wherever
+  it is, and the account comes from its last four digits. The file is parsed in memory and never
+  stored. Importing twice adds nothing, and a statement row matching an alert (same account,
+  amount, direction, within two days) confirms it instead of counting twice.
+- **Mutual funds.** A CAMS or KFintech CAS PDF (uploaded, or read from Gmail when its password is
+  saved) gives holdings via casparser; `money_navs` revalues them every night from AMFI's public
+  NAV file.
+- **Counting.** Spending leaves out transfers between your own accounts (card bill payments,
+  CRED), money put into investments (shown as invested) and rows you leave out. Categories come
+  from merchant names; "Always for this merchant" saves a rule that recategorises past and future
+  rows. Budgets show a pace tick for how far through the month we are. Repeating payments are the
+  same merchant about a month (or a year) apart for about the same amount.
+- **Assistant.** `money_summary` gives totals only (categories, top merchants, budgets, repeating
+  payments, fund value), and only when "Let the assistant read totals" is on (off by default).
+
+Privacy: amounts are whole paise; the bank's narration, import file names and the CAS password
+are encrypted with the token key (`money.seal`); no model reads alerts or statements; Money is
+not in search or Admin; logs carry counts and ids only. "Delete all Money data" removes
+everything. Data: `money_settings`, `money_accounts`, `money_txns`, `money_budgets`,
+`money_holdings`, `money_imports` (migration 0042). API under `/api/money`.
+
 ## Onboarding and routines
 
 ### The setup interview
