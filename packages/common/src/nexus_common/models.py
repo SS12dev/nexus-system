@@ -463,8 +463,15 @@ class Message(Base):
     # {id, name, type}. Shown as chips under the reply and lit up in the orb.
     recalled: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # For search across every chat (nexus_common.find).
+    tsv = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', content)", persisted=True), deferred=True
+    )
 
-    __table_args__ = (Index("ix_messages_chat_created", "chat_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_chat_created", "chat_id", "created_at"),
+        Index("ix_messages_tsv", "tsv", postgresql_using="gin"),
+    )
 
 
 class AuditLog(Base):

@@ -271,6 +271,25 @@ text hash, and every stored vector records its model, so swapping the embedder (
 OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 [infra/litellm/config.yaml](infra/litellm/config.yaml)) re-embeds everything in the background.
 
+## Search across everything
+
+**Cmd-K** (Ctrl-K, or `/` when not typing; the Search button in the sidebar or the phone header)
+opens one bar over everything you have: every message in every chat, the text inside Library
+files, memories, the people and things in Mind, links, routines, apps, agent teams and skills,
+plus the app's pages and quick actions ("New routine", "Upload a file"). The last row asks your
+assistant instead, in a new chat. **Search** (`/search`) shows the same with more results per
+kind and a filter by kind. A chat result opens the chat at the message that matched, highlighted
+(`/c/<id>?m=<message id>`); a file opens its preview (`/library?file=<id>`).
+
+`GET /api/find?q=&kinds=&limit=&meaning=` (`nexus_common/find.py`) matches **words** with
+Postgres full-text search (each word as a prefix, so "invo" finds "invoice"; messages gained a
+generated `tsv` column and GIN index in migration 0039) and titles by substring, and **meaning**
+with the embeddings Nexus already keeps (memories, chat summaries, file chunks, entities). The
+embedder gets 1.2 s; when Ollama is slow or off the bar answers on words alone and says so. Each
+hit's score is a plain sum (title match, word rank, meaning, a small recency nudge), so the order
+is easy to reason about. Everything is scoped to the signed-in person and skips Trash; queries are
+never logged (the `search.done` log line has counts and timings only).
+
 ## Onboarding and routines
 
 ### The setup interview

@@ -19,6 +19,8 @@ import type {
   FeedbackItem,
   FeedbackKind,
   FileItem,
+  FindKind,
+  FindResponse,
   Folder,
   GoogleAccess,
   LinkItem,
@@ -281,6 +283,8 @@ export const api = {
     ),
 
   files: () => request<FileItem[]>("/api/files"),
+  file: (id: string) => request<FileItem>(`/api/files/${id}`),
+  link: (id: string) => request<LinkItem>(`/api/links/${id}`),
   projects: () => request<Project[]>("/api/projects"),
   deleteProject: (id: string) =>
     request<{ queued: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
@@ -309,6 +313,17 @@ export const api = {
     request<{ text: string; offset: number; total_chars: number }>(
       `/api/files/${id}/text?offset=${offset}`,
     ),
+  /** Search across everything; `limit` is per kind. */
+  find: (
+    q: string,
+    opts: { kinds?: FindKind[]; limit?: number; meaning?: boolean; signal?: AbortSignal } = {},
+  ) => {
+    const params = new URLSearchParams({ q });
+    for (const k of opts.kinds ?? []) params.append("kinds", k);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.meaning === false) params.set("meaning", "false");
+    return request<FindResponse>(`/api/find?${params}`, { signal: opts.signal });
+  },
   searchFiles: (q: string) => request<SearchHit[]>(`/api/files/search?q=${encodeURIComponent(q)}`),
   renameFile: (id: string, name: string) =>
     request<FileItem>(`/api/files/${id}`, { method: "PATCH", body: json({ name }) }),

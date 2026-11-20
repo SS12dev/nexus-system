@@ -58,8 +58,18 @@ export function RoutinesPage() {
   const [editing, setEditing] = useState<Routine | "new" | null>(null);
   const [error, setError] = useState("");
   const canEdit = hasRole(user, "member");
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const focus = params.get("open");
+  // "New routine" from the Cmd-K bar opens the form straight away.
+  const askNew = params.get("new");
+  useEffect(() => {
+    if (!askNew) return;
+    if (canEdit) setEditing("new");
+    setParams((p) => {
+      p.delete("new");
+      return p;
+    }, { replace: true });
+  }, [askNew, canEdit, setParams]);
   const timezone = user.timezone || browserTimezone();
 
   const load = useCallback(

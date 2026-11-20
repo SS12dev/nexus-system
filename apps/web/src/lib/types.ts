@@ -1543,3 +1543,40 @@ export interface Universe {
   filaments: { a: string; b: string; w: number }[];
   roots: { area: string; w: number }[];
 }
+
+/** What search across everything can find (nexus_common/find.py). */
+export type FindKind =
+  | "chat"
+  | "file"
+  | "memory"
+  | "person"
+  | "thing"
+  | "link"
+  | "routine"
+  | "app"
+  | "system"
+  | "skill";
+
+export interface FindResult {
+  kind: FindKind;
+  id: string;
+  title: string;
+  /** Where it opens in the app. */
+  url: string;
+  /** Matched words are wrapped in \u0002 … \u0003. */
+  snippet: string;
+  detail: string;
+  at: string | null;
+  score: number;
+  matched: ("title" | "words" | "meaning")[];
+}
+
+export interface FindResponse {
+  query: string;
+  results: FindResult[];
+  /** False when meaning-based search was skipped (embedder slow or off). */
+  semantic: boolean;
+  took_ms: number;
+  /** Kinds with more hits than were returned. */
+  more: FindKind[];
+}

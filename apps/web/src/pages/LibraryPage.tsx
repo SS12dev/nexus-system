@@ -53,7 +53,7 @@ export function LibraryPage() {
   const projectsVersion = useStore((s) => s.projectsVersion);
   const projectDeletionErrors = useStore((s) => s.projectDeletionErrors);
   const [deletingProjects, setDeletingProjects] = useState<Set<string>>(() => new Set());
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const focus = params.get("folder");
   const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
   const [links, setLinks] = useState<LinkItem[]>([]);
@@ -101,6 +101,35 @@ export function LibraryPage() {
       .then(setFolders)
       .catch(() => {});
   }, [foldersVersion]);
+
+  // Search results and other pages open one file (?file=), link (?link=) or the upload
+  // picker (?upload=1) here; the parameter is dropped once used so Back behaves.
+  const openFile = params.get("file");
+  const openLink = params.get("link");
+  const askUpload = params.get("upload");
+  useEffect(() => {
+    if (!openFile && !openLink && !askUpload) return;
+    if (openFile)
+      api
+        .file(openFile)
+        .then((f) => {
+          upsertFile(f);
+          setPreview(f);
+        })
+        .catch(() => setError("That file is no longer in your Library."));
+    if (openLink)
+      api
+        .link(openLink)
+        .then(setLinkPreview)
+        .catch(() => setError("That link is no longer in your Library."));
+    if (askUpload && canEdit) picker.current?.click();
+    setParams((p) => {
+      p.delete("file");
+      p.delete("link");
+      p.delete("upload");
+      return p;
+    }, { replace: true });
+  }, [openFile, openLink, askUpload, canEdit, setParams, upsertFile]);
 
   // A link from the orb opens its project and scrolls to it.
   useEffect(() => {
