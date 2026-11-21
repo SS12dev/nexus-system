@@ -160,6 +160,18 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
     again = await money.sync_user(deps, user)
     assert again["added"] == 0 and again["skipped"] == 2
 
+    # Reading a year back asks Gmail for older mail but never moves the mark backwards.
+    google.requests.clear()
+    back = await money.sync_user(deps, user, back_days=365)
+    assert back["added"] == 0
+    after = int(
+        google.sent("GET", f"{GMAIL}/messages").url.params["q"].split("after:")[1].split()[0]
+    )
+    assert after < (datetime(2026, 11, 18, tzinfo=UTC) - timedelta(days=300)).timestamp()
+    async with sessionmaker() as db:
+        prefs = await db.get(MoneySettings, user)
+        assert prefs.gmail_synced_until == datetime(2026, 11, 18, 14, 0, tzinfo=UTC)
+
     logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
     for secret in ("Swiggy", "swiggy", "Blinkit", "25000", "hdfcbank", "UPI txn"):
         assert secret not in logged, secret

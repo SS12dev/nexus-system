@@ -1,16 +1,21 @@
 import { AlertTriangle, CheckCircle2, FileUp, KeyRound, Loader2, Lock, Mail, Pencil, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api";
 import { formatAgo } from "../../lib/format";
 import { dayLabel, type MoneyImport } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { Select } from "../Select";
+import { HistoryRead, ScreenshotImport } from "./Onboard";
 import { Card, Spinner, Toggle, useAccounts, useMoney, useMoneySettings } from "./parts";
 
 function importSummary(i: MoneyImport): string {
   if (i.status === "failed") return i.error ?? "Couldn't be read";
   if (i.kind === "cas") return `${i.counts.holdings ?? 0} fund holdings`;
+  if (i.kind === "screenshot") {
+    const already = (i.counts.matched ?? 0) + (i.counts.skipped ?? 0);
+    return `${i.counts.added ?? 0} new${already ? `, ${already} already in Money` : ""}`;
+  }
   const bits = [`${i.counts.added ?? 0} new`];
   if (i.counts.matched) bits.push(`${i.counts.matched} matched to alert emails`);
   if (i.counts.skipped) bits.push(`${i.counts.skipped} already here`);
@@ -21,11 +26,19 @@ function importSummary(i: MoneyImport): string {
  * account names, and deleting everything. */
 export function SetupView() {
   const { data: settings, reload } = useMoneySettings();
+  const ready = !!settings;
+  useEffect(() => {
+    // "Add screenshots" on the first screen links here with #screenshots.
+    if (ready && window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ block: "start" });
+  }, [ready]);
   if (!settings) return <Spinner />;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Upload casPasswordSet={settings.cas_password_set} />
       <AlertSync settings={settings} onChange={reload} />
+      <div id="screenshots" className="contents">
+        <ScreenshotImport />
+      </div>
+      <Upload casPasswordSet={settings.cas_password_set} />
       <Imports />
       <CasPassword set={settings.cas_password_set} onChange={reload} />
       <Accounts />
@@ -152,7 +165,7 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
     setBusy(true);
     try {
       await api.moneyUpdateSettings({ gmail_sync });
-      toast(gmail_sync ? "Reading alert emails from the last 90 days now" : "Alert emails won't be read");
+      toast(gmail_sync ? "Reading alert emails from the last 90 days now. Read further back below." : "Alert emails won't be read");
       onChange();
     } catch (e) {
       toast((e as Error).message, "error");
@@ -205,6 +218,7 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
           </button>
         </div>
       ) : null}
+      {settings.gmail_connected && settings.gmail_sync && <HistoryRead />}
     </Card>
   );
 }

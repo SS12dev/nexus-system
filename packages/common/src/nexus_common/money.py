@@ -325,6 +325,7 @@ _BANKS = [
     ("American Express", ("americanexpress", "amex")),
     ("OneCard", ("onecard",)),
 ]
+BANK_NAMES = tuple(name for name, _ in _BANKS)
 # Gmail search that finds most Indian bank and card alerts; parse_alert does the real check.
 ALERT_QUERY = (
     '(debited OR credited OR spent OR withdrawn OR "transaction alert") '

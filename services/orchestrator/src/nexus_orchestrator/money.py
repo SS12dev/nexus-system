@@ -43,6 +43,8 @@ FIRST_SYNC = timedelta(days=90)
 # Read again a little before the last sync, for mail that arrived late.
 OVERLAP = timedelta(days=1)
 MAX_MESSAGES = 1500
+# Reading old mail for history goes further, up to two years of alerts.
+MAX_HISTORY_MESSAGES = 6000
 PARALLEL = 5
 CAS_QUERY = (
     "from:(camsonline.com OR kfintech.com OR karvy.com) has:attachment filename:pdf newer_than:120d"
@@ -71,10 +73,17 @@ def _header(msg: dict, name: str) -> str:
     return ""
 
 
-async def _read_alerts(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings) -> dict:
-    since = (prefs.gmail_synced_until or utcnow() - FIRST_SYNC) - OVERLAP
+async def _read_alerts(
+    deps: TurnDeps, g: Google, user: User, prefs: MoneySettings, back_days: int | None = None
+) -> dict:
+    if back_days:
+        since = utcnow() - timedelta(days=back_days)
+        cap = MAX_HISTORY_MESSAGES
+    else:
+        since = (prefs.gmail_synced_until or utcnow() - FIRST_SYNC) - OVERLAP
+        cap = MAX_MESSAGES
     after = f"after:{int(since.timestamp())}"
-    ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", MAX_MESSAGES)
+    ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", cap)
     for query in (money.CARD_BILL_QUERY, money.EMI_QUERY):
         ids += [i for i in await _list_ids(g, f"{query} {after}", 200) if i not in ids]
     tz = zone(user)
@@ -115,7 +124,11 @@ async def _read_alerts(deps: TurnDeps, g: Google, user: User, prefs: MoneySettin
             for k, v in got.items():
                 counts[k] += v
         row = await store.settings_for(db, user.id)
-        row.gmail_synced_until = newest or utcnow()
+        # Reading old mail never moves the mark backwards.
+        if newest and (row.gmail_synced_until is None or newest > row.gmail_synced_until):
+            row.gmail_synced_until = newest
+        elif row.gmail_synced_until is None:
+            row.gmail_synced_until = utcnow()
         row.gmail_synced_at = utcnow()
         row.last_error = None
         await db.commit()
@@ -177,8 +190,11 @@ async def _read_cas(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings)
     return saved
 
 
-async def sync_user(deps: TurnDeps, user_id: uuid.UUID) -> dict | None:
-    """Read new alerts and the newest CAS for one person. None when they haven't switched it on."""
+async def sync_user(
+    deps: TurnDeps, user_id: uuid.UUID, *, back_days: int | None = None
+) -> dict | None:
+    """Read new alerts and the newest CAS for one person (with back_days, every alert that far
+    back). None when they haven't switched it on."""
     async with deps.sessionmaker() as db:
         user = await db.get(User, user_id)
         prefs = await db.get(MoneySettings, user_id)
@@ -193,7 +209,7 @@ async def sync_user(deps: TurnDeps, user_id: uuid.UUID) -> dict | None:
         db.expunge(user)
     g = Google(deps, user_id)
     try:
-        counts = await _read_alerts(deps, g, user, prefs)
+        counts = await _read_alerts(deps, g, user, prefs, back_days)
         holdings = await _read_cas(deps, g, user, prefs)
     except GoogleError as exc:
         # The text is about the connection (not connected, API off), never the mail itself.
