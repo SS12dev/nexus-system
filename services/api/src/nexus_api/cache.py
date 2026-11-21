@@ -8,13 +8,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from nexus_common.litellm import LiteLLMAdmin
-from nexus_common.modelnames import names_from_model_info
+from nexus_common.modelnames import cached_names
 
 log = logging.getLogger(__name__)
 
 SPEND_TTL_S = 60
-MODELS_TTL_S = 300
-MODELS_KEY = "nexus:cache:model-names"
 
 
 def _spend_key(secret: str) -> str:
@@ -44,18 +42,4 @@ async def cached_spend(redis: Redis, gateway: LiteLLMAdmin, secret: str) -> floa
 async def cached_model_names(redis: Redis, gateway: LiteLLMAdmin) -> dict[str, dict[str, str]]:
     """The real model behind each alias ({"nexus-pro": {"model", "label", "provider"}}), at
     most five minutes old. Empty when LiteLLM can't be reached; the app then shows aliases."""
-    try:
-        raw = await redis.get(MODELS_KEY)
-        if raw is not None:
-            return json.loads(raw)
-    except RedisError as exc:
-        log.warning("Model name cache unavailable: %s", exc)
-    info = await gateway.model_info()
-    if info is None:
-        return {}
-    names = names_from_model_info(info)
-    try:
-        await redis.set(MODELS_KEY, json.dumps(names), ex=MODELS_TTL_S)
-    except RedisError:
-        pass
-    return names
+    return await cached_names(redis, gateway)

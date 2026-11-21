@@ -3,7 +3,24 @@ named the way people know them ("GPT-5.4 mini", "Claude Sonnet 5.5"), so the app
 an alias without saying what it is. LiteLLM's /model/info is the source of truth: swapping a
 model in infra/litellm/config.yaml changes what the app shows with no code change."""
 
+import json
+import logging
 import re
+from typing import TYPE_CHECKING
+
+from redis.exceptions import RedisError
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+    from nexus_common.litellm import LiteLLMAdmin
+
+log = logging.getLogger(__name__)
+
+NAMES_TTL_S = 300
+NAMES_KEY = "nexus:cache:model-names"
+# Chat-facing aliases, cheapest first. Fallback aliases (nexus-pro-fallback) are left out.
+TIERS = ("nexus-nano", "nexus-mini", "nexus-pro", "nexus-max")
 
 # Provider prefixes LiteLLM uses, and how each provider writes its own model names.
 _PROVIDERS = {
@@ -85,3 +102,46 @@ def names_from_model_info(data: dict) -> dict[str, dict[str, str]]:
             "provider": provider(model),
         }
     return out
+
+
+async def cached_names(redis: "Redis", gateway: "LiteLLMAdmin") -> dict[str, dict[str, str]]:
+    """The real model behind each alias, at most five minutes old. Empty when LiteLLM can't be
+    reached; callers then show the aliases."""
+    try:
+        raw = await redis.get(NAMES_KEY)
+        if raw is not None:
+            return json.loads(raw)
+    except RedisError as exc:
+        log.warning("Model name cache unavailable: %s", exc)
+    info = await gateway.model_info()
+    if info is None:
+        return {}
+    names = names_from_model_info(info)
+    try:
+        await redis.set(NAMES_KEY, json.dumps(names), ex=NAMES_TTL_S)
+    except RedisError:
+        pass
+    return names
+
+
+def describe(names: dict[str, dict[str, str]], chat_alias: str) -> str:
+    """A few lines for the assistant's prompt so it can say which model it runs on. Empty when
+    the names are unknown, so the assistant never guesses."""
+    me = names.get(chat_alias)
+    if not me:
+        return ""
+    lineup = [f"{names[t]['label']} ({names[t]['provider']})" for t in TIERS if t in names]
+    fallbacks = [names[f"{t}-fallback"]["label"] for t in TIERS if f"{t}-fallback" in names]
+    lines = [
+        "## Models",
+        f"You are answering on {me['label']} by {me['provider']}, through Nexus's LiteLLM "
+        "gateway. When asked which model you are, say so plainly.",
+        "Team agents are given one of these, cheapest first: " + ", ".join(lineup) + ".",
+    ]
+    if fallbacks:
+        lines.append(
+            "If a provider fails, LiteLLM answers with the OpenAI fallback instead ("
+            + ", ".join(fallbacks)
+            + "); the footer under each reply names the model that answered."
+        )
+    return "\n".join(lines)

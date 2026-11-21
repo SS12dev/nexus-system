@@ -30,7 +30,7 @@ recalled). It runs with Docker Compose on one machine, reached through a Cloudfl
 | sandbox | services/sandbox | runs agent code (`run_code`) with no network and resource limits; document, data and 3D CAD libraries |
 | workbench, egress-proxy | services/workbench, infra/egress-proxy | dev teams' persistent project folders, commands and git; npm/PyPI/GitHub-only network |
 | deployer, docker-gate | services/deployer | builds finished projects as apps at `<app>.servhub.cc`, through a filtered Docker socket |
-| litellm | infra/litellm | the model gateway: aliases nexus-nano/mini/pro/max (OpenAI models), per-user and per-run budgets, spend logs |
+| litellm | infra/litellm | the model gateway: aliases nexus-nano/mini/pro/max (Claude Haiku 5.5, Gemini 3.8 Flash, Claude Sonnet 5.5, Claude Opus 5.5, each falling back to an OpenAI GPT-5.4/5.5 model), per-user and per-run budgets, spend logs |
 | langfuse-web, langfuse-worker, clickhouse | (images) | traces of every model call |
 | postgres, redis (Valkey), minio | infra/postgres | the stores below |
 | traefik, cloudflared | infra | routing and the tunnel |
@@ -56,8 +56,19 @@ nearest memories, past-chat summaries, attached documents) → a nano router dec
 team → the assistant's graph calls LiteLLM with the user's key, streaming over Valkey → the
 reply is stored and a memory job extracts durable facts. Pictures attached to the user's
 latest three messages (screenshots, photos; PNG, JPEG, WebP) go to the model as images, since
-every tier reads them; older ones become a line of text and the assistant can call
+every model reads them; older ones become a line of text and the assistant can call
 `view_image` to look again.
+
+## Models
+
+`infra/litellm/config.yaml` is the source of truth; the app reads it through LiteLLM's
+`/model/info` and shows real model names, never the aliases. The assistant's prompt carries a
+"Models" section naming the model it is answering on right now, and that section wins over this
+list if they differ. Defaults: chat on `nexus-pro` (Claude Sonnet 5.5), team designer on
+`nexus-max` (Claude Opus 5.5), router and memory on `nexus-nano` (Claude Haiku 5.5). Each
+alias falls back to its OpenAI model when its provider fails or its key is missing; the Admin
+Models tab groups calls by the model that actually answered, so fallbacks show by name.
+Settings for which alias each job uses are in Admin › Configuration › Models.
 
 ## Agent teams
 

@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Copy, KeyRound, Mail, RotateCcw, Search, Server } from "lucide-react";
+import { useModelLabel } from "../lib/models";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { confirmAction, toast } from "../components/Feedback";
 import { Select } from "../components/Select";
@@ -351,6 +352,7 @@ function Row({
   draft: ConfigValue | null | undefined;
   onChange: (v: ConfigValue | null) => void;
 }) {
+  const modelName = useModelLabel();
   const editing = draft !== undefined;
   // What the control shows: the draft, the .env value after a pending reset, or what is stored.
   const shown: ConfigValue = draft === null ? opt.default : editing ? draft : opt.value;
@@ -384,7 +386,10 @@ function Row({
         </div>
         <p className="mt-1 text-sm text-slate-400">{opt.help}</p>
         <p className="mt-1 text-xs text-slate-500">
-          <code>{opt.env}</code> · from .env: {show(opt.default, opt)}
+          <code>{opt.env}</code> · from .env:{" "}
+          {typeof opt.default === "string" && opt.default.startsWith("nexus-")
+            ? modelName(opt.default)
+            : show(opt.default, opt)}
         </p>
         {error && <p className="mt-1 text-xs text-rose-400">{error}</p>}
       </div>
@@ -420,6 +425,7 @@ function Control({
   invalid: boolean;
   onChange: (v: ConfigValue) => void;
 }) {
+  const modelName = useModelLabel();
   const box = `rounded-md border bg-ink px-2.5 py-1 text-base text-slate-100 sm:text-sm ${
     invalid ? "border-rose-500" : "border-edge"
   }`;
@@ -445,7 +451,7 @@ function Control({
       <Select id={id} value={String(value)} onChange={(e) => onChange(e.target.value)} className="w-full sm:w-48">
         {opt.choices.map((c) => (
           <option key={c} value={c}>
-            {c === "" ? "Off" : c}
+            {c === "" ? "Off" : c.startsWith("nexus-") ? modelName(c) : c}
           </option>
         ))}
       </Select>

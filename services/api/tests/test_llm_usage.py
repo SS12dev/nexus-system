@@ -89,18 +89,26 @@ async def test_calls_are_grouped_by_model_person_and_purpose(owner, spend_logs):
     await spend_logs(user=me["id"], spend=0.0, cache_hit="True", ms=5)
     await spend_logs(
         user=me["id"],
+        model="claude-haiku-5-5",
         model_group="nexus-nano",
         request_tags=json.dumps(["nexus", "route", "test"]),
         metadata=json.dumps({"additional_usage_values": {"cache_read_input_tokens": 60}}),
     )
     await spend_logs(
+        model="claude-sonnet-5-5",
         model_group="nexus-pro",
         status="failure",
         metadata=json.dumps(
             {"error_information": {"error_class": "RateLimitError", "error_message": "slow down"}}
         ),
     )
-    await spend_logs(call_type="aembedding", model_group="nexus-embed", spend=0, request_tags="[]")
+    await spend_logs(
+        call_type="aembedding",
+        model="bge-m3",
+        model_group="nexus-embed",
+        spend=0,
+        request_tags="[]",
+    )
 
     data = (await owner.get("/api/admin/llm")).json()
     assert data["available"] is True
@@ -111,7 +119,10 @@ async def test_calls_are_grouped_by_model_person_and_purpose(owner, spend_logs):
     assert t["saved_usd"] > 0
 
     models = {m["key"]: m for m in data["by_model"]}
-    assert models["nexus-mini"]["calls"] == 2 and models["nexus-mini"]["cache_hit_rate"] == 0.5
+    # Grouped by the model that answered, not the alias, and named as people know it.
+    assert models["gpt-5.4-mini"]["calls"] == 2 and models["gpt-5.4-mini"]["cache_hit_rate"] == 0.5
+    assert data["model_labels"]["claude-sonnet-5-5"] == "Claude Sonnet 5.5"
+    assert data["model_labels"]["gpt-5.4-mini"] == "GPT-5.4 mini"
     purposes = {p["key"]: p["calls"] for p in data["by_purpose"]}
     assert purposes == {"chat": 3, "route": 1, "embeddings": 1}
     people = {p["key"]: p for p in data["by_user"]}
@@ -120,7 +131,7 @@ async def test_calls_are_grouped_by_model_person_and_purpose(owner, spend_logs):
 
     assert data["failures"][0]["error"] == "RateLimitError slow down"
     assert data["unit"] == "day" and sum(s["calls"] for s in data["series"]) == 5
-    assert "nexus-pro" in data["models"] and "route" in data["purposes"]
+    assert "claude-sonnet-5-5" in data["models"] and "route" in data["purposes"]
     assert data["purpose_labels"]["route"] == "Routing"
 
 
@@ -128,15 +139,15 @@ async def test_filters_narrow_every_figure(owner, spend_logs):
     me = (await owner.get("/api/me")).json()
     other = str(uuid.uuid4())
     await spend_logs(user=me["id"])
-    await spend_logs(user=other, model_group="nexus-pro")
+    await spend_logs(user=other, model="claude-sonnet-5-5", model_group="nexus-pro")
     await spend_logs(user=other, at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=20))
 
     mine = (await owner.get(f"/api/admin/llm?user_id={me['id']}")).json()
     assert mine["totals"]["calls"] == 1
-    pro = (await owner.get("/api/admin/llm?model=nexus-pro")).json()
+    pro = (await owner.get("/api/admin/llm?model=claude-sonnet-5-5")).json()
     assert pro["totals"]["calls"] == 1
     # The model list for the filter still offers every model in the window.
-    assert set(pro["models"]) == {"nexus-mini", "nexus-pro"}
+    assert set(pro["models"]) == {"gpt-5.4-mini", "claude-sonnet-5-5"}
 
     since = (datetime.now(UTC) - timedelta(days=30)).isoformat()
     month = (await owner.get("/api/admin/llm", params={"since": since})).json()

@@ -1,7 +1,8 @@
 """Model-call figures for the Admin page's Models tab, read from LiteLLM's spend logs.
 
 LiteLLM writes one row per model call to `LiteLLM_SpendLogs` in its own database (next to
-Nexus's, see compose.yaml): the alias asked for (nexus-mini), tokens, cost, start and end
+Nexus's, see compose.yaml): the model that answered (claude-sonnet-5-5) and the alias asked
+for (nexus-pro), tokens, cost, start and end
 times, whether its response cache answered, the virtual key's user id (a Nexus user id) and the
 tags Nexus sends with the call. Nexus never asks LiteLLM to keep prompts or replies there, and
 nothing here reads those columns: only counts, costs and timings.
@@ -23,6 +24,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from nexus_common.modelnames import label as model_label
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +84,9 @@ def _rows_sql(has_status: bool) -> str:
     return f"""
         select
             "startTime" as at,
-            coalesce(nullif(model_group, ''), nullif(model, ''), 'unknown') as model,
+            -- The model that actually answered (claude-sonnet-5-5, or the OpenAI fallback),
+            -- not the nexus-* alias it was asked for.
+            coalesce(nullif(model, ''), nullif(model_group, ''), 'unknown') as model,
             nullif("user", '') as user_id,
             coalesce(
                 (select t from jsonb_array_elements_text(
@@ -308,6 +313,7 @@ class SpendLogs:
                 for r in failures
             ],
             "models": sorted({r.model for r in choices}),
+            "model_labels": {r.model: model_label(r.model) for r in choices},
             "purposes": sorted({r.purpose for r in choices}),
         }
 
