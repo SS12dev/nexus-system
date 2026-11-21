@@ -87,7 +87,7 @@ class AgentSpec(BaseModel):
     tier: Tier = "mini"
     tools: list[str] = Field(default_factory=list, max_length=12)
     skills: list[str] = Field(default_factory=list, max_length=12)
-    max_steps: int | None = Field(default=None, ge=1, le=40)
+    max_steps: int | None = Field(default=None, ge=1, le=200)
     # flow only: the agents whose results this one needs before it starts.
     after: list[str] = Field(default_factory=list, max_length=8)
     # flow only: the agent whose work this one reviews, sending it back until it passes.
@@ -349,13 +349,22 @@ def check_spec(spec: AgentSystemSpec, allowed_tools: set[str], skills: set[str])
     """Problems that make a valid-looking spec unusable for this user, in words Nexus can fix."""
     problems = []
     for a in spec.agents:
-        bad = [t for t in a.tools if t not in allowed_tools]
+        # The software team needs only its workbench tools (checked when it is designed);
+        # its other tools, like web search or view_image, are dropped at run time for a user
+        # who hasn't got them.
+        bad = [
+            t
+            for t in a.tools
+            if t not in allowed_tools and not (spec.topology == "dev_project" and a.id in DEV_IDS)
+        ]
         if bad:
             problems.append(
                 f"agent {a.id}: tools not available to this user: {', '.join(bad)} "
                 f"(available: {', '.join(sorted(allowed_tools)) or 'none'})"
             )
-        missing = [s for s in a.skills if s not in skills]
+        # The software team's skills are the house's own; one that is switched off is simply
+        # not loaded at run time, rather than stopping the team.
+        missing = [] if spec.topology == "dev_project" else [s for s in a.skills if s not in skills]
         if missing:
             problems.append(f"agent {a.id}: unknown or disabled skills: {', '.join(missing)}")
     unknown = [t for t in spec.approval.required_for if t not in allowed_tools]

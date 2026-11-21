@@ -90,6 +90,16 @@ class LiteLLMAdmin:
             return False
         return resp.status_code < 400
 
+    async def model_info(self) -> dict | None:
+        """LiteLLM's model list with the real model behind each alias, or None when down."""
+        try:
+            resp = await self._client.get("/model/info", timeout=5)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code >= 400:
+            return None
+        return resp.json()
+
     async def spend(self, key: str) -> float | None:
         try:
             resp = await self._client.get("/key/info", params={"key": key})

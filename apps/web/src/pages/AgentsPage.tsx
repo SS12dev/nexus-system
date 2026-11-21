@@ -1,4 +1,5 @@
 import { ArrowLeft, Bot, Bookmark, FileText, Play, Trash2 } from "lucide-react";
+import { useModelLabel } from "../lib/models";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Guide, GuideHeading } from "../components/Guide";
 import { Markdown } from "../components/Markdown";
@@ -55,9 +56,9 @@ const LIFETIME: Record<AgentSystem["lifetime"], { label: string; help: string }>
 
 const TIER_HELP: Record<string, string> = {
   nano: "Cheapest and fastest: sorting, extracting, short summaries.",
-  mini: "The default: tool use, research, writing, making files.",
-  pro: "About 5x mini: planning, leading a team, reviewing, hard reasoning.",
-  max: "The strongest and dearest; only when you ask for the best model.",
+  mini: "Quick work: simple tool use, short research, light writing.",
+  pro: "The default: research, writing, building, leading a team.",
+  max: "The strongest: planning, design, reviewing, hard reasoning.",
 };
 
 const EVENT_TEXT: Record<string, (d: Record<string, unknown>) => string> = {
@@ -68,6 +69,7 @@ const EVENT_TEXT: Record<string, (d: Record<string, unknown>) => string> = {
 
 export function AgentsPage() {
   const assistant = useAssistantName();
+  const modelName = useModelLabel();
   const { systemId } = useParams();
   const navigate = useNavigate();
   const user = useStore((s) => s.user)!;
@@ -335,7 +337,7 @@ export function AgentsPage() {
                     >
                       Agent and role
                     </th>
-                    <th className="px-3 py-2" title="The model tier: higher tiers are smarter and cost more.">
+                    <th className="px-3 py-2" title="The model this agent runs on, and what that model is used for.">
                       Model
                     </th>
                     <th
@@ -358,7 +360,7 @@ export function AgentsPage() {
                         </details>
                       </td>
                       <td className="px-3 py-2 text-xs" title={TIER_HELP[a.tier]}>
-                        {a.tier}
+                        {modelName(a.tier)}
                         <div className="mt-0.5 text-slate-500">{TIER_HELP[a.tier]?.split(":")[0]}</div>
                       </td>
                       <td className="px-3 py-2">
@@ -478,7 +480,9 @@ export function AgentsPage() {
                         <span className="shrink-0 text-slate-500">{new Date(e.at).toLocaleTimeString()}</span>
                         <span className="shrink-0 font-medium text-slate-300">{e.agent}</span>
                         <span className="min-w-0 truncate text-slate-400">
-                          {(EVENT_TEXT[e.type] ?? (() => e.type))(e.data)}
+                          {(EVENT_TEXT[e.type] ?? (() => e.type))(
+                            e.data.tier ? { ...e.data, tier: modelName(String(e.data.tier)) } : e.data,
+                          )}
                         </span>
                       </li>
                     ))}

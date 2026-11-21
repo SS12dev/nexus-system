@@ -164,11 +164,19 @@ All model calls go to LiteLLM using four aliases, so a model swap is a change to
 
 | Alias | Model | Used for |
 | --- | --- | --- |
-| `nexus-nano` | gpt-5.4-nano | routing, extraction, titles, summaries |
-| `nexus-mini` | gpt-5.4-mini | plain chat (`CHAT_MODEL`), most sub-agents |
-| `nexus-pro` | gpt-5.4 | planning and designing agent systems |
-| `nexus-max` | gpt-5.5 | escalation only |
+| `nexus-nano` | Claude Haiku 5.5 | routing, extraction, titles, summaries |
+| `nexus-mini` | Gemini 3.8 Flash | quick tool use and long inputs |
+| `nexus-pro` | Claude Sonnet 5.5 | plain chat (`CHAT_MODEL`), most sub-agents, the software team's builders and tester |
+| `nexus-max` | Claude Opus 5.5 | designing agent systems (`DESIGN_MODEL`), leads, planners and reviewers |
 | `nexus-embed` | bge-m3 in Ollama on the host | memory and document search |
+
+Each chat alias falls back to an OpenAI model (GPT-5.4 nano, GPT-5.4 mini, GPT-5.4, GPT-5.5)
+when its provider fails or its key is missing. Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY` (`./scripts/secrets.sh set NAME`). The app shows the real model name, not the
+alias.
+
+Quality comes first: the defaults favour the stronger tiers, and budgets are generous (team run
+$5, software run $25, any run at most $100). Lower them in Admin › Configuration to save money.
 
 LiteLLM runs in Compose with an exact-match Redis cache and sends every generation to Langfuse.
 To use another LiteLLM (for example on a server later), set `LITELLM_BASE_URL` and its
@@ -518,7 +526,7 @@ calls `build_agent_system`. Before Nexus answers a message, the cheapest tier (`
 nexus-nano) decides whether it is work for a team; when it is, Nexus's first move is to build
 one. Nexus is an orchestrator: any real piece of work (research, writing, analysis, code,
 documents) goes to a team, as small as one agent, and Nexus itself only does direct one-step
-things (chat, a quick fact, one look at mail or calendar, adding a task) and manages teams. The architect model (`DESIGN_MODEL`, nexus-pro) writes an
+things (chat, a quick fact, one look at mail or calendar, adding a task) and manages teams. The architect model (`DESIGN_MODEL`, nexus-max) writes an
 AgentSystemSpec: a small team, a topology, each agent's role, instructions, model tier, tools and
 skills. The spec is validated against what you may use, compiled to a LangGraph graph and run on
 the orchestrator queue; the team's card in the chat shows each agent live, and the result and
@@ -542,8 +550,8 @@ reuses for similar asks (Nexus only keeps a team up front when you say so).
   the earlier result (`based_on`; its first agent looks at the old files and lists what is
   wrong before changing anything) or continues the software project. Nexus can also look
   things up itself with `find_past_work`.
-- **Model tiers:** the spec picks nano, mini or pro per agent. nexus-max is only for a team's
-  lead, and only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
+- **Model tiers:** the spec picks a tier per agent, pro by default and max for leads, planners
+  and reviewers; nexus-max only for roles in `MAX_TIER_ROLES`. An agent whose model call fails retries one
   tier up; non-lead agents drop a tier once 80% of the run's budget is spent.
 - **Budgets:** each run gets its own LiteLLM key capped at its budget (`DEFAULT_RUN_BUDGET_USD`,
   at most `MAX_RUN_BUDGET_USD` and what you have left this period), and a run whose estimate
@@ -591,11 +599,11 @@ software team, `dev_project`, in a workbench project:
 
 | Stage | Agent (tier) | Does |
 | --- | --- | --- |
-| 1. Brief | Researcher (mini) | Looks at similar apps, picks a house stack (static with Vite, Vite + FastAPI, or Vite + Express), writes `BRIEF.md` |
-| 2. Plan | Architect (pro) | Writes `PLAN.md`: features, file layout, acceptance criteria, test plan; posted in the chat |
-| 3. Build | Frontend and backend builders (mini) | Build side by side in their own folders and commit as they go; no backend for a static app |
-| 4. Test | Tester (mini) | Unit tests and a headless Playwright smoke test; writes `TEST_REPORT.md` |
-| 5. Review | Reviewer (pro) | Approves, or sends numbered fixes back to stage 3, at most three rounds |
+| 1. Brief | Researcher (pro) | Looks at good apps of the kind, picks a house stack (static with Vite, Vite + FastAPI, or Vite + Express), writes `BRIEF.md` with numbered requirements |
+| 2. Plan | Architect (max) | Writes `PLAN.md` as a design: features, design direction, data model, API contract, file layout, failure cases, acceptance criteria, test plan; posted in the chat |
+| 3. Build | Frontend and backend builders (pro) | Build side by side in their own folders, test logic as they go and commit; no backend for a static app |
+| 4. Test | Tester (pro), then Nexus | Unit, API and Playwright journey tests; writes `TEST_REPORT.md`. Nexus then runs every suite, the code checks and the screenshots itself |
+| 5. Review | Reviewer (max) | Reads the measured results, looks at the screenshots, may run read-only commands; approves, or sends numbered fixes back to stage 3, at most three rounds |
 | 6. Release | (code) | Commits what is left, saves the project to the Library, pushes it to its own private GitHub repo and, once every test passes, runs it as an app (unapproved work only after the last round, with its open points listed, and never over a live app) |
 
 The plan is posted and the team carries on; say "plan first" or "wait for me" and it stops
@@ -613,7 +621,21 @@ sends back any still broken. When the live app was found broken, a green fix rep
 with open review points. A static app a builder made in its own subfolder is moved to the
 project root, and the deployer also finds it there and refuses a build with no `index.html`
 (that once served nginx's welcome page as the app).
-Each agent may take 40 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($3), still
+Every agent works from engineering skills in `library/core` (technical design, test-driven
+development, systematic debugging, API design, data modelling, security review, frontend design,
+testing strategy, production readiness, code review) and the role standards in
+`library/instructions/roles/`.
+
+After the tester, plain code runs the checks a professional team gates on, counted from the
+tools' own output (`run_gates` in `systems/suites.py`): the TypeScript type check, a linter
+(the project's own ESLint, or Biome added by Nexus when there is none), `npm audit` of the
+dependencies that ship, and for a FastAPI back end Ruff with security rules and `pip-audit`.
+It also photographs the built app at phone and laptop width (`.nexus/shots/`). The reviewer gets
+the counts and the pictures (via `view_image`, which reads images in the project folder); type
+errors, lint errors and high-severity vulnerabilities are fixes, warnings are not. The final
+reply lists the check results next to the tests.
+
+Each agent may take 100 steps, and a run's default budget is `DEV_RUN_BUDGET_USD` ($25), still
 capped by `MAX_RUN_BUDGET_USD`; a lower budget Nexus picks itself, without the user naming a sum,
 is ignored, so the team always has room for its three review rounds and the deploy. It needs the Run code (exec) permission.
 

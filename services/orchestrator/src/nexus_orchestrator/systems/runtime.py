@@ -224,12 +224,12 @@ class RunContext:
         return 0.0
 
     async def tier_for(self, agent: AgentSpec, escalated: bool) -> str:
-        """The spec's tier, adjusted by policy: nexus-max only for the lead when the user's role
-        allows it; one tier up after a failure; non-lead agents one tier down once less than
-        20% of the run's budget is left."""
+        """The spec's tier, adjusted by policy: nexus-max only when the user's role allows it;
+        one tier up after a failure; non-lead agents one tier down once less than 20% of the
+        run's budget is left."""
         is_lead = agent.id == self.spec.lead.id
         tier = agent.tier
-        if tier == "max" and not (is_lead and self.allow_max):
+        if tier == "max" and not self.allow_max:
             tier = "pro"
         if escalated:
             tier = self.escalate(agent, tier)
@@ -241,7 +241,7 @@ class RunContext:
 
     def escalate(self, agent: AgentSpec, tier: str) -> str:
         up = tier_up(tier)
-        if up == "max" and not (agent.id == self.spec.lead.id and self.allow_max):
+        if up == "max" and not self.allow_max:
             return tier
         return up
 

@@ -10,6 +10,12 @@ export interface Budget {
   spend_usd: number | null;
 }
 
+export interface ModelName {
+  model: string;
+  label: string;
+  provider: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -22,6 +28,8 @@ export interface User {
   created_at: string;
   last_login_at: string | null;
   budget: Budget;
+  /** The real model behind each alias, e.g. {"nexus-pro": {model, label, provider}} (only on /api/me). */
+  models?: Record<string, ModelName>;
   /** Set while an admin has maintenance mode on (only on /api/me). */
   notice?: string | null;
   /** Owners and admins: access requests waiting for a decision (only on /api/me). */

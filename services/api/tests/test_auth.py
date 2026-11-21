@@ -9,7 +9,7 @@ async def test_first_user_becomes_owner(client_for):
     assert me["email"] == "owner@example.com"
     assert me["role"] == "owner"
     assert me["status"] == "active"
-    assert me["budget"]["max_usd"] == "50.00"
+    assert me["budget"]["max_usd"] == "500.00"
 
 
 async def test_uninvited_user_is_refused(owner, client_for):

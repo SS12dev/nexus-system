@@ -596,9 +596,29 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
             parts.append("too large or too many, not saved: " + ", ".join(result.skipped_files))
         return "\n\n".join(parts)
 
+    async def project_image(path: str) -> str | None:
+        """An image file in this run's workbench project, queued to be shown, or None."""
+        project = ctx.workbench_project
+        if deps.workbench is None or not project or not path:
+            return None
+        try:
+            got = await deps.workbench.read(str(user_id), project, path)
+        except WorkbenchError:
+            return None
+        if got.get("encoding") != "base64" or got.get("truncated"):
+            return None
+        data = base64.b64decode(got["content"])
+        kind = image_type(data)
+        if kind is None:
+            return None
+        key = uuid.uuid4().hex[:8]
+        ctx.images[key] = (PurePath(path).name, kind, data)
+        return f"{path} is shown to you below. [image {key}]"
+
     async def view_image(name: str) -> str:
         """Look at an image: a render or preview this run made (e.g. out/rocket.png saved as
-        rocket.png), a chart, or a picture or screenshot the user gave, by file name or id. The
+        rocket.png), a chart, a picture or screenshot the user gave, by file name or id, or an
+        image in the project folder by its path (e.g. .nexus/shots/phone.jpg). The
         picture is shown to you right after this call. Use it to check your own visual output
         against the request before you report it (missing, misplaced, wrongly sized or ugly
         parts), or to look again at a screenshot from earlier in the chat."""
@@ -625,6 +645,10 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
                 if f is None:
                     f = await db.scalar(found.order_by(File.created_at.desc()).limit(1))
         if f is None:
+            # A picture in the run's project folder (a screenshot of the app a dev team built).
+            shown = await project_image(name.strip())
+            if shown:
+                return shown
             return f"No image called {name}. Save it to out/ with run_code first."
         if f.size > MAX_IMAGE_BYTES:
             return f"{f.name} is too large to look at; render a smaller PNG."

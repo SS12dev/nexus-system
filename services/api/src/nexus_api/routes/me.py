@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select
 
 from nexus_api.appsettings import maintenance_notice
-from nexus_api.cache import cached_spend
+from nexus_api.cache import cached_model_names, cached_spend
 from nexus_api.deps import (
     CurrentUser,
     DbDep,
@@ -115,6 +115,7 @@ async def me(
         phone=user.phone,
         share_usage=user.share_usage,
         channels=channels,
+        models=await cached_model_names(redis, gateway),
         terms_version=user.terms_version,
         terms_current=TERMS_VERSION,
         terms_needed=terms_needed(user),

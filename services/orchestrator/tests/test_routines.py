@@ -146,7 +146,7 @@ async def test_skipped_without_budget(deps, gateway, routine, sessionmaker, sett
         user = await db.get(User, uid)
         key = await ensure_user_key(db, settings, gateway, user)
         await db.commit()
-    gateway.keys[key]["spend"] = 49.99  # owner budget is 50
+    gateway.keys[key]["spend"] = 499.99  # owner budget is 500
     assert await routines.run_routine(deps, rid, datetime.now(UTC)) == "skipped"
 
 
@@ -267,7 +267,7 @@ async def test_routine_runs_skip_the_team_router(deps, routine):
         assert await routines.run_routine(deps, rid, datetime.now(UTC)) == "ok"
     finally:
         deps.settings.route_model = ""
-    assert [c["model"] for c in deps.factory_calls] == ["nexus-mini"]
+    assert [c["model"] for c in deps.factory_calls] == ["nexus-pro"]
 
 
 async def test_push_delivery(deps, routine, sessionmaker, monkeypatch):
