@@ -20,6 +20,8 @@ import type {
   MoneyTxn,
   Plan,
   Savings,
+  SecretDetails,
+  TxnMatches,
   Subscription,
   SubscriptionSave,
   Subscriptions,
@@ -259,9 +261,21 @@ export const api = {
   moneyTxns: (q: TxnQuery = {}) =>
     request<TxnPage>(`/api/money/transactions${orgQuery(q)}`),
   moneyTxn: (id: string) => request<MoneyTxn>(`/api/money/transactions/${id}`),
+  moneyTxnMatches: (id: string) => request<TxnMatches>(`/api/money/transactions/${id}/matches`),
+  moneyScanLinks: () =>
+    request<{ transfers: number; card_payments: number; refunds: number; savings: number; self_transfers: number }>("/api/money/links/scan", { method: "POST" }),
   moneyUpdateTxn: (
     id: string,
-    body: { category?: string; for_merchant?: boolean; excluded?: boolean; note?: string },
+    body: {
+      category?: string;
+      for_merchant?: boolean;
+      excluded?: boolean;
+      note?: string;
+      unpair?: boolean;
+      pair_with?: string;
+      pair_as?: "transfer" | "refund";
+      asset_id?: string | null;
+    },
   ) =>
     request<{ txn: MoneyTxn; also_changed: number }>(`/api/money/transactions/${id}`, {
       method: "PATCH",
@@ -301,6 +315,29 @@ export const api = {
     request<Asset>("/api/money/savings", { method: "POST", body: json(body) }),
   moneyEditSaving: (id: string, body: Partial<AssetIn>) =>
     request<Asset>(`/api/money/savings/${id}`, { method: "PATCH", body: json(body) }),
+  moneySavingDetails: (id: string) => request<SecretDetails>(`/api/money/savings/${id}/details`),
+  moneyLoanDetails: (id: string) => request<SecretDetails>(`/api/money/loans/${id}/details`),
+  /** The whole of Money as an Excel file; locked when a password is given. */
+  moneyExport: async (password: string): Promise<{ blob: Blob; name: string }> => {
+    const resp = await fetch("/api/money/export", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: json({ password: password || null }),
+    });
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try {
+        const body = await resp.json();
+        if (typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(resp.status, detail);
+    }
+    const name = /filename="([^"]+)"/.exec(resp.headers.get("content-disposition") ?? "")?.[1] ?? "finances.xlsx";
+    return { blob: await resp.blob(), name };
+  },
   moneyDeleteSaving: (id: string) => request<void>(`/api/money/savings/${id}`, { method: "DELETE" }),
   moneyLoans: () => request<Loans>("/api/money/loans"),
   moneyAddLoan: (body: LoanIn) => request<Loan>("/api/money/loans", { method: "POST", body: json(body) }),

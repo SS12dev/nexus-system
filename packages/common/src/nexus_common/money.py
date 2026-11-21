@@ -15,6 +15,7 @@ This module is pure parsing and arithmetic so it can be tested without a databas
 (routes/money.py) and the orchestrator (money.py) do the storing and fetching.
 """
 
+import base64
 import csv
 import hashlib
 import io
@@ -25,19 +26,60 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from nexus_common.google import decrypt, encrypt
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+
+from nexus_common.google import _fernets as token_fernets
 from nexus_common.settings import Settings
 
 # --- Storage helpers ------------------------------------------------------------------------
 
 
+def _own_fernets(settings: Settings) -> list[Fernet]:
+    keys = [k.strip() for k in settings.money_encryption_keys.split(",") if k.strip()]
+    return [
+        Fernet(base64.urlsafe_b64encode(hashlib.sha256(b"nexus-money:" + k.encode()).digest()))
+        for k in keys
+    ]
+
+
 def seal(settings: Settings, text: str) -> str:
-    """Encrypt a piece of financial text (a narration, a statement password) for the database."""
-    return encrypt(settings, text) if text else ""
+    """Encrypt a piece of financial text (a narration, an account number, a statement
+    password) for the database: under MONEY_ENCRYPTION_KEYS when set, else the token keys."""
+    if not text:
+        return ""
+    own = _own_fernets(settings)
+    return (own or token_fernets(settings))[0].encrypt(text.encode()).decode()
 
 
 def unseal(settings: Settings, value: str | None) -> str:
-    return (decrypt(settings, value) or "") if value else ""
+    """ "" when empty or sealed under a key that is no longer configured."""
+    if not value:
+        return ""
+    try:
+        keys = [*_own_fernets(settings), *token_fernets(settings)]
+        return MultiFernet(keys).decrypt(value.encode()).decode()
+    except InvalidToken:
+        return ""
+
+
+def sealed_current(settings: Settings, value: str) -> bool:
+    """Whether a sealed value is under the key `seal` uses now (else it should be moved)."""
+    own = _own_fernets(settings)
+    try:
+        (own or token_fernets(settings))[0].decrypt(value.encode())
+        return True
+    except InvalidToken:
+        return False
+
+
+def last4(number: str | None) -> str | None:
+    """The last four letters or digits of an account, folio or policy number, to show masked."""
+    chars = re.sub(r"[^0-9A-Za-z]", "", number or "")
+    return chars[-4:].upper() or None
+
+
+def masked(last: str | None) -> str | None:
+    return f"••••{last}" if last else None
 
 
 def paise(value: str | float | Decimal | int) -> int:
@@ -167,6 +209,11 @@ def categorise(merchant: str, narration: str = "", *, credit: bool = False,
     if credit and is_emi_conversion(hay):
         # The card gives the purchase back and bills it as instalments instead.
         return "Transfers"
+    if credit and _INTEREST.search(hay):
+        return "Income"
+    if credit and _MATURITY.search(hay):
+        # A deposit coming back is your own money returning, not income.
+        return "Investments"
     if not credit and _EMI.search(hay) and not _SAVING.search(hay):
         return "Loans and EMIs"
     for category, words in _RULES:
@@ -180,6 +227,38 @@ def categorise(merchant: str, narration: str = "", *, credit: bool = False,
     if re.search(r"\b[a-z0-9._-]+@(?:ok\w+|ybl|paytm|ibl|axl|upi|apl|icici|hdfcbank|sbi)\b", hay):
         return "Transfers"
     return "Other"
+
+
+_INTEREST = re.compile(r"\bint(?:erest)?\.?\s*(?:pd|paid|cr|credit)|\binterest\b(?!.*charg)", re.I)
+_MATURITY = re.compile(
+    r"\bmaturity\b|\bmatured\b|premature|\bredemption\b|\bredeemed\b"
+    r"|\b(?:fd|td|rd|deposit)\s*(?:a/c\s*)?(?:closure|closed|clos|liquidat)",
+    re.I,
+)
+
+# Which kind of saving a payment or credit mentions, to tie it to one the person tracks.
+_SAVING_KINDS: list[tuple[str, re.Pattern]] = [
+    ("rd", re.compile(r"\brd\b|recurring\s*dep|\brd\s*inst", re.I)),
+    ("ppf", re.compile(r"\bppf\b|public\s*provident", re.I)),
+    ("nps", re.compile(r"\bnps\b|\bpran\b|protean|nsdl\s*cra", re.I)),
+    ("fd", re.compile(r"\bfd\b|fixed\s*dep|term\s*dep|\btd\b|\bstdr\b|\bmod\b", re.I)),
+    ("gold", re.compile(r"\bsgb\b|sovereign\s*gold|digital\s*gold|augmont|safegold", re.I)),
+]
+
+
+def saving_kind(text: str) -> str | None:
+    """ "rd", "ppf", "nps", "fd" or "gold" when the text names one, else None."""
+    return next((kind for kind, rx in _SAVING_KINDS if rx.search(text)), None)
+
+
+def is_self_payee(merchant: str, owner_name: str | None) -> bool:
+    """A UPI payment to someone with the person's own first and last name: money moved to
+    another of their accounts (often one Money doesn't know about)."""
+    names = [w for w in re.findall(r"[a-z]+", (owner_name or "").lower()) if len(w) > 1]
+    if len(names) < 2:
+        return False
+    words = set(re.findall(r"[a-z]+", merchant.lower()))
+    return names[0] in words and names[-1] in words
 
 
 # An instalment of a loan or a card EMI. "emi" only as a word: "premium" isn't one.
@@ -271,6 +350,9 @@ _DEBIT = re.compile(
     re.I,
 )
 _CREDIT = re.compile(r"\b(credited|received|deposited|refund(?:ed)?|reversed)\b", re.I)
+_PAID_DONE = re.compile(
+    r"has been (?:successfully )?(?:paid|debited|deducted|processed)|successfully paid", re.I
+)
 _NOT_A_TRANSACTION = re.compile(
     r"\b(otp|one time password|will be (?:debited|credited)|is due|minimum amount due|"
     r"statement (?:is|for)|e-?mandate|autopay (?:registration|request)|requested money|"
@@ -279,7 +361,8 @@ _NOT_A_TRANSACTION = re.compile(
 )
 _ACCOUNT = re.compile(
     r"(?:a/?c|acct|account|card)(?:\s*(?:no\.?|number|ending(?:\s*(?:with|in))?))?"
-    r"[\s:.]*[x*#]+\s?(\d{3,4})\b|\bending\s*(?:with|in)?\s*(\d{4})\b|\b[xX*]{1,8}(\d{4})\b",
+    r"[\s:.]*[x*#]+\s?(\d{3,4})\b|\bending\s*(?:with|in)?\s*(\d{4})\b|\b[xX*]{1,8}(\d{4})\b"
+    r"|\b\d{4,6}[xX*]{4,10}(\d{4})\b",
     re.I,
 )
 _DATES = [
@@ -297,8 +380,13 @@ _REF = re.compile(
     re.I,
 )
 _MERCHANT_PATTERNS = [
-    re.compile(r"\binfo[-:\s]+(?:upi/)?(?:p2[ma]/)?(?:\d+/)?"
+    # "Info: VIN*PLAYSTATION": the card network's prefix (VIN*, PYU*, RAZ*) goes.
+    re.compile(r"\binfo[-:\s]+(?:upi/)?(?:p2[ma]/)?(?:\d+/)?(?:[A-Z]{2,5}\*)?"
                r"([A-Za-z][\w .&@-]{1,40}?)(?:/|\.|$|\s{2})", re.I),
+    # "Sender: RAVI KUMAR (VPA: ...)" in HDFC's UPI credit alerts.
+    re.compile(r"\bsender\s*:\s*([A-Za-z][\w .&-]{1,40}?)\s*(?:\(|\.\s|,|$)", re.I),
+    # "Your EZVIZ bill, set up through E-mandate, has been successfully paid".
+    re.compile(r"\byour\s+([A-Za-z][\w .&-]{1,40}?)\s+bill\b", re.I),
     re.compile(r"\bvpa\s+([\w.-]+@[\w.-]+)(?:\s+([A-Z][A-Z0-9 &.]{2,40}?))?"
                r"(?=\s+on\b|\.|\s*$|\s+ref)", re.I),
     re.compile(r";\s*([A-Za-z][\w .&-]{1,40}?)\s+credited\b", re.I),
@@ -326,10 +414,22 @@ _BANKS = [
     ("OneCard", ("onecard",)),
 ]
 BANK_NAMES = tuple(name for name, _ in _BANKS)
-# Gmail search that finds most Indian bank and card alerts; parse_alert does the real check.
+# Words in the senders' addresses (alerts@hdfcbank.net, credit_cards@icici.bank.in: Indian
+# banks moved to .bank.in in 2025, and "bank.in" alone catches every one of them). Gmail's
+# from: matches a word of the address, so one word covers every domain a bank uses.
+ALERT_SENDERS = (
+    "bank.in", "hdfcbank", "icici", "icicibank", "sbi", "sbicard", "onlinesbi", "axisbank", "kotak",
+    "kotakbank", "idfcfirstbank", "yesbank", "indusind", "federalbank", "aubank",
+    "bankofbaroda", "bobcard", "pnb", "unionbankofindia", "canarabank", "rblbank",
+    "americanexpress", "aexp", "onecard", "scapia", "jupiter", "fi.money",
+)  # fmt: skip
+# Gmail search for bank and card alerts: anything from a bank's address, or an email that
+# reads like one. Wide on purpose (bank offers come too); parse_alert does the real check.
+# Promotions isn't skipped: Gmail files some banks' alerts there.
 ALERT_QUERY = (
-    '(debited OR credited OR spent OR withdrawn OR "transaction alert") '
-    "(Rs OR INR OR ₹) -category:promotions -category:social"
+    "({" + " ".join(f"from:{s}" for s in ALERT_SENDERS) + "} OR "
+    '((debited OR credited OR spent OR withdrawn OR "transaction alert" OR "has been used") '
+    '(Rs OR "Rs." OR INR OR ₹))) -category:social'
 )
 
 
@@ -423,7 +523,12 @@ def _merchant(text: str, direction: str) -> str:
             # "VPA swiggy@icici SWIGGY": the name after the handle reads better.
             name = m.group(2)
         name = re.sub(r"\b(?:a/?c|account|acct)\b.*$", "", name, flags=re.I).strip()
-        if name and not re.fullmatch(r"[\dxX* ]+", name) and name.lower() not in ("your", "you"):
+        if (
+            name
+            and not re.fullmatch(r"[\dxX* ]+", name)
+            and name.lower() not in ("your", "you")
+            and not name.lower().startswith("your ")
+        ):
             return clean_merchant(name)
     return "Unknown"
 
@@ -433,7 +538,10 @@ def parse_alert(subject: str, body: str, received: date, sender: str = "") -> Pa
     due-date reminder, a declined payment, a promotion). The bank comes from the sender's
     address when there is one, since the text names other banks too ("VPA x@icici")."""
     text = " ".join(f"{subject}. {body}".split())[:4000]
-    if _NOT_A_TRANSACTION.search(text):
+    if (stop := _NOT_A_TRANSACTION.search(text)) and not (
+        # An autopay that has gone through is a payment; only its set-up notices aren't.
+        re.fullmatch(r"e-?mandate", stop.group(1), re.I) and _PAID_DONE.search(text)
+    ):
         return None
     amount = _amount(text)
     if not amount:
@@ -447,9 +555,12 @@ def parse_alert(subject: str, body: str, received: date, sender: str = "") -> Pa
         return None
     mask = next(g for g in account.groups() if g)
     low = text.lower()
-    card = bool(re.search(r"\bcard\b", low[max(0, account.start() - 30) : account.end() + 5]))
+    near = low[max(0, account.start() - 30) : account.end() + 5]
+    # A debit card spends from the bank account; only a credit card is an account of its own.
+    card = bool(re.search(r"\bcard\b", near)) and not re.search(r"\bdebit\s+card\b", low)
     channel = (
-        "upi" if re.search(r"\b(upi|vpa)\b", low)
+        "autopay" if re.search(r"e-?mandate|auto\s*-?pay|standing instruction|\bnach\b", low)
+        else "upi" if re.search(r"\b(upi|vpa)\b", low)
         else "card" if card or "card" in low
         else "atm" if re.search(r"\batm\b|withdrawn", low)
         else "neft" if "neft" in low
@@ -493,7 +604,8 @@ def _safe_paise(text: str) -> int | None:
 
 _NUM = r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)"
 _BALANCE = re.compile(
-    r"\b(?:avl\.?|avbl\.?|available|clear|closing)?\s*bal(?:ance)?\b(?:\s*(?:is|in a/c))?[\s:.-]*"
+    r"\b(?:avl\.?|avbl\.?|available|clear|closing)?\s*bal(?:ance)?\b"
+    r"(?:\s*in\s+(?:your\s+)?(?:a/c|account))?(?:\s*is)?[\s:.-]*"
     r"(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)",
     re.I,
 )
@@ -588,7 +700,8 @@ class EmiBooking:
     account_mask: str
     institution: str | None
     principal_paise: int
-    months: int
+    # None when the email leaves the term to an attached schedule (ICICI does).
+    months: int | None
     rate_bp: int
     emi_paise: int | None
     booked_on: date
@@ -598,7 +711,8 @@ class EmiBooking:
 _EMI_BOOKED = re.compile(
     r"\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:converted|booked|processed|approved)"
     r"|\bsuccessfully\s+(?:converted|booked)|\bemi\s+(?:is\s+)?(?:booked|confirmed)\b"
-    r"|\bconverted\s+(?:in)?to\s+(?:an?\s+)?emi\b",
+    r"|\bconverted\s+(?:in)?to\s+(?:an?\s+)?emi\b|\bwe\s+have\s+converted\b"
+    r"|\binto\s+equated\s+monthly\s+instal",
     re.I,
 )
 _EMI_OFFER = re.compile(
@@ -630,15 +744,17 @@ def parse_emi_booking(
     text = " ".join(f"{subject}. {body}".split())[:4000]
     if not re.search(r"\bemi\b", text, re.I) or not _EMI_BOOKED.search(text):
         return None
-    if _EMI_OFFER.search(text):
+    # Offers read "eligible", "convert now" up top; a booking's footer advertising other EMI
+    # deals ("click here", "EMI Fest Offers") doesn't make it an offer.
+    if _EMI_OFFER.search(text[:300]):
         return None
     account = _ACCOUNT.search(text)
     amount = _amount(text)
     tenure = _TENURE_WORD.search(text) or _TENURE.search(text)
-    if not account or not amount or not tenure:
+    if not account or not amount:
         return None
-    months = int(tenure.group(1))
-    if not 2 <= months <= 84:
+    months = int(tenure.group(1)) if tenure else None
+    if months is not None and not 2 <= months <= 84:
         return None
     rate_bp = 0
     if not re.search(r"no[\s-]*cost", text, re.I) and (r := _RATE.search(text)):
@@ -655,7 +771,7 @@ def parse_emi_booking(
         months=months,
         rate_bp=rate_bp if rate_bp < 6000 else 0,
         emi_paise=emi_paise,
-        booked_on=received,
+        booked_on=_date(text, received) or received,
         merchant=merchant if merchant != "Unknown" else "",
     )
 
@@ -1012,6 +1128,8 @@ class Txn:
     category: str
     excluded: bool = False
     account_id: str | None = None
+    # How it was paid; "autopay" (an e-mandate or standing instruction) marks a repeating one.
+    channel: str = "other"
 
 
 def month_bounds(month: str) -> tuple[date, date]:
@@ -1020,6 +1138,10 @@ def month_bounds(month: str) -> tuple[date, date]:
     start = date(y, m, 1)
     end = date(y + (m == 12), m % 12 + 1, 1)
     return start, end
+
+
+# Categories that aren't spending: money in, money moved, money saved.
+NOT_SPENDING = frozenset({"Income", "Transfers", "Investments"})
 
 
 def counted(t: Txn) -> bool:
@@ -1033,12 +1155,25 @@ def spending(t: Txn) -> bool:
     return t.direction == "debit" and counted(t) and t.category != "Investments"
 
 
+def refund(t: Txn) -> bool:
+    """Money back in a spending category (a refund paired with its purchase, or a friend's share
+    of a bill): it lowers that category's spending rather than counting as income."""
+    return t.direction == "credit" and counted(t) and t.category not in NOT_SPENDING
+
+
+def income(t: Txn) -> bool:
+    """Money in that is earned. A deposit or fund coming back (Investments) is your own money
+    returning, and a refund is spending undone."""
+    return t.direction == "credit" and counted(t) and t.category == "Income"
+
+
 def summarise(txns: list[Txn]) -> dict:
-    spent = sum(t.amount_paise for t in txns if spending(t))
+    back = [t for t in txns if refund(t)]
+    spent = sum(t.amount_paise for t in txns if spending(t)) - sum(t.amount_paise for t in back)
     essential = sum(
         t.amount_paise for t in txns if spending(t) and t.category in ESSENTIAL_CATEGORIES
-    )
-    income = sum(t.amount_paise for t in txns if t.direction == "credit" and counted(t))
+    ) - sum(t.amount_paise for t in back if t.category in ESSENTIAL_CATEGORIES)
+    income_paise = sum(t.amount_paise for t in txns if income(t))
     invested = sum(
         t.amount_paise
         for t in txns
@@ -1051,18 +1186,27 @@ def summarise(txns: list[Txn]) -> dict:
             by_cat[t.category] += t.amount_paise
             by_merchant[t.merchant][0] += t.amount_paise
             by_merchant[t.merchant][1] += 1
+    for t in back:
+        by_cat[t.category] -= t.amount_paise
+        if t.merchant in by_merchant:
+            by_merchant[t.merchant][0] -= t.amount_paise
+    by_cat = {c: v for c, v in by_cat.items() if v > 0}
     return {
         "spent_paise": spent,
         "essential_paise": essential,
-        "income_paise": income,
+        "income_paise": income_paise,
         "invested_paise": invested,
-        "net_paise": income - spent - invested,
+        "net_paise": income_paise - spent - invested,
         "categories": sorted(
             ({"category": c, "spent_paise": v} for c, v in by_cat.items()),
             key=lambda x: -x["spent_paise"],
         ),
         "merchants": sorted(
-            ({"merchant": m, "spent_paise": v[0], "count": v[1]} for m, v in by_merchant.items()),
+            (
+                {"merchant": m, "spent_paise": v[0], "count": v[1]}
+                for m, v in by_merchant.items()
+                if v[0] > 0
+            ),
             key=lambda x: -x["spent_paise"],
         )[:10],
         "count": len(txns),
@@ -1155,7 +1299,8 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
     """Payments that repeat (subscriptions, rent, bills, SIPs): the same merchant at least
     three times about a month apart (or twice about a year apart), for about the same amount
     (within 15%; the latest may differ, which is a price change). Lapsed ones (no payment for
-    two cycles) and card bill payments are left out."""
+    two cycles) and card bill payments are left out. A payment the bank says was taken by
+    autopay (an e-mandate) is a subscription from its first charge, for the person to confirm."""
     by: dict[str, list[Txn]] = defaultdict(list)
     for t in txns:
         if (
@@ -1212,6 +1357,24 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
                 )
             )
             break
+        else:
+            auto = [t for t in items if t.channel == "autopay"]
+            if auto and (today - auto[-1].occurred_on).days <= 45:
+                last = auto[-1]
+                found.append(
+                    Subscription(
+                        merchant=merchant,
+                        category=last.category,
+                        cadence="monthly",
+                        typical_paise=last.amount_paise,
+                        last_on=last.occurred_on,
+                        next_on=add_months(last.occurred_on, 1),
+                        count=len(auto),
+                        monthly_paise=last.amount_paise,
+                        last_paise=last.amount_paise,
+                        previous_paise=auto[-2].amount_paise if len(auto) > 1 else 0,
+                    )
+                )
     return sorted(found, key=lambda s: -s.monthly_paise)
 
 
@@ -1246,3 +1409,53 @@ def find_emis(txns: list[Txn], today: date) -> list[EmiSeen]:
         months = {(t.occurred_on.year, t.occurred_on.month) for t in items}
         found.append(EmiSeen(merchant, account_id, latest, len(months), items[0].occurred_on, last))
     return sorted(found, key=lambda e: -e.monthly_paise)
+
+
+# --- Balance check -------------------------------------------------------------------------------
+
+
+@dataclass
+class Gap:
+    """Money the balances say moved on a day that no transaction here explains: a missing
+    row (positive: something came in; negative: something went out) or a duplicate."""
+
+    on: date
+    gap_paise: int
+
+
+def reconcile(rows: list[tuple[date, int, int | None]]) -> tuple[int, list[Gap]]:
+    """Check an account's transactions against the balances the bank printed beside them.
+
+    `rows` are (day, signed amount, balance after or None), oldest day first. Within a day the
+    bank's order isn't known, so the day's closing balance is the printed balance no other row
+    follows from. Each day's opening balance plus its movements should give that closing
+    balance; any difference is a gap. Returns (days checked, gaps)."""
+    by_day: dict[date, list[tuple[int, int | None]]] = defaultdict(list)
+    for on, signed, balance in rows:
+        by_day[on].append((signed, balance))
+    running: int | None = None
+    checked = 0
+    gaps: list[Gap] = []
+    for on in sorted(by_day):
+        day = by_day[on]
+        printed = [(s_, b) for s_, b in day if b is not None]
+        flow = sum(s_ for s_, _ in day)
+        if not printed:
+            if running is not None:
+                running += flow
+            continue
+        opens = {b - s_ for s_, b in printed}
+        closing = next(
+            (b for _, b in reversed(printed) if b not in opens),
+            printed[-1][1],
+        )
+        if running is None:
+            # First balance seen: start from it, nothing to check yet.
+            running = closing
+            continue
+        checked += 1
+        gap = closing - (running + flow)
+        if abs(gap) >= 100:
+            gaps.append(Gap(on, gap))
+        running = closing
+    return checked, gaps

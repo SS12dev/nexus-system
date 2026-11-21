@@ -23,13 +23,44 @@ export interface MoneyTxn {
   direction: Direction;
   merchant: string;
   category: string;
-  category_by: "auto" | "rule" | "user";
+  category_by: "auto" | "rule" | "user" | "pair";
   channel: string;
   source: "alert" | "statement" | "manual";
   confirmed: boolean;
   excluded: boolean;
   note: string;
+  /** Tied to another row: money between your accounts, a card bill payment, or a refund. */
+  pair_id: string | null;
+  pair_kind: PairKind | null;
+  /** The saving this went into or came back from. */
+  asset_id: string | null;
   narration?: string | null;
+  /** Details only: the other half of the pair and the saving's name. */
+  paired?: Linked | null;
+  saving?: string | null;
+}
+
+export type PairKind = "transfer" | "card" | "refund";
+
+export interface Linked {
+  id: string;
+  occurred_on: string;
+  amount_paise: number;
+  direction: Direction;
+  merchant: string;
+  account: string | null;
+}
+
+export interface TxnMatches {
+  transfers: Linked[];
+  refunds: Linked[];
+  savings: { id: string; name: string; kind: AssetKind }[];
+}
+
+export interface BalanceCheck {
+  days_checked: number;
+  gap_count: number;
+  gaps: { on: string; gap_paise: number }[];
 }
 
 export interface TxnPage {
@@ -143,6 +174,8 @@ export interface AccountView {
   owed_paise?: number | null;
   owed_from_limit?: boolean;
   emis?: { id: string; name: string; emi_paise: number }[];
+  /** Banks: whether the transactions add up to the balances the bank printed. */
+  balance_check?: BalanceCheck | null;
 }
 
 export interface AccountEdit {
@@ -173,6 +206,8 @@ export interface Loan {
   first_due_on: string;
   status: "active" | "closed";
   note: string | null;
+  /** The loan account number's last four ("••••9001"); the full number needs the eye button. */
+  account_no_masked: string | null;
   paid: number;
   left: number;
   outstanding_paise: number;
@@ -219,6 +254,8 @@ export interface LoanIn {
   emi_paise?: number | null;
   first_due_on: string;
   note?: string | null;
+  /** Left out: unchanged. "": cleared. */
+  account_no?: string;
 }
 
 export type AssetKind = "fd" | "rd" | "ppf" | "epf" | "nps" | "gold" | "other";
@@ -238,10 +275,20 @@ export interface Asset {
   payout: boolean;
   status: "active" | "closed";
   note: string | null;
+  branch: string | null;
+  /** Only the last four show ("••••5678"); the number and nominee are encrypted. */
+  account_no_masked: string | null;
+  has_nominee: boolean;
+  nominee_relation: string | null;
   value_paise: number;
   maturity_value_paise: number | null;
   monthly_paise: number;
   matured: boolean;
+  /** From payments tied to it: the last one in, whether this month's has gone in, and when
+   * money came back (a maturity). */
+  last_paid_on?: string | null;
+  paid_this_month?: boolean;
+  received_on?: string | null;
 }
 
 export interface AssetIn {
@@ -257,6 +304,17 @@ export interface AssetIn {
   payout?: boolean;
   status?: "active" | "closed";
   note?: string | null;
+  branch?: string | null;
+  /** Left out: unchanged. "": cleared. */
+  account_no?: string;
+  nominee?: string;
+  nominee_relation?: string | null;
+}
+
+/** What the eye button shows, decrypted. */
+export interface SecretDetails {
+  account_no: string | null;
+  nominee?: string | null;
 }
 
 export interface Savings {

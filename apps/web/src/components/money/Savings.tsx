@@ -5,7 +5,8 @@ import { api } from "../../lib/api";
 import { dayLabel, daysUntil, fullDay, isoToday, percent, rupees, type Asset, type AssetIn, type AssetKind, type Investments } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { SERIES } from "./Charts";
-import { FormDialog, moneyText, percentText, read, type Field } from "./FormDialog";
+import { FormDialog, moneyText, percentText, read, secretChange, type Field } from "./FormDialog";
+import { SecretLine } from "./Secret";
 import { Card, Empty, Spinner, Stat, useMoney } from "./parts";
 
 const ADD: { kind: AssetKind; label: string }[] = [
@@ -139,9 +140,36 @@ function AssetTile({ a, onEdit }: { a: Asset; onEdit: () => void }) {
         {["epf", "nps", "gold", "other"].includes(a.kind) &&
           `${rupees(a.amount_paise, { whole: true })} on ${a.balance_on ? dayLabel(a.balance_on) : "—"}${a.contribution_paise ? ` · ${rupees(a.contribution_paise, { whole: true })} a month` : ""}`}
       </p>
+      {(a.last_paid_on || a.received_on) && (
+        <p className="mt-1 text-xs text-slate-500">
+          {a.received_on
+            ? `Money came back on ${dayLabel(a.received_on)}${a.status === "active" ? ": mark it closed if it has ended" : ""}`
+            : a.kind === "rd" && a.status === "active" && !a.paid_this_month && !a.matured && new Date().getDate() > Number(a.start_on?.slice(8, 10) ?? 1) + 3
+              ? `This month's instalment not seen yet · last paid ${dayLabel(a.last_paid_on!)}`
+              : `Last paid on ${dayLabel(a.last_paid_on!)}`}
+        </p>
+      )}
+      <SecretLine
+        label={NUMBER_LABEL[a.kind]}
+        masked={a.account_no_masked}
+        branch={a.branch && (a.kind === "epf" ? a.branch : `${a.branch} branch`)}
+        nominee={a.has_nominee ? a.nominee_relation || "set" : null}
+        reveal={() => api.moneySavingDetails(a.id)}
+        onAdd={onEdit}
+      />
     </div>
   );
 }
+
+const NUMBER_LABEL: Record<AssetKind, string> = {
+  fd: "FD account number",
+  rd: "RD account number",
+  ppf: "PPF account number",
+  epf: "UAN or member ID",
+  nps: "PRAN",
+  gold: "Folio or account number",
+  other: "Account or reference number",
+};
 
 const HELP: Record<AssetKind, string> = {
   fd: "The deposit, its rate, and the start and maturity dates from the FD receipt.",
@@ -181,6 +209,35 @@ function AssetDialog({ kind, a, defaults, onClose }: { kind: AssetKind; a?: Asse
         ] as Field[])),
     ...(kind === "fd" ? ([{ key: "payout", label: "Interest is paid out to my account", kind: "check", value: a?.payout ? "1" : "", hint: "Rather than added to the deposit." }] as Field[]) : []),
     ...(a ? ([{ key: "closed", label: "Closed or withdrawn", kind: "check", value: a.status === "closed" ? "1" : "" }] as Field[]) : []),
+    {
+      key: "for_family",
+      label: "For whoever has to claim it",
+      kind: "heading",
+      value: "",
+      hint: "Kept encrypted. Only the last four digits and the relation show until you press the eye, and they go into Export my finances.",
+    },
+    {
+      key: "account_no",
+      label: NUMBER_LABEL[kind],
+      kind: "text",
+      value: "",
+      optional: true,
+      half: true,
+      placeholder: kind === "epf" ? "100912345678" : kind === "nps" ? "110012345678" : "Printed on the receipt or passbook",
+      secret: a ? { saved: a.account_no_masked, reveal: async () => (await api.moneySavingDetails(a.id)).account_no } : undefined,
+    },
+    { key: "branch", label: kind === "epf" ? "Employer or EPFO office" : "Branch", kind: "text", value: a?.branch ?? "", optional: true, half: true },
+    {
+      key: "nominee",
+      label: "Nominee",
+      kind: "text",
+      value: "",
+      optional: true,
+      half: true,
+      placeholder: "Their full name",
+      secret: a ? { saved: a.has_nominee ? "A nominee is" : null, reveal: async () => (await api.moneySavingDetails(a.id)).nominee ?? null } : undefined,
+    },
+    { key: "nominee_relation", label: "They are your", kind: "text", value: a?.nominee_relation ?? "", optional: true, half: true, placeholder: "Mother, spouse…" },
   ];
   const remove = async () => {
     if (!a) return;
@@ -212,6 +269,10 @@ function AssetDialog({ kind, a, defaults, onClose }: { kind: AssetKind; a?: Asse
           rate_bp: read.percent(v.rate) ?? 0,
           payout: v.payout === "1",
           status: v.closed === "1" ? "closed" : "active",
+          branch: v.branch.trim() || null,
+          nominee_relation: v.nominee_relation.trim() || null,
+          account_no: secretChange(v, "account_no"),
+          nominee: secretChange(v, "nominee"),
         };
         if (term) Object.assign(body, { start_on: v.start_on, maturity_on: v.maturity_on });
         if (balance) Object.assign(body, { contribution_paise: read.money(v.contribution ?? "") ?? 0, maturity_on: v.maturity_on || null });

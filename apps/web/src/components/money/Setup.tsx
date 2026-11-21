@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, FileUp, KeyRound, Loader2, Lock, Mail, Pencil, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, EyeOff, FileSpreadsheet, FileUp, KeyRound, Loader2, Lock, Mail, Pencil, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api";
@@ -42,6 +42,9 @@ export function SetupView() {
       <Imports />
       <CasPassword set={settings.cas_password_set} onChange={reload} />
       <Accounts />
+      <div id="export" className="contents">
+        <Export />
+      </div>
       <Assistant on={settings.assistant_access} onChange={reload} />
       <Privacy />
     </div>
@@ -408,13 +411,87 @@ function Assistant({ on, onChange }: { on: boolean; onChange: () => void }) {
   );
 }
 
+/** Everything in Money as one Excel workbook, optionally locked with a password. */
+function Export() {
+  const [password, setPassword] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      const { blob, name } = await api.moneyExport(password);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      toast(password ? `Downloaded ${name}, locked with your password` : `Downloaded ${name}`);
+      setPassword("");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="Export my finances">
+      <p className="text-sm text-slate-400">
+        One Excel workbook with everything in Money: a summary with your net worth, accounts and cards, savings and deposits (with account
+        numbers, maturity dates and nominees), mutual funds, loans and EMIs, subscriptions and insurance. For your own records, or so
+        your family knows what you have and where to claim it.
+      </p>
+      <label htmlFor="export-password" className="mt-3 block text-sm text-slate-300">
+        Password to open the file <span className="text-slate-500">(recommended)</span>
+      </label>
+      <span className="relative mt-1 block">
+        <input
+          id="export-password"
+          type={visible ? "text" : "password"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+          maxLength={128}
+          placeholder="Leave empty for an unlocked file"
+          className="w-full rounded-md border border-edge bg-ink px-2.5 py-1.5 pr-9 text-base text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none sm:text-sm"
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((x) => !x)}
+          className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-white"
+          aria-label={visible ? "Hide the password" : "Show the password"}
+        >
+          {visible ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </span>
+      <p className="mt-1 text-xs text-slate-500">
+        The file holds full account numbers, so lock it if it will leave this device. Excel, Numbers and LibreOffice ask for the password
+        to open it (AES-256). Nexus doesn't keep the password: if it's forgotten, export again.
+      </p>
+      <button
+        onClick={download}
+        disabled={busy}
+        className="mt-3 flex items-center gap-1.5 rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-ink hover:bg-sky-400 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} {password ? "Download locked Excel" : "Download Excel"}
+      </button>
+      <p className="mt-2 text-xs text-slate-500">Each export is noted in the audit log.</p>
+    </Card>
+  );
+}
+
 function Privacy() {
   return (
     <Card title="Privacy and deleting">
       <ul className="list-disc space-y-1 pl-4 text-sm text-slate-400">
         <li>Everything stays on your own server. No bank login, no aggregator, no third party.</li>
         <li>Statements and alerts are read with fixed rules here; no AI model sees them.</li>
-        <li>The bank's wording of each transaction, file names and your CAS password are encrypted in the database.</li>
+        <li>
+          The bank's wording of each transaction, file names, your CAS password, and account numbers and nominees on savings and loans are
+          encrypted in the database.
+        </li>
         <li>Only you (the owner) can open Money. It isn't in search, the Admin pages or the logs.</li>
         <li>Read-only: nothing here can move money.</li>
       </ul>

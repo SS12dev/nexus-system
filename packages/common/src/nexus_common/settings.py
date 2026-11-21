@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # Encrypts stored Google tokens: comma-separated, the first encrypts and any decrypts, so a
     # new key goes first and the old one is dropped later. Empty uses SECRET_KEY, as before.
     token_encryption_keys: str = ""
+    # Encrypts Money's sensitive text (narrations, account numbers, nominees, the CAS password)
+    # under keys of its own, so a leak of the other keys doesn't open it. Same rules: the first
+    # encrypts, any decrypts. Empty keeps using the token keys; values sealed before are moved
+    # over in the background once it is set.
+    money_encryption_keys: str = ""
     session_cookie_name: str = "nexus_session"
     session_ttl_days: int = 30
     # Force the Secure flag on cookies; otherwise it follows the request scheme.
