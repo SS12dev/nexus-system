@@ -76,6 +76,7 @@ import {
   zoneCity,
 } from "../lib/widgets";
 import { useStore } from "../store/chat";
+import { useCommandBar } from "./CommandBar";
 import { useWidgetPointedAt } from "./Screen";
 import { useAssistantName } from "../lib/assistant";
 import { useWide } from "../lib/media";
@@ -1010,7 +1011,10 @@ function CustomWidgetCard({ widget: w, compact }: { widget: Widget; compact: boo
     const onMessage = async (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
       const m = e.data;
-      if (!win || e.source !== win || !m || m.nexus !== 1 || typeof m.id !== "number") return;
+      if (!win || e.source !== win || !m || m.nexus !== 1) return;
+      // Cmd-K pressed inside the card: the frame keeps its own keys, so it tells the app.
+      if (m.shortcut === "search") return useCommandBar.getState().setOpen(true);
+      if (typeof m.id !== "number") return;
       // The frame's origin is opaque ("null"), so replies can only be addressed with "*"; they
       // go to this frame's window and nowhere else.
       const reply = (body: Record<string, unknown>) => win.postMessage({ nexus: 1, id: m.id, ...body }, "*");

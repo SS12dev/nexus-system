@@ -131,7 +131,11 @@ SHIM = (
     'open:function(u){return call("open",{url:u});},read:function(u){return call("read",{url:u});},'
     'ask:function(t){return call("ask",{text:t});},chat:{'
     'fork:function(){return call("chat.fork");},'
-    'new:function(t){return call("chat.new",{text:t||""});}}};})();</script>'
+    'new:function(t){return call("chat.new",{text:t||""});}}};'
+    # Cmd-K (Ctrl-K) inside a card still opens the app's search: a frame keeps its own keys.
+    'if(!alone)window.addEventListener("keydown",function(e){if((e.metaKey||e.ctrlKey)&&'
+    '(e.code==="KeyK"||(e.key||"").toLowerCase()==="k")){e.preventDefault();'
+    'parent.postMessage({nexus:1,shortcut:"search"},"*");}},true);})();</script>'
 )
 
 _CHECKS = [
