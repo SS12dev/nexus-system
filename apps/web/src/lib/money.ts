@@ -280,6 +280,62 @@ export interface Assumptions {
   fund_high_bp: number;
   new_sip_paise: number;
   emergency_months: number;
+  save_target_bp: number;
+  health_cover_paise: number | null;
+  life_cover_paise: number | null;
+  dependants: boolean | null;
+}
+
+export type HealthStatus = "good" | "watch" | "act" | "unknown";
+
+export interface HealthCheck {
+  key: "emergency" | "saving" | "emis" | "cards" | "bills" | "health" | "life";
+  title: string;
+  status: HealthStatus;
+  value: string;
+  target: string;
+  body: string;
+  link: string | null;
+}
+
+export interface Health {
+  verdict: "good" | "watch" | "act";
+  counts: Record<HealthStatus, number>;
+  checks: HealthCheck[];
+  next_step: HealthCheck | null;
+  safe_to_spend: {
+    known: boolean;
+    expected_income_paise: number;
+    keep_paise: number;
+    spent_paise: number;
+    committed_paise: number;
+    left_paise: number;
+    per_day_paise: number;
+    days_left: number;
+    status: HealthStatus;
+  };
+  balance: {
+    income_paise: number;
+    essentials_paise: number;
+    lifestyle_paise: number;
+    saved_paise: number;
+    guide: { essentials: number; lifestyle: number; saved: number };
+  };
+  ready_to_invest: boolean;
+  months_of_history: number;
+  targets: Pick<Assumptions, "save_target_bp" | "emergency_months" | "health_cover_paise" | "life_cover_paise" | "dependants">;
+  unknown_balances: number;
+}
+
+/** Each part of a month as a share of income, for the essentials / lifestyle / saved balance.
+ * Saved can be negative (more out than in); shares are of income, so they add up to 1. */
+export function balanceShares(b: Health["balance"]): { essentials: number; lifestyle: number; saved: number } | null {
+  if (b.income_paise <= 0) return null;
+  return {
+    essentials: b.essentials_paise / b.income_paise,
+    lifestyle: b.lifestyle_paise / b.income_paise,
+    saved: b.saved_paise / b.income_paise,
+  };
 }
 
 export interface ForecastPoint {

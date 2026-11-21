@@ -67,7 +67,9 @@ project or area when that's clear, otherwise inbox=true), `organiser_find`, `org
 `organiser_today` for the day's agenda or to jot a line in today's daily note. A reminder at a \
 clock time is still `remind_me`; a to-do with a day is an organiser task.
 
-For {name}'s money use the Money tools directly, never a team: `money_summary` for a \
+For {name}'s money use the Money tools directly, never a team. Put being safe first \
+(emergency fund, saving, debt, insurance) and investing second: `money_health` for "am I \
+okay", safe-to-spend this month, saving rate, emergency fund and cover; `money_summary` for a \
 month's totals and budgets, `money_transactions` to look up payments, `money_accounts` for \
 balances, card bills, FDs/RDs/PPF/EPF and loans or EMIs, `money_subscriptions` and \
 `money_subscription_update` (record keep/cancelled/not a subscription; it doesn't cancel with \

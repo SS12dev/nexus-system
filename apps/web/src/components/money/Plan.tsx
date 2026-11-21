@@ -16,8 +16,8 @@ const HORIZONS = [
   { months: 120, label: "10 years" },
 ];
 
-/** Net worth now and where it's heading, what a monthly investment would change, goals and
- * the assumptions behind it all. */
+/** Net worth now and where it's heading, goals (an emergency fund first), what a monthly
+ * investment would change once the cushion is there, and the assumptions behind it all. */
 export function PlanView() {
   const [months, setMonths] = useState(24);
   const [sip, setSip] = useState<number | null>(null);
@@ -27,13 +27,21 @@ export function PlanView() {
     return () => clearTimeout(t);
   }, [sip]);
   const { data, error } = useMoney(() => api.moneyPlan({ months, new_sip_paise: debounced ?? undefined }), [months, debounced]);
-  const [dialog, setDialog] = useState<"assumptions" | "goal" | Goal | null>(null);
+  const [dialog, setDialog] = useState<"assumptions" | "goal" | "emergency" | Goal | null>(null);
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!data) return <Spinner />;
   const end = data.points[data.points.length - 1];
   const s = data.start;
   const i = data.inputs;
   const sipNow = sip ?? data.assumptions.new_sip_paise;
+  // The cushion comes before growth: a goal for it is offered until there is one, and the
+  // investing card says so while it's short.
+  const safe = data.emergency_months != null && data.emergency_months >= data.assumptions.emergency_months;
+  const emergencyGoal = data.goals.some((g) => /emergenc|cushion|rainy/i.test(g.name))
+    ? null
+    : Math.max(data.assumptions.emergency_months * i.spend_paise - data.liquid_paise, 0) > 0
+      ? data.assumptions.emergency_months * i.spend_paise
+      : null;
   const sliderMax = Math.max(Math.ceil(Math.max(i.surplus_paise, 2000000) / 100000) * 100000, sipNow);
   return (
     <>
@@ -100,7 +108,28 @@ export function PlanView() {
               </p>
             )}
           </Card>
+          <Goals
+            goals={data.goals}
+            total={data.goals_monthly_paise}
+            surplus={i.surplus_paise}
+            onAdd={() => setDialog("goal")}
+            onEdit={(g) => setDialog(g)}
+            emergency={emergencyGoal}
+            onAddEmergency={() => setDialog("emergency")}
+          />
           <Card title="Try investing each month">
+            {!safe && (
+              <p className="mb-3 flex items-start gap-2 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-xs leading-relaxed text-slate-300">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" style={{ color: "#fab219" }} aria-hidden />
+                <span>
+                  Safety first: your emergency fund covers {data.emergency_months ?? 0} of {data.assumptions.emergency_months} months. Investing is for money you
+                  won't need for five years or more, so it comes after the cushion.{" "}
+                  <Link to="/money/health" className="text-sky-300 hover:text-sky-200">
+                    See the health checks
+                  </Link>
+                </span>
+              </p>
+            )}
             <p className="mb-3 text-xs text-slate-500">
               Move the slider to see the forecast with a monthly SIP at {percent(data.assumptions.fund_return_bp)} a year. Nothing is saved until you
               choose to.
@@ -144,7 +173,6 @@ export function PlanView() {
               </button>
             )}
           </Card>
-          <Goals goals={data.goals} total={data.goals_monthly_paise} surplus={i.surplus_paise} onAdd={() => setDialog("goal")} onEdit={(g) => setDialog(g)} />
         </div>
         <div className="grid min-w-0 content-start gap-4">
           <Card
@@ -181,7 +209,15 @@ export function PlanView() {
         </div>
       </div>
       {dialog === "assumptions" && <AssumptionsDialog a={data.assumptions} saved={data.saved_assumptions} plan={data} onClose={() => setDialog(null)} />}
-      {dialog && dialog !== "assumptions" && <GoalDialog goal={dialog === "goal" ? null : dialog} onClose={() => setDialog(null)} />}
+      {dialog === "emergency" && emergencyGoal != null && (
+        <GoalDialog
+          goal={null}
+          initial={{ name: "Emergency fund", target_paise: emergencyGoal, saved_paise: Math.min(data.liquid_paise, emergencyGoal) }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog && typeof dialog === "object" && <GoalDialog goal={dialog} onClose={() => setDialog(null)} />}
+      {dialog === "goal" && <GoalDialog goal={null} onClose={() => setDialog(null)} />}
     </>
   );
 }
@@ -217,7 +253,33 @@ function InsightRow({ x }: { x: Insight }) {
   );
 }
 
-function Goals({ goals, total, surplus, onAdd, onEdit }: { goals: Goal[]; total: number; surplus: number; onAdd: () => void; onEdit: (g: Goal) => void }) {
+function Goals({
+  goals,
+  total,
+  surplus,
+  onAdd,
+  onEdit,
+  emergency,
+  onAddEmergency,
+}: {
+  goals: Goal[];
+  total: number;
+  surplus: number;
+  onAdd: () => void;
+  onEdit: (g: Goal) => void;
+  emergency: number | null;
+  onAddEmergency: () => void;
+}) {
+  const offer = emergency != null && (
+    <button onClick={onAddEmergency} className="mt-3 flex w-full items-center gap-2 rounded-lg border border-dashed border-edge px-3 py-2 text-left text-sm text-slate-300 hover:bg-edge/40">
+      <Target size={14} className="shrink-0 text-slate-500" />
+      <span className="min-w-0 flex-1">
+        Start with an emergency fund of {rupees(emergency, { whole: true })}
+        <span className="block text-xs text-slate-500">Your emergency months of usual spending: the cushion that keeps a bad month from becoming debt.</span>
+      </span>
+      <Plus size={14} className="shrink-0 text-sky-300" />
+    </button>
+  );
   return (
     <Card
       title="Goals"
@@ -264,16 +326,32 @@ function Goals({ goals, total, surplus, onAdd, onEdit }: { goals: Goal[]; total:
       ) : (
         <p className="text-sm text-slate-500">An emergency fund, a trip, a laptop, a down payment: set the amount and date, and see what it takes each month.</p>
       )}
+      {offer}
     </Card>
   );
 }
 
-function GoalDialog({ goal, onClose }: { goal: Goal | null; onClose: () => void }) {
+function GoalDialog({
+  goal,
+  initial,
+  onClose,
+}: {
+  goal: Goal | null;
+  initial?: { name: string; target_paise: number; saved_paise: number };
+  onClose: () => void;
+}) {
   const fields: Field[] = [
-    { key: "name", label: "Goal", kind: "text", value: goal?.name ?? "", placeholder: "Emergency fund, trip to Japan…" },
-    { key: "target", label: "Amount", kind: "money", value: moneyText(goal?.target_paise), half: true },
+    { key: "name", label: "Goal", kind: "text", value: goal?.name ?? initial?.name ?? "", placeholder: "Emergency fund, trip to Japan…" },
+    { key: "target", label: "Amount", kind: "money", value: moneyText(goal?.target_paise ?? initial?.target_paise), half: true },
     { key: "by_on", label: "By", kind: "date", value: goal?.by_on ?? addMonths(isoToday(), 12), half: true },
-    { key: "saved", label: "Already put aside", kind: "money", value: moneyText(goal?.saved_paise ?? 0), optional: true },
+    {
+      key: "saved",
+      label: "Already put aside",
+      kind: "money",
+      value: moneyText(goal?.saved_paise ?? initial?.saved_paise ?? 0),
+      optional: true,
+      hint: initial ? "What's in the bank and FDs now; change it if some of that is meant for other things." : undefined,
+    },
   ];
   return (
     <FormDialog

@@ -363,7 +363,56 @@ def build_money_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         )
         return "\n".join(lines)
 
+    async def money_health() -> str:
+        """How financially safe the user is: emergency fund months, saving rate against their
+        target, EMIs against income, credit card use and overdue bills, whether the bank covers
+        the next 30 days of bills, health and life cover; how much is safe to spend for the
+        rest of this month; and the balance of essentials, lifestyle and saving. Start here for
+        "am I okay?", "how much can I spend?" or "am I saving enough?"."""
+        await note("money_health")
+        async with deps.sessionmaker() as db:
+            today = await _open(db)
+            if today is None:
+                return OFF
+            hv = await store.health_view(db, user_id, today)
+        c = hv["counts"]
+        lines = [
+            "<health>",
+            f"Overall: {hv['verdict']} ({c['good']} good, {c['watch']} to watch, {c['act']} "
+            f"to act on, {c['unknown']} not known).",
+        ]
+        for x in hv["checks"]:
+            lines.append(
+                f"- {x['title']} [{x['status']}]: {x['value']} (aim: {x['target']}). {x['body']}"
+            )
+        if hv["next_step"]:
+            lines.append(f"Most important next: {hv['next_step']['title']}.")
+        safe = hv["safe_to_spend"]
+        if safe["known"]:
+            lines.append(
+                f"This month: expected income {r(safe['expected_income_paise'])}, keep "
+                f"{r(safe['keep_paise'])} as savings, spent {r(safe['spent_paise'])}, still due "
+                f"{r(safe['committed_paise'])}; safe to spend {r(safe['left_paise'])} over "
+                f"{safe['days_left']} days ({r(safe['per_day_paise'])} a day)."
+            )
+        b = hv["balance"]
+        if b["income_paise"]:
+            inc = b["income_paise"]
+            lines.append(
+                f"Usual month: essentials {b['essentials_paise'] / inc:.0%}, lifestyle "
+                f"{b['lifestyle_paise'] / inc:.0%}, saved {b['saved_paise'] / inc:.0%} of "
+                "income (a common guide is 50/30/20)."
+            )
+        lines.append(
+            "Ready to start investing for growth: "
+            + ("yes" if hv["ready_to_invest"] else "not yet, safety first")
+            + ". Health and life cover are what the user told Money; Nexus can't see policies."
+            "</health>"
+        )
+        return "\n".join(lines)
+
     return {
+        "money_health": money_health,
         "money_summary": money_summary,
         "money_transactions": money_transactions,
         "money_accounts": money_accounts,

@@ -110,6 +110,87 @@ def test_forecast_range_widens_with_uneven_months():
     assert last["low_paise"] < last["net_worth_paise"] < last["high_paise"]
 
 
+def _snap(**kw) -> plan.Snapshot:
+    base = dict(
+        income_paise=10000000, spend_paise=6000000, essential_paise=4000000, emis_paise=500000,
+        liquid_paise=40000000, cash_paise=30000000, balances_known=True, cards=1,
+        card_owed_paise=2000000, card_limit_paise=20000000, overdue_bills=0, due_30_paise=1500000,
+        month_income_paise=10000000, month_spent_paise=3000000, month_committed_paise=500000,
+        days_left=10, months_of_history=3,
+    )  # fmt: skip
+    return plan.Snapshot(**{**base, **kw})
+
+
+def test_health_checks_put_safety_first():
+    covered = plan.Assumptions(health_cover_paise=100000000, dependants=False)
+    out = plan.health(_snap(), covered)
+    by = {c["key"]: c for c in out["checks"]}
+    # ₹4L against ₹60k a month is 6.7 months; 40% saved; EMIs 5%; cards 10% of the limit.
+    assert by["emergency"]["status"] == "good" and by["emergency"]["value"] == "6.7 months"
+    assert by["saving"]["status"] == "good" and by["saving"]["value"] == "40% of income"
+    assert by["emis"]["status"] == by["cards"]["status"] == by["bills"]["status"] == "good"
+    assert by["health"]["status"] == by["life"]["status"] == "good"
+    assert out["verdict"] == "good" and out["next_step"] is None and out["ready_to_invest"]
+    # ₹1L expected, keep 20%, ₹30k spent, ₹5k still due: ₹45k left over 10 days.
+    safe = out["safe_to_spend"]
+    assert (safe["left_paise"], safe["per_day_paise"]) == (4500000, 450000)
+    b = out["balance"]
+    assert (b["essentials_paise"], b["lifestyle_paise"], b["saved_paise"]) == (
+        4000000, 2000000, 4000000,
+    )  # fmt: skip
+
+    # Nothing about cover told, a thin cushion and an overdue card bill: the bill comes first.
+    out = plan.health(_snap(liquid_paise=9000000, overdue_bills=1), plan.Assumptions())
+    by = {c["key"]: c for c in out["checks"]}
+    assert by["emergency"]["status"] == "act" and by["cards"]["status"] == "act"
+    assert by["health"]["status"] == by["life"]["status"] == "unknown"
+    assert out["verdict"] == "act" and out["next_step"]["key"] == "cards"
+    assert not out["ready_to_invest"]
+
+
+def test_health_ladders_and_overspending():
+    # EMIs at 35% of income are worth watching; at 45% act. Cards at 40% of limit: watch.
+    out = plan.health(_snap(emis_paise=3500000, card_owed_paise=8000000), plan.Assumptions())
+    by = {c["key"]: c for c in out["checks"]}
+    assert by["emis"]["status"] == "watch" and by["cards"]["status"] == "watch"
+    assert {c["key"]: c for c in plan.health(_snap(emis_paise=4500000), plan.Assumptions())[
+        "checks"]}["emis"]["status"] == "act"  # fmt: skip
+    # Spent past the safe amount; bills due beyond the bank balance.
+    out = plan.health(_snap(month_spent_paise=9000000, due_30_paise=50000000), plan.Assumptions())
+    assert out["safe_to_spend"]["left_paise"] < 0 and out["safe_to_spend"]["status"] == "act"
+    assert out["safe_to_spend"]["per_day_paise"] == 0
+    assert {c["key"]: c for c in out["checks"]}["bills"]["status"] == "act"
+    # Someone depends on the income and there's no term cover.
+    life = plan.health(_snap(), plan.Assumptions(dependants=True, life_cover_paise=0))
+    assert {c["key"]: c for c in life["checks"]}["life"]["status"] == "act"
+    # No income seen yet: the saving rate and safe-to-spend say they don't know.
+    empty = plan.health(_snap(income_paise=0, month_income_paise=0), plan.Assumptions())
+    assert {c["key"]: c for c in empty["checks"]}["saving"]["status"] == "unknown"
+    assert not empty["safe_to_spend"]["known"]
+    reminders = store.health_reminders(
+        plan.health(_snap(month_spent_paise=9000000, due_30_paise=50000000), plan.Assumptions()),
+        date(2026, 11, 21),
+    )
+    assert [r["tag"] for r in reminders] == ["safe:2026-11", "cover:2026-11"]
+
+
+def test_insights_build_the_cushion_before_investing():
+    loans: list = []
+    short = plan.insights(
+        today=date(2026, 11, 21), liquid_paise=6000000, spend_paise=6000000,
+        surplus_paise=2000000, income_paise=10000000, loans=loans, assume=plan.Assumptions(),
+    )  # fmt: skip
+    titles = [x["title"] for x in short]
+    # ₹3L short at ₹20k a month: 15 months, so February 2028.
+    assert "Emergency fund full by February 2028" in titles
+    assert not any(t.startswith("Investing") for t in titles)
+    full = plan.insights(
+        today=date(2026, 11, 21), liquid_paise=40000000, spend_paise=6000000,
+        surplus_paise=2000000, income_paise=10000000, loans=loans, assume=plan.Assumptions(),
+    )  # fmt: skip
+    assert any(x["title"].startswith("Investing") for x in full)
+
+
 # --- The API -----------------------------------------------------------------------------------
 
 
@@ -121,7 +202,7 @@ async def test_members_cannot_see_planning(owner, client_for, invite):
     await invite(owner, "friend@example.com")
     friend = await client_for("friend@example.com")
     for path in ("/api/money/balances", "/api/money/savings", "/api/money/loans",
-                 "/api/money/plan", "/api/money/subscriptions"):  # fmt: skip
+                 "/api/money/plan", "/api/money/subscriptions", "/api/money/health"):  # fmt: skip
         assert (await friend.get(path)).status_code == 403
 
 
@@ -366,3 +447,50 @@ async def test_emi_conversion_leaves_out_the_purchase(owner, sessionmaker, setti
     assert loans["monthly_paise"] == loans["items"][0]["emi_paise"]
     ov = (await owner.get("/api/money/overview")).json()
     assert ov["spent_paise"] == 433400 or ov["spent_paise"] == 0
+
+
+async def test_health_tab_and_targets(owner, sessionmaker, settings):
+    async with sessionmaker() as db:
+        user = await _user(db)
+        today = local_today(user)
+        start = date(today.year, today.month, 1)
+        rows = []
+        for back in (1, 2, 3):
+            m = money.add_months(start, -back)
+            rows += [
+                money.Parsed(m + timedelta(days=1), 10000000, "credit", "Acme salary", "SALARY",
+                             account_mask="3456", institution="Axis Bank"),
+                money.Parsed(m + timedelta(days=2), 2500000, "debit", "Landlord", "RENT",
+                             account_mask="3456", institution="Axis Bank"),
+                money.Parsed(m + timedelta(days=3), 1500000, "debit", "Swiggy", "SWIGGY",
+                             account_mask="3456", institution="Axis Bank"),
+            ]  # fmt: skip
+        rows.append(
+            money.Parsed(today, 100000, "debit", "Blinkit", "BLINKIT", account_mask="3456",
+                         institution="Axis Bank", balance_paise=12000000)
+        )  # fmt: skip
+        await store.ingest(db, settings, user.id, rows, source="statement")
+        await db.commit()
+
+    out = (await owner.get("/api/money/health")).json()
+    by = {c["key"]: c for c in out["checks"]}
+    # ₹1.2L in the bank for ₹40k a month: 3 months, short of 6.
+    assert by["emergency"]["status"] == "watch" and by["emergency"]["value"] == "3.0 months"
+    assert by["saving"]["value"] == "60% of income"
+    assert by["health"]["status"] == "unknown"
+    b = out["balance"]
+    assert (b["essentials_paise"], b["lifestyle_paise"]) == (2500000, 1500000)
+    assert out["safe_to_spend"]["keep_paise"] == 2000000
+
+    # Saving targets and cover save on their own, without touching the forecast's.
+    await owner.put("/api/money/plan/assumptions", json={"inflation_bp": 600})
+    resp = await owner.put(
+        "/api/money/plan/assumptions",
+        json={"save_target_bp": 3000, "health_cover_paise": 100000000, "dependants": False},
+    )
+    assert resp.status_code == 200 and resp.json()["inflation_bp"] == 600
+    out = (await owner.get("/api/money/health")).json()
+    by = {c["key"]: c for c in out["checks"]}
+    assert by["health"]["status"] == "good" and by["life"]["status"] == "good"
+    assert out["targets"]["save_target_bp"] == 3000
+    assert out["safe_to_spend"]["keep_paise"] == 3000000

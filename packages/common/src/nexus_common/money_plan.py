@@ -263,6 +263,12 @@ class Assumptions:
     # A new monthly investment to try out ("what if I start a ₹10,000 SIP?").
     new_sip_paise: int = 0
     emergency_months: int = 6
+    # The share of income to keep, and the cover the safety checks look for. None means
+    # "not told yet", which the checks say rather than guess.
+    save_target_bp: int = 2000
+    health_cover_paise: int | None = None
+    life_cover_paise: int | None = None
+    dependants: bool | None = None
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "Assumptions":
@@ -280,9 +286,11 @@ class History:
     income: list[int] = field(default_factory=list)
     spend: list[int] = field(default_factory=list)
     invested: list[int] = field(default_factory=list)
+    essentials: list[int] = field(default_factory=list)
 
 
-def _recent(values: list[int], n: int = 3) -> int:
+def recent(values: list[int], n: int = 3) -> int:
+    """The mean of the last `n` values (the last three full months), 0 when there are none."""
     tail = values[-n:]
     return round(statistics.mean(tail)) if tail else 0
 
@@ -302,8 +310,8 @@ def forecast(
 
     cash_paise is what's in the bank less what's owed on cards; funds_paise is the mutual
     funds' value today. Returns the starting point, the inputs used, and one point a month."""
-    income = assume.income_paise if assume.income_paise is not None else _recent(history.income)
-    spend_all = assume.spend_paise if assume.spend_paise is not None else _recent(history.spend)
+    income = assume.income_paise if assume.income_paise is not None else recent(history.income)
+    spend_all = assume.spend_paise if assume.spend_paise is not None else recent(history.spend)
     this_month = date(today.year, today.month, 1)
     emis_now = sum(emi_in_month(loan, this_month) for loan in loans)
     # Spending without EMIs, so each loan's end shows up as money freed.
@@ -314,7 +322,7 @@ def forecast(
     monthly_debits = sum(
         monthly_contribution(a) for a in assets if a.kind in CASH_FUNDED and a.kind != "ppf"
     )
-    existing_sip = max(_recent(history.invested) - monthly_debits, 0)
+    existing_sip = max(recent(history.invested) - monthly_debits, 0)
     surpluses = [
         i - s - v for i, s, v in zip(history.income, history.spend, history.invested, strict=True)
     ]
@@ -426,14 +434,15 @@ def insights(
                 }
             )
     if income_paise > 0:
-        rate = surplus_paise / income_paise
-        tone = "good" if rate >= 0.2 else "warning" if rate < 0.1 else "info"
+        rate = (income_paise - spend_paise) / income_paise
+        goal = assume.save_target_bp / 10000
+        tone = "good" if rate >= goal else "warning" if rate < goal / 2 else "info"
         out.append(
             {
                 "tone": tone,
                 "title": f"Saving {rate:.0%} of income",
-                "body": "Over the last three months, after spending, EMIs and what already "
-                "goes into savings. 20% or more is a comfortable rate.",
+                "body": "Over the last three months, after spending and EMIs, counting what "
+                f"went into RDs, PPF or funds. Your target is {goal:.0%}.",
             }
         )
     for name, loan in loans:
@@ -448,7 +457,20 @@ def insights(
                 "money frees up after, and the forecast counts it.",
             }
         )
-    if surplus_paise > 0 and assume.new_sip_paise == 0:
+    covered = spend_paise > 0 and liquid_paise / spend_paise >= assume.emergency_months
+    if surplus_paise > 0 and spend_paise > 0 and not covered:
+        gap = assume.emergency_months * spend_paise - liquid_paise
+        months = math.ceil(gap / surplus_paise)
+        out.append(
+            {
+                "tone": "info",
+                "title": f"Emergency fund full by {add_months(today, months):%B %Y}",
+                "body": f"Keeping the whole monthly surplus of {_inr(surplus_paise)} in the bank "
+                f"or a sweep FD closes the {_inr(gap)} gap in about {months} month"
+                f"{'s' if months != 1 else ''}. Investing for growth comes after.",
+            }
+        )
+    if surplus_paise > 0 and assume.new_sip_paise == 0 and covered:
         half = surplus_paise // 2 // 50000 * 50000 or surplus_paise // 2
         five = future_value_monthly(half, assume.fund_return_bp, 60)
         out.append(
@@ -463,12 +485,264 @@ def insights(
     return out
 
 
+# --- Financial health ---------------------------------------------------------------------------
+
+# Rules of thumb the checks use. Each is a common Indian personal-finance guideline, kept here so
+# the page, the assistant and the tests agree.
+EMI_GOOD, EMI_LIMIT = 0.30, 0.40  # EMIs as a share of take-home pay
+CARD_GOOD, CARD_LIMIT = 0.30, 0.50  # credit card balance as a share of the limit
+HEALTH_COVER_GOOD = 10_00_000_00  # ₹10 lakh of health cover for one adult in a city
+LIFE_COVER_YEARS = 10  # term cover of ten years' income when someone depends on you
+PRIORITY = ("cards", "bills", "emergency", "health", "emis", "life", "saving")
+
+
+@dataclass
+class Snapshot:
+    """What the health checks need, gathered by the store. Monthly figures are the last three
+    full months' averages; "month" figures are this calendar month so far."""
+
+    income_paise: int
+    spend_paise: int
+    essential_paise: int
+    emis_paise: int
+    liquid_paise: int
+    cash_paise: int
+    balances_known: bool
+    cards: int
+    card_owed_paise: int
+    card_limit_paise: int
+    overdue_bills: int
+    due_30_paise: int
+    month_income_paise: int
+    month_spent_paise: int
+    month_committed_paise: int
+    days_left: int
+    months_of_history: int
+
+
+def _check(key, title, status, value, target, body, link=None) -> dict:
+    return {
+        "key": key,
+        "title": title,
+        "status": status,
+        "value": value,
+        "target": target,
+        "body": body,
+        "link": link,
+    }
+
+
+def _ladder(share: float, good: float, limit: float) -> str:
+    return "good" if share <= good else "watch" if share <= limit else "act"
+
+
+def health(snap: Snapshot, assume: Assumptions) -> dict:
+    """How safe the money is: a handful of checks with a status each (good, watch, act or
+    unknown), what's safe to spend for the rest of this month, the balance between essentials,
+    lifestyle and saving, and the one next step that matters most."""
+    checks: dict[str, dict] = {}
+    spend, income = snap.spend_paise, snap.income_paise
+    target = assume.emergency_months
+
+    if spend > 0 and snap.balances_known:
+        months = snap.liquid_paise / spend
+        status = "good" if months >= target else "watch" if months >= 3 else "act"
+        gap = max(target * spend - snap.liquid_paise, 0)
+        checks["emergency"] = _check(
+            "emergency",
+            "Emergency fund",
+            status,
+            f"{months:.1f} months",
+            f"{target} months",
+            "Money you can reach in a day (bank and FDs) against your usual monthly spending. "
+            + (
+                f"About {_inr(gap)} more reaches {target} months."
+                if gap
+                else "Enough to ride out a job change or a big bill."
+            ),
+            "/money/plan",
+        )
+    else:
+        checks["emergency"] = _check(
+            "emergency",
+            "Emergency fund",
+            "unknown",
+            "Not known",
+            f"{target} months",
+            "Add bank balances on the Accounts tab and a month of transactions to see how many "
+            "months your savings would cover.",
+            "/money/accounts",
+        )
+
+    goal = assume.save_target_bp / 10000
+    if income > 0:
+        rate = (income - spend) / income
+        status = "good" if rate >= goal else "watch" if rate >= goal / 2 else "act"
+        checks["saving"] = _check(
+            "saving",
+            "Saving rate",
+            status,
+            f"{rate:.0%} of income",
+            f"{goal:.0%} or more",
+            "What's left after spending and EMIs over the last three months, including what went "
+            "into RDs, PPF or funds.",
+            "/money/budgets",
+        )
+    else:
+        checks["saving"] = _check(
+            "saving",
+            "Saving rate",
+            "unknown",
+            "Not known",
+            f"{goal:.0%} or more",
+            "No salary or other income seen yet. Import a statement or switch on alert emails.",
+            "/money/settings",
+        )
+
+    if income > 0:
+        share = snap.emis_paise / income
+        checks["emis"] = _check(
+            "emis",
+            "EMIs against income",
+            _ladder(share, EMI_GOOD, EMI_LIMIT),
+            f"{share:.0%}" if snap.emis_paise else "No EMIs",
+            f"under {EMI_GOOD:.0%}",
+            "Loans and card EMIs each month as a share of take-home pay. Above "
+            f"{EMI_LIMIT:.0%} leaves little room when something goes wrong.",
+            "/money/accounts",
+        )
+
+    if snap.cards:
+        if snap.overdue_bills:
+            status, value = "act", f"{snap.overdue_bills} bill overdue"
+        elif snap.card_limit_paise:
+            share = snap.card_owed_paise / snap.card_limit_paise
+            status, value = _ladder(share, CARD_GOOD, CARD_LIMIT), f"{share:.0%} of limit"
+        else:
+            status, value = "unknown", "Limit not known"
+        checks["cards"] = _check(
+            "cards",
+            "Credit cards",
+            status,
+            value,
+            f"under {CARD_GOOD:.0%}, paid in full",
+            "An unpaid card bill costs 36 to 45% a year in interest and hurts your credit score; "
+            "using little of the limit helps it.",
+            "/money/accounts",
+        )
+
+    if snap.balances_known:
+        ok = snap.cash_paise >= snap.due_30_paise
+        checks["bills"] = _check(
+            "bills",
+            "Next 30 days covered",
+            "good" if ok else "act",
+            f"{_inr(snap.cash_paise)} for {_inr(snap.due_30_paise)} due",
+            "bank balance covers it",
+            "Card bills, EMIs and renewals due in the next 30 days against what's in the bank now.",
+            "/money",
+        )
+
+    cover = assume.health_cover_paise
+    checks["health"] = _check(
+        "health",
+        "Health insurance",
+        "unknown"
+        if cover is None
+        else "good"
+        if cover >= HEALTH_COVER_GOOD
+        else "watch"
+        if cover > 0
+        else "act",
+        "Not told" if cover is None else _inr(cover) if cover else "None",
+        f"{_inr(HEALTH_COVER_GOOD)} or more of your own",
+        "A hospital stay can undo years of saving. Cover through work ends with the job, so a "
+        "policy of your own matters.",
+        None,
+    )
+
+    life = assume.life_cover_paise
+    need = income * 12 * LIFE_COVER_YEARS
+    if assume.dependants is None:
+        status, value = "unknown", "Not told"
+    elif not assume.dependants:
+        status, value = "good", "No one depends on you yet"
+    else:
+        status = "good" if life and life >= need else "watch" if life else "act"
+        value = _inr(life) if life else "None"
+    checks["life"] = _check(
+        "life",
+        "Life cover",
+        status,
+        value,
+        f"{LIFE_COVER_YEARS}x yearly income if someone depends on you",
+        "Plain term insurance, not an investment plan. Only needed once someone relies on your "
+        "income.",
+        None,
+    )
+
+    # Safe to spend for the rest of this month: expected income, less the saving target, what's
+    # already gone and what's still due (EMIs, renewals).
+    expected = max(snap.month_income_paise, income)
+    keep = round(expected * goal)
+    left = expected - keep - snap.month_spent_paise - snap.month_committed_paise
+    safe = {
+        "known": expected > 0,
+        "expected_income_paise": expected,
+        "keep_paise": keep,
+        "spent_paise": snap.month_spent_paise,
+        "committed_paise": snap.month_committed_paise,
+        "left_paise": left,
+        "per_day_paise": max(left, 0) // max(snap.days_left, 1),
+        "days_left": snap.days_left,
+        "status": "unknown" if expected <= 0 else "good" if left >= 0 else "act",
+    }
+
+    essentials = min(snap.essential_paise, spend)
+    balance = {
+        "income_paise": income,
+        "essentials_paise": essentials,
+        "lifestyle_paise": max(spend - essentials, 0),
+        "saved_paise": income - spend,
+        "guide": {"essentials": 0.5, "lifestyle": 0.3, "saved": 0.2},
+    }
+
+    order = [checks[k] for k in PRIORITY if k in checks]
+    pick = next(
+        (c for want in ("act", "watch", "unknown") for c in order if c["status"] == want), None
+    )
+    counts = {s: sum(1 for c in order if c["status"] == s) for s in ("good", "watch", "act")}
+    counts["unknown"] = len(order) - sum(counts.values())
+    verdict = (
+        "act" if counts["act"] else "watch" if counts["watch"] or counts["unknown"] else "good"
+    )
+    ready = (
+        all(checks[k]["status"] == "good" for k in ("emergency", "cards", "bills") if k in checks)
+        and checks["health"]["status"] != "act"
+    )
+    return {
+        "verdict": verdict,
+        "counts": counts,
+        "checks": order,
+        "next_step": pick,
+        "safe_to_spend": safe,
+        "balance": balance,
+        "ready_to_invest": ready and checks["emergency"]["status"] == "good",
+        "months_of_history": snap.months_of_history,
+    }
+
+
 def _inr(p: int) -> str:
     """₹1.2L / ₹45,000 style, for sentences."""
     rupees = p / 100
     if abs(rupees) >= 1e7:
-        return f"₹{rupees / 1e7:.2f} Cr"
+        return f"₹{_trim(rupees / 1e7)}\u00a0Cr"
     if abs(rupees) >= 1e5:
-        return f"₹{rupees / 1e5:.2f} L"
+        return f"₹{_trim(rupees / 1e5)}\u00a0L"
     whole = f"{round(rupees):,}"
     return f"₹{whole}"
+
+
+def _trim(x: float) -> str:
+    """2.50 -> 2.5, 10.00 -> 10."""
+    return f"{x:.2f}".rstrip("0").rstrip(".")

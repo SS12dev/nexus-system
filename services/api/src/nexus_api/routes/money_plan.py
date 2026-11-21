@@ -396,6 +396,10 @@ class AssumptionsIn(BaseModel):
     fund_high_bp: RateBp = 1300
     new_sip_paise: Paise = 0
     emergency_months: int = Field(default=6, ge=1, le=24)
+    save_target_bp: Annotated[int, Field(ge=0, le=9000)] = 2000
+    health_cover_paise: Paise | None = None
+    life_cover_paise: Paise | None = None
+    dependants: bool | None = None
 
 
 @router.get("/plan")
@@ -422,12 +426,27 @@ async def get_plan(
 async def save_assumptions(
     body: AssumptionsIn, user: OwnerUser, db: DbDep, redis: RedisDep
 ) -> dict:
+    """Only the fields sent change, so the forecast's assumptions and the safety targets can
+    be saved from different places without overwriting each other."""
     prefs = await store.settings_for(db, user.id)
-    prefs.plan = body.model_dump()
+    prefs.plan = {**(prefs.plan or {}), **body.model_dump(exclude_unset=True)}
     prefs.updated_at = utcnow()
     await db.commit()
     await store.changed(redis, user.id)
+    log.info(
+        "money.assumptions_saved",
+        extra={"user_id": str(user.id), "fields": sorted(body.model_fields_set)},
+    )
     return prefs.plan
+
+
+@router.get("/health")
+async def get_health(user: OwnerUser, db: DbDep) -> dict:
+    """How safe the money is: the checks, safe-to-spend this month and the balance between
+    essentials, lifestyle and saving."""
+    out = await store.health_view(db, user.id, local_today(user))
+    await db.commit()
+    return out
 
 
 class GoalIn(BaseModel):

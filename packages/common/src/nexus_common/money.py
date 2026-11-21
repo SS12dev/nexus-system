@@ -90,6 +90,22 @@ CATEGORIES = (
     "Other",
 )
 
+# Spending you can't easily cut: a roof, food at home, getting about, health, bills and loans.
+# Everything else counted as spending is lifestyle. Used for the essentials, lifestyle and
+# savings balance on the Health tab.
+ESSENTIAL_CATEGORIES = frozenset(
+    {
+        "Groceries",
+        "Transport",
+        "Bills and utilities",
+        "Rent and housing",
+        "Health",
+        "Education",
+        "Loans and EMIs",
+        "Fees and charges",
+    }
+)
+
 # Lowercase words in the merchant or narration -> category. First match wins, so specific
 # names come before generic words.
 _RULES: list[tuple[str, tuple[str, ...]]] = [
@@ -1018,6 +1034,9 @@ def spending(t: Txn) -> bool:
 
 def summarise(txns: list[Txn]) -> dict:
     spent = sum(t.amount_paise for t in txns if spending(t))
+    essential = sum(
+        t.amount_paise for t in txns if spending(t) and t.category in ESSENTIAL_CATEGORIES
+    )
     income = sum(t.amount_paise for t in txns if t.direction == "credit" and counted(t))
     invested = sum(
         t.amount_paise
@@ -1033,6 +1052,7 @@ def summarise(txns: list[Txn]) -> dict:
             by_merchant[t.merchant][1] += 1
     return {
         "spent_paise": spent,
+        "essential_paise": essential,
         "income_paise": income,
         "invested_paise": invested,
         "net_paise": income - spent - invested,

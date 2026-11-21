@@ -135,6 +135,13 @@ TOOLS: list[ToolInfo] = [
         owner_only=True,
     ),
     ToolInfo(
+        "money_health",
+        "Money safety check",
+        "read",
+        "Emergency fund, saving rate, EMIs, cards, cover and safe-to-spend this month.",
+        owner_only=True,
+    ),
+    ToolInfo(
         "money_plan",
         "Money forecast",
         "read",

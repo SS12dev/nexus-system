@@ -4,6 +4,7 @@ import type {
   Asset,
   AssetIn,
   Assumptions,
+  Health,
   Balances,
   Investments,
   Loan,
@@ -304,7 +305,8 @@ export const api = {
   moneyDeleteLoan: (id: string) => request<void>(`/api/money/loans/${id}`, { method: "DELETE" }),
   moneyPlan: (q: { months?: number; new_sip_paise?: number; fund_return_bp?: number } = {}) =>
     request<Plan>(`/api/money/plan${orgQuery(q)}`),
-  moneySaveAssumptions: (body: Assumptions) =>
+  moneyHealth: () => request<Health>("/api/money/health"),
+  moneySaveAssumptions: (body: Partial<Assumptions>) =>
     request<Assumptions>("/api/money/plan/assumptions", { method: "PUT", body: json(body) }),
   moneyAddGoal: (body: { name: string; target_paise: number; by_on: string; saved_paise?: number; asset_ids?: string[] }) =>
     request<{ id: string }>("/api/money/goals", { method: "POST", body: json(body) }),

@@ -951,6 +951,7 @@ async def history(db: AsyncSession, user_id: uuid.UUID, today: date, months: int
         h.income.append(s["income_paise"])
         h.spend.append(s["spent_paise"])
         h.invested.append(s["invested_paise"])
+        h.essentials.append(s["essential_paise"])
     return h
 
 
@@ -1035,6 +1036,99 @@ async def plan_view(
             assume=assume,
         ),
     }
+
+
+async def health_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
+    """The safety checks, safe-to-spend and balance for the Health tab and the assistant."""
+    prefs = await settings_for(db, user_id)
+    assume = plan.Assumptions.from_dict(prefs.plan)
+    h = await history(db, user_id, today)
+    income = assume.income_paise if assume.income_paise is not None else plan.recent(h.income)
+    spend = assume.spend_paise if assume.spend_paise is not None else plan.recent(h.spend)
+    accounts = await accounts_view(db, user_id, today)
+    subs = await subscriptions_view(db, user_id, today)
+    asset_rows = [r for r in await _rows(db, MoneyAsset, user_id) if r.status == "active"]
+    loan_rows = [r for r in await _rows(db, MoneyLoan, user_id) if r.status == "active"]
+    month_start = date(today.year, today.month, 1)
+    month_end = money.add_months(month_start, 1)
+    emis = sum(plan.emi_in_month(as_loan(r), month_start) for r in loan_rows)
+
+    banks = [a for a in accounts["items"] if a["kind"] == "bank" and not a["hidden"]]
+    cards = [a for a in accounts["items"] if a["kind"] == "card" and not a["hidden"]]
+    limited = [a for a in cards if a.get("credit_limit_paise") and a.get("owed_paise") is not None]
+    liquid = accounts["cash_paise"] + sum(
+        plan.asset_value(as_asset(r), today) for r in asset_rows if r.kind in plan.LIQUID_KINDS
+    )
+    upcoming = await upcoming_payments(db, user_id, today, days=30, subs=subs)
+    # Still to go out this month, not counting card bills: their spending is already counted
+    # on the day of each purchase. Savings instalments aren't spending either.
+    rest = [
+        u["amount_paise"] for u in upcoming if u["kind"] == "emi" and today < u["on"] < month_end
+    ] + [
+        s["amount_paise"]
+        for s in subs["items"]
+        if s["status"] in ("new", "active")
+        and s["category"] != "Investments"
+        and s["next_on"]
+        and today < s["next_on"] < month_end
+    ]
+    this_month = money.summarise(await load(db, user_id, month_start, today + timedelta(days=1)))
+    snap = plan.Snapshot(
+        income_paise=income,
+        spend_paise=spend,
+        essential_paise=plan.recent(h.essentials),
+        emis_paise=emis,
+        liquid_paise=liquid,
+        cash_paise=accounts["cash_paise"],
+        balances_known=any(a["balance_paise"] is not None for a in banks),
+        cards=len(cards),
+        card_owed_paise=sum(a["owed_paise"] for a in limited),
+        card_limit_paise=sum(a["credit_limit_paise"] for a in limited),
+        overdue_bills=sum(1 for a in cards if (a.get("bill") or {}).get("status") == "overdue"),
+        due_30_paise=sum(u["amount_paise"] for u in upcoming),
+        month_income_paise=this_month["income_paise"],
+        month_spent_paise=this_month["spent_paise"],
+        month_committed_paise=sum(rest),
+        days_left=(month_end - today).days,
+        months_of_history=len(h.income),
+    )
+    return {
+        **plan.health(snap, assume),
+        "targets": {
+            "save_target_bp": assume.save_target_bp,
+            "emergency_months": assume.emergency_months,
+            "health_cover_paise": assume.health_cover_paise,
+            "life_cover_paise": assume.life_cover_paise,
+            "dependants": assume.dependants,
+        },
+        "unknown_balances": accounts["unknown_balances"],
+    }
+
+
+def health_reminders(health: dict, today: date) -> list[dict]:
+    """Once a month at most: spending has gone past what's safe this month, or the bank won't
+    cover the next 30 days of bills. Tags carry the month, so each is sent once a month."""
+    out = []
+    month = f"{today.year:04d}-{today.month:02d}"
+    safe = health["safe_to_spend"]
+    if safe["known"] and safe["left_paise"] < 0 and safe["days_left"] > 1:
+        out.append({
+            "tag": f"safe:{month}",
+            "title": "Spending is past this month's safe amount",
+            "body": f"{money.rupees(-safe['left_paise'])} over, after keeping "
+            f"{money.rupees(safe['keep_paise'])} as savings and what's still due. "
+            f"{safe['days_left']} days to go.",
+            "url": "/money/health",
+        })  # fmt: skip
+    bills = next((c for c in health["checks"] if c["key"] == "bills"), None)
+    if bills and bills["status"] == "act":
+        out.append({
+            "tag": f"cover:{month}",
+            "title": "Bills due soon are more than the bank balance",
+            "body": f"{bills['value']} in the next 30 days. Move money in or check the balances.",
+            "url": "/money/health",
+        })  # fmt: skip
+    return out
 
 
 async def upcoming_payments(

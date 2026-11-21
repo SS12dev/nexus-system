@@ -1,4 +1,4 @@
-import { CalendarClock, CreditCard, FileUp, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, Trash2 } from "lucide-react";
+import { CalendarClock, CreditCard, FileUp, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "../components/Feedback";
@@ -6,6 +6,7 @@ import { Guide, GuideHeading } from "../components/Guide";
 import { BudgetMeter, CategoryBars, TrendBars } from "../components/money/Charts";
 import { Card, Empty, MonthPicker, Spinner, Stat, useMoney, useMoneySettings } from "../components/money/parts";
 import { AccountsView } from "../components/money/Accounts";
+import { HealthStrip, HealthView } from "../components/money/Health";
 import { PlanView } from "../components/money/Plan";
 import { SavingsView } from "../components/money/Savings";
 import { SetupView } from "../components/money/Setup";
@@ -41,6 +42,7 @@ export function MoneyPage() {
           <Route index element={<OverviewView latest={latest} />} />
           <Route path="transactions" element={<TransactionsView latest={latest} />} />
           <Route path="budgets" element={<BudgetsView latest={latest} />} />
+          <Route path="health" element={<HealthView />} />
           <Route path="accounts" element={<AccountsView />} />
           <Route path="subscriptions" element={<SubscriptionsView />} />
           <Route path="savings" element={<SavingsView />} />
@@ -56,6 +58,7 @@ export function MoneyPage() {
 
 const TABS = [
   { to: "/money", label: "Overview", icon: LayoutDashboard },
+  { to: "/money/health", label: "Health", icon: ShieldCheck },
   { to: "/money/accounts", label: "Accounts", icon: CreditCard },
   { to: "/money/transactions", label: "Transactions", icon: ListOrdered },
   { to: "/money/budgets", label: "Budgets", icon: PiggyBank },
@@ -82,8 +85,8 @@ function Header() {
         </span>
       </div>
       <p className="mb-3 text-sm text-slate-400">
-        Every account, card, loan and saving in one place: where money goes, what's due, and where you're heading. Built from
-        your own emails and statements.
+        Every account, card, loan and saving in one place: whether you're safe, what you can spend, what's due, and where
+        you're heading. Built from your own emails and statements.
       </p>
       {home && (
         <Guide title="How Money works">
@@ -113,6 +116,12 @@ function Header() {
             <GuideHeading>Subscriptions</GuideHeading>
             Payments that repeat are found for you. Keep, cancel or hide each one: kept ones get a reminder before renewal,
             and a charge after you cancel or a price rise is flagged.
+          </div>
+          <div>
+            <GuideHeading>Health: are you safe?</GuideHeading>
+            The Health tab checks the things that keep you safe: an emergency fund, how much you keep each month, EMIs and
+            card balances, bills covered and insurance. It also says how much is safe to spend for the rest of the month
+            after your saving target.
           </div>
           <div>
             <GuideHeading>Savings and the plan</GuideHeading>
@@ -169,6 +178,7 @@ function OverviewView({ latest }: { latest: string }) {
   const gain = data.funds_cost_paise ? data.funds_value_paise - data.funds_cost_paise : null;
   return (
     <>
+      {month === latest && <HealthStrip />}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <MonthPicker month={month} latest={latest} onChange={pick} />
         <SyncLine on={data.gmail_sync} at={data.gmail_synced_at} />

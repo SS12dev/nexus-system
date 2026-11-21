@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, budgetState, compact, daysUntil, emiFor, monthLabel, parsePercent, parseRupees, percent, rupees, shiftMonth, whenLabel } from "./money";
+import { addMonths, balanceShares, budgetState, compact, daysUntil, emiFor, monthLabel, parsePercent, parseRupees, percent, rupees, shiftMonth, whenLabel } from "./money";
 
 describe("money helpers", () => {
   it("formats rupees the Indian way", () => {
@@ -60,5 +60,17 @@ describe("planning helpers", () => {
     expect(whenLabel("2026-11-22", now)).toBe("tomorrow");
     expect(whenLabel("2026-11-26", now)).toBe("in 5 days");
     expect(daysUntil("2026-11-18", now)).toBe(-3);
+  });
+});
+
+describe("balanceShares", () => {
+  it("splits a month into shares of income", () => {
+    const b = { income_paise: 10000000, essentials_paise: 5000000, lifestyle_paise: 3500000, saved_paise: 1500000, guide: { essentials: 0.5, lifestyle: 0.3, saved: 0.2 } };
+    expect(balanceShares(b)).toEqual({ essentials: 0.5, lifestyle: 0.35, saved: 0.15 });
+  });
+  it("is empty without income, and saved can go below zero", () => {
+    const guide = { essentials: 0.5, lifestyle: 0.3, saved: 0.2 };
+    expect(balanceShares({ income_paise: 0, essentials_paise: 1, lifestyle_paise: 1, saved_paise: -2, guide })).toBeNull();
+    expect(balanceShares({ income_paise: 100, essentials_paise: 80, lifestyle_paise: 40, saved_paise: -20, guide })?.saved).toBeCloseTo(-0.2);
   });
 });

@@ -207,7 +207,7 @@ async def test_assistant_uses_money_unless_switched_off(deps, user, sessionmaker
 
     ctx = ToolContext(deps=deps, user_id=user, chat_id=None, emit=emit)
     names = ["money_summary", "money_transactions", "money_accounts", "money_subscriptions",
-             "money_subscription_update", "money_plan"]  # fmt: skip
+             "money_subscription_update", "money_plan", "money_health"]  # fmt: skip
     tools = {t.name: t for t in build_tools(ctx, names)}
     assert set(names) <= set(tools)
 
@@ -242,6 +242,9 @@ async def test_assistant_uses_money_unless_switched_off(deps, user, sessionmaker
     assert "Totals:" in await tools["money_accounts"].ainvoke({})
     plan = await tools["money_plan"].ainvoke({"months": 12, "try_monthly_sip": 5000})
     assert "Net worth now" in plan and "new SIP ₹5,000.00/month" in plan
+    health = await tools["money_health"].ainvoke({})
+    assert "Overall:" in health and "Emergency fund [unknown]" in health
+    assert "Health insurance [unknown]" in health and "UPI-SWIGGY" not in health
 
     async with sessionmaker() as db:
         prefs = await store.settings_for(db, user)

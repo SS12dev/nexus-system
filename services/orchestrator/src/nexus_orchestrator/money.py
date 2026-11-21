@@ -289,11 +289,16 @@ async def send_reminders(deps: TurnDeps, now: datetime | None = None) -> int:
             today = local_today(user, now)
             subs = await store.subscriptions_view(db, user.id, today)
             accounts = await store.accounts_view(db, user.id, today)
-            for r in store.reminders(subs, accounts, today):
+            due = store.reminders(subs, accounts, today)
+            health = await store.health_view(db, user.id, today)
+            due += store.health_reminders(health, today)
+            for r in due:
                 key = f"money:remind:{user.id}:{r['tag']}"
                 if not await deps.redis.set(key, "1", nx=True, ex=REMIND_KEEP):
                     continue
-                url = "/money/accounts" if r["tag"].startswith("card") else "/money/subscriptions"
+                url = r.get("url") or (
+                    "/money/accounts" if r["tag"].startswith("card") else "/money/subscriptions"
+                )
                 await notify(
                     db, deps.redis, deps.settings, user.id, NotificationKind.reminder,
                     r["title"], r["body"], url=url, tag=f"money-{r['tag']}"[:120],
