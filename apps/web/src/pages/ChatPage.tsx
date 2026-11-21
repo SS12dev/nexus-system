@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { ClarificationCard } from "../components/ClarificationCard";
 import { SystemCard } from "../components/SystemCard";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Composer } from "../components/Composer";
 import { MessageView } from "../components/MessageView";
 import { api } from "../lib/api";
@@ -66,9 +66,29 @@ export function ChatView({ chatId, side = false }: { chatId?: string; side?: boo
     return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   }, [messages, systems]);
 
+  // ?m=<message id> (from search) opens the chat at that message, highlighted for a moment,
+  // instead of at the bottom. It applies once; new messages scroll to the bottom as usual.
+  const [params] = useSearchParams();
+  const target = side ? null : params.get("m");
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const jumped = useRef<string | null>(null);
+  const hasTarget = !!target && messages.some((m) => m.id === target);
   useEffect(() => {
+    if (!target || !hasTarget || jumped.current === target) return;
+    jumped.current = target;
+    document.getElementById(`m-${target}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlight(target);
+    const t = window.setTimeout(() => setHighlight(null), 2500);
+    return () => window.clearTimeout(t);
+  }, [target, hasTarget]);
+
+  useEffect(() => {
+    // Waiting to jump to a searched-for message: don't scroll past it first. After the jump,
+    // stay there until something new streams in.
+    if (target && (jumped.current !== target || !messages.some((m) => m.status === "streaming")))
+      return;
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, systems.length, approvals.length]);
+  }, [messages, systems.length, approvals.length, target]);
 
   const canChat = hasRole(user, "member");
   const busy = messages.some((m) => m.status === "streaming");
@@ -99,7 +119,14 @@ export function ChatView({ chatId, side = false }: { chatId?: string; side?: boo
                 .some((message) => message.role === "user");
               return (
                 <Fragment key={item.message.id}>
-                  <MessageView message={item.message} activity={activity} />
+                  <div
+                    id={`m-${item.message.id}`}
+                    className={`scroll-mt-24 rounded-2xl transition-shadow duration-700 ${
+                      highlight === item.message.id ? "ring-2 ring-sky-400/60 ring-offset-4 ring-offset-ink" : ""
+                    }`}
+                  >
+                    <MessageView message={item.message} activity={activity} />
+                  </div>
                   {item.message.role === "assistant" &&
                     item.message.status === "complete" &&
                     clarification?.questions.length ? (

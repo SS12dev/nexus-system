@@ -2,7 +2,7 @@
 
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
@@ -11,6 +11,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Computed,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -463,8 +464,15 @@ class Message(Base):
     # {id, name, type}. Shown as chips under the reply and lit up in the orb.
     recalled: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # For search across every chat (nexus_common.find).
+    tsv = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', content)", persisted=True), deferred=True
+    )
 
-    __table_args__ = (Index("ix_messages_chat_created", "chat_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_chat_created", "chat_id", "created_at"),
+        Index("ix_messages_tsv", "tsv", postgresql_using="gin"),
+    )
 
 
 class AuditLog(Base):
@@ -1900,3 +1908,428 @@ class ScreenState(Base):
     # [{"key": "mode" | "move:<widget>" | "focus:file:<id>", "at": iso}], newest last.
     overrides: Mapped[list] = mapped_column(JSONB, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TelegramLink(Base):
+    """A Telegram chat linked to a Nexus account (nexus_common/telegram.py). One per person and
+    one per Telegram chat: messages there go to the person's assistant, in a Nexus chat of its
+    own, and routines can deliver to it."""
+
+    __tablename__ = "telegram_links"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Telegram's chat id: 64-bit, and the only address the bot needs to reply.
+    tg_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    tg_username: Mapped[str | None] = mapped_column(String(64))
+    tg_name: Mapped[str | None] = mapped_column(String(128))
+    # The Nexus chat Telegram messages go to; "/new" starts another.
+    chat_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chats.id", ondelete="SET NULL"))
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- Organiser (nexus_common/organiser.py) ------------------------------------------------------
+
+
+class OrgItem(Base):
+    """One thing in the life organiser: a note, task, project, area, resource or daily note.
+    PARA: projects have an end, areas don't, resources are topics; anything archived is the
+    Archive. Notes and tasks sit under a project, area or resource through parent_id. New
+    captures wait in the Inbox (status "inbox") until filed."""
+
+    __tablename__ = "org_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # note, task, project, area, resource, daily (organiser.TYPES).
+    type: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    # Markdown, with [[wikilinks]] to other items.
+    body: Mapped[str] = mapped_column(Text, default="")
+    # Per type (organiser.STATUSES): inbox, todo, doing, done, dropped, active, paused, archived.
+    status: Mapped[str] = mapped_column(String(16))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("org_items.id", ondelete="SET NULL")
+    )
+    due_on: Mapped[date | None] = mapped_column(Date)
+    # 0 none, 1 low, 2 medium, 3 high.
+    priority: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # The day a daily note is for (one per person per day).
+    day: Mapped[date | None] = mapped_column(Date)
+    # user, assistant, telegram, review.
+    source: Mapped[str] = mapped_column(String(16), default="user", server_default="user")
+    # Where the assistant thinks an inbox item belongs: {type, title, parent_id, due_on, why}.
+    suggestion: Mapped[dict | None] = mapped_column(JSON)
+    # Bumped on every change; a save naming an older version is refused (laptop vs phone).
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
+    tsv = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', title || ' ' || body)", persisted=True),
+        deferred=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_org_items_user_type", "user_id", "type", "status"),
+        Index("ix_org_items_parent", "parent_id"),
+        Index("ix_org_items_due", "user_id", "due_on"),
+        Index(
+            "uq_org_items_daily",
+            "user_id",
+            "day",
+            unique=True,
+            postgresql_where=text("type = 'daily'"),
+        ),
+        Index("ix_org_items_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_org_items_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class OrgLink(Base):
+    """A [[wikilink]] from one item's text to another, for backlinks."""
+
+    __tablename__ = "org_links"
+
+    src_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("org_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    dst_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("org_items.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("ix_org_links_dst", "dst_id"),)
+
+
+class OrgRevision(Base):
+    """An earlier version of an item's text, kept so a bad edit can be undone."""
+
+    __tablename__ = "org_revisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("org_items.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    # user or assistant: who made the version that followed this one.
+    actor: Mapped[str] = mapped_column(String(16), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_org_revisions_item", "item_id", "created_at"),)
+
+
+class OrgReview(Base):
+    """One weekly review: when it was done, what the week's focus is, and a few counts."""
+
+    __tablename__ = "org_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The Monday of the week being planned.
+    week_of: Mapped[date] = mapped_column(Date)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    focus: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "week_of"),)
+
+
+class MoneySettings(Base):
+    """One person's Money switches. Money is read-only: nothing here can move money."""
+
+    __tablename__ = "money_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Read bank and card alert emails from Gmail every hour.
+    gmail_sync: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Let the assistant read Money (totals, transactions without the bank's narration,
+    # accounts, subscriptions, the plan) and manage subscriptions. Never statements or alerts.
+    assistant_access: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    # The CAS PDF password (usually the PAN), encrypted (money.seal).
+    cas_password_enc: Mapped[str | None] = mapped_column(Text)
+    # The person's own categories: {merchant_key: category}.
+    rules: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Gmail messages up to this time have been read.
+    gmail_synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gmail_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The last CAS email read, so it isn't parsed again.
+    cas_message_id: Mapped[str | None] = mapped_column(String(64))
+    cas_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What went wrong on the last background run, in words for the person.
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    # The forecast's assumptions (money_plan.Assumptions as a dict); empty means defaults.
+    plan: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MoneyAccount(Base):
+    """A bank account or card, known by its bank and last four digits."""
+
+    __tablename__ = "money_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    institution: Mapped[str | None] = mapped_column(String(60))
+    mask: Mapped[str | None] = mapped_column(String(8))
+    # bank or card.
+    kind: Mapped[str] = mapped_column(String(8), default="bank")
+    name: Mapped[str] = mapped_column(String(120), default="")
+    # The latest balance an alert or statement showed (or the person typed), and its date.
+    balance_paise: Mapped[int | None] = mapped_column(BigInteger)
+    balance_on: Mapped[date | None] = mapped_column(Date)
+    # Cards: the limit (typed in), the available limit from the latest alert, and the latest
+    # statement's bill.
+    credit_limit_paise: Mapped[int | None] = mapped_column(BigInteger)
+    available_paise: Mapped[int | None] = mapped_column(BigInteger)
+    available_on: Mapped[date | None] = mapped_column(Date)
+    due_paise: Mapped[int | None] = mapped_column(BigInteger)
+    min_due_paise: Mapped[int | None] = mapped_column(BigInteger)
+    due_on: Mapped[date | None] = mapped_column(Date)
+    statement_on: Mapped[date | None] = mapped_column(Date)
+    # When the person marked the current bill paid by hand.
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    # Closed or not worth showing; its transactions still count.
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_accounts_user", "user_id"),)
+
+
+class MoneyTxn(Base):
+    """One transaction from an alert email, a statement file or typed in. Amounts are whole
+    paise; the bank's own narration is encrypted (money.seal)."""
+
+    __tablename__ = "money_txns"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    occurred_on: Mapped[date] = mapped_column(Date)
+    amount_paise: Mapped[int] = mapped_column(BigInteger)
+    # debit or credit.
+    direction: Mapped[str] = mapped_column(String(8))
+    merchant: Mapped[str] = mapped_column(String(120))
+    category: Mapped[str] = mapped_column(String(40))
+    # auto (word list), rule (the person's rule for the merchant) or user (set on this row).
+    category_by: Mapped[str] = mapped_column(String(8), default="auto", server_default="auto")
+    narration_enc: Mapped[str] = mapped_column(Text, default="")
+    # upi, card, atm, neft, imps, cash, other.
+    channel: Mapped[str] = mapped_column(String(8), default="other")
+    # alert, statement or manual.
+    source: Mapped[str] = mapped_column(String(16))
+    # The Gmail message or import it came from.
+    source_ref: Mapped[str | None] = mapped_column(String(64))
+    ref: Mapped[str | None] = mapped_column(String(40))
+    balance_paise: Mapped[int | None] = mapped_column(BigInteger)
+    dedupe_key: Mapped[str] = mapped_column(String(40))
+    # The other source's key once an alert and a statement row are matched, so importing the
+    # statement again doesn't add the row a second time.
+    alt_key: Mapped[str | None] = mapped_column(String(40))
+    # Both an alert and a statement row were seen for this one.
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Left out of totals (a refund pair, a transfer between own accounts...).
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "dedupe_key"),
+        Index("ix_money_txns_user_day", "user_id", "occurred_on"),
+        Index("ix_money_txns_account", "account_id"),
+    )
+
+
+class MoneyBudget(Base):
+    """A monthly limit for one category."""
+
+    __tablename__ = "money_budgets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    category: Mapped[str] = mapped_column(String(40))
+    monthly_paise: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "category"),)
+
+
+class MoneyHolding(Base):
+    """A mutual fund holding from the latest CAS, revalued nightly from AMFI's NAVs."""
+
+    __tablename__ = "money_holdings"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    folio: Mapped[str] = mapped_column(String(40))
+    amc: Mapped[str] = mapped_column(String(120), default="")
+    scheme: Mapped[str] = mapped_column(String(300))
+    isin: Mapped[str | None] = mapped_column(String(16))
+    amfi_code: Mapped[str | None] = mapped_column(String(16))
+    units: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    nav: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    nav_date: Mapped[date | None] = mapped_column(Date)
+    value_paise: Mapped[int | None] = mapped_column(BigInteger)
+    cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    # The date of the statement the units came from.
+    as_of: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "folio", "scheme"),)
+
+
+class MoneyImport(Base):
+    """One statement or CAS file read. The file itself is never kept."""
+
+    __tablename__ = "money_imports"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # statement or cas.
+    kind: Mapped[str] = mapped_column(String(16))
+    # upload or gmail.
+    origin: Mapped[str] = mapped_column(String(16), default="upload")
+    filename_enc: Mapped[str] = mapped_column(Text, default="")
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    # done or failed.
+    status: Mapped[str] = mapped_column(String(16))
+    # {"added", "matched", "skipped"} for statements, {"holdings"} for a CAS.
+    counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_imports_user", "user_id", "created_at"),)
+
+
+class MoneySubscription(Base):
+    """What the person decided about a repeating payment (keep, cancelled, not a subscription),
+    or one they added by hand. Detected payments without a row here are shown as new."""
+
+    __tablename__ = "money_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # money.merchant_key of the merchant, so detection and this row meet.
+    key: Mapped[str] = mapped_column(String(120))
+    merchant: Mapped[str] = mapped_column(String(120))
+    # active, cancelled or ignored (not a subscription).
+    status: Mapped[str] = mapped_column(String(12), default="active")
+    # Added by hand: the amount, cadence and next date are the person's, not detected.
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    category: Mapped[str] = mapped_column(String(40), default="Subscriptions")
+    amount_paise: Mapped[int | None] = mapped_column(BigInteger)
+    # monthly, quarterly or yearly.
+    cadence: Mapped[str] = mapped_column(String(12), default="monthly")
+    next_on: Mapped[date | None] = mapped_column(Date)
+    # Days before a renewal to remind; 0 means no reminder.
+    remind_days: Mapped[int] = mapped_column(Integer, default=3)
+    manage_url: Mapped[str | None] = mapped_column(String(300))
+    note: Mapped[str | None] = mapped_column(String(300))
+    cancelled_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "key"),)
+
+
+class MoneyAsset(Base):
+    """Savings tracked by hand: a fixed or recurring deposit, PPF, EPF, NPS, gold or anything
+    else. Values are worked out from the terms (money_plan.asset_value)."""
+
+    __tablename__ = "money_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # fd, rd, ppf, epf, nps, gold or other.
+    kind: Mapped[str] = mapped_column(String(8))
+    name: Mapped[str] = mapped_column(String(120), default="")
+    institution: Mapped[str | None] = mapped_column(String(60))
+    # FD: the deposit. RD: the monthly instalment. Others: the balance on balance_on.
+    amount_paise: Mapped[int] = mapped_column(BigInteger)
+    # Interest or expected return a year, in basis points (7.1% = 710).
+    rate_bp: Mapped[int] = mapped_column(Integer, default=0)
+    start_on: Mapped[date | None] = mapped_column(Date)
+    maturity_on: Mapped[date | None] = mapped_column(Date)
+    balance_on: Mapped[date | None] = mapped_column(Date)
+    # What goes in each month (EPF, NPS, other) or each year (PPF).
+    contribution_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    # FD: interest paid out rather than added to the deposit.
+    payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # active or closed.
+    status: Mapped[str] = mapped_column(String(8), default="active")
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_assets_user", "user_id"),)
+
+
+class MoneyLoan(Base):
+    """A loan or EMI (a card EMI, a no-cost EMI, a personal or home loan). What's left and when
+    it ends are worked out from the terms (money_plan.loan_state)."""
+
+    __tablename__ = "money_loans"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # card_emi, personal, home, vehicle, education or other.
+    kind: Mapped[str] = mapped_column(String(12), default="card_emi")
+    name: Mapped[str] = mapped_column(String(120))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    lender: Mapped[str | None] = mapped_column(String(60))
+    principal_paise: Mapped[int] = mapped_column(BigInteger)
+    rate_bp: Mapped[int] = mapped_column(Integer, default=0)
+    months: Mapped[int] = mapped_column(Integer)
+    # The instalment; worked out from the terms when not typed in.
+    emi_paise: Mapped[int] = mapped_column(BigInteger)
+    first_due_on: Mapped[date] = mapped_column(Date)
+    # active or closed (paid off early).
+    status: Mapped[str] = mapped_column(String(8), default="active")
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_loans_user", "user_id"),)
+
+
+class MoneyGoal(Base):
+    """Something to save for: an amount by a date, and how much is put aside so far."""
+
+    __tablename__ = "money_goals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120))
+    target_paise: Mapped[int] = mapped_column(BigInteger)
+    by_on: Mapped[date] = mapped_column(Date)
+    saved_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    # The savings tracked for it (MoneyAsset ids), counted on top of saved_paise.
+    asset_ids: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_goals_user", "user_id"),)

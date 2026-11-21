@@ -27,7 +27,19 @@ class RecordingQueue:
         self.account_recovery_notices: list[tuple[str, uuid.UUID]] = []
         self.invite_notices: list[uuid.UUID] = []
         self.account_purges: list[uuid.UUID] = []
+        self.telegram: list[dict] = []
+        self.organiser_suggests: list[uuid.UUID] = []
+        self.money_syncs: list[uuid.UUID] = []
         self.fail = False
+
+    async def enqueue_telegram(self, update):
+        self.telegram.append(update)
+
+    async def enqueue_organiser_suggest(self, item_id):
+        self.organiser_suggests.append(item_id)
+
+    async def enqueue_money_sync(self, user_id):
+        self.money_syncs.append(user_id)
 
     async def enqueue_turn(self, chat_id, assistant_message_id):
         if self.fail:

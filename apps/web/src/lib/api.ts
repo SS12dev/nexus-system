@@ -1,3 +1,28 @@
+import type {
+  AccountEdit,
+  AccountView,
+  Asset,
+  AssetIn,
+  Assumptions,
+  Health,
+  Balances,
+  Investments,
+  Loan,
+  LoanIn,
+  Loans,
+  MoneyAccount,
+  MoneyImport,
+  MoneyOverview,
+  MoneySettings,
+  MoneyTxn,
+  Plan,
+  Savings,
+  Subscription,
+  SubscriptionSave,
+  Subscriptions,
+  TxnPage,
+  TxnQuery,
+} from "./money";
 import type { TuneId } from "./tunes";
 import type {
   Universe,
@@ -19,6 +44,17 @@ import type {
   FeedbackItem,
   FeedbackKind,
   FileItem,
+  FindKind,
+  FindResponse,
+  OrgItem,
+  OrgItemDetail,
+  OrgItemInput,
+  OrgListQuery,
+  OrgOverview,
+  OrgReview,
+  OrgRevision,
+  OrgToday,
+  TelegramStatus,
   Folder,
   GoogleAccess,
   LinkItem,
@@ -136,7 +172,159 @@ function forUsers(ids: string[]): URLSearchParams {
   return q;
 }
 
+/** A save based on an older version: the server's current copy comes with it. */
+export class OrgConflict extends ApiError {
+  constructor(
+    message: string,
+    public current: OrgItem,
+  ) {
+    super(409, message);
+  }
+}
+
+async function orgSave(path: string, method: string, body: unknown): Promise<OrgItem> {
+  const resp = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: json(body),
+  });
+  if (resp.status === 409) {
+    const data = await resp.json();
+    throw new OrgConflict(data.detail, data.current);
+  }
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try {
+      const data = await resp.json();
+      detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(resp.status, detail);
+  }
+  return resp.json();
+}
+
+function orgQuery(q: OrgListQuery | TxnQuery | Record<string, string | number | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((x) => p.append(k, String(x)));
+    else p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
+  orgOverview: () => request<OrgOverview>("/api/organiser/overview"),
+  orgToday: () => request<OrgToday>("/api/organiser/today"),
+  orgDaily: (day: string) => request<OrgItem>(`/api/organiser/daily/${day}`),
+  orgItems: (q: OrgListQuery = {}) => request<OrgItem[]>(`/api/organiser/items${orgQuery(q)}`),
+  orgItem: (id: string) => request<OrgItemDetail>(`/api/organiser/items/${id}`),
+  orgCreate: (body: OrgItemInput) =>
+    request<OrgItem>("/api/organiser/items", { method: "POST", body: json(body) }),
+  /** Quick capture; to the Inbox unless `inbox: false`. */
+  orgCapture: (text: string, opts: { inbox?: boolean; task?: boolean; parent_id?: string } = {}) =>
+    request<OrgItem>("/api/organiser/capture", { method: "POST", body: json({ text, ...opts }) }),
+  /** Throws OrgConflict when `version` is outdated. */
+  orgUpdate: (id: string, changes: OrgItemInput & { version?: number }) =>
+    orgSave(`/api/organiser/items/${id}`, "PATCH", changes),
+  orgDelete: (id: string) => request<void>(`/api/organiser/items/${id}`, { method: "DELETE" }),
+  orgMakeTasks: (id: string) =>
+    request<{ item: OrgItem; made: OrgItem[] }>(`/api/organiser/items/${id}/tasks`, {
+      method: "POST",
+    }),
+  orgRevisions: (id: string) => request<OrgRevision[]>(`/api/organiser/items/${id}/revisions`),
+  orgRevision: (id: string, rev: string) =>
+    request<OrgRevision>(`/api/organiser/items/${id}/revisions/${rev}`),
+  orgRestore: (id: string, rev: string) =>
+    request<OrgItem>(`/api/organiser/items/${id}/revisions/${rev}/restore`, { method: "POST" }),
+  orgReview: () => request<OrgReview>("/api/organiser/review"),
+  orgFinishReview: (focus: string[], notes: string) =>
+    request<OrgReview>("/api/organiser/review", { method: "POST", body: json({ focus, notes }) }),
+  orgExportUrl: "/api/organiser/export.zip",
+
+  moneySettings: () => request<MoneySettings>("/api/money/settings"),
+  moneyUpdateSettings: (body: { gmail_sync?: boolean; assistant_access?: boolean; cas_password?: string }) =>
+    request<MoneySettings>("/api/money/settings", { method: "PATCH", body: json(body) }),
+  moneySync: () => request<{ queued: boolean }>("/api/money/sync", { method: "POST" }),
+  moneyOverview: (month?: string) =>
+    request<MoneyOverview>(`/api/money/overview${orgQuery({ month })}`),
+  moneyTxns: (q: TxnQuery = {}) =>
+    request<TxnPage>(`/api/money/transactions${orgQuery(q)}`),
+  moneyTxn: (id: string) => request<MoneyTxn>(`/api/money/transactions/${id}`),
+  moneyUpdateTxn: (
+    id: string,
+    body: { category?: string; for_merchant?: boolean; excluded?: boolean; note?: string },
+  ) =>
+    request<{ txn: MoneyTxn; also_changed: number }>(`/api/money/transactions/${id}`, {
+      method: "PATCH",
+      body: json(body),
+    }),
+  moneyAddTxn: (body: {
+    occurred_on: string;
+    amount: string;
+    direction: "debit" | "credit";
+    merchant: string;
+    category?: string;
+    account_id?: string;
+    note?: string;
+  }) => request<MoneyTxn>("/api/money/transactions", { method: "POST", body: json(body) }),
+  moneyDeleteTxn: (id: string) =>
+    request<void>(`/api/money/transactions/${id}`, { method: "DELETE" }),
+  moneyAccounts: () => request<MoneyAccount[]>("/api/money/accounts"),
+  moneyRenameAccount: (id: string, name: string) =>
+    request<MoneyAccount>(`/api/money/accounts/${id}`, { method: "PATCH", body: json({ name }) }),
+  moneySetBudget: (category: string, monthly_paise: number) =>
+    request<void>(`/api/money/budgets/${encodeURIComponent(category)}`, {
+      method: "PUT",
+      body: json({ monthly_paise }),
+    }),
+  moneyDeleteBudget: (category: string) =>
+    request<void>(`/api/money/budgets/${encodeURIComponent(category)}`, { method: "DELETE" }),
+  moneySubscriptions: () => request<Subscriptions>("/api/money/subscriptions"),
+  moneySaveSubscription: (body: SubscriptionSave) =>
+    request<Subscription>("/api/money/subscriptions", { method: "PUT", body: json(body) }),
+  moneyForgetSubscription: (key: string) =>
+    request<void>(`/api/money/subscriptions/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  moneyBalances: () => request<Balances>("/api/money/balances"),
+  moneyEditAccount: (id: string, body: AccountEdit) =>
+    request<AccountView>(`/api/money/accounts/${id}/details`, { method: "PATCH", body: json(body) }),
+  moneySavings: () => request<Savings>("/api/money/savings"),
+  moneyAddSaving: (body: AssetIn) =>
+    request<Asset>("/api/money/savings", { method: "POST", body: json(body) }),
+  moneyEditSaving: (id: string, body: Partial<AssetIn>) =>
+    request<Asset>(`/api/money/savings/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteSaving: (id: string) => request<void>(`/api/money/savings/${id}`, { method: "DELETE" }),
+  moneyLoans: () => request<Loans>("/api/money/loans"),
+  moneyAddLoan: (body: LoanIn) => request<Loan>("/api/money/loans", { method: "POST", body: json(body) }),
+  moneyEditLoan: (id: string, body: Partial<LoanIn> & { status?: "active" | "closed" }) =>
+    request<Loan>(`/api/money/loans/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteLoan: (id: string) => request<void>(`/api/money/loans/${id}`, { method: "DELETE" }),
+  moneyPlan: (q: { months?: number; new_sip_paise?: number; fund_return_bp?: number } = {}) =>
+    request<Plan>(`/api/money/plan${orgQuery(q)}`),
+  moneyHealth: () => request<Health>("/api/money/health"),
+  moneySaveAssumptions: (body: Partial<Assumptions>) =>
+    request<Assumptions>("/api/money/plan/assumptions", { method: "PUT", body: json(body) }),
+  moneyAddGoal: (body: { name: string; target_paise: number; by_on: string; saved_paise?: number; asset_ids?: string[] }) =>
+    request<{ id: string }>("/api/money/goals", { method: "POST", body: json(body) }),
+  moneyEditGoal: (id: string, body: { name?: string; target_paise?: number; by_on?: string; saved_paise?: number; asset_ids?: string[] }) =>
+    request<{ id: string }>(`/api/money/goals/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
+  moneyInvestments: () => request<Investments>("/api/money/investments"),
+  moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
+  moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string } = {}) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.password) form.append("password", opts.password);
+    form.append("remember_password", String(opts.remember ?? true));
+    if (opts.account_id) form.append("account_id", opts.account_id);
+    return request<MoneyImport>("/api/money/imports", { method: "POST", body: form });
+  },
+  moneyDeleteAll: () =>
+    request<void>("/api/money/delete-all", { method: "POST", body: json({ confirm: "delete" }) }),
   authConfig: () => request<AuthConfig>("/auth/config"),
   accessState: () => request<AccessState>("/auth/access-request"),
   requestAccess: (note: string) =>
@@ -281,6 +469,8 @@ export const api = {
     ),
 
   files: () => request<FileItem[]>("/api/files"),
+  file: (id: string) => request<FileItem>(`/api/files/${id}`),
+  link: (id: string) => request<LinkItem>(`/api/links/${id}`),
   projects: () => request<Project[]>("/api/projects"),
   deleteProject: (id: string) =>
     request<{ queued: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
@@ -309,6 +499,21 @@ export const api = {
     request<{ text: string; offset: number; total_chars: number }>(
       `/api/files/${id}/text?offset=${offset}`,
     ),
+  telegram: () => request<TelegramStatus>("/api/telegram"),
+  telegramLink: () =>
+    request<{ code: string; url: string | null; expires_at: string }>("/api/telegram/link", { method: "POST" }),
+  telegramUnlink: () => request<void>("/api/telegram/link", { method: "DELETE" }),
+  /** Search across everything; `limit` is per kind. */
+  find: (
+    q: string,
+    opts: { kinds?: FindKind[]; limit?: number; meaning?: boolean; signal?: AbortSignal } = {},
+  ) => {
+    const params = new URLSearchParams({ q });
+    for (const k of opts.kinds ?? []) params.append("kinds", k);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.meaning === false) params.set("meaning", "false");
+    return request<FindResponse>(`/api/find?${params}`, { signal: opts.signal });
+  },
   searchFiles: (q: string) => request<SearchHit[]>(`/api/files/search?q=${encodeURIComponent(q)}`),
   renameFile: (id: string, name: string) =>
     request<FileItem>(`/api/files/${id}`, { method: "PATCH", body: json({ name }) }),

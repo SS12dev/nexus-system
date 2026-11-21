@@ -14,6 +14,8 @@ EventType = Literal[
     "message.failed",
     "chat.updated",
     "chat.deleted",
+    # A Telegram chat was linked to the account (Settings shows it without a reload).
+    "telegram.linked",
     "tool.call",
     "tool.done",
     "file.updated",
@@ -45,6 +47,10 @@ EventType = Literal[
     "skill.updated",
     "skill.deleted",
     "trash.changed",
+    # Something in the organiser was made, changed or removed (nexus_common.organiser).
+    "organiser.changed",
+    # New transactions or holdings arrived in Money (counts only, never amounts).
+    "money.changed",
     # Sent to owners and admins: how many access requests are waiting.
     "access.pending",
     "account.recovery.pending",

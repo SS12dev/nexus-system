@@ -59,8 +59,8 @@ def build_routine_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
         "FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=9;BYMINUTE=0". At most hourly. Write prompt as the
         user would ask it, self-contained (it runs later with no chat around it). Set
         only_if_new for digests and watches so a run with nothing new stays silent. delivery
-        may list "email" and "whatsapp" to also notify the user there. Only create one when
-        the user asks for something recurring."""
+        may list "email", "whatsapp" and "telegram" to also notify the user there. Only
+        create one when the user asks for something recurring."""
         await note("create_routine", routine=name, schedule=schedule)
         async with deps.sessionmaker() as db:
             user = await db.get(User, user_id)

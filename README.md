@@ -271,6 +271,135 @@ text hash, and every stored vector records its model, so swapping the embedder (
 OpenAI's `text-embedding-3-small` with `dimensions: 1024`, see
 [infra/litellm/config.yaml](infra/litellm/config.yaml)) re-embeds everything in the background.
 
+## Search across everything
+
+**Cmd-K** (Ctrl-K, or `/` when not typing; the Search button in the sidebar or the phone header)
+opens one bar over everything you have: every message in every chat, the text inside Library
+files, memories, the people and things in Mind, links, routines, apps, agent teams and skills,
+plus the app's pages and quick actions ("New routine", "Upload a file"). The last row asks your
+assistant instead, in a new chat. **Search** (`/search`) shows the same with more results per
+kind and a filter by kind. A chat result opens the chat at the message that matched, highlighted
+(`/c/<id>?m=<message id>`); a file opens its preview (`/library?file=<id>`).
+
+`GET /api/find?q=&kinds=&limit=&meaning=` (`nexus_common/find.py`) matches **words** with
+Postgres full-text search (each word as a prefix, so "invo" finds "invoice"; messages gained a
+generated `tsv` column and GIN index in migration 0039) and titles by substring, and **meaning**
+with the embeddings Nexus already keeps (memories, chat summaries, file chunks, entities). The
+embedder gets 1.2 s; when Ollama is slow or off the bar answers on words alone and says so. Each
+hit's score is a plain sum (title match, word rank, meaning, a small recency nudge), so the order
+is easy to reason about. Everything is scoped to the signed-in person and skips Trash; queries are
+never logged (the `search.done` log line has counts and timings only).
+
+## Telegram
+
+Your assistant on Telegram, two-way: text, voice notes, photos and documents, with the same
+memory, tools and teams as in the app. Nothing to install on the phone, and the Bot API is free.
+
+**Setting it up (owner, once):**
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, pick a name and a
+   username ending in `bot`. It replies with a token.
+2. Store the token and a random webhook secret, then restart so both services read them:
+
+   ```sh
+   ./scripts/secrets.sh set TELEGRAM_BOT_TOKEN          # paste the token
+   openssl rand -hex 32 | ./scripts/secrets.sh set TELEGRAM_WEBHOOK_SECRET
+   ./scripts/compose.sh --profile tunnel up -d
+   ```
+
+3. The orchestrator registers `NEXUS_URL/api/telegram/webhook` with Telegram when it starts
+   (`telegram.webhook_set` in its log). `NEXUS_URL` must be the public `https://` address, and
+   if Cloudflare Access ever fronts it, that one path needs a bypass rule.
+
+**Connecting your account:** Settings › Telegram › Connect opens the bot with a one-time code
+(ten minutes); tap Start and the chat is linked. `/new` starts a fresh chat, `/unlink`
+disconnects, `/in <text>` drops a note or to-do straight into the Organiser's Inbox (no model
+turn, so it's instant and free), `/today` sends the day's agenda, and `/help` lists them all. Only
+private chats are answered, never groups.
+
+**How it works:** Telegram posts each update to the webhook with the secret header; the API
+checks it in constant time, drops repeats by update id, queues the update and answers at once.
+The orchestrator's `telegram_update` job (never retried, so no reply is sent twice) runs the
+message as a normal turn in a Nexus chat called **Telegram**, shows "typing…" while it works,
+then sends the reply as Telegram HTML (converted from Markdown in `nexus_common/telegram.py`,
+split over several messages when long). One message is answered at a time per person; the
+next waits its turn. Voice notes go through the `nexus-transcribe` LiteLLM alias
+(`gpt-4o-mini-transcribe`, about US$0.003 a minute on the OpenAI key, billed to your budget)
+and the transcript is echoed first so a mishearing shows. Photos and documents are saved to the
+Library like uploads in a chat. Routines can deliver to Telegram as well (the routine's
+"Tell me on" options). Message text is never logged.
+
+## Organiser
+
+A built-in place for notes, to-dos, projects and the parts of life you look after (`/organiser`),
+so nothing needs Notion or Obsidian. It follows **PARA**: projects have a finish line, areas are
+ongoing (Health, Money, Home, Work), resources are topics, and anything finished or parked is the
+Archive. Notes and tasks sit inside any of them.
+
+- **Capture first, sort later.** Anything jotted down lands in the **Inbox**: the box on Today,
+  Cmd-K "Capture to Inbox", `/in` on Telegram, or telling the assistant. `[ ] call the bank
+  tomorrow #money` is a task due tomorrow tagged money; anything else is a note. The
+  `organiser_suggest` job asks the small model (`ORGANISER_MODEL`, nexus-nano) where each one
+  belongs; it's only a suggestion, accepted with one tap.
+- **Today** shows overdue, due-today and in-progress tasks and the week's focus beside a **daily
+  note** made from a short template. "Make N checkboxes into tasks" turns `- [ ]` lines into real
+  tasks linked from the line.
+- **Weekly review** (`/organiser/review`): about ten minutes in five steps (empty your head, clear
+  the Inbox, sort overdue tasks, give each stalled project a next step, pick up to three focus
+  tasks). A reminder goes out at 6 pm local time on Sunday (`ORGANISER_REVIEW_HOUR`) if it isn't
+  done.
+- **Links and history.** `[[Title]]` links items (backlinks show on the target; a link to a
+  missing title offers to create it). Text autosaves; every save names the version it started
+  from and an outdated one is refused (409) so the laptop and phone never silently overwrite
+  each other: you choose which to keep, and keeping yours files the other in the item's history.
+  Revisions are kept every five minutes of editing and before any assistant edit (50 per item).
+  Deleting goes to Trash with everything inside, for seven days.
+- **Export** gives a zip of Markdown files with YAML front matter and `[[wikilinks]]` in PARA
+  folders, which Obsidian opens as a vault. The `organiser_export` job also writes one to object
+  storage every night (`exports/<user>/organiser-vault.zip`; `ORGANISER_NIGHTLY_EXPORT=false` turns
+  it off).
+- **The assistant** has `organiser_add`, `organiser_find`, `organiser_read`, `organiser_update`
+  and `organiser_today`, so "add buy soil to the garden project", "what's due this week?" and
+  "jot in today's note that the stand-up moved" just work. It can't delete, only archive or drop.
+  Organiser items are in search (Tasks, Notes, Projects and areas) by words and meaning.
+
+Data: `org_items` (one table for every kind, with a generated `tsv` and an embedding),
+`org_links`, `org_revisions`, `org_reviews` (migration 0041). API under `/api/organiser`; the rules
+live in `nexus_common/organiser.py`, shared by the API and the orchestrator. Logs carry ids, kinds
+and counts, never titles or text.
+
+## Money
+
+A read-only view of the owner's finances (`/money`, owner only): where money goes, budgets,
+repeating payments and mutual funds. No bank login, no aggregator, nothing paid, and nothing can
+move money.
+
+- **Alert emails.** With "Bank and card alert emails" on (needs Gmail allowed in Settings), the
+  `money_hourly` job reads new debit and credit alerts (`ALERT_QUERY`, first run 90 days back)
+  and turns them into transactions with fixed rules (`nexus_common/money.py`: HDFC, ICICI, SBI,
+  Axis, Kotak and most Indian banks and cards). OTPs, due-date reminders, mandates and declined
+  payments are skipped. "Check now" queues `money_sync` for one person.
+- **Statements.** Upload a CSV or .xlsx export from net banking; the header row is found wherever
+  it is, and the account comes from its last four digits. The file is parsed in memory and never
+  stored. Importing twice adds nothing, and a statement row matching an alert (same account,
+  amount, direction, within two days) confirms it instead of counting twice.
+- **Mutual funds.** A CAMS or KFintech CAS PDF (uploaded, or read from Gmail when its password is
+  saved) gives holdings via casparser; `money_navs` revalues them every night from AMFI's public
+  NAV file.
+- **Counting.** Spending leaves out transfers between your own accounts (card bill payments,
+  CRED), money put into investments (shown as invested) and rows you leave out. Categories come
+  from merchant names; "Always for this merchant" saves a rule that recategorises past and future
+  rows. Budgets show a pace tick for how far through the month we are. Repeating payments are the
+  same merchant about a month (or a year) apart for about the same amount.
+- **Assistant.** `money_summary` gives totals only (categories, top merchants, budgets, repeating
+  payments, fund value), and only when "Let the assistant read totals" is on (off by default).
+
+Privacy: amounts are whole paise; the bank's narration, import file names and the CAS password
+are encrypted with the token key (`money.seal`); no model reads alerts or statements; Money is
+not in search or Admin; logs carry counts and ids only. "Delete all Money data" removes
+everything. Data: `money_settings`, `money_accounts`, `money_txns`, `money_budgets`,
+`money_holdings`, `money_imports` (migration 0042). API under `/api/money`.
+
 ## Onboarding and routines
 
 ### The setup interview

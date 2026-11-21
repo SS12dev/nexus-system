@@ -21,6 +21,7 @@ from nexus_api.routes import (
     chats,
     feedback,
     files,
+    find,
     folders,
     graph_admin,
     imports,
@@ -29,8 +30,11 @@ from nexus_api.routes import (
     links,
     me,
     memories,
+    money,
+    money_plan,
     notifications,
     ops,
+    organiser,
     projects,
     push,
     questions,
@@ -39,6 +43,7 @@ from nexus_api.routes import (
     screen,
     skills,
     systems,
+    telegram,
     trash,
     web,
     widgets,
@@ -131,6 +136,10 @@ def create_app(
     app.include_router(me.router)
     app.include_router(chats.router)
     app.include_router(files.router)
+    app.include_router(find.router)
+    app.include_router(organiser.router)
+    app.include_router(money.router)
+    app.include_router(money_plan.router)
     app.include_router(links.router)
     app.include_router(notifications.router)
     app.include_router(widgets.router)
@@ -157,6 +166,7 @@ def create_app(
     app.include_router(routines.router)
     app.include_router(push.router)
     app.include_router(trash.router)
+    app.include_router(telegram.router)
     app.include_router(feedback.router)
     app.include_router(ws.router)
 

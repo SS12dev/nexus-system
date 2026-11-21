@@ -28,6 +28,9 @@ class JobQueue(Protocol):
     async def enqueue_account_recovery_notice(self, kind: str, request_id: uuid.UUID) -> None: ...
     async def enqueue_invite_notice(self, user_id: uuid.UUID) -> None: ...
     async def enqueue_account_purge(self, user_id: uuid.UUID) -> None: ...
+    async def enqueue_telegram(self, update: dict) -> None: ...
+    async def enqueue_organiser_suggest(self, item_id: uuid.UUID) -> None: ...
+    async def enqueue_money_sync(self, user_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -135,3 +138,19 @@ class ArqJobQueue:
         await self.enqueue_job(
             "purge_deleted_account", str(user_id), _job_id=f"account-purge:{user_id}"
         )
+
+    async def enqueue_telegram(self, update: dict) -> None:
+        """One Telegram update; the job id drops a repeat the API's own check missed."""
+        await self.enqueue_job(
+            "telegram_update", update, _job_id=f"telegram:{update.get('update_id')}"
+        )
+
+    async def enqueue_organiser_suggest(self, item_id: uuid.UUID) -> None:
+        """Ask the assistant where a new Inbox item belongs (a suggestion, never a move)."""
+        await self.enqueue_job(
+            "organiser_suggest", str(item_id), _job_id=f"organiser-suggest:{item_id}"
+        )
+
+    async def enqueue_money_sync(self, user_id: uuid.UUID) -> None:
+        """Read new bank alert and CAS emails for one person now. One at a time per person."""
+        await self.enqueue_job("money_sync", str(user_id), _job_id=f"money-sync:{user_id}")

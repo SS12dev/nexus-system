@@ -32,6 +32,15 @@ model_list:
       # Ollama unloads an idle model after 5 minutes, and loading bge-m3 again adds about
       # 1.2 s to the next message. It is about 650 MB, so keep it loaded.
       keep_alive: -1
+  # Speech to text: Telegram voice notes (and voice in the app later). About US$0.003 a minute
+  # on the OpenAI key you already have. A local whisper.cpp server can replace it later
+  # without touching Nexus, since Nexus only ever names this alias.
+  - model_name: nexus-transcribe
+    litellm_params:
+      model: openai/gpt-4o-mini-transcribe
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: audio_transcription
 
 litellm_settings:
   # Every generation, with cost, goes to Langfuse (LANGFUSE_* env vars).

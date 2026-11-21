@@ -87,6 +87,7 @@ async def me(
             ("push", settings.push_enabled),
             ("email", settings.smtp_enabled),
             ("whatsapp", settings.whatsapp_enabled),
+            ("telegram", settings.telegram_enabled),
         )
         if on
     ]

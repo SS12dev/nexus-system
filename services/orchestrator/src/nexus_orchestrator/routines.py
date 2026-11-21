@@ -25,10 +25,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from nexus_common import mail, push, whatsapp
+from nexus_common import mail, push, telegram, whatsapp
 from nexus_common.events import Event, publish
 from nexus_common.litellm import active_key, get_budget
 from nexus_common.models import (
@@ -40,6 +41,7 @@ from nexus_common.models import (
     Routine,
     RoutineRun,
     RoutineRunStatus,
+    TelegramLink,
     TrashItem,
     User,
     UserStatus,
@@ -304,6 +306,23 @@ async def deliver(deps, r: Routine, user: User, content: str) -> list[str]:
             done.append("whatsapp")
         except whatsapp.WhatsAppError as exc:
             log.warning("Routine %s: WhatsApp failed: %s", r.id, exc)
+    if "telegram" in channels and deps.settings.telegram_enabled:
+        async with deps.sessionmaker() as db:
+            tg_chat = await db.scalar(
+                select(TelegramLink.tg_chat_id).where(TelegramLink.user_id == user.id)
+            )
+        if tg_chat is not None:
+            base = deps.settings.nexus_url.rstrip("/")
+            text = f"**{r.name}**\n\n{content.strip()}\n\n[Open in Nexus]({base}{routine_url(r)})"
+            http = deps.google_http or httpx.AsyncClient()
+            try:
+                await telegram.Bot(deps.settings, http).send(tg_chat, text)
+                done.append("telegram")
+            except telegram.TelegramError as exc:
+                log.warning("Routine %s: Telegram failed: %s", r.id, exc)
+            finally:
+                if deps.google_http is None:
+                    await http.aclose()
     return done
 
 

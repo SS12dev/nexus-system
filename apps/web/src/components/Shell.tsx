@@ -7,16 +7,19 @@ import {
   Brain,
   CalendarClock,
   FolderOpen,
+  LayoutList,
   LogOut,
   Menu,
   MessageSquareHeart,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings,
   Sparkles,
   Trash2,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -26,6 +29,7 @@ import { useAssistantName } from "../lib/assistant";
 import { hasRole, isOwner } from "../lib/types";
 import { useStore } from "../store/chat";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { useOrgOverview } from "./organiser/parts";
 import { NoticeToasts, useNoticeTray } from "./Notices";
 import { RingOverlay, useWidgetsLoader } from "./Widgets";
 import { useScreenLoader } from "./Screen";
@@ -33,6 +37,7 @@ import { Orb } from "./Orb";
 import { confirmAction } from "./Feedback";
 import { FeedbackDialog } from "./FeedbackDialog";
 import { Tour } from "./Tour";
+import { CommandBar, SHORTCUT, useCommandBar, useCommandBarShortcut } from "./CommandBar";
 
 const SIDEBAR_KEY = "nexus.sidebar";
 
@@ -58,6 +63,7 @@ export function Shell() {
   );
   const upsertApprovals = useStore((s) => s.upsertApprovals);
   const pendingAccess = useStore((s) => s.pendingAccess) ?? 0;
+  const orgInbox = useOrgOverview()?.inbox ?? 0;
   const pendingRecovery = useStore((s) => s.pendingRecovery) ?? 0;
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState(false);
@@ -118,6 +124,8 @@ export function Shell() {
   const tip = (text: string) => (collapsed ? text : undefined);
 
   useNoticeTray();
+  useCommandBarShortcut();
+  const openSearch = useCommandBar((s) => s.setOpen);
   useWidgetsLoader();
   useScreenLoader();
   const spend = user.budget.spend_usd;
@@ -174,6 +182,21 @@ export function Shell() {
           <MessageSquarePlus size={16} className="shrink-0" />
           <span className={label}>New chat</span>
         </button>
+        <button
+          onClick={() => {
+            setOpen(false);
+            openSearch(true);
+          }}
+          title={tip(`Search everything (${SHORTCUT})`)}
+          aria-label="Search everything"
+          className={`mx-3 mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-slate-400 hover:bg-edge/60 hover:text-slate-200 ${collapsed ? "md:mx-2 md:justify-center md:px-0" : ""}`}
+        >
+          <Search size={16} className="shrink-0" />
+          <span className={label}>Search</span>
+          <kbd className={`ml-auto rounded border border-edge px-1.5 text-xs text-slate-500 ${collapsed ? "md:hidden" : ""}`}>
+            {SHORTCUT}
+          </kbd>
+        </button>
         {/* Folded: the chat list goes; the space keeps the links at the bottom. */}
         {collapsed && <div className="hidden flex-1 md:block" />}
         <nav className={`flex-1 overflow-y-auto px-2 ${collapsed ? "md:hidden" : ""}`}>
@@ -202,6 +225,19 @@ export function Shell() {
           ))}
         </nav>
         <div className={`border-t border-edge p-3 text-sm ${collapsed ? "md:px-2" : ""}`}>
+          <NavLink to="/organiser" className={(p) => `relative ${navClass(p)}`} title={tip("Organiser")}>
+            <LayoutList size={16} className="shrink-0" /> <span className={label}>Organiser</span>
+            {orgInbox > 0 && (
+              <Badge collapsed={collapsed} title={`${orgInbox} in your Inbox to sort`}>
+                {orgInbox}
+              </Badge>
+            )}
+          </NavLink>
+          {isOwner(user) && (
+            <NavLink to="/money" className={navClass} title={tip("Money")}>
+              <Wallet size={16} className="shrink-0" /> <span className={label}>Money</span>
+            </NavLink>
+          )}
           <NavLink to="/library" className={navClass} title={tip("Library")}>
             <FolderOpen size={16} className="shrink-0" /> <span className={label}>Library</span>
           </NavLink>
@@ -285,6 +321,7 @@ export function Shell() {
       )}
       {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
       <Tour />
+      <CommandBar />
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 border-b border-edge px-4 py-3 md:hidden">
           <button
@@ -302,6 +339,13 @@ export function Shell() {
             <Orb state={state} size={22} />
             <span className="font-semibold">{assistant}</span>
           </Link>
+          <button
+            onClick={() => openSearch(true)}
+            className="ml-auto p-1 text-slate-300"
+            aria-label="Search everything"
+          >
+            <Search size={20} />
+          </button>
         </header>
         {user.notice && (
           <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">

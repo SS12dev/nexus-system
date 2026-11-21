@@ -13,6 +13,7 @@ const LABELS: Record<string, string> = {
   file: "File",
   folder: "Folder",
   link: "Library link",
+  org_item: "Organiser item",
   memories_all: "All memories",
   memory: "Memory",
   project: "Software project",
