@@ -487,3 +487,33 @@ async def test_order_emails_name_payments_and_record_cash(deps, user, sessionmak
     logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
     for secret in ("Swiggy", "Domino", "45250", "49500", "1234567890"):
         assert secret not in logged, secret
+
+
+async def test_a_read_back_cut_short_is_not_counted(deps, user, sessionmaker, settings):
+    """A mailbox Google refuses during a read back: the read doesn't use up one of the day's
+    read backs, and the notice says what was read and what wasn't."""
+    import time
+
+    from nexus_common import money_mail
+    from nexus_orchestrator.money import history_note
+
+    async with sessionmaker() as db:
+        await money_mail.save(db, settings, user, "alerts.box@gmail.com", {
+            "scope": f"openid {money_mail.SCOPE}", "refresh_token": "r", "access_token": "a",
+            "expires_in": 3600})  # fmt: skip
+        await db.commit()
+    await switch_on(sessionmaker, user)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    key = f"nexus:rl:money-history:{user}:{int(time.time() // 86400)}"
+    await deps.redis.set(key, 2)
+    assert await money.sync_user(deps, user, back_days=62) is None
+    assert int(await deps.redis.get(key)) == 1
+
+    base = {"messages": 10, "added": 4, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
+    title, body = history_note(2, base, "Gmail said: 403.")
+    assert title == "Read some of your old emails, but not all"
+    assert body.startswith("4 new transactions.") and "didn't count" in body

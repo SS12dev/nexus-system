@@ -159,3 +159,12 @@ async def test_orders_meet_their_payments(owner, sessionmaker, settings):
     async with sessionmaker() as db:
         assert (await db.get(MoneyTxn, ask["id"])).excluded is True
     assert left.status_code == 200
+
+
+def test_waits_read_in_hours_and_minutes():
+    from nexus_api.ratelimit import wait_text
+
+    assert wait_text(16593) == "4 h 37 min"
+    assert wait_text(7200) == "2 h"
+    assert wait_text(75) == "2 min"
+    assert wait_text(20) == "20 s"

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import html
 import logging
+import random
 import re
 import uuid
 from collections.abc import Callable
@@ -134,8 +135,36 @@ def _format_event(e: dict, tz: ZoneInfo) -> str:
     return line
 
 
+# Google's per-minute quotas ("Units per minute per user", "Rate Limit Exceeded") refill within a
+# minute: wait and try again, longer each time, about a minute in all. A daily quota doesn't.
+RETRY_WAITS = (2.0, 4.0, 8.0, 16.0, 32.0)
+
+
+def _rate_limited(resp: httpx.Response) -> bool:
+    if resp.status_code == 429:
+        return True
+    if resp.status_code != 403:
+        return False
+    try:
+        err = resp.json().get("error", {})
+    except ValueError:
+        return False
+    if not isinstance(err, dict):
+        return False
+    text = str(err.get("message", "")).lower()
+    reasons = {str(e.get("reason", "")) for e in err.get("errors") or [] if isinstance(e, dict)}
+    if "per day" in text or "dailyLimitExceeded" in reasons:
+        return False
+    return bool(reasons & {"rateLimitExceeded", "userRateLimitExceeded"}) or (
+        "rate limit" in text or "quota exceeded" in text
+    )
+
+
 class Google:
     """Calls Google's APIs as one user."""
+
+    # Seconds to wait before each retry of a rate-limited call; tests set it to zeros.
+    retry_waits: tuple[float, ...] = RETRY_WAITS
 
     def __init__(self, deps: Any, user_id: uuid.UUID):
         self.deps = deps
@@ -172,9 +201,16 @@ class Google:
         if own:
             client = httpx.AsyncClient(timeout=30)
         try:
-            resp = await client.request(
-                method, url, headers={"Authorization": f"Bearer {token}"}, **kwargs
-            )
+            for attempt in range(len(self.retry_waits) + 1):
+                resp = await client.request(
+                    method, url, headers={"Authorization": f"Bearer {token}"}, **kwargs
+                )
+                if attempt == len(self.retry_waits) or not _rate_limited(resp):
+                    break
+                after = resp.headers.get("Retry-After", "")
+                wait = float(after) if after.isdigit() else self.retry_waits[attempt]
+                log.info("google.rate_limited", extra={"service": service, "attempt": attempt + 1})
+                await asyncio.sleep(min(wait, 60.0) + random.uniform(0, 0.5))
         except httpx.HTTPError as exc:
             raise GoogleError(f"Couldn't reach {SERVICE_TITLES[service]}: {exc}") from exc
         finally:
@@ -200,6 +236,11 @@ class Google:
             )
         if resp.status_code == 404:
             return f"{SERVICE_TITLES[service]} has no such item."
+        if _rate_limited(resp):
+            return (
+                f"Google is limiting how fast {SERVICE_TITLES[service]} can be read just now. "
+                "Try again in a few minutes; Money tries again on its own within the hour."
+            )
         log.info("Google %s error %s: %s", service, resp.status_code, message)
         return f"{SERVICE_TITLES[service]} said: {resp.status_code} {message}".strip()
 

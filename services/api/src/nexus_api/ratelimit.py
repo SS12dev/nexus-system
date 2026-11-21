@@ -51,10 +51,20 @@ async def hit(redis: Redis, bucket: str, who: str, limit: int, window_s: int) ->
     return max(1, int((window + 1) * window_s - now))
 
 
+def wait_text(seconds: int) -> str:
+    """16593 -> "4 h 37 min"; 75 -> "2 min"; 20 -> "20 s"."""
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes = -(-seconds // 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60} min" if minutes % 60 else f"{minutes // 60} h"
+
+
 def too_many(retry_after: int, what: str = "requests") -> HTTPException:
     return HTTPException(
         status.HTTP_429_TOO_MANY_REQUESTS,
-        f"Too many {what}. Try again in {retry_after} s.",
+        f"Too many {what}. Try again in {wait_text(retry_after)}.",
         headers={"Retry-After": str(retry_after)},
     )
 
