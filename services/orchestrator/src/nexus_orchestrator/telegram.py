@@ -27,11 +27,13 @@ from nexus_common.models import (
     Message,
     MessageRole,
     MessageStatus,
+    NotificationKind,
     TelegramLink,
     User,
     UserStatus,
     utcnow,
 )
+from nexus_common.notices import notify
 from nexus_common.queues import DOCS_QUEUE
 from nexus_common.storage import file_key
 from nexus_common.telegram import Bot, Incoming, TelegramError
@@ -240,6 +242,16 @@ async def _start(deps: TurnDeps, bot: Bot, inc: Incoming, code: str) -> None:
         assistant = user.assistant
     await publish(deps.redis, user.id, Event(type="telegram.linked"))
     log.info("telegram.linked", extra={"user_id": str(user.id)})
+    # Whoever opens a Connect link links their Telegram, so say who did, in case it wasn't them.
+    who = f"@{inc.username}" if inc.username else (inc.name or "A Telegram account")
+    async with deps.sessionmaker() as db:
+        await notify(
+            db, deps.redis, deps.settings, user.id, NotificationKind.info,
+            "Telegram connected",
+            f"{who} can now talk to {assistant} and gets your routines and brief. "
+            "Not you? Disconnect it in Settings.",
+            url="/settings",
+        )  # fmt: skip
     await bot.send(
         inc.tg_chat_id,
         f"Connected. I'm {assistant}, the same assistant as in Nexus, with the same memory. "

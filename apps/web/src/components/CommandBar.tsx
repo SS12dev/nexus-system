@@ -72,25 +72,32 @@ export function Snippet({ text }: { text: string }) {
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 export const SHORTCUT = isMac ? "⌘K" : "Ctrl K";
 
-/** Cmd-K (Ctrl-K) anywhere opens the bar; "/" does too when not typing in a field. */
+/** Is this key press Cmd-K (Ctrl-K)? By the key's place too, so it works on any layout. */
+export function isSearchKey(e: Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "key" | "code">): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.altKey && (e.code === "KeyK" || (e.key ?? "").toLowerCase() === "k");
+}
+
+/** Cmd-K (Ctrl-K) anywhere opens the bar; "/" does too when not typing in a field. Listened for
+ * in the capture phase, so no page, editor or chart that handles keys itself can swallow it. */
 export function useCommandBarShortcut() {
   const setOpen = useCommandBar((s) => s.setOpen);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (isSearchKey(e)) {
         e.preventDefault();
-        setOpen(!useCommandBar.getState().open);
+        e.stopPropagation();
+        if (!e.repeat) setOpen(!useCommandBar.getState().open);
         return;
       }
       const t = e.target as HTMLElement | null;
       const typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
-      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.defaultPrevented) {
         e.preventDefault();
         setOpen(true);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [setOpen]);
 }
 

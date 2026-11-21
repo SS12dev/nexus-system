@@ -18,7 +18,7 @@ from nexus_common import config, graph_sync, widgets
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
-from nexus_common.litellm import LiteLLMAdmin
+from nexus_common.litellm import LiteLLMAdmin, widen_user_keys
 from nexus_common.logs import configure_logging, traced_job, with_request_id
 from nexus_common.settings import get_settings
 from nexus_common.skills import sync_library
@@ -105,10 +105,21 @@ async def startup(ctx: dict) -> None:
     )
     # Telegram re-registers its webhook each start (cheap, and keeps NEXUS_URL changes in step).
     ctx["telegram_webhook"] = asyncio.create_task(telegram.register_webhook(ctx["deps"]))
+    # Keys made before an alias existed can't call it (voice notes need nexus-transcribe).
+    ctx["widen_keys"] = asyncio.create_task(_widen_keys(ctx["deps"]))
     async with ctx["deps"].sessionmaker() as db:
         changed = await sync_library(db, Path(settings.library_path))
     if changed:
         log.info("Skills library: %d core skills added or updated", changed)
+
+
+async def _widen_keys(deps: TurnDeps) -> None:
+    try:
+        async with deps.sessionmaker() as db:
+            done = await widen_user_keys(db, deps.gateway)
+        log.info("litellm.keys_widened", extra={"count": done})
+    except Exception:
+        log.warning("litellm.widen_skipped", exc_info=True)
 
 
 async def shutdown(ctx: dict) -> None:

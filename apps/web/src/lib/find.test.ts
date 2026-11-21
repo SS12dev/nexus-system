@@ -46,3 +46,23 @@ describe("matchCommands", () => {
     expect(matchCommands("", COMMANDS)).toHaveLength(COMMANDS.length);
   });
 });
+
+describe("isSearchKey", () => {
+  const key = (k: Partial<KeyboardEvent>) => ({ metaKey: false, ctrlKey: false, altKey: false, key: "", code: "", ...k });
+  it("is Cmd-K or Ctrl-K on any keyboard layout", async () => {
+    const { isSearchKey } = await import("../components/CommandBar");
+    expect(isSearchKey(key({ metaKey: true, key: "k", code: "KeyK" }))).toBe(true);
+    expect(isSearchKey(key({ ctrlKey: true, key: "K", code: "KeyK" }))).toBe(true);
+    // A Russian layout gives "л" for the same key.
+    expect(isSearchKey(key({ metaKey: true, key: "л", code: "KeyK" }))).toBe(true);
+    expect(isSearchKey(key({ key: "k", code: "KeyK" }))).toBe(false);
+    expect(isSearchKey(key({ metaKey: true, altKey: true, key: "k", code: "KeyK" }))).toBe(false);
+  });
+});
+
+describe("Go to", () => {
+  it("lists the Brief and Money's tabs", () => {
+    expect(matchCommands("brief", COMMANDS).map((c) => c.id)).toContain("brief");
+    expect(matchCommands("subscriptions", COMMANDS).map((c) => c.id)).toContain("money-subs");
+  });
+});

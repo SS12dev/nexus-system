@@ -13,6 +13,7 @@ from nexus_common.models import (
     File,
     Message,
     MessageRole,
+    Notification,
     Routine,
     TelegramLink,
 )
@@ -105,6 +106,10 @@ async def test_link_then_talk(deps, bot, owner, model, sessionmaker):
     async with sessionmaker() as db:
         row = await db.get(TelegramLink, user.id)
     assert (row.tg_chat_id, row.tg_username, row.tg_name) == (TG_CHAT, "shivam", "Shivam")
+    # The person is told in Nexus who linked, in case a Connect link reached someone else.
+    async with sessionmaker() as db:
+        notice = await db.scalar(select(Notification))
+    assert notice.title == "Telegram connected" and "@shivam" in notice.body
 
     model.script = ["**Sure.** Here's the plan:\n- one\n- two"]
     await telegram.handle_update(deps, update(2, text="What's my plan?"))
