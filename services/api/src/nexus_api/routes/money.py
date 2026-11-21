@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -495,21 +495,7 @@ async def delete_budget(category: str, user: OwnerUser, db: DbDep) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# --- Subscriptions and investments -----------------------------------------------------------
-
-
-@router.get("/subscriptions")
-async def subscriptions(user: OwnerUser, db: DbDep) -> dict:
-    today = local_today(user)
-    txns = await store.load(
-        db, user.id, today - store.SUBSCRIPTION_LOOKBACK, today + timedelta(days=1)
-    )
-    subs = money.find_subscriptions(txns, today)
-    return {
-        "items": [store.subscription_out(s) for s in subs],
-        "monthly_paise": sum(s.monthly_paise for s in subs),
-        "yearly_paise": sum(s.monthly_paise for s in subs) * 12,
-    }
+# --- Investments -----------------------------------------------------------
 
 
 class HoldingOut(BaseModel):

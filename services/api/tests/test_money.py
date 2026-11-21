@@ -188,8 +188,9 @@ async def test_subscriptions_and_delete_everything(owner, sessionmaker, settings
         await store.ingest(db, settings, user.id, rows, source="statement")
         await db.commit()
     subs = (await owner.get("/api/money/subscriptions")).json()
-    assert [s["merchant"] for s in subs["items"]] == ["Netflix"]
-    assert subs["monthly_paise"] == 64900
+    assert [(s["merchant"], s["status"]) for s in subs["items"]] == [("Netflix", "new")]
+    assert subs["subscriptions_monthly_paise"] == 64900
+    assert subs["items"][0]["manage_url"] == "https://www.netflix.com/account"
 
     assert (await owner.post("/api/money/delete-all", json={"confirm": "nope"})).status_code == 422
     assert (

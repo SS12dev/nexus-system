@@ -81,6 +81,7 @@ CATEGORIES = (
     "Health",
     "Travel",
     "Education",
+    "Loans and EMIs",
     "Investments",
     "Transfers",
     "Cash",
@@ -114,7 +115,7 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                 "akasa", "spicejet", "airbnb", "oyo", "booking.com", "agoda", "hotel", "ixigo")),
     ("Shopping", ("amazon", "flipkart", "myntra", "ajio", "nykaa", "meesho", "croma",
                   "reliance digital", "decathlon", "ikea", "tata cliq", "snapdeal", "lenskart",
-                  "bambu", "robu", "thingiverse")),
+                  "bambu", "robu", "thingiverse", "sony", "apple india", "vijay sales")),
     ("Bills and utilities", ("electricity", "bescom", "msedcl", "tata power", "adani elec",
                              "airtel", "jio", "vodafone", "vi prepaid", "bsnl", "act fibernet",
                              "broadband", "gas", "water bill", "dth", "tatasky", "tata play",
@@ -129,6 +130,7 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Education", ("coursera", "udemy", "edx", "school", "college", "university", "tuition",
                    "kindle", "books")),
     ("Investments", ("zerodha", "groww", "kuvera", "coin by", "upstox", "mutual fund",
+                     "recurring deposit", "rd instal", "rd install", "fixed deposit",
                      "sip", "nps", "ppf", "camsonline", "kfintech", "indmoney", "smallcase",
                      "icclzerodha", "bse limited", "nse clearing")),
     ("Fees and charges", ("charges", "fee", "penalty", "gst on", "annual fee", "late payment",
@@ -146,6 +148,11 @@ def categorise(merchant: str, narration: str = "", *, credit: bool = False,
     if rules and (own := rules.get(merchant_key(merchant))):
         return own
     hay = f" {merchant} {narration} ".lower()
+    if credit and is_emi_conversion(hay):
+        # The card gives the purchase back and bills it as instalments instead.
+        return "Transfers"
+    if not credit and _EMI.search(hay) and not _SAVING.search(hay):
+        return "Loans and EMIs"
     for category, words in _RULES:
         if any(w in hay for w in words):
             if credit and category not in ("Income", "Investments", "Transfers"):
@@ -157,6 +164,30 @@ def categorise(merchant: str, narration: str = "", *, credit: bool = False,
     if re.search(r"\b[a-z0-9._-]+@(?:ok\w+|ybl|paytm|ibl|axl|upi|apl|icici|hdfcbank|sbi)\b", hay):
         return "Transfers"
     return "Other"
+
+
+# An instalment of a loan or a card EMI. "emi" only as a word: "premium" isn't one.
+_EMI = re.compile(
+    r"\bemis?\b|\bloan\s*(?:emi|repayment|instal)|\binstal+ments?\b|bajaj\s*fin|hdb\s*fin"
+    r"|home\s*credit|tvs\s*credit|snapmint|\b(?:n?ach)\b.{0,30}\b(?:loan|finance|fin)\b",
+    re.I,
+)
+_EMI_CONVERSION = re.compile(
+    r"emi\s*(?:conversion|booking|booked|reversal)|convert(?:ed)?\s*(?:in)?to\s*emi"
+    r"|loan\s*booking|(?:smart|easy|instant|flexi)\s*emi\b.{0,20}\b(?:cr|credit|reversal)\b",
+    re.I,
+)
+
+
+# An instalment into savings ("RD INSTALLMENT", "SIP") is investing, not a loan.
+_SAVING = re.compile(
+    r"recurring\s*deposit|\brd\b|fixed\s*deposit|\bfd\b|\bppf\b|\bnps\b|\bsip\b|mutual\s*fund", re.I
+)
+
+
+def is_emi_conversion(text: str) -> bool:
+    """A card credit that turns a purchase into EMIs ("SMARTEMI CONVERSION", "LOAN BOOKING")."""
+    return bool(_EMI_CONVERSION.search(text))
 
 
 def merchant_key(merchant: str) -> str:
@@ -181,6 +212,17 @@ def clean_merchant(raw: str) -> str:
     text = " ".join((raw or "").split())
     text = re.sub(r"^(?:vpa|upi|to|at|from|by)\s+", "", text, flags=re.I)
     lowered = text.lower()
+    if re.search(r"\bemis?\b", lowered) and "@" not in text:
+        # "EMI PRINCIPAL 03/12 SONY INDIA" and "EMI INTEREST 03/12 SONY" are one loan: "EMI Sony".
+        rest = re.sub(
+            r"\b(?:emis?|principal|prin|interest|int|amount|amt|gst|igst|cgst|sgst|on|of|for|"
+            r"smart|easy|instant|flexi|no|cost|loan|pvt|ltd|india|\d+(?:\s*/\s*\d+)?)\b",
+            " ",
+            text,
+            flags=re.I,
+        )
+        words = [w for w in re.sub(r"[^\w&' ]+", " ", rest).split() if len(w) > 1][:3]
+        return f"EMI {' '.join(words).title()}".strip()
     for key, name in _HANDLE_NAMES.items():
         if re.search(rf"(?<![a-z]){re.escape(key)}", lowered):
             return name
@@ -228,6 +270,7 @@ _DATES = [
     (re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\b"), "dmy"),
     (re.compile(r"\b(\d{1,2})[- ]?([A-Za-z]{3})[a-z]*[- ,]?(\d{4}|\d{2})\b"), "dMy"),
     (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "ymd"),
+    (re.compile(r"\b([A-Za-z]{3})[a-z]*\.?\s(\d{1,2}),?\s(\d{4})\b"), "Mdy"),
 ]
 _MONTHS = {m: i for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1
@@ -252,6 +295,7 @@ _MERCHANT_PATTERNS = [
 _BANKS = [
     ("HDFC Bank", ("hdfc",)),
     ("ICICI Bank", ("icici",)),
+    ("SBI Card", ("sbicard", "sbi card")),
     ("State Bank of India", ("sbi", "state bank")),
     ("Axis Bank", ("axis",)),
     ("Kotak Mahindra Bank", ("kotak",)),
@@ -298,7 +342,9 @@ def bank_of(text: str) -> str | None:
     return None
 
 
-def _date(text: str, fallback: date) -> date:
+def _date(text: str, fallback: date, back: int = 45, ahead: int = 1) -> date | None:
+    """The first date in the text within [fallback - back, fallback + ahead] days; the fallback
+    when there is none (None when the fallback is None)."""
     for pattern, kind in _DATES:
         for m in pattern.finditer(text):
             try:
@@ -306,6 +352,11 @@ def _date(text: str, fallback: date) -> date:
                     y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
                 elif kind == "dmy":
                     d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                elif kind == "Mdy":
+                    mon = _MONTHS.get(m.group(1)[:3].lower())
+                    if mon is None:
+                        continue
+                    d, mo, y = int(m.group(2)), mon, int(m.group(3))
                 else:
                     mon = _MONTHS.get(m.group(2)[:3].lower())
                     if mon is None:
@@ -317,7 +368,9 @@ def _date(text: str, fallback: date) -> date:
             except ValueError:
                 continue
             # An alert is about the last few weeks; anything else is a misread.
-            if fallback - timedelta(days=45) <= found <= fallback + timedelta(days=1):
+            if fallback is None or (
+                fallback - timedelta(days=back) <= found <= fallback + timedelta(days=ahead)
+            ):
                 return found
     return fallback
 
@@ -387,17 +440,206 @@ def parse_alert(subject: str, body: str, received: date, sender: str = "") -> Pa
         else "other"
     )  # fmt: skip
     ref = _REF.search(text)
+    merchant = _merchant(text, direction)
+    if card and direction == "credit" and re.search(r"\bpayment\b", low):
+        # "Payment of Rs 15,230 received towards your card XX5678": paying the bill.
+        merchant = "Card bill payment"
+    kind = "card" if card else "bank"
+    extra: dict = {}
+    balance = None
+    if (m := _BALANCE.search(text)) and kind == "bank":
+        balance = _safe_paise(m.group(1))
+    if (m := _LIMIT.search(text)) and kind == "card":
+        extra["available_limit_paise"] = _safe_paise(m.group(1))
     return Parsed(
         occurred_on=_date(text, received),
         amount_paise=amount,
         direction=direction,
-        merchant=_merchant(text, direction),
+        merchant=merchant,
         narration=text[:600],
         channel=channel,
         account_mask=mask[-4:],
-        account_kind="card" if card else "bank",
+        account_kind=kind,
         institution=bank_of(sender) or bank_of(re.sub(r"\S+@\S+", " ", text)),
         ref=ref.group(1) if ref else None,
+        balance_paise=balance,
+        extra=extra,
+    )
+
+
+def _safe_paise(text: str) -> int | None:
+    try:
+        return paise(text)
+    except ValueError:
+        return None
+
+
+_NUM = r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)"
+_BALANCE = re.compile(
+    r"\b(?:avl\.?|avbl\.?|available|clear|closing)?\s*bal(?:ance)?\b(?:\s*(?:is|in a/c))?[\s:.-]*"
+    r"(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)",
+    re.I,
+)
+_LIMIT = re.compile(
+    r"\bavail(?:able|\.)?\s*(?:credit\s*)?(?:limit|lmt)\b[^\d₹]{0,30}?" + _NUM, re.I
+)
+
+
+@dataclass
+class CardBill:
+    """A credit card statement email: what's owed and by when."""
+
+    account_mask: str
+    institution: str | None
+    total_due_paise: int
+    min_due_paise: int | None
+    due_on: date
+    statement_on: date
+
+
+_TOTAL_DUE = re.compile(
+    r"\btotal\s*(?:amount|amt\.?|payment)?\s*(?:due|payable|outstanding)\b[^\d₹]{0,25}?" + _NUM,
+    re.I,
+)
+_MIN_DUE = re.compile(
+    r"\bmin(?:imum|\.)?\s*(?:amount|amt\.?|payment)?\s*(?:due|payable)\b[^\d₹]{0,25}?" + _NUM,
+    re.I,
+)
+_DUE_DATE = re.compile(r"\b(?:payment\s*)?due\s*(?:date|by|on)\b[\s:.,-]*(?:is\s*)?(.{6,20})", re.I)
+# Gmail search for credit card statement emails; parse_card_bill does the real check.
+CARD_BILL_QUERY = (
+    '"credit card" statement ("total amount due" OR "total due" OR "total payment due" '
+    'OR "total amt due") -category:promotions'
+)
+
+
+def parse_card_bill(subject: str, body: str, received: date, sender: str = "") -> CardBill | None:
+    """Read a credit card statement email: total due, minimum due and the due date. None for
+    anything else (an ordinary alert, a promotion, a reminder without the amounts)."""
+    text = " ".join(f"{subject}. {body}".split())[:6000]
+    low = text.lower()
+    if "card" not in low or "statement" not in low:
+        return None
+    total = _TOTAL_DUE.search(text)
+    due = _DUE_DATE.search(text)
+    account = _ACCOUNT.search(text)
+    if not total or not due or not account:
+        return None
+    total_paise = _safe_paise(total.group(1))
+    due_on = _date(due.group(1), None)
+    if total_paise is None or due_on is None:
+        return None
+    if not received - timedelta(days=10) <= due_on <= received + timedelta(days=60):
+        return None
+    minimum = _MIN_DUE.search(text)
+    return CardBill(
+        account_mask=next(g for g in account.groups() if g)[-4:],
+        institution=bank_of(sender) or bank_of(re.sub(r"\S+@\S+", " ", text)),
+        total_due_paise=total_paise,
+        min_due_paise=_safe_paise(minimum.group(1)) if minimum else None,
+        due_on=due_on,
+        statement_on=received,
+    )
+
+
+def bill_status(
+    due_paise: int | None,
+    due_on: date | None,
+    statement_on: date | None,
+    paid_on: date | None,
+    payments_paise: int,
+    today: date,
+) -> dict:
+    """Where a card's latest bill stands: paid, part paid, due or overdue, and what's left.
+    Payments are the card's credits since the statement; marking it paid by hand wins."""
+    if not due_paise or not due_on:
+        return {"status": "none", "left_paise": 0}
+    if paid_on and (statement_on is None or paid_on >= statement_on):
+        return {"status": "paid", "left_paise": 0}
+    left = max(due_paise - payments_paise, 0)
+    if left <= 100:  # within a rupee
+        return {"status": "paid", "left_paise": 0}
+    if today > due_on:
+        return {"status": "overdue", "left_paise": left}
+    return {"status": "part" if payments_paise > 0 else "due", "left_paise": left}
+
+
+@dataclass
+class EmiBooking:
+    """A purchase turned into EMIs, read from the card's confirmation email."""
+
+    account_mask: str
+    institution: str | None
+    principal_paise: int
+    months: int
+    rate_bp: int
+    emi_paise: int | None
+    booked_on: date
+    merchant: str
+
+
+_EMI_BOOKED = re.compile(
+    r"\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:converted|booked|processed|approved)"
+    r"|\bsuccessfully\s+(?:converted|booked)|\bemi\s+(?:is\s+)?(?:booked|confirmed)\b"
+    r"|\bconverted\s+(?:in)?to\s+(?:an?\s+)?emi\b",
+    re.I,
+)
+_EMI_OFFER = re.compile(
+    r"\beligible\b|\bpre-?approved\b|\bconvert\s+now\b|\bavail\b|\boffer\b|\bclick\b"
+    r"|\bunsubscribe\b",
+    re.I,
+)
+_TENURE = re.compile(r"\b(\d{1,2})\s*(?:months?|mths?|m)\b(?!\w)", re.I)
+_TENURE_WORD = re.compile(r"\btenure\b[^\d]{0,20}(\d{1,2})", re.I)
+_RATE = re.compile(
+    r"(?:interest|roi|rate)[^\d%]{0,30}(\d{1,2}(?:\.\d{1,2})?)\s*%|(\d{1,2}(?:\.\d{1,2})?)\s*%"
+    r"\s*(?:p\.?\s*a\.?|per\s+annum|interest)",
+    re.I,
+)
+_EMI_AMOUNT = re.compile(
+    r"\b(?:emi|instal+ment)\s*(?:amount|amt\.?)?\s*(?:of|is|:)?\s*" + _NUM, re.I
+)
+EMI_QUERY = (
+    '(EMI OR SmartEMI OR "Smart EMI" OR "Easy EMI" OR "Instant EMI") '
+    '(converted OR booked OR processed OR "loan account") -category:promotions'
+)
+
+
+def parse_emi_booking(
+    subject: str, body: str, received: date, sender: str = ""
+) -> EmiBooking | None:
+    """Read a "your purchase has been converted to EMI" email: the card, the amount, how many
+    months and at what rate. Offers ("eligible for EMI", "convert now") are not bookings."""
+    text = " ".join(f"{subject}. {body}".split())[:4000]
+    if not re.search(r"\bemi\b", text, re.I) or not _EMI_BOOKED.search(text):
+        return None
+    if _EMI_OFFER.search(text):
+        return None
+    account = _ACCOUNT.search(text)
+    amount = _amount(text)
+    tenure = _TENURE_WORD.search(text) or _TENURE.search(text)
+    if not account or not amount or not tenure:
+        return None
+    months = int(tenure.group(1))
+    if not 2 <= months <= 84:
+        return None
+    rate_bp = 0
+    if not re.search(r"no[\s-]*cost", text, re.I) and (r := _RATE.search(text)):
+        rate_bp = int(round(float(r.group(1) or r.group(2)) * 100))
+    emi = _EMI_AMOUNT.search(text)
+    emi_paise = _safe_paise(emi.group(1)) if emi else None
+    if emi_paise == amount:
+        emi_paise = None
+    merchant = _merchant(text, "debit")
+    return EmiBooking(
+        account_mask=next(g for g in account.groups() if g)[-4:],
+        institution=bank_of(sender) or bank_of(re.sub(r"\S+@\S+", " ", text)),
+        principal_paise=amount,
+        months=months,
+        rate_bp=rate_bp if rate_bp < 6000 else 0,
+        emi_paise=emi_paise,
+        booked_on=received,
+        merchant=merchant if merchant != "Unknown" else "",
     )
 
 
@@ -752,6 +994,7 @@ class Txn:
     merchant: str
     category: str
     excluded: bool = False
+    account_id: str | None = None
 
 
 def month_bounds(month: str) -> tuple[date, date]:
@@ -815,19 +1058,90 @@ class Subscription:
     next_on: date
     count: int
     monthly_paise: int
+    # The latest payment and the one before, to spot a price change.
+    last_paise: int = 0
+    previous_paise: int = 0
+
+    @property
+    def price_change_paise(self) -> int:
+        """How much the latest payment differs from the one before (0 within 2%)."""
+        if not self.previous_paise:
+            return 0
+        diff = self.last_paise - self.previous_paise
+        return diff if abs(diff) > self.previous_paise * 0.02 else 0
+
+
+# Where to manage or cancel well-known subscriptions (merchant_key -> account page).
+MANAGE_URLS = {
+    "netflix": "https://www.netflix.com/account",
+    "spotify": "https://www.spotify.com/account/overview/",
+    "youtube": "https://www.youtube.com/paid_memberships",
+    "youtube premium": "https://www.youtube.com/paid_memberships",
+    "google play": "https://play.google.com/store/account/subscriptions",
+    "google": "https://play.google.com/store/account/subscriptions",
+    "apple": "https://apps.apple.com/account/subscriptions",
+    "apple com bill": "https://apps.apple.com/account/subscriptions",
+    "icloud": "https://apps.apple.com/account/subscriptions",
+    "amazon prime": "https://www.amazon.in/gp/primecentral",
+    "prime video": "https://www.amazon.in/gp/primecentral",
+    "openai": "https://chatgpt.com/",
+    "chatgpt": "https://chatgpt.com/",
+    "anthropic": "https://claude.ai/settings/billing",
+    "github": "https://github.com/settings/billing",
+    "linkedin": "https://www.linkedin.com/premium/manage/",
+    "audible": "https://www.audible.in/account/overview",
+}
+# Repeating payments that are bills rather than subscriptions to review.
+BILL_CATEGORIES = ("Rent and housing", "Bills and utilities", "Investments")
+CADENCE_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
+
+
+def manage_url(merchant: str) -> str | None:
+    key = merchant_key(merchant)
+    return MANAGE_URLS.get(key) or next(
+        (url for k, url in MANAGE_URLS.items() if key.startswith(k + " ")), None
+    )
+
+
+def per_month(amount_paise: int, cadence: str) -> int:
+    return amount_paise // CADENCE_MONTHS.get(cadence, 1)
+
+
+def roll_forward(day: date, cadence: str, today: date) -> date:
+    """The first renewal on or after today, for a date that has passed."""
+    step = CADENCE_MONTHS.get(cadence, 1)
+    n, nxt = 0, day
+    while nxt < today and n < 600:
+        n += 1
+        nxt = add_months(day, step * n)
+    return nxt
+
+
+def add_months(day: date, months: int) -> date:
+    """The same day of the month `months` later, or the month's last day if it's shorter."""
+    n = day.year * 12 + day.month - 1 + months
+    y, m = divmod(n, 12)
+    m += 1
+    for d in (day.day, 30, 29, 28):
+        try:
+            return date(y, m, min(d, day.day))
+        except ValueError:
+            continue
+    return date(y, m, 28)
 
 
 def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
     """Payments that repeat (subscriptions, rent, bills, SIPs): the same merchant at least
     three times about a month apart (or twice about a year apart), for about the same amount
-    (within 15%). Lapsed ones (no payment for two cycles) and card bill payments are left out."""
+    (within 15%; the latest may differ, which is a price change). Lapsed ones (no payment for
+    two cycles) and card bill payments are left out."""
     by: dict[str, list[Txn]] = defaultdict(list)
     for t in txns:
         if (
             t.direction == "debit"
             and not t.excluded
             and t.merchant != "Unknown"
-            and t.category not in ("Transfers", "Income")
+            and t.category not in ("Transfers", "Income", "Loans and EMIs")
         ):
             by[t.merchant].append(t)
     found: list[Subscription] = []
@@ -848,11 +1162,18 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
                 run.append(t)
             if len(run) < need:
                 continue
-            typical = int(statistics.median(t.amount_paise for t in run))
-            if any(abs(t.amount_paise - typical) > typical * 0.15 for t in run):
+            # The earlier payments must agree; the latest may be a new price (up to double).
+            older = run[1:]
+            usual = int(statistics.median(t.amount_paise for t in older))
+            if any(abs(t.amount_paise - usual) > usual * 0.15 for t in older):
                 continue
+            latest = run[0].amount_paise
+            if not usual / 2 <= latest <= usual * 2:
+                continue
+            changed = abs(latest - usual) > usual * 0.15
+            typical = latest if changed else int(statistics.median(t.amount_paise for t in run))
             last = run[0].occurred_on
-            nxt = last + timedelta(days=step)
+            nxt = add_months(last, 1 if cadence == "monthly" else 12)
             if (today - last).days > step * 2:
                 continue
             found.append(
@@ -865,7 +1186,42 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
                     next_on=nxt,
                     count=len(run),
                     monthly_paise=typical if cadence == "monthly" else typical // 12,
+                    last_paise=latest,
+                    previous_paise=run[1].amount_paise,
                 )
             )
             break
     return sorted(found, key=lambda s: -s.monthly_paise)
+
+
+@dataclass
+class EmiSeen:
+    """EMI payments seen on an account: a loan worth tracking if it isn't yet."""
+
+    merchant: str
+    account_id: str | None
+    monthly_paise: int
+    months_seen: int
+    first_on: date
+    last_on: date
+
+
+def find_emis(txns: list[Txn], today: date) -> list[EmiSeen]:
+    """EMIs paid in the last two months, grouped by loan ("EMI Sony" on one card). The monthly
+    figure is the latest month's total, so principal, interest and its GST add up."""
+    by: dict[tuple[str, str | None], list[Txn]] = defaultdict(list)
+    for t in txns:
+        if t.direction == "debit" and not t.excluded and t.category == "Loans and EMIs":
+            by[(t.merchant, t.account_id)].append(t)
+    found = []
+    for (merchant, account_id), items in by.items():
+        items.sort(key=lambda t: t.occurred_on)
+        last = items[-1].occurred_on
+        if (today - last).days > 62:
+            continue
+        month = (last.year, last.month)
+        latest = sum(t.amount_paise for t in items if (t.occurred_on.year, t.occurred_on.month)
+                     == month)  # fmt: skip
+        months = {(t.occurred_on.year, t.occurred_on.month) for t in items}
+        found.append(EmiSeen(merchant, account_id, latest, len(months), items[0].occurred_on, last))
+    return sorted(found, key=lambda e: -e.monthly_paise)

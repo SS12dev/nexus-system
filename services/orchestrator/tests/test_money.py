@@ -18,6 +18,7 @@ from nexus_common.models import (
     MoneySettings,
     MoneyTxn,
     RoleName,
+    User,
     UserStatus,
     utcnow,
 )
@@ -140,7 +141,8 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
     deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(google))
 
     counts = await money.sync_user(deps, user)
-    assert counts == {"messages": 3, "added": 2, "matched": 0, "skipped": 0}
+    assert counts == {
+        "messages": 3, "added": 2, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}  # fmt: skip
     query = google.sent("GET", f"{GMAIL}/messages").url.params["q"]
     assert "debited" in query and "after:" in query
 
@@ -199,24 +201,99 @@ async def test_holdings_are_valued_at_the_latest_nav(deps, user, sessionmaker):
         assert h.value_paise == 939675  # 100.5 x 93.5 = 9396.75
 
 
-async def test_assistant_reads_totals_only_when_allowed(deps, user, sessionmaker, settings):
+async def test_assistant_uses_money_unless_switched_off(deps, user, sessionmaker, settings):
     async def emit(*args, **kwargs):
         pass
 
     ctx = ToolContext(deps=deps, user_id=user, chat_id=None, emit=emit)
-    tool = {t.name: t for t in build_tools(ctx, ["money_summary"])}["money_summary"]
-    assert "hasn't let the assistant" in await tool.ainvoke({})
+    names = ["money_summary", "money_transactions", "money_accounts", "money_subscriptions",
+             "money_subscription_update", "money_plan"]  # fmt: skip
+    tools = {t.name: t for t in build_tools(ctx, names)}
+    assert set(names) <= set(tools)
 
     async with sessionmaker() as db:
         rows = [
             m.Parsed(date(2026, 11, 3), 45000, "debit", "Swiggy", "UPI-SWIGGY"),
             m.Parsed(date(2026, 11, 4), 12500000, "credit", "Acme", "SALARY"),
+        ] + [
+            m.Parsed(date(2026, mo, 5), 64900, "debit", "Netflix", f"NETFLIX {mo}")
+            for mo in (8, 9, 10, 11)
         ]
         await store.ingest(db, settings, user, rows, source="statement")
-        prefs = await store.settings_for(db, user)
-        prefs.assistant_access = True
         await db.commit()
-    out = await tool.ainvoke({"month": "2026-11"})
-    assert "Spent ₹450.00" in out and "income ₹1,25,000.00" in out
+    # On by default.
+    out = await tools["money_summary"].ainvoke({"month": "2026-11"})
+    assert "Spent ₹1,099.00" in out and "income ₹1,25,000.00" in out
     assert "Food and dining ₹450.00" in out
     assert "UPI-SWIGGY" not in out  # never the bank's narration
+
+    out = await tools["money_transactions"].ainvoke({"search": "swig"})
+    assert "Swiggy [Food and dining]" in out and "UPI-SWIGGY" not in out
+    assert "Netflix" not in out
+
+    out = await tools["money_subscriptions"].ainvoke({})
+    assert "Netflix (subscription, new)" in out
+    out = await tools["money_subscription_update"].ainvoke(
+        {"merchant": "netflix", "status": "cancelled"}
+    )
+    assert out.startswith("Saved: Netflix")
+    assert "Netflix (subscription, cancelled)" in await tools["money_subscriptions"].ainvoke({})
+
+    assert "Totals:" in await tools["money_accounts"].ainvoke({})
+    plan = await tools["money_plan"].ainvoke({"months": 12, "try_monthly_sip": 5000})
+    assert "Net worth now" in plan and "new SIP ₹5,000.00/month" in plan
+
+    async with sessionmaker() as db:
+        prefs = await store.settings_for(db, user)
+        prefs.assistant_access = False
+        await db.commit()
+    for name in names:
+        args = {"merchant": "Netflix", "status": "active"} if name.endswith("update") else {}
+        assert "switched off" in await tools[name].ainvoke(args)
+
+
+async def test_card_bills_emi_emails_and_reminders(deps, user, sessionmaker, monkeypatch):
+    when = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
+    mails = {
+        "b1": _mail(
+            "b1",
+            "Your HDFC Bank Credit Card Statement for November 2026",
+            "Your HDFC Bank Credit Card ending 5678 statement is ready. Total Amount Due: Rs. "
+            "24,512.00 Minimum Amount Due: Rs. 1,230.00 Payment Due Date: 21/11/2026",
+            "emailstatements.cards@hdfcbank.net",
+            when,
+        ),
+        "e1": _mail(
+            "e1",
+            "Your SmartEMI request is processed",
+            "Your transaction of Rs 54,990.00 at SONY INDIA on HDFC Bank Credit Card ending 5678 "
+            "has been successfully converted to EMI for a tenure of 12 months at 15% p.a.",
+            "alerts@hdfcbank.net",
+            when,
+        ),
+    }
+    routes = {("GET", f"{GMAIL}/messages"): {"messages": [{"id": k} for k in mails]}}
+    for k, v in mails.items():
+        routes[("GET", f"{GMAIL}/messages/{k}")] = v
+    fake = Google(routes)
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(fake))
+    await grant(sessionmaker, deps.settings, user, ["gmail"])
+    await switch_on(sessionmaker, user)
+    counts = await money.sync_user(deps, user)
+    assert (counts["bills"], counts["emis"], counts["added"]) == (1, 1, 0)
+
+    async with sessionmaker() as db:
+        accounts = await store.accounts_view(db, user, date(2026, 11, 19))
+        (card,) = accounts["items"]
+        assert (card["due_paise"], card["bill"]["status"]) == (2451200, "due")
+        loans = await store.loans_view(db, user, date(2026, 11, 19))
+        assert loans["items"][0]["months"] == 12
+
+    async with sessionmaker() as db:
+        (await db.get(User, user)).timezone = "Asia/Kolkata"
+        await db.commit()
+    # 9 am in Kolkata is 03:30 UTC; the bill is due in two days.
+    nine = datetime(2026, 11, 19, 3, 30, tzinfo=UTC)
+    assert await money.send_reminders(deps, nine) == 1
+    assert await money.send_reminders(deps, nine) == 0  # once only
+    assert await money.send_reminders(deps, nine + timedelta(hours=1)) == 0

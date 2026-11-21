@@ -163,6 +163,7 @@ async def money_sync(ctx: dict, user_id: str) -> None:
 @traced_job
 async def money_hourly(ctx: dict) -> None:
     await money.sync_all(ctx["deps"])
+    await money.send_reminders(ctx["deps"])
 
 
 @traced_job

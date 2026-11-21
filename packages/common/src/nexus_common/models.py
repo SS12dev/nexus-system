@@ -2058,9 +2058,10 @@ class MoneySettings(Base):
     )
     # Read bank and card alert emails from Gmail every hour.
     gmail_sync: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-    # Let the assistant read spending totals (never transactions or narrations).
+    # Let the assistant read Money (totals, transactions without the bank's narration,
+    # accounts, subscriptions, the plan) and manage subscriptions. Never statements or alerts.
     assistant_access: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false")
+        Boolean, default=True, server_default=text("true")
     )
     # The CAS PDF password (usually the PAN), encrypted (money.seal).
     cas_password_enc: Mapped[str | None] = mapped_column(Text)
@@ -2074,6 +2075,8 @@ class MoneySettings(Base):
     cas_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # What went wrong on the last background run, in words for the person.
     last_error: Mapped[str | None] = mapped_column(String(300))
+    # The forecast's assumptions (money_plan.Assumptions as a dict); empty means defaults.
+    plan: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -2090,6 +2093,22 @@ class MoneyAccount(Base):
     # bank or card.
     kind: Mapped[str] = mapped_column(String(8), default="bank")
     name: Mapped[str] = mapped_column(String(120), default="")
+    # The latest balance an alert or statement showed (or the person typed), and its date.
+    balance_paise: Mapped[int | None] = mapped_column(BigInteger)
+    balance_on: Mapped[date | None] = mapped_column(Date)
+    # Cards: the limit (typed in), the available limit from the latest alert, and the latest
+    # statement's bill.
+    credit_limit_paise: Mapped[int | None] = mapped_column(BigInteger)
+    available_paise: Mapped[int | None] = mapped_column(BigInteger)
+    available_on: Mapped[date | None] = mapped_column(Date)
+    due_paise: Mapped[int | None] = mapped_column(BigInteger)
+    min_due_paise: Mapped[int | None] = mapped_column(BigInteger)
+    due_on: Mapped[date | None] = mapped_column(Date)
+    statement_on: Mapped[date | None] = mapped_column(Date)
+    # When the person marked the current bill paid by hand.
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    # Closed or not worth showing; its transactions still count.
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_money_accounts_user", "user_id"),)
@@ -2202,3 +2221,115 @@ class MoneyImport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_money_imports_user", "user_id", "created_at"),)
+
+
+class MoneySubscription(Base):
+    """What the person decided about a repeating payment (keep, cancelled, not a subscription),
+    or one they added by hand. Detected payments without a row here are shown as new."""
+
+    __tablename__ = "money_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # money.merchant_key of the merchant, so detection and this row meet.
+    key: Mapped[str] = mapped_column(String(120))
+    merchant: Mapped[str] = mapped_column(String(120))
+    # active, cancelled or ignored (not a subscription).
+    status: Mapped[str] = mapped_column(String(12), default="active")
+    # Added by hand: the amount, cadence and next date are the person's, not detected.
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    category: Mapped[str] = mapped_column(String(40), default="Subscriptions")
+    amount_paise: Mapped[int | None] = mapped_column(BigInteger)
+    # monthly, quarterly or yearly.
+    cadence: Mapped[str] = mapped_column(String(12), default="monthly")
+    next_on: Mapped[date | None] = mapped_column(Date)
+    # Days before a renewal to remind; 0 means no reminder.
+    remind_days: Mapped[int] = mapped_column(Integer, default=3)
+    manage_url: Mapped[str | None] = mapped_column(String(300))
+    note: Mapped[str | None] = mapped_column(String(300))
+    cancelled_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "key"),)
+
+
+class MoneyAsset(Base):
+    """Savings tracked by hand: a fixed or recurring deposit, PPF, EPF, NPS, gold or anything
+    else. Values are worked out from the terms (money_plan.asset_value)."""
+
+    __tablename__ = "money_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # fd, rd, ppf, epf, nps, gold or other.
+    kind: Mapped[str] = mapped_column(String(8))
+    name: Mapped[str] = mapped_column(String(120), default="")
+    institution: Mapped[str | None] = mapped_column(String(60))
+    # FD: the deposit. RD: the monthly instalment. Others: the balance on balance_on.
+    amount_paise: Mapped[int] = mapped_column(BigInteger)
+    # Interest or expected return a year, in basis points (7.1% = 710).
+    rate_bp: Mapped[int] = mapped_column(Integer, default=0)
+    start_on: Mapped[date | None] = mapped_column(Date)
+    maturity_on: Mapped[date | None] = mapped_column(Date)
+    balance_on: Mapped[date | None] = mapped_column(Date)
+    # What goes in each month (EPF, NPS, other) or each year (PPF).
+    contribution_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    # FD: interest paid out rather than added to the deposit.
+    payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # active or closed.
+    status: Mapped[str] = mapped_column(String(8), default="active")
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_assets_user", "user_id"),)
+
+
+class MoneyLoan(Base):
+    """A loan or EMI (a card EMI, a no-cost EMI, a personal or home loan). What's left and when
+    it ends are worked out from the terms (money_plan.loan_state)."""
+
+    __tablename__ = "money_loans"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # card_emi, personal, home, vehicle, education or other.
+    kind: Mapped[str] = mapped_column(String(12), default="card_emi")
+    name: Mapped[str] = mapped_column(String(120))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    lender: Mapped[str | None] = mapped_column(String(60))
+    principal_paise: Mapped[int] = mapped_column(BigInteger)
+    rate_bp: Mapped[int] = mapped_column(Integer, default=0)
+    months: Mapped[int] = mapped_column(Integer)
+    # The instalment; worked out from the terms when not typed in.
+    emi_paise: Mapped[int] = mapped_column(BigInteger)
+    first_due_on: Mapped[date] = mapped_column(Date)
+    # active or closed (paid off early).
+    status: Mapped[str] = mapped_column(String(8), default="active")
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_loans_user", "user_id"),)
+
+
+class MoneyGoal(Base):
+    """Something to save for: an amount by a date, and how much is put aside so far."""
+
+    __tablename__ = "money_goals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120))
+    target_paise: Mapped[int] = mapped_column(BigInteger)
+    by_on: Mapped[date] = mapped_column(Date)
+    saved_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    # The savings tracked for it (MoneyAsset ids), counted on top of saved_paise.
+    asset_ids: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_money_goals_user", "user_id"),)

@@ -3,6 +3,10 @@
 - `sync_user`: read new bank and card alert emails from Gmail into transactions, and the newest
   CAMS / KFintech consolidated statement (when its password is saved) into holdings. Runs
   hourly for everyone who switched it on, and when they press "Check now".
+  Card statement emails give each card's bill and due date, and "converted to EMI" emails
+  start tracking the loan.
+- `send_reminders`: once a day at 9 am local time, renewals coming up, a charge after
+  cancelling, a price rise, and card bills due in three days or missed. Each is sent once.
 - `revalue_holdings`: each night, value every holding at AMFI's latest published NAV.
 
 No model sees any of it: alerts and statements are read with plain rules on this machine.
@@ -19,8 +23,16 @@ from sqlalchemy import select
 
 from nexus_common import money
 from nexus_common import money_store as store
-from nexus_common.models import MoneyHolding, MoneySettings, User, UserStatus, utcnow
-from nexus_common.organiser import zone
+from nexus_common.models import (
+    MoneyHolding,
+    MoneySettings,
+    NotificationKind,
+    User,
+    UserStatus,
+    utcnow,
+)
+from nexus_common.notices import notify
+from nexus_common.organiser import local_today, zone
 from nexus_orchestrator.google_tools import GMAIL, Google, GoogleError, _b64decode, message_body
 from nexus_orchestrator.turn import TurnDeps
 
@@ -61,10 +73,14 @@ def _header(msg: dict, name: str) -> str:
 
 async def _read_alerts(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings) -> dict:
     since = (prefs.gmail_synced_until or utcnow() - FIRST_SYNC) - OVERLAP
-    query = f"{money.ALERT_QUERY} after:{int(since.timestamp())}"
-    ids = await _list_ids(g, query, MAX_MESSAGES)
+    after = f"after:{int(since.timestamp())}"
+    ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", MAX_MESSAGES)
+    for query in (money.CARD_BILL_QUERY, money.EMI_QUERY):
+        ids += [i for i in await _list_ids(g, f"{query} {after}", 200) if i not in ids]
     tz = zone(user)
     parsed: list[tuple[money.Parsed, str]] = []
+    bills: list[money.CardBill] = []
+    bookings: list[money.EmiBooking] = []
     newest = prefs.gmail_synced_until
     gate = asyncio.Semaphore(PARALLEL)
 
@@ -75,18 +91,22 @@ async def _read_alerts(deps: TurnDeps, g: Google, user: User, prefs: MoneySettin
         received = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000, UTC)
         newest = max(newest or received, received)
         body, _ = message_body(msg.get("payload") or {})
-        p = money.parse_alert(
-            _header(msg, "subject"),
-            body,
-            received.astimezone(tz).date(),
-            sender=_header(msg, "from"),
-        )
-        if p is not None:
+        subject, sender = _header(msg, "subject"), _header(msg, "from")
+        day = received.astimezone(tz).date()
+        if bill := money.parse_card_bill(subject, body, day, sender=sender):
+            bills.append(bill)
+        elif booking := money.parse_emi_booking(subject, body, day, sender=sender):
+            bookings.append(booking)
+        elif p := money.parse_alert(subject, body, day, sender=sender):
             parsed.append((p, mid))
 
     await asyncio.gather(*(one(m) for m in ids))
-    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0}
+    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
     async with deps.sessionmaker() as db:
+        for bill in sorted(bills, key=lambda b: b.statement_on):
+            counts["bills"] += await store.record_card_bill(db, user.id, bill)
+        for booking in bookings:
+            counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
         # Oldest first, so an account's rows arrive in order.
         for p, mid in sorted(parsed, key=lambda x: x[0].occurred_on):
             got = await store.ingest(
@@ -188,7 +208,7 @@ async def sync_user(deps: TurnDeps, user_id: uuid.UUID) -> dict | None:
     if holdings is not None:
         counts["holdings"] = holdings
     log.info("money.synced", extra={"user_id": str(user_id), **counts})
-    if counts.get("added") or counts.get("matched") or holdings:
+    if any(counts.get(k) for k in ("added", "matched", "bills", "emis")) or holdings:
         await store.changed(deps.redis, user_id, **counts)
     return counts
 
@@ -244,3 +264,42 @@ async def revalue_holdings(deps: TurnDeps, navs: dict | None = None) -> int:
         await store.changed(deps.redis, uid)
     log.info("money.revalued", extra={"count": len(changed), "navs": len(navs)})
     return len(changed)
+
+
+REMIND_HOUR = 9
+REMIND_KEEP = 60 * 60 * 24 * 45
+
+
+async def send_reminders(deps: TurnDeps, now: datetime | None = None) -> int:
+    """Money reminders for everyone at 9 am their time. A Redis key per reminder makes sure
+    each is sent once, however often this runs."""
+    now = now or utcnow()
+    async with deps.sessionmaker() as db:
+        users = (
+            await db.scalars(
+                select(User)
+                .join(MoneySettings, MoneySettings.user_id == User.id)
+                .where(User.status == UserStatus.active)
+            )
+        ).all()
+        sent = 0
+        for user in users:
+            if now.astimezone(zone(user)).hour != REMIND_HOUR:
+                continue
+            today = local_today(user, now)
+            subs = await store.subscriptions_view(db, user.id, today)
+            accounts = await store.accounts_view(db, user.id, today)
+            for r in store.reminders(subs, accounts, today):
+                key = f"money:remind:{user.id}:{r['tag']}"
+                if not await deps.redis.set(key, "1", nx=True, ex=REMIND_KEEP):
+                    continue
+                url = "/money/accounts" if r["tag"].startswith("card") else "/money/subscriptions"
+                await notify(
+                    db, deps.redis, deps.settings, user.id, NotificationKind.reminder,
+                    r["title"], r["body"], url=url, tag=f"money-{r['tag']}"[:120],
+                )  # fmt: skip
+                sent += 1
+        await db.commit()
+    if sent:
+        log.info("money.reminders_sent", extra={"count": sent})
+    return sent

@@ -404,3 +404,187 @@ def test_brand_names():
     assert money.clean_merchant("JIOMART GROCERY") == "JioMart"
     assert money.clean_merchant("OPENAI *CHATGPT SUBSCR") == "OpenAI"
     assert money.clean_merchant("nobroker.rent@hdfcbank") == "NoBroker"
+
+
+# --- Balances, limits, card bills, EMIs and price changes --------------------------------------
+
+
+def test_alerts_carry_the_balance_and_available_limit():
+    bank = money.parse_alert(
+        "Debit transaction alert",
+        "INR 560.00 debited from A/c no. XX3456 on 16-11-2026 12:01:13 IST at BLINKIT. "
+        "Avl Bal- INR 12,345.67. Not you? SMS BLOCK 3456 to 919951860002 - Axis Bank",
+        TODAY,
+    )
+    assert bank.balance_paise == 1234567
+    card = money.parse_alert(
+        "Transaction alert for your ICICI Bank Credit Card",
+        "Dear Customer, your ICICI Bank Credit Card XX9012 has been used for a transaction of "
+        "INR 3,250.00 on Nov 19, 2026 at 08:14:01. Info: AMAZON PAY IN E COMMERC. The "
+        "Available Credit Limit on your card is INR 1,46,750.00.",
+        TODAY,
+    )
+    assert card.balance_paise is None
+    assert card.extra["available_limit_paise"] == 14675000
+
+
+def test_card_payment_received_is_a_bill_payment():
+    p = money.parse_alert(
+        "Payment received on your credit card",
+        "Dear Cardmember, Payment of Rs 15,230.00 has been received towards your HDFC Bank "
+        "Credit Card ending 5678 on 18-11-2026. Thank you.",
+        TODAY,
+        sender="alerts@hdfcbank.net",
+    )
+    assert p is not None and p.direction == "credit"
+    assert (p.merchant, p.account_kind, p.account_mask) == ("Card bill payment", "card", "5678")
+    assert money.categorise(p.merchant, p.narration, credit=True) == "Transfers"
+
+
+@pytest.mark.parametrize(
+    "sender,subject,body,expected",
+    [
+        (
+            "emailstatements.cards@hdfcbank.net",
+            "Your HDFC Bank Credit Card Statement for November 2026",
+            "Dear Customer, your HDFC Bank Credit Card ending 5678 statement is ready. "
+            "Total Amount Due: Rs. 24,512.00 Minimum Amount Due: Rs. 1,230.00 "
+            "Payment Due Date: 07/12/2026",
+            ("5678", "HDFC Bank", 2451200, 123000, date(2026, 12, 7)),
+        ),
+        (
+            "credit_cards@icicibank.com",
+            "ICICI Bank Credit Card Statement",
+            "Your ICICI Bank Credit Card XX9012 statement for the period 16 Oct 2026 to "
+            "15 Nov 2026. Total Amount due INR 8,431.50, Minimum Amount due INR 430.00. "
+            "Due Date: December 3, 2026",
+            ("9012", "ICICI Bank", 843150, 43000, date(2026, 12, 3)),
+        ),
+        (
+            "statements@sbicard.com",
+            "Your SBI Card Monthly Statement - Nov 2026",
+            "SBI Card ending 4321. Total Amount Due ₹12,000.00. Min. Amount Due ₹600.00. "
+            "Payment due by 28 Nov 2026.",
+            ("4321", "SBI Card", 1200000, 60000, date(2026, 11, 28)),
+        ),
+        (
+            "cc.statements@axisbank.com",
+            "Axis Bank Credit Card Statement",
+            "Credit Card No. XX7788. Total Payment Due: INR 3,100 Minimum Payment Due: INR 200 "
+            "Payment Due Date: 05-12-2026",
+            ("7788", "Axis Bank", 310000, 20000, date(2026, 12, 5)),
+        ),
+    ],
+)
+def test_card_bills(sender, subject, body, expected):
+    bill = money.parse_card_bill(subject, body, TODAY, sender=sender)
+    assert bill is not None
+    got = (bill.account_mask, bill.institution, bill.total_due_paise, bill.min_due_paise,
+           bill.due_on)  # fmt: skip
+    assert got == expected
+
+
+def test_not_card_bills():
+    # A due-date reminder without the amounts, a promotion, an ordinary alert.
+    assert money.parse_card_bill("Payment reminder", "Your card XX5678 is due soon.", TODAY) is None
+    assert (
+        money.parse_card_bill(
+            "Get a new credit card",
+            "Lifetime free credit card statement offer. Total due Rs 0. Due date 01/01/2030",
+            TODAY,
+        )
+        is None
+    )
+
+
+def test_bill_status():
+    due, today = date(2026, 12, 7), date(2026, 11, 25)
+    stmt = date(2026, 11, 18)
+    assert money.bill_status(None, None, None, None, 0, today)["status"] == "none"
+    assert money.bill_status(2451200, due, stmt, None, 0, today) == {
+        "status": "due", "left_paise": 2451200}  # fmt: skip
+    assert money.bill_status(2451200, due, stmt, None, 1000000, today)["status"] == "part"
+    assert money.bill_status(2451200, due, stmt, None, 2451200, today)["status"] == "paid"
+    assert money.bill_status(2451200, due, stmt, None, 0, date(2026, 12, 8))["status"] == "overdue"
+    assert money.bill_status(2451200, due, stmt, date(2026, 11, 20), 0, today)["status"] == "paid"
+
+
+def test_emi_lines_are_loans_not_shopping():
+    for narration in ("EMI PRINCIPAL 03/12 SONY INDIA PVT LTD", "EMI INTEREST 03/12 SONY",
+                      "ACH D- BAJAJ FINANCE LTD-12345678", "GST ON EMI INTEREST"):  # fmt: skip
+        merchant = money.clean_merchant(narration)
+        assert money.categorise(merchant, narration) == "Loans and EMIs", narration
+    assert money.clean_merchant("EMI PRINCIPAL 03/12 SONY INDIA PVT LTD") == "EMI Sony"
+    assert money.clean_merchant("EMI INTEREST 03/12 SONY") == "EMI Sony"
+    # "Premium" is not an EMI.
+    assert money.categorise("YouTube Premium", "YOUTUBE PREMIUM") == "Subscriptions"
+    # The purchase coming back as EMIs is a transfer, not income.
+    assert money.is_emi_conversion("SMARTEMI CONVERSION SONY PLAYSTATION 5")
+    assert money.categorise("Sony", "EMI CONVERSION SONY", credit=True) == "Transfers"
+
+
+def test_emi_booking_email():
+    b = money.parse_emi_booking(
+        "Your SmartEMI request is processed",
+        "Dear Customer, your transaction of Rs 54,990.00 at SONY INDIA on HDFC Bank Credit "
+        "Card ending 5678 has been successfully converted to EMI for a tenure of 12 months at "
+        "an interest rate of 15% p.a. Your EMI amount is Rs 4,963.00.",
+        date(2026, 9, 2),
+        sender="alerts@hdfcbank.net",
+    )
+    assert b is not None
+    assert (b.account_mask, b.principal_paise, b.months, b.rate_bp, b.emi_paise) == (
+        "5678", 5499000, 12, 1500, 496300)  # fmt: skip
+    assert b.institution == "HDFC Bank"
+    no_cost = money.parse_emi_booking(
+        "EMI booked",
+        "Your purchase of INR 49,990 on ICICI Bank Credit Card XX9012 has been converted to a "
+        "No Cost EMI of 6 months.",
+        date(2026, 9, 2),
+    )
+    assert no_cost is not None and (no_cost.months, no_cost.rate_bp) == (6, 0)
+    # An offer is not a booking.
+    assert (
+        money.parse_emi_booking(
+            "Convert to EMI",
+            "Your purchase of Rs 54,990 on card XX5678 is eligible to be converted to EMI for "
+            "12 months. Convert now!",
+            date(2026, 9, 2),
+        )
+        is None
+    )
+
+
+def test_find_emis():
+    txns = [
+        _t("2026-10-05", 433400, "EMI Sony", "Loans and EMIs", account_id="c1"),
+        _t("2026-10-05", 54900, "EMI Sony", "Loans and EMIs", account_id="c1"),
+        _t("2026-11-05", 440000, "EMI Sony", "Loans and EMIs", account_id="c1"),
+        _t("2026-11-05", 48300, "EMI Sony", "Loans and EMIs", account_id="c1"),
+        _t("2026-06-05", 100000, "EMI Old", "Loans and EMIs", account_id="c1"),
+    ]
+    found = money.find_emis(txns, TODAY)
+    assert [(e.merchant, e.monthly_paise, e.months_seen) for e in found] == [
+        ("EMI Sony", 488300, 2)
+    ]
+    # EMIs are loans, not repeating payments to review.
+    assert money.find_subscriptions(txns, TODAY) == []
+
+
+def test_subscription_price_change():
+    txns = [
+        _t("2026-08-05", 49900, "Netflix", "Subscriptions"),
+        _t("2026-09-05", 49900, "Netflix", "Subscriptions"),
+        _t("2026-10-05", 49900, "Netflix", "Subscriptions"),
+        _t("2026-11-05", 64900, "Netflix", "Subscriptions"),
+    ]
+    (sub,) = money.find_subscriptions(txns, TODAY)
+    assert (sub.typical_paise, sub.previous_paise, sub.price_change_paise) == (64900, 49900, 15000)
+    assert money.manage_url("Netflix") == "https://www.netflix.com/account"
+    assert money.roll_forward(date(2026, 1, 31), "monthly", TODAY) == date(2026, 11, 30)
+    assert money.add_months(date(2026, 1, 31), 1) == date(2026, 2, 28)
+
+
+def test_savings_instalments_are_investing_not_emis():
+    for narration in ("RD INSTALLMENT 000123 HDFC", "SIP INSTALMENT GROWW"):
+        assert money.categorise(money.clean_merchant(narration), narration) == "Investments"
