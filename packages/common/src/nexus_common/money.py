@@ -40,6 +40,16 @@ def unseal(settings: Settings, value: str | None) -> str:
     return (decrypt(settings, value) or "") if value else ""
 
 
+def last4(number: str | None) -> str | None:
+    """The last four letters or digits of an account, folio or policy number, to show masked."""
+    chars = re.sub(r"[^0-9A-Za-z]", "", number or "")
+    return chars[-4:].upper() or None
+
+
+def masked(last: str | None) -> str | None:
+    return f"••••{last}" if last else None
+
+
 def paise(value: str | float | Decimal | int) -> int:
     """'1,23,456.78' or 123456.78 -> 12345678. Raises ValueError on anything else."""
     if isinstance(value, int):

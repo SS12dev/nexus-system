@@ -2280,6 +2280,14 @@ class MoneyAsset(Base):
     # active or closed.
     status: Mapped[str] = mapped_column(String(8), default="active")
     note: Mapped[str | None] = mapped_column(String(300))
+    # For whoever has to claim it: the branch, the account, folio or PRAN/UAN number (encrypted,
+    # money.seal, with its last four kept apart to show it masked) and the nominee's name
+    # (encrypted) and relation.
+    branch: Mapped[str | None] = mapped_column(String(80))
+    account_no_enc: Mapped[str | None] = mapped_column(Text)
+    account_last4: Mapped[str | None] = mapped_column(String(4))
+    nominee_enc: Mapped[str | None] = mapped_column(Text)
+    nominee_relation: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -2310,6 +2318,9 @@ class MoneyLoan(Base):
     # active or closed (paid off early).
     status: Mapped[str] = mapped_column(String(8), default="active")
     note: Mapped[str | None] = mapped_column(String(300))
+    # The loan account number (encrypted, money.seal) and its last four, to show it masked.
+    account_no_enc: Mapped[str | None] = mapped_column(Text)
+    account_last4: Mapped[str | None] = mapped_column(String(4))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

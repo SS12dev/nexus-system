@@ -82,6 +82,7 @@ export const COMMANDS: Command[] = [
   { id: "money-subs", label: "Subscriptions", keywords: "money renewals netflix recurring", section: "Go to", to: "/money/subscriptions", owner: true },
   { id: "money-plan", label: "Money plan", keywords: "forecast goals net worth sip", section: "Go to", to: "/money/plan", owner: true },
   { id: "money-setup", label: "Money import and settings", keywords: "statement screenshot alerts gmail", section: "Go to", to: "/money/setup", owner: true },
+  { id: "money-export", label: "Export my finances", keywords: "excel xlsx download spreadsheet family handover backup", section: "Go to", to: "/money/setup#export", owner: true },
   { id: "money-txns", label: "Transactions", keywords: "money spending bank upi", section: "Go to", to: "/money/transactions", owner: true },
   { id: "money-funds", label: "Savings and investments", keywords: "money mutual funds cas portfolio fd rd ppf epf", section: "Go to", to: "/money/savings", owner: true },
   { id: "library", label: "Library", keywords: "files documents links folders", section: "Go to", to: "/library" },

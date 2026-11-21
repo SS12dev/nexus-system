@@ -867,6 +867,11 @@ def asset_out(row: MoneyAsset, today: date) -> dict:
         "payout": row.payout,
         "status": row.status,
         "note": row.note,
+        "branch": row.branch,
+        # The number and nominee stay encrypted; only the last four and the relation show.
+        "account_no_masked": money.masked(row.account_last4),
+        "has_nominee": bool(row.nominee_enc),
+        "nominee_relation": row.nominee_relation,
         "value_paise": value,
         "maturity_value_paise": plan.maturity_value(a),
         "monthly_paise": plan.monthly_contribution(a),
@@ -890,6 +895,7 @@ def loan_out(row: MoneyLoan, today: date, labels: dict[uuid.UUID, str]) -> dict:
         "first_due_on": row.first_due_on,
         "status": row.status,
         "note": row.note,
+        "account_no_masked": money.masked(row.account_last4),
         **plan.loan_state(as_loan(row), today),
     }
 

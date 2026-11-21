@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Eye, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { parsePercent, parseRupees } from "../../lib/money";
 import { Select } from "../Select";
@@ -7,7 +7,7 @@ import { Select } from "../Select";
 export interface Field {
   key: string;
   label: string;
-  kind: "text" | "money" | "percent" | "date" | "int" | "select" | "check" | "url";
+  kind: "text" | "money" | "percent" | "date" | "int" | "select" | "check" | "url" | "heading";
   value: string;
   options?: [string, string][];
   hint?: ReactNode;
@@ -17,6 +17,9 @@ export interface Field {
   when?: (v: Record<string, string>) => boolean;
   /** Two short fields side by side on wider screens. */
   half?: boolean;
+  /** A stored secret (an account number): it starts empty with its masked form as the
+   * placeholder, and Show fills it in. Blank keeps it; see `secretChange`. */
+  secret?: { saved: string | null; reveal: () => Promise<string | null> };
 }
 
 export type Values = Record<string, string>;
@@ -28,9 +31,16 @@ export const read = {
   int: (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : null),
 };
 
+/** What to send for a secret field: undefined to keep the stored value, else the new text
+ * ("" clears it). Untouched and blank means keep; shown and then emptied means clear. */
+export function secretChange(v: Values, key: string): string | undefined {
+  const text = (v[key] ?? "").trim();
+  return text || v[`${key}:shown`] === "1" ? text : undefined;
+}
+
 function problem(f: Field, v: string): string | null {
   const empty = !v.trim();
-  if (f.kind === "check") return null;
+  if (f.kind === "check" || f.kind === "heading") return null;
   if (empty) return f.optional ? null : `${f.label} is needed`;
   if (f.kind === "money" && read.money(v) == null) return `${f.label}: type rupees, like 1,500 or 249.50`;
   if (f.kind === "percent" && read.percent(v) == null) return `${f.label}: type a rate like 7.1`;
@@ -65,6 +75,7 @@ export function FormDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [touched, setTouched] = useState(false);
+  const [revealing, setRevealing] = useState("");
   const box = useRef<HTMLDivElement>(null);
   const shown = fields.filter((f) => !f.when || f.when(values));
   const problems = shown.map((f) => problem(f, values[f.key] ?? "")).filter(Boolean) as string[];
@@ -97,6 +108,17 @@ export function FormDialog({
     }
   };
   const set = (k: string, v: string) => setValues((cur) => ({ ...cur, [k]: v }));
+  const reveal = async (f: Field) => {
+    setRevealing(f.key);
+    try {
+      const text = (await f.secret!.reveal()) ?? "";
+      setValues((cur) => ({ ...cur, [f.key]: text, [`${f.key}:shown`]: "1" }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRevealing("");
+    }
+  };
   const input =
     "w-full rounded-md border border-edge bg-ink px-2.5 py-1.5 text-base text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none sm:text-sm";
 
@@ -124,6 +146,14 @@ export function FormDialog({
             const id = `money-field-${f.key}`;
             const v = values[f.key] ?? "";
             const bad = touched && problem(f, v);
+            const hidden = f.secret?.saved && values[`${f.key}:shown`] !== "1" ? f.secret : null;
+            if (f.kind === "heading")
+              return (
+                <div key={f.key} className="col-span-2 border-t border-edge/70 pt-3">
+                  <p className="text-xs font-medium tracking-wide text-slate-300 uppercase">{f.label}</p>
+                  {f.hint && <p className="mt-0.5 text-xs text-slate-500">{f.hint}</p>}
+                </div>
+              );
             if (f.kind === "check")
               return (
                 <label key={f.key} className="col-span-2 flex items-start gap-2 text-sm text-slate-300">
@@ -156,11 +186,23 @@ export function FormDialog({
                       type={f.kind === "date" ? "date" : f.kind === "url" ? "url" : "text"}
                       inputMode={f.kind === "money" || f.kind === "percent" ? "decimal" : f.kind === "int" ? "numeric" : undefined}
                       value={v}
-                      placeholder={f.placeholder}
+                      placeholder={hidden ? `${hidden.saved} saved` : f.placeholder}
+                      autoComplete={f.secret ? "off" : undefined}
                       onChange={(e) => set(f.key, e.target.value)}
                       aria-invalid={bad ? true : undefined}
-                      className={`${input} ${f.kind === "money" ? "pl-6" : ""} ${f.kind === "percent" ? "pr-7" : ""} ${bad ? "border-rose-500/70" : ""}`}
+                      className={`${input} ${f.kind === "money" ? "pl-6" : ""} ${f.kind === "percent" ? "pr-7" : ""} ${hidden ? "pr-16" : ""} ${bad ? "border-rose-500/70" : ""}`}
                     />
+                    {hidden && (
+                      <button
+                        type="button"
+                        onClick={() => reveal(f)}
+                        disabled={revealing === f.key}
+                        className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-sky-300 hover:bg-edge/70"
+                        aria-label={`Show the saved ${f.label.toLowerCase()}`}
+                      >
+                        {revealing === f.key ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />} Show
+                      </button>
+                    )}
                     {f.kind === "percent" && <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-500">%</span>}
                   </span>
                 )}

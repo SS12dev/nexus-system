@@ -20,7 +20,8 @@ import {
 } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { SERIES } from "./Charts";
-import { FormDialog, moneyText, percentText, read, type Field, type Values } from "./FormDialog";
+import { FormDialog, moneyText, percentText, read, secretChange, type Field, type Values } from "./FormDialog";
+import { SecretLine } from "./Secret";
 import { AddAccountDialog } from "./Onboard";
 import { Empty, Spinner, Stat, useMoney } from "./parts";
 
@@ -335,6 +336,9 @@ function LoanTile({ loan, onEdit }: { loan: Loan; onEdit: () => void }) {
         {loan.interest_left_paise > 0 && ` · ${rupees(loan.interest_left_paise, { whole: true })} interest to come`}
       </p>
       {loan.note && <p className="mt-1 text-xs text-amber-200/80">{loan.note}</p>}
+      {loan.account_no_masked && (
+        <SecretLine label="Loan account" masked={loan.account_no_masked} reveal={() => api.moneyLoanDetails(loan.id)} onAdd={() => {}} />
+      )}
     </div>
   );
 }
@@ -441,6 +445,16 @@ function LoanDialog({ loan, seen, cards, onClose }: { loan?: Loan; seen?: EmiSee
       optional: true,
       hint: "Leave empty to work it out. Card EMIs often add GST on the interest.",
     },
+    {
+      key: "account_no",
+      label: "Loan account number",
+      kind: "text",
+      value: "",
+      optional: true,
+      placeholder: "On the loan letter or the bank's app",
+      hint: "Kept encrypted; only the last four show. It goes into Export my finances.",
+      secret: loan ? { saved: loan.account_no_masked, reveal: async () => (await api.moneyLoanDetails(loan.id)).account_no } : undefined,
+    },
     { key: "closed", label: "Paid off or closed early", kind: "check", value: loan?.status === "closed" ? "1" : "", when: () => !!loan },
   ];
   const preview = (v: Values) => {
@@ -493,6 +507,7 @@ function LoanDialog({ loan, seen, cards, onClose }: { loan?: Loan; seen?: EmiSee
           months: read.int(v.months)!,
           emi_paise: read.money(v.emi),
           first_due_on: v.first_due_on,
+          account_no: secretChange(v, "account_no"),
         };
         if (loan) {
           await api.moneyEditLoan(loan.id, { ...body, emi_paise: body.emi_paise ?? 0, status: v.closed === "1" ? "closed" : "active" });

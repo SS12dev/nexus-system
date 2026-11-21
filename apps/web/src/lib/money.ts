@@ -173,6 +173,8 @@ export interface Loan {
   first_due_on: string;
   status: "active" | "closed";
   note: string | null;
+  /** The loan account number's last four ("••••9001"); the full number needs the eye button. */
+  account_no_masked: string | null;
   paid: number;
   left: number;
   outstanding_paise: number;
@@ -219,6 +221,8 @@ export interface LoanIn {
   emi_paise?: number | null;
   first_due_on: string;
   note?: string | null;
+  /** Left out: unchanged. "": cleared. */
+  account_no?: string;
 }
 
 export type AssetKind = "fd" | "rd" | "ppf" | "epf" | "nps" | "gold" | "other";
@@ -238,6 +242,11 @@ export interface Asset {
   payout: boolean;
   status: "active" | "closed";
   note: string | null;
+  branch: string | null;
+  /** Only the last four show ("••••5678"); the number and nominee are encrypted. */
+  account_no_masked: string | null;
+  has_nominee: boolean;
+  nominee_relation: string | null;
   value_paise: number;
   maturity_value_paise: number | null;
   monthly_paise: number;
@@ -257,6 +266,17 @@ export interface AssetIn {
   payout?: boolean;
   status?: "active" | "closed";
   note?: string | null;
+  branch?: string | null;
+  /** Left out: unchanged. "": cleared. */
+  account_no?: string;
+  nominee?: string;
+  nominee_relation?: string | null;
+}
+
+/** What the eye button shows, decrypted. */
+export interface SecretDetails {
+  account_no: string | null;
+  nominee?: string | null;
 }
 
 export interface Savings {
