@@ -142,7 +142,8 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
 
     counts = await money.sync_user(deps, user)
     assert counts == {
-        "messages": 3, "added": 2, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}  # fmt: skip
+        "messages": 3, "added": 2, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
+        "orders": 0, "orders_matched": 0}  # fmt: skip
     query = google.sent("GET", f"{GMAIL}/messages").url.params["q"]
     assert "debited" in query and "after:" in query and "from:hdfcbank" in query
     assert "-category:promotions" not in query
@@ -173,9 +174,10 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
         prefs = await db.get(MoneySettings, user)
         assert prefs.gmail_synced_until == datetime(2026, 11, 18, 14, 0, tzinfo=UTC)
 
-    logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
-    # The search itself names banks in general (money.ALERT_SENDERS); what must not show is
-    # anything from the person's mail: merchants, amounts, the sender's address.
+    # The search itself names banks and shops in general (money.ALERT_SENDERS,
+    # money_orders.SHOPS) in the HTTP client's request lines; what must not show in Nexus's own
+    # logs is anything from the person's mail: merchants, amounts, the sender's address.
+    logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records if r.name != "httpx")
     for secret in ("Swiggy", "swiggy", "Blinkit", "25000", "alerts@hdfcbank.net", "UPI txn"):
         assert secret not in logged, secret
 
@@ -431,3 +433,87 @@ async def test_assistant_reads_advice_and_one_counted_notice(deps, user, session
         (notice,) = (await db.scalars(select(Notification))).all()
     assert notice.title == "1 new thing to sort out" and notice.url == "/advice"
     assert "HDFC" not in f"{notice.title} {notice.body}"
+
+
+async def test_order_emails_name_payments_and_record_cash(deps, user, sessionmaker, caplog):
+    """The hourly read also reads shop order emails: an order names the bank payment it
+    matches; a cash-on-delivery order becomes a cash transaction. Logs carry counts only."""
+    caplog.set_level(logging.INFO)
+    when = datetime(2026, 11, 18, 13, 0, tzinfo=UTC)
+    alert = _mail(
+        "a1", "You have done a UPI txn",
+        "Rs.452.50 has been debited from account **1234 to VPA payu@hdfcbank PAYU on 18-11-26. "
+        "Your UPI transaction reference number is 432112345678.",
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.net>", when,
+    )  # fmt: skip
+    swiggy = _mail(
+        "o1", "Your Swiggy order was delivered",
+        "Order No: 1234567890 Item Total ₹420 Paid Via UPI Order Total ₹ 452.50",
+        "Swiggy <noreply@swiggy.in>", when,
+    )  # fmt: skip
+    dominos = _mail(
+        "o2", "Order Successful",
+        "Order No. 232 Order Total Rs.495.00 Payment Mode Cash Grand Total : Rs.495.00",
+        "Dominos India <do-not-reply@dominos.co.in>", when,
+    )  # fmt: skip
+    mails = {"a1": alert, "o1": swiggy, "o2": dominos}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url).split("?")[0]
+        if url == f"{GMAIL}/messages":
+            q = request.url.params.get("q", "")
+            ids = ["o1", "o2"] if "from:dominos" in q else ["a1"] if "debited" in q else []
+            return httpx.Response(200, json={"messages": [{"id": i} for i in ids]})
+        mid = url.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=mails[mid]) if mid in mails else httpx.Response(404)
+
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await grant(sessionmaker, deps.settings, user, ["gmail"])
+    await switch_on(sessionmaker, user)
+    counts = await money.sync_user(deps, user)
+    assert (counts["messages"], counts["added"], counts["orders"], counts["orders_matched"]) == (
+        1, 1, 1, 1)  # fmt: skip
+
+    async with sessionmaker() as db:
+        rows = (await db.scalars(select(MoneyTxn).order_by(MoneyTxn.amount_paise))).all()
+    assert [(r.merchant, r.amount_paise, r.channel, r.source) for r in rows] == [
+        ("Swiggy", 45250, "upi", "alert"),
+        ("Domino's Pizza", 49500, "cash", "receipt"),
+    ]
+    # Reading again adds nothing.
+    again = await money.sync_user(deps, user)
+    assert again["orders"] == 0 and again["orders_matched"] == 0
+
+    logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
+    for secret in ("Swiggy", "Domino", "45250", "49500", "1234567890"):
+        assert secret not in logged, secret
+
+
+async def test_a_read_back_cut_short_is_not_counted(deps, user, sessionmaker, settings):
+    """A mailbox Google refuses during a read back: the read doesn't use up one of the day's
+    read backs, and the notice says what was read and what wasn't."""
+    import time
+
+    from nexus_common import money_mail
+    from nexus_orchestrator.money import history_note
+
+    async with sessionmaker() as db:
+        await money_mail.save(db, settings, user, "alerts.box@gmail.com", {
+            "scope": f"openid {money_mail.SCOPE}", "refresh_token": "r", "access_token": "a",
+            "expires_in": 3600})  # fmt: skip
+        await db.commit()
+    await switch_on(sessionmaker, user)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    key = f"nexus:rl:money-history:{user}:{int(time.time() // 86400)}"
+    await deps.redis.set(key, 2)
+    assert await money.sync_user(deps, user, back_days=62) is None
+    assert int(await deps.redis.get(key)) == 1
+
+    base = {"messages": 10, "added": 4, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
+    title, body = history_note(2, base, "Gmail said: 403.")
+    assert title == "Read some of your old emails, but not all"
+    assert body.startswith("4 new transactions.") and "didn't count" in body

@@ -363,3 +363,63 @@ def test_parse_when():
     assert parse_when("2026-10-21", tz) == date(2026, 10, 21)
     assert parse_when("2026-10-21T09:00", tz).utcoffset() == timedelta(hours=1)
     assert parse_when("2026-10-21T09:00Z", tz).utcoffset() == timedelta(0)
+
+
+QUOTA = {
+    "error": {
+        "code": 403,
+        "message": "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per "
+        "minute per user' of service 'gmail.googleapis.com'.",
+        "errors": [{"reason": "rateLimitExceeded"}],
+    }
+}
+
+
+async def test_rate_limits_are_waited_out(deps, sessionmaker, monkeypatch):
+    """Google's per-minute quota: wait and try again. A daily quota or a real refusal isn't
+    retried, and a limit that doesn't lift says so plainly."""
+    from nexus_api.users import create_user
+    from nexus_orchestrator import google_tools
+    from nexus_orchestrator.google_tools import GoogleError
+
+    async with sessionmaker() as db:
+        u = await create_user(db, email="g@example.com", role=RoleName.owner,
+                              status=UserStatus.active)  # fmt: skip
+        await db.commit()
+    await grant(sessionmaker, deps.settings, u.id, ["gmail"])
+    monkeypatch.setattr(google_tools.Google, "retry_waits", (0.0, 0.0, 0.0))
+    calls = {"n": 0}
+
+    def flaky(request):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return httpx.Response(403, json=QUOTA)
+        return {"messagesTotal": 7}
+
+    deps.google_http = httpx.AsyncClient(
+        transport=httpx.MockTransport(Google({("GET", f"{GMAIL}/profile"): flaky}))
+    )
+    g = google_tools.Google(deps, u.id)
+    assert (await g.call("gmail", "GET", f"{GMAIL}/profile"))["messagesTotal"] == 7
+    assert calls["n"] == 3
+
+    # Still limited after every retry: a plain message, not Google's.
+    calls["n"] = -100
+    with pytest.raises(GoogleError, match="limiting how fast Gmail"):
+        await g.call("gmail", "GET", f"{GMAIL}/profile")
+    assert calls["n"] == -96  # the first try and three retries
+
+    daily = {"error": {"code": 403, "message": "Quota exceeded: queries per day",
+                       "errors": [{"reason": "dailyLimitExceeded"}]}}  # fmt: skip
+    seen = []
+
+    def once(request):
+        seen.append(request)
+        return httpx.Response(403, json=daily)
+
+    deps.google_http = httpx.AsyncClient(
+        transport=httpx.MockTransport(Google({("GET", f"{GMAIL}/profile"): once}))
+    )
+    with pytest.raises(GoogleError):
+        await google_tools.Google(deps, u.id).call("gmail", "GET", f"{GMAIL}/profile")
+    assert len(seen) == 1

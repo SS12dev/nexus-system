@@ -15,13 +15,15 @@ Logs carry counts and ids only, never amounts, merchants, subjects or senders.
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+from redis.exceptions import RedisError
 from sqlalchemy import select
 
-from nexus_common import advice_store, money, money_mail
+from nexus_common import advice_store, money, money_mail, money_orders
 from nexus_common import money_store as store
 from nexus_common.google import GoogleNotConnected, get_grant, services_in
 from nexus_common.models import (
@@ -80,6 +82,29 @@ MAX_MESSAGES = 1500
 # Reading old mail for history goes further, up to two years of alerts.
 MAX_HISTORY_MESSAGES = 6000
 PARALLEL = 5
+# Gmail allows 15,000 quota units a minute per mailbox and reading one message costs 5, so at
+# most 50 a second; a long read back stays well under that, so other Gmail use keeps working.
+READS_PER_SECOND = 20.0
+
+
+class Pace:
+    """Spaces calls evenly: at most `per_second` starts a second, shared by parallel tasks."""
+
+    def __init__(self, per_second: float):
+        self.gap = 1 / per_second
+        self.next = 0.0
+        self.lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        loop = asyncio.get_running_loop()
+        async with self.lock:
+            now = loop.time()
+            at = max(now, self.next)
+            self.next = at + self.gap
+        if at > now:
+            await asyncio.sleep(at - now)
+
+
 CAS_QUERY = (
     "from:(camsonline.com OR kfintech.com OR karvy.com) has:attachment filename:pdf newer_than:120d"
 )
@@ -127,16 +152,24 @@ async def _read_alerts(
     ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", cap)
     for query in (money.CARD_BILL_QUERY, money.EMI_QUERY):
         ids += [i for i in await _list_ids(g, f"{query} {after}", 200) if i not in ids]
+    # Order emails (Swiggy, Amazon, a cab...): counted apart so the alert counts stay honest.
+    seen = set(ids)
+    order_ids = [
+        i for i in await _list_ids(g, f"{money_orders.ORDER_QUERY} {after}", cap) if i not in seen
+    ]
     tz = zone(user)
     parsed: list[tuple[money.Parsed, str]] = []
     bills: list[money.CardBill] = []
     bookings: list[money.EmiBooking] = []
+    orders: list[tuple[money_orders.Order, str]] = []
     newest = mark
     gate = asyncio.Semaphore(PARALLEL)
+    pace = Pace(READS_PER_SECOND)
 
     async def one(mid: str) -> None:
         nonlocal newest
         async with gate:
+            await pace.wait()
             msg = await g.call("gmail", "GET", f"{GMAIL}/messages/{mid}", params={"format": "full"})
         received = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000, UTC)
         newest = max(newest or received, received)
@@ -149,9 +182,12 @@ async def _read_alerts(
             bookings.append(booking)
         elif p := money.parse_alert(subject, body, day, sender=sender):
             parsed.append((p, mid))
+        elif order := money_orders.parse_order(subject, body, day, sender=sender):
+            orders.append((order, mid))
 
-    await asyncio.gather(*(one(m) for m in ids))
-    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
+    await asyncio.gather(*(one(m) for m in [*ids, *order_ids]))
+    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
+              "orders": 0, "orders_matched": 0}  # fmt: skip
     async with deps.sessionmaker() as db:
         for bill in sorted(bills, key=lambda b: b.statement_on):
             counts["bills"] += await store.record_card_bill(db, user.id, bill)
@@ -165,6 +201,11 @@ async def _read_alerts(
         # After the alerts, so the purchase an EMI replaces is already in.
         for booking in bookings:
             counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
+        # Last, so each order can find the payment its bank already reported.
+        for order, mid in sorted(orders, key=lambda x: x[0].occurred_on):
+            got = await store.record_order(db, deps.settings, user.id, order, mid)
+            counts["orders"] += got == "added"
+            counts["orders_matched"] += got == "matched"
         box = await db.get(MoneyMailbox, mailbox_id) if mailbox_id else None
         if box is not None:
             # Reading old mail never moves the mark backwards.
@@ -298,6 +339,8 @@ async def sync_user(
             )  # fmt: skip
             continue
         counts = got if counts is None else {k: counts.get(k, 0) + v for k, v in got.items()}
+    if back_days and error:
+        await _refund_history(deps, user_id)
     if counts is None:
         if back_days:
             await _tell_history(deps, user_id, back_days, None, error)
@@ -312,30 +355,44 @@ async def sync_user(
     if holdings is not None:
         counts["holdings"] = holdings
     if back_days:
-        await _tell_history(deps, user_id, back_days, counts, None)
+        await _tell_history(deps, user_id, back_days, counts, error)
     log.info("money.synced", extra={"user_id": str(user_id), **counts})
-    if any(counts.get(k) for k in ("added", "matched", "bills", "emis")) or holdings:
+    if any(counts.get(k) for k in ("added", "matched", "bills", "emis", "orders",
+                                   "orders_matched")) or holdings:  # fmt: skip
         await store.changed(deps.redis, user_id, **counts)
     return counts
+
+
+async def _refund_history(deps: TurnDeps, user_id: uuid.UUID) -> None:
+    """A read back that Google cut short doesn't count against the day's few (the API's
+    ratelimit.hit bucket "money-history", one window a day)."""
+    key = f"nexus:rl:money-history:{user_id}:{int(time.time() // 86400)}"
+    try:
+        if int(await deps.redis.get(key) or 0) > 0:
+            await deps.redis.decr(key)
+    except RedisError as exc:
+        log.warning("money.history_refund_failed", extra={"error": type(exc).__name__})
 
 
 def history_note(months: int, counts: dict | None, error: str | None) -> tuple[str, str]:
     """The bell notice after reading old alerts: what was found, in counts only. Reading back
     runs in the background, so without this a read that finds nothing looks like it never ran."""
-    if error:
+    if error and counts is None:
         return (
             "Couldn't read your old alert emails",
-            f"{error[:200]} Fix it in Money › Import and settings, then try again.",
+            f"{error[:200]} Fix it in Money › Import and settings, then try again; this read "
+            "didn't count against today's limit.",
         )
     found = counts["added"] + counts["matched"] + counts["skipped"]
-    if not counts["messages"]:
+    orders = counts.get("orders", 0) + counts.get("orders_matched", 0)
+    if not counts["messages"] and not orders:
         return (
             "No bank alert emails found",
             f"Nothing in the last {months} months of Gmail looked like a bank or card alert. If "
             "your banks send alerts by SMS only, switch on email alerts in each bank's app, or add "
             "statements and screenshots instead.",
         )
-    if not found and not counts["bills"] and not counts["emis"]:
+    if not found and not counts["bills"] and not counts["emis"] and not orders:
         return (
             "Old alert emails read, but none could be understood",
             f"{counts['messages']} possible alert emails, but none matched the formats Money "
@@ -349,10 +406,19 @@ def history_note(months: int, counts: dict | None, error: str | None) -> tuple[s
         parts.append(f"{counts['bills']} card bills")
     if counts["emis"]:
         parts.append(f"{counts['emis']} EMIs")
+    if orders:
+        parts.append(f"{orders} orders from shop emails")
     rest = counts["messages"] - found - counts["bills"] - counts["emis"]
     tail = (
         f" {rest} other emails weren't transactions (OTPs, reminders, offers)." if rest > 0 else ""
     )
+    if error:
+        return (
+            "Read some of your old emails, but not all",
+            ", ".join(parts) + f". One mailbox couldn't be read: {error[:160]} Read back again "
+            "when it's fixed; what's already in is skipped, and this read didn't count against "
+            "today's limit.",
+        )
     return f"Read {months} months of alert emails", ", ".join(parts) + "." + tail
 
 

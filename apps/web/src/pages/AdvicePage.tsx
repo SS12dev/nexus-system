@@ -270,7 +270,7 @@ function AdviceGuide() {
       <div>
         <GuideHeading>What it looks for</GuideHeading>
         Card bills due or overdue, cards used past 30% of their limit, cards about to expire, subscriptions spread across many cards
-        or charged in foreign currency, price rises, double charges, unusual spending, bank fees and an Inbox that's piling up.
+        or charged in foreign currency, price rises, double charges, unusual spending, bank fees, orders from shop emails nobody's payment explains, and an Inbox that's piling up.
       </div>
       <div>
         <GuideHeading>Done, snooze, not relevant</GuideHeading>

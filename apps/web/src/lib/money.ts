@@ -35,7 +35,7 @@ export interface MoneyTxn {
   category: string;
   category_by: "auto" | "rule" | "user" | "pair";
   channel: string;
-  source: "alert" | "statement" | "manual";
+  source: "alert" | "statement" | "manual" | "screenshot" | "receipt";
   confirmed: boolean;
   excluded: boolean;
   note: string;
@@ -640,7 +640,22 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
   alert: "From an alert email",
   statement: "From a statement",
   manual: "Added by you",
+  screenshot: "From a screenshot",
+  receipt: "From an order email",
 };
+
+/** An order from a shop's email that no bank or card payment explains yet. */
+export interface OrderToConfirm {
+  id: string;
+  occurred_on: string;
+  merchant: string;
+  amount_paise: number;
+  category: string;
+  /** What the email said: upi, card, neft, other. */
+  paid_by: string;
+}
+
+export type OrderPaid = { how: "cash" } | { how: "account"; account_id: string } | { how: "leave_out" };
 
 /** Basis points -> "7.1%". */
 export function percent(bp: number): string {

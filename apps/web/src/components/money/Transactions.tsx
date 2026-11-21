@@ -16,6 +16,7 @@ import {
 } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { Select } from "../Select";
+import { OrdersToConfirm } from "./Orders";
 import { Empty, MonthPicker, Spinner, useAccounts, useMoneySettings, useMoneyVersion } from "./parts";
 
 const PAGE = 100;
@@ -77,6 +78,7 @@ export function TransactionsView({ latest }: { latest: string }) {
 
   return (
     <>
+      <OrdersToConfirm />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {month === "all" ? (
           <button onClick={() => set("month", "")} className="rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge">
