@@ -2,7 +2,7 @@
 
 import pytest
 
-from nexus_common.modelnames import label, names_from_model_info, provider
+from nexus_common.modelnames import describe, label, names_from_model_info, provider
 
 
 @pytest.mark.parametrize(
@@ -51,3 +51,27 @@ async def test_me_lists_the_real_models(client_for):
     pro = {"model": "gpt-5.4", "label": "GPT-5.4", "provider": "OpenAI"}
     assert me["models"]["nexus-pro"] == pro
     assert me["models"]["nexus-max"]["label"] == "GPT-5.5"
+
+
+NAMES = {
+    "nexus-nano": {
+        "model": "claude-haiku-5-5",
+        "label": "Claude Haiku 5.5",
+        "provider": "Anthropic",
+    },
+    "nexus-pro": {
+        "model": "claude-sonnet-5-5",
+        "label": "Claude Sonnet 5.5",
+        "provider": "Anthropic",
+    },
+    "nexus-pro-fallback": {"model": "gpt-5.4", "label": "GPT-5.4", "provider": "OpenAI"},
+}
+
+
+def test_the_assistant_is_told_its_model():
+    text = describe(NAMES, "nexus-pro")
+    assert "You are answering on Claude Sonnet 5.5 by Anthropic" in text
+    assert "Claude Haiku 5.5 (Anthropic), Claude Sonnet 5.5 (Anthropic)" in text
+    assert "fallback" in text and "GPT-5.4" in text
+    # Unknown names: say nothing rather than let the assistant guess.
+    assert describe({}, "nexus-pro") == ""

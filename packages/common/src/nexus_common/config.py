@@ -118,8 +118,8 @@ OPTIONS: tuple[Option, ...] = (
         "chat_model",
         "Models",
         "Chat model",
-        "The model tier the assistant answers with in chat. Tiers are LiteLLM aliases "
-        "(infra/litellm/config.yaml): nano is cheapest, max is the most capable and costly.",
+        "The model the assistant answers with in chat. Each choice is a model set in "
+        "infra/litellm/config.yaml, listed cheapest first; the last is the most capable.",
         "choice",
         choices=MODEL_TIERS,
     ),
@@ -147,7 +147,7 @@ OPTIONS: tuple[Option, ...] = (
         "design_model",
         "Models",
         "Team designer model",
-        "Designs agent teams (who does what, with which tools and tier) and drafts skills "
+        "Designs agent teams (who does what, with which tools and model) and drafts skills "
         "learned from long runs.",
         "choice",
         choices=MODEL_TIERS,
@@ -157,16 +157,16 @@ OPTIONS: tuple[Option, ...] = (
         "Models",
         "Memory model",
         "Extracts memories after each turn, summarises quiet chats and rebuilds profiles. Runs "
-        "often, so the cheapest tier is usually right.",
+        "often, so the cheapest model is usually right.",
         "choice",
         choices=MODEL_TIERS,
     ),
     Option(
         "max_tier_roles",
         "Models",
-        "Roles allowed the max tier",
-        "Roles whose team leads may use nexus-max when the best model is asked for. Others get "
-        "pro at most.",
+        "Roles allowed the strongest model",
+        "Roles whose agents may use the strongest model (the last in the model lists). Others "
+        "get the one below it at most.",
         "list",
         choices=ROLES,
     ),
@@ -719,8 +719,8 @@ OPTIONS: tuple[Option, ...] = (
         "improve_model",
         "Self-review",
         "Proposal model",
-        "Drafts the proposals from what the review found. One call per review, so mini costs "
-        "a cent or two.",
+        "Drafts the proposals from what the review found. One call per review, so a quick "
+        "model costs a cent or two.",
         "choice",
         choices=MODEL_TIERS,
     ),

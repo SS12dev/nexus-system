@@ -1048,6 +1048,8 @@ export interface LlmUsage {
     error: string;
   }[];
   models?: string[];
+  /** Each model id in `models` as people write it, e.g. claude-sonnet-5-5 -> Claude Sonnet 5.5. */
+  model_labels?: Record<string, string>;
   purposes?: string[];
   purpose_labels?: Record<string, string>;
 }

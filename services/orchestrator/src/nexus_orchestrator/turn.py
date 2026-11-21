@@ -23,6 +23,8 @@ from nexus_common.graph import note_used
 from nexus_common.library import file_payload
 from nexus_common.links import link_payload
 from nexus_common.litellm import GatewayError, LiteLLMAdmin, ensure_user_key
+from nexus_common.modelnames import cached_names
+from nexus_common.modelnames import describe as describe_models
 from nexus_common.models import (
     AgentRun,
     AgentSystem,
@@ -499,6 +501,8 @@ async def _generate(
             extra.append(skills_block)
         if allowed:
             extra.append(await systems_context(db, user.id, chat.id))
+        chat_alias = msg.model or deps.settings.chat_model
+        extra.append(describe_models(await cached_names(deps.redis, deps.gateway), chat_alias))
         rendered = "\n\n".join(x for x in [context.render(), *extra] if x)
         images, older = await user_images(deps, db, history)
         # Release the connection while the model runs; tools open their own sessions.

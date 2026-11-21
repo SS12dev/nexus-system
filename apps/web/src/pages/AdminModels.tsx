@@ -52,7 +52,7 @@ function GroupTable({
       ? labels[r.key ?? ""] ?? r.key
       : kind === "person"
         ? r.name || r.email || (r.key ? "Removed user or a system key" : "No user (master key)")
-        : r.key;
+        : (labels[r.key ?? ""] ?? r.key);
   return (
     <div className="overflow-x-auto rounded-lg border border-edge bg-panel">
       <table className="w-full min-w-[720px] text-sm">
@@ -84,7 +84,9 @@ function GroupTable({
                     {name(r)}
                   </button>
                 ) : (
-                  <span className={`truncate ${kind === "model" ? "font-mono text-xs" : ""}`}>{name(r)}</span>
+                  <span className="truncate" title={kind === "model" ? (r.key ?? undefined) : undefined}>
+                    {name(r)}
+                  </span>
                 )}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums">{r.calls}</td>
@@ -155,6 +157,7 @@ export function ModelsPanel({
   }, [load]);
 
   const labels = data?.purpose_labels ?? {};
+  const modelLabels = data?.model_labels ?? {};
   const t = data?.totals;
   const unit = data?.unit ?? "day";
   const when = (iso: string) =>
@@ -203,7 +206,7 @@ export function ModelsPanel({
           <option value="">All models</option>
           {(data?.models ?? []).map((m) => (
             <option key={m} value={m}>
-              {m}
+              {modelLabels[m] ?? m}
             </option>
           ))}
         </Select>
@@ -271,8 +274,9 @@ export function ModelsPanel({
               <p className="mt-2 text-xs text-slate-500">
                 From LiteLLM's spend logs: one row per model call, with its tokens, cost, timing and whether a cache
                 answered it. Prompts and replies aren't read. The response cache is LiteLLM's exact-match cache in
-                Valkey (a repeated identical call costs nothing); the prompt cache is OpenAI's, which bills a long
-                repeated prompt start at a fraction of the price. Latency leaves out cache hits and failures.
+                Valkey (a repeated identical call costs nothing); the prompt cache is the model provider's (Anthropic,
+                Google or OpenAI), which bills a long repeated prompt start at a fraction of the price. Each row is the
+                model that actually answered, so calls that fell back to OpenAI show under their own name. Latency leaves out cache hits and failures.
               </p>
             </Section>
 
@@ -320,7 +324,7 @@ export function ModelsPanel({
             </Section>
 
             <Section title="By model">
-              <GroupTable rows={data.by_model ?? []} kind="model" labels={labels} />
+              <GroupTable rows={data.by_model ?? []} kind="model" labels={modelLabels} />
             </Section>
             <Section title="By what it was for">
               <p className="mb-2 text-sm text-slate-400">
@@ -346,7 +350,7 @@ export function ModelsPanel({
                   {(data.failures ?? []).map((f, i) => (
                     <li key={i} className="flex flex-wrap gap-x-3 px-3 py-2">
                       <span className="w-28 text-xs text-slate-500">{formatDateTime(f.at)}</span>
-                      <span className="font-mono text-xs text-slate-400">{f.model}</span>
+                      <span className="text-xs text-slate-400">{modelLabels[f.model] ?? f.model}</span>
                       <span className="text-xs text-slate-400">{labels[f.purpose] ?? f.purpose}</span>
                       {f.user && <span className="text-xs text-slate-500">{f.user}</span>}
                       <span className="w-full break-words text-slate-300">{f.error || "No message"}</span>
