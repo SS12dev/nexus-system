@@ -73,6 +73,7 @@ async def facts(
             db, user.id, today - timedelta(days=HISTORY_DAYS), today + timedelta(days=1)
         )
         f.health = await store.health_view(db, user.id, today)
+        f.orders = await store.orders_to_confirm(db, user.id, today)
     return f
 
 

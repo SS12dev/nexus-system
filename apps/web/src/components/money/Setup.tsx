@@ -213,6 +213,11 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
         cards. One-time passwords, reminders and declined payments are skipped. When a statement arrives later, its rows
         are matched to the alerts instead of counted twice.
       </p>
+      <p className="mt-2 text-sm text-slate-400">
+        Order emails (Swiggy, Zomato, Domino's, Amazon, Flipkart, Uber and similar) are read too: they give a payment the shop's
+        name, record cash-on-delivery orders as cash, and when no payment matches an order Money asks how you paid. Only the shop,
+        total, date and payment mode are kept, never the items or your address.
+      </p>
       {!settings.gmail_connected && !settings.mailboxes.length ? (
         <p className="mt-3 flex items-start gap-1.5 text-sm text-amber-200">
           <Mail size={14} className="mt-[3px] shrink-0" />

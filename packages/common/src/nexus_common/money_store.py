@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_links
+from nexus_common import money, money_links, money_orders
 from nexus_common import money_plan as plan
 from nexus_common.events import Event, publish
 from nexus_common.models import (
@@ -170,8 +170,8 @@ async def ingest(
     # Which other sources can hold the same transaction. A screenshot can repeat anything already
     # in (or another screenshot of the same list), so it only adds what's new.
     others = {
-        "alert": ("statement", "screenshot"),
-        "statement": ("alert", "screenshot"),
+        "alert": ("statement", "screenshot", "receipt"),
+        "statement": ("alert", "screenshot", "receipt"),
         "screenshot": ("alert", "statement", "screenshot", "manual"),
     }.get(source, ())
     before = list(nearby)
@@ -215,6 +215,11 @@ async def ingest(
             continue
         if twin is not None:
             used.add(twin.id)
+            if twin.source == "receipt":
+                # The bank's record of an order Money read first: the order keeps the shop's
+                # name, the bank says how it was paid.
+                twin.channel = p.channel[:8]
+                twin.narration_enc = money.seal(cfg, p.narration)
             twin.confirmed = True
             twin.alt_key = key
             if source == "statement":
@@ -259,6 +264,148 @@ async def ingest(
         await money_links.link(db, cfg, user_id, min(r.occurred_on for r in rows))
     log.info("money.ingested", extra={"user_id": str(user_id), "source": source, **counts})
     return counts
+
+
+# A payment for an order can be dated a day before the email (an authorisation) or a few days
+# after (a statement's posting date).
+ORDER_BEFORE, ORDER_AFTER = 1, 3
+
+
+async def record_order(
+    db: AsyncSession, cfg: Settings, user_id: uuid.UUID, order: money_orders.Order, source_ref: str
+) -> str:
+    """One order email: names the bank or card payment it matches ("matched"), or becomes a
+    transaction of its own ("added"), which a later alert joins. "skipped" when already read."""
+    p = money.Parsed(
+        order.occurred_on, order.amount_paise, "debit", order.shop, "",
+        channel=money_orders.CHANNEL.get(order.paid_by, "other"), ref=order.order_no,
+    )  # fmt: skip
+    key = money.dedupe_key(p, None)
+    lo, hi = (
+        order.occurred_on - timedelta(days=ORDER_BEFORE),
+        order.occurred_on + timedelta(days=ORDER_AFTER),
+    )
+    nearby = (
+        await db.scalars(
+            select(MoneyTxn)
+            .where(
+                MoneyTxn.user_id == user_id,
+                MoneyTxn.direction == "debit",
+                MoneyTxn.occurred_on >= lo,
+                MoneyTxn.occurred_on <= hi,
+            )
+            .order_by(MoneyTxn.occurred_on)
+        )
+    ).all()
+    if any(key in (t.dedupe_key, t.alt_key) for t in nearby):
+        return "skipped"
+    prefs = await settings_for(db, user_id)
+    rules = prefs.rules or {}
+    category = money.categorise(order.shop, rules=rules)
+    if category == "Other" and order.category:
+        category = order.category
+    # A payment of the same amount, not already named after another order: a shop's name
+    # stays when it's already right.
+    twins = [
+        t
+        for t in nearby
+        if t.source != "receipt"
+        and abs(t.amount_paise - order.amount_paise) <= 100
+        and t.pair_kind is None
+    ]
+    twins.sort(
+        key=lambda t: (t.merchant == order.shop, abs((t.occurred_on - order.occurred_on).days))
+    )
+    if twins:
+        twin = twins[0]
+        if twin.merchant == order.shop:
+            return "skipped"
+        twin.merchant = order.shop[:120]
+        if twin.category_by == "auto":
+            twin.category = category
+        twin.alt_key = twin.alt_key or key
+        return "matched"
+    account = None
+    if order.card_mask:
+        account = await db.scalar(
+            select(MoneyAccount).where(
+                MoneyAccount.user_id == user_id,
+                (MoneyAccount.mask == order.card_mask)
+                | (MoneyAccount.card_mask == order.card_mask),
+            )
+        )
+    db.add(
+        MoneyTxn(
+            user_id=user_id,
+            account_id=account.id if account else None,
+            occurred_on=order.occurred_on,
+            amount_paise=order.amount_paise,
+            direction="debit",
+            merchant=order.shop[:120],
+            category=category,
+            category_by="rule" if rules.get(money.merchant_key(order.shop)) else "auto",
+            narration_enc=money.seal(cfg, ""),
+            channel=p.channel,
+            source="receipt",
+            source_ref=source_ref[:64],
+            ref=(order.order_no or "")[:40] or None,
+            dedupe_key=key,
+            created_at=utcnow(),
+        )
+    )
+    await db.flush()
+    return "added"
+
+
+def _unpaid(user_id: uuid.UUID, today: date):
+    """Orders no payment explains yet: not cash, no account, a day or more old (an alert
+    usually arrives within the hour)."""
+    return (
+        MoneyTxn.user_id == user_id,
+        MoneyTxn.source == "receipt",
+        MoneyTxn.account_id.is_(None),
+        MoneyTxn.channel != "cash",
+        MoneyTxn.excluded.is_(False),
+        MoneyTxn.occurred_on < today,
+    )
+
+
+async def orders_to_confirm(db: AsyncSession, user_id: uuid.UUID, today: date) -> list[dict]:
+    rows = (
+        await db.scalars(
+            select(MoneyTxn)
+            .where(*_unpaid(user_id, today))
+            .order_by(MoneyTxn.occurred_on.desc())
+            .limit(50)
+        )
+    ).all()
+    return [
+        {
+            "id": str(t.id),
+            "occurred_on": t.occurred_on,
+            "merchant": t.merchant,
+            "amount_paise": t.amount_paise,
+            "category": t.category,
+            "paid_by": t.channel,
+        }
+        for t in rows
+    ]
+
+
+async def confirm_order(
+    db: AsyncSession, user_id: uuid.UUID, txn: MoneyTxn, how: str, account: MoneyAccount | None
+) -> None:
+    """The person's answer to "how did you pay?": cash, one of their accounts, or leave it out
+    (someone else paid, or it's already counted)."""
+    if how == "cash":
+        txn.channel, txn.account_id, txn.excluded = "cash", None, False
+    elif how == "account" and account is not None:
+        txn.account_id, txn.excluded = account.id, False
+        if txn.channel == "cash":
+            txn.channel = "other"
+    elif how == "leave_out":
+        txn.excluded = True
+    await db.flush()
 
 
 def _note_balance(account: MoneyAccount, p: money.Parsed) -> None:

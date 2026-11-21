@@ -359,6 +359,36 @@ async def _own_txn(db, user_id: uuid.UUID, txn_id: uuid.UUID) -> MoneyTxn:
     return t
 
 
+@router.get("/orders/to-confirm")
+async def orders_to_confirm(user: OwnerUser, db: DbDep) -> dict:
+    """Orders from shop emails that no bank or card payment explains: "how did you pay?"."""
+    return {"items": await store.orders_to_confirm(db, user.id, local_today(user))}
+
+
+class OrderPaidIn(BaseModel):
+    how: Literal["cash", "account", "leave_out"]
+    account_id: uuid.UUID | None = None
+
+
+@router.post("/orders/{txn_id}/paid")
+async def order_paid(
+    txn_id: uuid.UUID, body: OrderPaidIn, user: OwnerUser, db: DbDep, redis: RedisDep
+) -> dict:
+    txn = await _own_txn(db, user.id, txn_id)
+    if txn.source != "receipt":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Not an order from an email.")
+    account = None
+    if body.how == "account":
+        account = await db.get(MoneyAccount, body.account_id) if body.account_id else None
+        if account is None or account.user_id != user.id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pick one of your accounts.")
+    await store.confirm_order(db, user.id, txn, body.how, account)
+    await db.commit()
+    log.info("money.order_paid", extra={"user_id": str(user.id), "how": body.how})
+    await store.changed(redis, user.id)
+    return {"items": await store.orders_to_confirm(db, user.id, local_today(user))}
+
+
 @router.get("/transactions/{txn_id}", response_model=TxnDetail)
 async def get_transaction(
     txn_id: uuid.UUID, user: OwnerUser, db: DbDep, cfg: SettingsDep

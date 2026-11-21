@@ -93,6 +93,8 @@ class Facts:
     health: dict | None = None
     # {"inbox_old": n, "overdue": n} from the Organiser.
     life: dict | None = None
+    # Orders from shop emails no payment explains (money_store.orders_to_confirm).
+    orders: list[dict] = field(default_factory=list)
 
 
 def _r(p: int) -> str:
@@ -478,6 +480,29 @@ def to_review(f: Facts) -> list[Item]:
     )]  # fmt: skip
 
 
+def orders_unpaid(f: Facts) -> list[Item]:
+    if not f.orders:
+        return []
+    n = len(f.orders)
+    names = ", ".join(f"{o['merchant']} {_r(o['amount_paise'])}" for o in f.orders[:3]) + (
+        f" and {n - 3} more" if n > 3 else ""
+    )
+    newest = max(o["occurred_on"] for o in f.orders)
+    return [Item(
+        key=f"orders:{newest}",
+        area="spending",
+        level="act",
+        title=f"{_plural(n, 'order')} to confirm: how did you pay?",
+        body=f"{names}. They came from shop emails, but no bank or card payment matches. Say if "
+        "it was cash, which account, or leave it out (someone else paid, or it's already "
+        "counted) so your spending stays right.",
+        why="Order emails with no matching payment after a day",
+        url="/money/transactions?orders=1",
+        action="Answer",
+        amount_paise=sum(o["amount_paise"] for o in f.orders),
+    )]  # fmt: skip
+
+
 # --- Spending and checks ------------------------------------------------------------------------
 
 
@@ -687,7 +712,7 @@ def life(f: Facts) -> list[Item]:
 RULES = (
     card_overdue, card_use, card_expiry, moves, otp_limit, card_many, subs_on_bank, forex,
     after_cancel, price_rises, yearly_renewals, duplicates, to_review,
-    health, balance_gaps, new_big, doubles, spikes, fees, life,
+    health, balance_gaps, new_big, doubles, spikes, fees, orders_unpaid, life,
 )  # fmt: skip
 
 

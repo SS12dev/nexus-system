@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from sqlalchemy import select
 
-from nexus_common import advice_store, money, money_mail
+from nexus_common import advice_store, money, money_mail, money_orders
 from nexus_common import money_store as store
 from nexus_common.google import GoogleNotConnected, get_grant, services_in
 from nexus_common.models import (
@@ -127,10 +127,16 @@ async def _read_alerts(
     ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", cap)
     for query in (money.CARD_BILL_QUERY, money.EMI_QUERY):
         ids += [i for i in await _list_ids(g, f"{query} {after}", 200) if i not in ids]
+    # Order emails (Swiggy, Amazon, a cab...): counted apart so the alert counts stay honest.
+    seen = set(ids)
+    order_ids = [
+        i for i in await _list_ids(g, f"{money_orders.ORDER_QUERY} {after}", cap) if i not in seen
+    ]
     tz = zone(user)
     parsed: list[tuple[money.Parsed, str]] = []
     bills: list[money.CardBill] = []
     bookings: list[money.EmiBooking] = []
+    orders: list[tuple[money_orders.Order, str]] = []
     newest = mark
     gate = asyncio.Semaphore(PARALLEL)
 
@@ -149,9 +155,12 @@ async def _read_alerts(
             bookings.append(booking)
         elif p := money.parse_alert(subject, body, day, sender=sender):
             parsed.append((p, mid))
+        elif order := money_orders.parse_order(subject, body, day, sender=sender):
+            orders.append((order, mid))
 
-    await asyncio.gather(*(one(m) for m in ids))
-    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
+    await asyncio.gather(*(one(m) for m in [*ids, *order_ids]))
+    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
+              "orders": 0, "orders_matched": 0}  # fmt: skip
     async with deps.sessionmaker() as db:
         for bill in sorted(bills, key=lambda b: b.statement_on):
             counts["bills"] += await store.record_card_bill(db, user.id, bill)
@@ -165,6 +174,11 @@ async def _read_alerts(
         # After the alerts, so the purchase an EMI replaces is already in.
         for booking in bookings:
             counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
+        # Last, so each order can find the payment its bank already reported.
+        for order, mid in sorted(orders, key=lambda x: x[0].occurred_on):
+            got = await store.record_order(db, deps.settings, user.id, order, mid)
+            counts["orders"] += got == "added"
+            counts["orders_matched"] += got == "matched"
         box = await db.get(MoneyMailbox, mailbox_id) if mailbox_id else None
         if box is not None:
             # Reading old mail never moves the mark backwards.
@@ -314,7 +328,8 @@ async def sync_user(
     if back_days:
         await _tell_history(deps, user_id, back_days, counts, None)
     log.info("money.synced", extra={"user_id": str(user_id), **counts})
-    if any(counts.get(k) for k in ("added", "matched", "bills", "emis")) or holdings:
+    if any(counts.get(k) for k in ("added", "matched", "bills", "emis", "orders",
+                                   "orders_matched")) or holdings:  # fmt: skip
         await store.changed(deps.redis, user_id, **counts)
     return counts
 
@@ -328,14 +343,15 @@ def history_note(months: int, counts: dict | None, error: str | None) -> tuple[s
             f"{error[:200]} Fix it in Money › Import and settings, then try again.",
         )
     found = counts["added"] + counts["matched"] + counts["skipped"]
-    if not counts["messages"]:
+    orders = counts.get("orders", 0) + counts.get("orders_matched", 0)
+    if not counts["messages"] and not orders:
         return (
             "No bank alert emails found",
             f"Nothing in the last {months} months of Gmail looked like a bank or card alert. If "
             "your banks send alerts by SMS only, switch on email alerts in each bank's app, or add "
             "statements and screenshots instead.",
         )
-    if not found and not counts["bills"] and not counts["emis"]:
+    if not found and not counts["bills"] and not counts["emis"] and not orders:
         return (
             "Old alert emails read, but none could be understood",
             f"{counts['messages']} possible alert emails, but none matched the formats Money "
@@ -349,6 +365,8 @@ def history_note(months: int, counts: dict | None, error: str | None) -> tuple[s
         parts.append(f"{counts['bills']} card bills")
     if counts["emis"]:
         parts.append(f"{counts['emis']} EMIs")
+    if orders:
+        parts.append(f"{orders} orders from shop emails")
     rest = counts["messages"] - found - counts["bills"] - counts["emis"]
     tail = (
         f" {rest} other emails weren't transactions (OTPs, reminders, offers)." if rest > 0 else ""
