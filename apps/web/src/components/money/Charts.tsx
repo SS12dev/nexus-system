@@ -1,6 +1,6 @@
 import { AlertTriangle, CircleCheck, OctagonAlert, Table2 } from "lucide-react";
-import { useState } from "react";
-import { budgetState, compact, monthLabel, rupees, type BudgetLine, type MoneyOverview } from "../../lib/money";
+import { useEffect, useRef, useState } from "react";
+import { budgetState, compact, monthLabel, rupees, shortMonth, type BudgetLine, type ForecastPoint, type MoneyOverview } from "../../lib/money";
 
 /** One series, one hue (the dataviz palette's blue for dark surfaces). Status colours are only
  * for a budget's state, and always come with an icon and words. */
@@ -188,5 +188,159 @@ export function BudgetMeter({ budget, progress, compactRow = false }: { budget: 
         <span className={state === "ok" ? "text-slate-400" : ""}>{s.words(left)}</span>
       </p>
     </div>
+  );
+}
+
+
+/** Net worth month by month: one line (the expected path) inside a lighter band (the likely
+ * range). A dashed line marks zero when the range crosses it. Hover or arrow keys move a
+ * crosshair with the month's numbers; the table shows every month. */
+export function ForecastChart({ start, points, title = "Net worth forecast" }: { start: number; points: ForecastPoint[]; title?: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(600);
+  const [hover, setHover] = useState<number | null>(null);
+  const [table, setTable] = useState(false);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(260, Math.round(e.contentRect.width))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [table]);
+
+  const H = 200;
+  const pad = { l: 8, r: 52, t: 12, b: 22 };
+  const all = [start, ...points.flatMap((p) => [p.low_paise, p.high_paise])];
+  let lo = Math.min(...all);
+  let hi = Math.max(...all);
+  if (hi === lo) hi = lo + 100;
+  const span = hi - lo;
+  lo -= span * 0.06;
+  hi += span * 0.06;
+  const n = points.length;
+  const x = (i: number) => pad.l + (i / n) * (width - pad.l - pad.r);
+  const y = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+  const line = [`M${x(0)},${y(start)}`, ...points.map((p, i) => `L${x(i + 1)},${y(p.net_worth_paise)}`)].join(" ");
+  const band =
+    `M${x(0)},${y(start)} ` +
+    points.map((p, i) => `L${x(i + 1)},${y(p.high_paise)}`).join(" ") +
+    " " +
+    [...points].reverse().map((p, i) => `L${x(n - i)},${y(p.low_paise)}`).join(" ") +
+    " Z";
+  const ticks = [lo + (hi - lo) * 0.15, lo + (hi - lo) * 0.5, lo + (hi - lo) * 0.85];
+  const every = n <= 12 ? 3 : n <= 36 ? 6 : 12;
+  const pick = (clientX: number) => {
+    const rect = box.current?.getBoundingClientRect();
+    if (!rect) return;
+    const i = Math.round(((clientX - rect.left - pad.l) / (width - pad.l - pad.r)) * n);
+    setHover(Math.min(Math.max(i, 1), n) - 1);
+  };
+  const h = hover != null ? points[hover] : null;
+  return (
+    <figure className="min-w-0">
+      <figcaption className="mb-2 flex items-center gap-2">
+        <span className="text-sm font-medium text-slate-300">{title}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="inline-block h-0.5 w-4 rounded" style={{ background: SERIES }} /> expected
+          <span className="ml-1 inline-block h-2.5 w-4 rounded-sm" style={{ background: SERIES, opacity: 0.22 }} /> likely range
+        </span>
+        <button
+          onClick={() => setTable((t) => !t)}
+          aria-pressed={table}
+          className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-slate-400 hover:bg-edge hover:text-slate-200"
+        >
+          <Table2 size={12} /> {table ? "Chart" : "Table"}
+        </button>
+      </figcaption>
+      {table ? (
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-panel text-left text-xs text-slate-500">
+              <tr>
+                <th className="py-1 font-normal">Month</th>
+                <th className="py-1 text-right font-normal">Expected</th>
+                <th className="hidden py-1 text-right font-normal sm:table-cell">Likely range</th>
+                <th className="py-1 text-right font-normal">Loans left</th>
+              </tr>
+            </thead>
+            <tbody>
+              {points.map((p) => (
+                <tr key={p.month} className="border-t border-edge/60 text-slate-300">
+                  <td className="py-1">{shortMonth(p.month)}</td>
+                  <td className="py-1 text-right tabular-nums text-slate-100">{rupees(p.net_worth_paise, { whole: true })}</td>
+                  <td className="hidden py-1 text-right tabular-nums sm:table-cell">
+                    {compact(p.low_paise)} to {compact(p.high_paise)}
+                  </td>
+                  <td className="py-1 text-right tabular-nums">{p.debt_paise ? compact(p.debt_paise) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div
+          ref={box}
+          className="relative touch-pan-y outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+          tabIndex={0}
+          role="img"
+          aria-label={`${title}: from ${rupees(start, { whole: true })} now to about ${rupees(points[n - 1]?.net_worth_paise ?? start, { whole: true })} in ${shortMonth(points[n - 1]?.month ?? "")}`}
+          onPointerMove={(e) => pick(e.clientX)}
+          onPointerDown={(e) => pick(e.clientX)}
+          onPointerLeave={() => setHover(null)}
+          onBlur={() => setHover(null)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight") setHover((v) => Math.min((v ?? -1) + 1, n - 1));
+            if (e.key === "ArrowLeft") setHover((v) => Math.max((v ?? n) - 1, 0));
+          }}
+        >
+          <svg width={width} height={H} className="block overflow-visible">
+            {ticks.map((t) => (
+              <g key={t}>
+                <line x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} stroke="#334155" strokeDasharray="2 4" strokeWidth={1} />
+                <text x={width - pad.r + 6} y={y(t) + 4} fontSize={11} fill="#64748b">
+                  {compact(t)}
+                </text>
+              </g>
+            ))}
+            {lo < 0 && hi > 0 && <line x1={pad.l} x2={width - pad.r} y1={y(0)} y2={y(0)} stroke="#94a3b8" strokeWidth={1} strokeDasharray="4 3" />}
+            <path d={band} fill={SERIES} opacity={0.18} />
+            <path d={line} fill="none" stroke={SERIES} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            <circle cx={x(0)} cy={y(start)} r={4} fill={SERIES} stroke="#0f172a" strokeWidth={2} />
+            {points.map((p, i) =>
+              (i + 1) % every === 0 ? (
+                <text key={p.month} x={x(i + 1)} y={H - 4} fontSize={11} fill="#64748b" textAnchor="middle">
+                  {shortMonth(p.month)}
+                </text>
+              ) : null,
+            )}
+            <text x={x(0)} y={H - 4} fontSize={11} fill="#94a3b8" textAnchor="start">
+              Now
+            </text>
+            {h && hover != null && (
+              <g>
+                <line x1={x(hover + 1)} x2={x(hover + 1)} y1={pad.t} y2={H - pad.b} stroke="#94a3b8" strokeWidth={1} />
+                <circle cx={x(hover + 1)} cy={y(h.net_worth_paise)} r={4.5} fill={SERIES} stroke="#0f172a" strokeWidth={2} />
+              </g>
+            )}
+          </svg>
+          {h && hover != null && (
+            <div
+              className="pointer-events-none absolute top-1 z-10 w-max rounded-md border border-edge bg-ink px-2 py-1.5 text-xs shadow-lg"
+              style={x(hover + 1) > width / 2 ? { right: width - x(hover + 1) + 8 } : { left: x(hover + 1) + 8 }}
+            >
+              <span className="block font-medium text-slate-200">{shortMonth(h.month)}</span>
+              <span className="block text-slate-100">About {rupees(h.net_worth_paise, { whole: true })}</span>
+              <span className="block text-slate-400">
+                Likely {compact(h.low_paise)} to {compact(h.high_paise)}
+              </span>
+              <span className="block text-slate-400">
+                Bank {compact(h.cash_paise)} · funds {compact(h.funds_paise)} · savings {compact(h.savings_paise)}
+              </span>
+              {h.debt_paise > 0 && <span className="block text-slate-400">Loans left {compact(h.debt_paise)}</span>}
+            </div>
+          )}
+        </div>
+      )}
+    </figure>
   );
 }

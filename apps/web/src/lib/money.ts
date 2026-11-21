@@ -61,15 +61,289 @@ export interface MoneyAccount {
   last_on: string | null;
 }
 
+export type SubStatus = "new" | "active" | "cancelled" | "ignored";
+export type Cadence = "monthly" | "quarterly" | "yearly";
+
 export interface Subscription {
+  key: string;
+  id: string | null;
   merchant: string;
   category: string;
-  cadence: "monthly" | "yearly";
-  typical_paise: number;
-  last_on: string;
-  next_on: string;
-  count: number;
+  /** Subscriptions to review, or bills, rent and SIPs. */
+  group: "subscription" | "bill";
+  status: SubStatus;
+  manual: boolean;
+  detected: boolean;
+  cadence: Cadence;
+  amount_paise: number;
   monthly_paise: number;
+  next_on: string | null;
+  last_on: string | null;
+  count: number;
+  price_change_paise: number;
+  previous_paise: number | null;
+  charged_after_cancel: { on: string; amount_paise: number } | null;
+  not_seen: boolean;
+  remind_days: number;
+  manage_url: string | null;
+  note: string | null;
+  cancelled_on: string | null;
+}
+
+export interface Subscriptions {
+  items: Subscription[];
+  subscriptions_monthly_paise: number;
+  bills_monthly_paise: number;
+  yearly_paise: number;
+  saved_monthly_paise: number;
+  to_review: number;
+}
+
+export interface SubscriptionSave {
+  merchant: string;
+  status?: Exclude<SubStatus, "new">;
+  remind_days?: number;
+  manage_url?: string | null;
+  note?: string | null;
+  manual?: boolean;
+  amount_paise?: number;
+  cadence?: Cadence;
+  next_on?: string;
+  category?: string;
+  cancelled_on?: string;
+}
+
+export type BillStatus = "none" | "due" | "part" | "paid" | "overdue";
+
+export interface AccountView {
+  id: string;
+  label: string;
+  name: string;
+  institution: string | null;
+  mask: string | null;
+  kind: "bank" | "card";
+  hidden: boolean;
+  count: number;
+  last_on: string | null;
+  balance_paise: number | null;
+  balance_on: string | null;
+  spent_month_paise: number;
+  in_month_paise: number;
+  // Cards only.
+  credit_limit_paise?: number | null;
+  available_paise?: number | null;
+  available_on?: string | null;
+  due_paise?: number | null;
+  min_due_paise?: number | null;
+  due_on?: string | null;
+  statement_on?: string | null;
+  paid_on?: string | null;
+  paid_since_statement_paise?: number;
+  bill?: { status: BillStatus; left_paise: number };
+  owed_paise?: number | null;
+  owed_from_limit?: boolean;
+  emis?: { id: string; name: string; emi_paise: number }[];
+}
+
+export interface AccountEdit {
+  name?: string;
+  hidden?: boolean;
+  balance_paise?: number | null;
+  credit_limit_paise?: number | null;
+  due_paise?: number | null;
+  min_due_paise?: number | null;
+  due_on?: string | null;
+  paid?: boolean;
+}
+
+export type LoanKind = "card_emi" | "personal" | "home" | "vehicle" | "education" | "other";
+
+export interface Loan {
+  id: string;
+  kind: LoanKind;
+  kind_label: string;
+  name: string;
+  account_id: string | null;
+  account: string | null;
+  lender: string | null;
+  principal_paise: number;
+  rate_bp: number;
+  months: number;
+  emi_paise: number;
+  first_due_on: string;
+  status: "active" | "closed";
+  note: string | null;
+  paid: number;
+  left: number;
+  outstanding_paise: number;
+  next_due_on: string | null;
+  ends_on: string;
+  total_interest_paise: number;
+  interest_left_paise: number;
+  done: boolean;
+}
+
+export interface EmiSeen {
+  merchant: string;
+  account_id: string | null;
+  account: string | null;
+  monthly_paise: number;
+  months_seen: number;
+  first_on: string;
+  last_on: string;
+}
+
+export interface Loans {
+  items: Loan[];
+  monthly_paise: number;
+  outstanding_paise: number;
+  untracked: EmiSeen[];
+}
+
+export interface Balances {
+  items: AccountView[];
+  cash_paise: number;
+  owed_paise: number;
+  unknown_balances: number;
+  loans: Loans;
+}
+
+export interface LoanIn {
+  kind: LoanKind;
+  name: string;
+  account_id?: string | null;
+  lender?: string | null;
+  principal_paise: number;
+  rate_bp: number;
+  months: number;
+  emi_paise?: number | null;
+  first_due_on: string;
+  note?: string | null;
+}
+
+export type AssetKind = "fd" | "rd" | "ppf" | "epf" | "nps" | "gold" | "other";
+
+export interface Asset {
+  id: string;
+  kind: AssetKind;
+  kind_label: string;
+  name: string;
+  institution: string | null;
+  amount_paise: number;
+  rate_bp: number;
+  start_on: string | null;
+  maturity_on: string | null;
+  balance_on: string | null;
+  contribution_paise: number;
+  payout: boolean;
+  status: "active" | "closed";
+  note: string | null;
+  value_paise: number;
+  maturity_value_paise: number | null;
+  monthly_paise: number;
+  matured: boolean;
+}
+
+export interface AssetIn {
+  kind: AssetKind;
+  name?: string;
+  institution?: string | null;
+  amount_paise: number;
+  rate_bp?: number;
+  start_on?: string | null;
+  maturity_on?: string | null;
+  balance_on?: string | null;
+  contribution_paise?: number;
+  payout?: boolean;
+  status?: "active" | "closed";
+  note?: string | null;
+}
+
+export interface Savings {
+  items: Asset[];
+  total_paise: number;
+  monthly_paise: number;
+  funds_value_paise: number;
+  funds_cost_paise: number;
+  maturing: Asset[];
+  kinds: Record<AssetKind, string>;
+  default_rates: Partial<Record<AssetKind, number>>;
+}
+
+export interface Assumptions {
+  income_paise: number | null;
+  spend_paise: number | null;
+  income_growth_bp: number;
+  inflation_bp: number;
+  fund_return_bp: number;
+  fund_low_bp: number;
+  fund_high_bp: number;
+  new_sip_paise: number;
+  emergency_months: number;
+}
+
+export interface ForecastPoint {
+  month: string;
+  net_worth_paise: number;
+  low_paise: number;
+  high_paise: number;
+  cash_paise: number;
+  funds_paise: number;
+  savings_paise: number;
+  debt_paise: number;
+  emis_paise: number;
+}
+
+export interface Goal {
+  id: string;
+  name: string;
+  target_paise: number;
+  by_on: string;
+  saved_paise: number;
+  asset_ids: string[];
+  have_paise: number;
+  months_left: number;
+  rate_bp: number;
+  monthly_needed_paise: number;
+  progress: number;
+}
+
+export interface Insight {
+  tone: "good" | "warning" | "info";
+  title: string;
+  body: string;
+}
+
+export interface Plan {
+  start: { net_worth_paise: number; cash_paise: number; funds_paise: number; savings_paise: number; debt_paise: number };
+  inputs: {
+    income_paise: number;
+    spend_paise: number;
+    emis_paise: number;
+    contributions_paise: number;
+    existing_investing_paise: number;
+    surplus_paise: number;
+    surplus_spread_paise: number;
+    months_of_history: number;
+  };
+  points: ForecastPoint[];
+  assumptions: Assumptions;
+  saved_assumptions: Partial<Assumptions>;
+  accounts_known: number;
+  unknown_balances: number;
+  liquid_paise: number;
+  emergency_months: number | null;
+  goals: Goal[];
+  goals_monthly_paise: number;
+  insights: Insight[];
+}
+
+export interface Upcoming {
+  kind: "subscription" | "card" | "emi";
+  label: string;
+  amount_paise: number;
+  on: string;
+  detail: string;
 }
 
 export interface BudgetLine {
@@ -90,7 +364,8 @@ export interface MoneyOverview {
   budgets: BudgetLine[];
   month_progress: number;
   subscriptions_monthly_paise: number;
-  upcoming: Subscription[];
+  subscriptions_to_review: number;
+  upcoming: Upcoming[];
   /** Put into investments this month (SIPs and the like). */
   invested_paise: number;
   funds_value_paise: number;
@@ -221,3 +496,78 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
   statement: "From a statement",
   manual: "Added by you",
 };
+
+/** Basis points -> "7.1%". */
+export function percent(bp: number): string {
+  return `${Number((bp / 100).toFixed(2))}%`;
+}
+
+/** A percentage typed by a person -> basis points, or null: "7.1" -> 710. */
+export function parsePercent(text: string): number | null {
+  const clean = text.replace(/[%\s]/g, "");
+  if (!/^\d{1,2}(\.\d{1,2})?$/.test(clean)) return null;
+  return Math.round(Number(clean) * 100);
+}
+
+/** "2027-03" -> "Mar 2027". */
+export function shortMonth(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return `${MONTHS[m - 1]} ${y}`;
+}
+
+/** "2026-11-05" -> "5 Nov 2026". */
+export function fullDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+}
+
+/** Days from today to an ISO date (negative when it has passed). */
+export function daysUntil(day: string, now = new Date()): number {
+  const [y, m, d] = day.split("-").map(Number);
+  const then = Date.UTC(y, m - 1, d);
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((then - today) / 86_400_000);
+}
+
+/** "today", "tomorrow", "in 5 days", "3 days ago". */
+export function whenLabel(day: string, now = new Date()): string {
+  const n = daysUntil(day, now);
+  if (n === 0) return "today";
+  if (n === 1) return "tomorrow";
+  if (n === -1) return "yesterday";
+  return n > 0 ? `in ${n} days` : `${-n} days ago`;
+}
+
+export const CADENCE_LABEL: Record<Cadence, string> = { monthly: "Monthly", quarterly: "Every 3 months", yearly: "Yearly" };
+
+export const BILL_LABEL: Record<BillStatus, string> = {
+  none: "No bill read yet",
+  due: "Due",
+  part: "Part paid",
+  paid: "Paid",
+  overdue: "Overdue",
+};
+
+/** The reducing-balance EMI (the same sum as the server's): a no-cost EMI splits evenly. */
+export function emiFor(principal: number, rateBp: number, months: number): number {
+  if (months <= 0) return principal;
+  const r = rateBp / 120000;
+  if (r === 0) return Math.ceil(principal / months);
+  const f = (1 + r) ** months;
+  return Math.round((principal * r * f) / (f - 1));
+}
+
+/** Today as YYYY-MM-DD in the browser's time zone. */
+export function isoToday(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** The same day `months` later (the month's last day when it's shorter), as YYYY-MM-DD. */
+export function addMonths(day: string, months: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const n = y * 12 + (m - 1) + months;
+  const yy = Math.floor(n / 12);
+  const mm = (n % 12) + 1;
+  const last = new Date(yy, mm, 0).getDate();
+  return `${yy}-${String(mm).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}

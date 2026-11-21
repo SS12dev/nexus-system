@@ -1,11 +1,24 @@
 import type {
+  AccountEdit,
+  AccountView,
+  Asset,
+  AssetIn,
+  Assumptions,
+  Balances,
   Investments,
+  Loan,
+  LoanIn,
+  Loans,
   MoneyAccount,
   MoneyImport,
   MoneyOverview,
   MoneySettings,
   MoneyTxn,
+  Plan,
+  Savings,
   Subscription,
+  SubscriptionSave,
+  Subscriptions,
   TxnPage,
   TxnQuery,
 } from "./money";
@@ -192,7 +205,7 @@ async function orgSave(path: string, method: string, body: unknown): Promise<Org
   return resp.json();
 }
 
-function orgQuery(q: OrgListQuery | TxnQuery | { month?: string }): string {
+function orgQuery(q: OrgListQuery | TxnQuery | Record<string, string | number | undefined>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) {
     if (v === undefined || v === null || v === "") continue;
@@ -270,10 +283,34 @@ export const api = {
     }),
   moneyDeleteBudget: (category: string) =>
     request<void>(`/api/money/budgets/${encodeURIComponent(category)}`, { method: "DELETE" }),
-  moneySubscriptions: () =>
-    request<{ items: Subscription[]; monthly_paise: number; yearly_paise: number }>(
-      "/api/money/subscriptions",
-    ),
+  moneySubscriptions: () => request<Subscriptions>("/api/money/subscriptions"),
+  moneySaveSubscription: (body: SubscriptionSave) =>
+    request<Subscription>("/api/money/subscriptions", { method: "PUT", body: json(body) }),
+  moneyForgetSubscription: (key: string) =>
+    request<void>(`/api/money/subscriptions/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  moneyBalances: () => request<Balances>("/api/money/balances"),
+  moneyEditAccount: (id: string, body: AccountEdit) =>
+    request<AccountView>(`/api/money/accounts/${id}/details`, { method: "PATCH", body: json(body) }),
+  moneySavings: () => request<Savings>("/api/money/savings"),
+  moneyAddSaving: (body: AssetIn) =>
+    request<Asset>("/api/money/savings", { method: "POST", body: json(body) }),
+  moneyEditSaving: (id: string, body: Partial<AssetIn>) =>
+    request<Asset>(`/api/money/savings/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteSaving: (id: string) => request<void>(`/api/money/savings/${id}`, { method: "DELETE" }),
+  moneyLoans: () => request<Loans>("/api/money/loans"),
+  moneyAddLoan: (body: LoanIn) => request<Loan>("/api/money/loans", { method: "POST", body: json(body) }),
+  moneyEditLoan: (id: string, body: Partial<LoanIn> & { status?: "active" | "closed" }) =>
+    request<Loan>(`/api/money/loans/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteLoan: (id: string) => request<void>(`/api/money/loans/${id}`, { method: "DELETE" }),
+  moneyPlan: (q: { months?: number; new_sip_paise?: number; fund_return_bp?: number } = {}) =>
+    request<Plan>(`/api/money/plan${orgQuery(q)}`),
+  moneySaveAssumptions: (body: Assumptions) =>
+    request<Assumptions>("/api/money/plan/assumptions", { method: "PUT", body: json(body) }),
+  moneyAddGoal: (body: { name: string; target_paise: number; by_on: string; saved_paise?: number; asset_ids?: string[] }) =>
+    request<{ id: string }>("/api/money/goals", { method: "POST", body: json(body) }),
+  moneyEditGoal: (id: string, body: { name?: string; target_paise?: number; by_on?: string; saved_paise?: number; asset_ids?: string[] }) =>
+    request<{ id: string }>(`/api/money/goals/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
   moneyInvestments: () => request<Investments>("/api/money/investments"),
   moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
   moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string } = {}) => {

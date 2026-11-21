@@ -368,7 +368,7 @@ function Assistant({ on, onChange }: { on: boolean; onChange: () => void }) {
       action={
         <Toggle
           checked={on}
-          label="Let the assistant read totals"
+          label="Let the assistant use Money"
           onChange={async (assistant_access) => {
             try {
               await api.moneyUpdateSettings({ assistant_access });
@@ -383,10 +383,11 @@ function Assistant({ on, onChange }: { on: boolean; onChange: () => void }) {
       <p className="flex gap-2 text-sm text-slate-400">
         <Sparkles size={15} className="mt-0.5 shrink-0 text-sky-300" />
         <span>
-          Off by default. When on, your assistant can answer “how much did I spend on food this month?” from{" "}
-          <b className="text-slate-300">totals</b>: spending by category and merchant, budgets, repeating payments and fund
-          value. Those totals are sent to the AI model like any other chat. It never sees single transactions, bank
-          narrations, account numbers or statements, and can't change anything.
+          On by default. Your assistant can answer “how much did I spend on food?”, “when is my card bill due?” or “what
+          if I invest ₹10,000 a month?” from your transactions (date, amount, merchant, category), balances, card bills,
+          savings, loans, subscriptions and the forecast. What it reads is sent to the AI model like any other chat. It
+          never sees the bank's own wording, full account numbers or statements. The one thing it can change is what
+          you've decided about a subscription; it can't move money.
         </span>
       </p>
     </Card>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetState, compact, monthLabel, parseRupees, rupees, shiftMonth } from "./money";
+import { addMonths, budgetState, compact, daysUntil, emiFor, monthLabel, parsePercent, parseRupees, percent, rupees, shiftMonth, whenLabel } from "./money";
 
 describe("money helpers", () => {
   it("formats rupees the Indian way", () => {
@@ -37,5 +37,28 @@ describe("money helpers", () => {
     expect(budgetState(b, 0.5)).toBe("ok");
     expect(budgetState({ ...b, spent_paise: 700 }, 0.5)).toBe("ahead");
     expect(budgetState({ ...b, spent_paise: 1100 }, 0.9)).toBe("over");
+  });
+});
+
+describe("planning helpers", () => {
+  it("works out an EMI the same way as the server", () => {
+    // The PS5: ₹54,990 over 12 months at 15%.
+    expect(Math.abs(emiFor(5499000, 1500, 12) - 496330)).toBeLessThan(50);
+    expect(emiFor(4999000, 0, 6)).toBe(833167);
+  });
+  it("adds months, keeping to the end of shorter months", () => {
+    expect(addMonths("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonths("2026-11-05", 2)).toBe("2027-01-05");
+  });
+  it("reads percentages and says when a date is", () => {
+    expect(parsePercent("7.1")).toBe(710);
+    expect(parsePercent("8.25%")).toBe(825);
+    expect(parsePercent("abc")).toBeNull();
+    expect(percent(710)).toBe("7.1%");
+    const now = new Date(2026, 10, 21);
+    expect(whenLabel("2026-11-21", now)).toBe("today");
+    expect(whenLabel("2026-11-22", now)).toBe("tomorrow");
+    expect(whenLabel("2026-11-26", now)).toBe("in 5 days");
+    expect(daysUntil("2026-11-18", now)).toBe(-3);
   });
 });

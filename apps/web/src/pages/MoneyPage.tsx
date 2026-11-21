@@ -1,11 +1,15 @@
-import { CalendarClock, FileUp, LayoutDashboard, Landmark, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { CalendarClock, CreditCard, FileUp, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "../components/Feedback";
 import { Guide, GuideHeading } from "../components/Guide";
 import { BudgetMeter, CategoryBars, TrendBars } from "../components/money/Charts";
 import { Card, Empty, MonthPicker, Spinner, Stat, useMoney, useMoneySettings } from "../components/money/parts";
+import { AccountsView } from "../components/money/Accounts";
+import { PlanView } from "../components/money/Plan";
+import { SavingsView } from "../components/money/Savings";
 import { SetupView } from "../components/money/Setup";
+import { SubscriptionsView } from "../components/money/Subscriptions";
 import { TransactionsView } from "../components/money/Transactions";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
@@ -37,8 +41,11 @@ export function MoneyPage() {
           <Route index element={<OverviewView latest={latest} />} />
           <Route path="transactions" element={<TransactionsView latest={latest} />} />
           <Route path="budgets" element={<BudgetsView latest={latest} />} />
+          <Route path="accounts" element={<AccountsView />} />
           <Route path="subscriptions" element={<SubscriptionsView />} />
-          <Route path="investments" element={<InvestmentsView />} />
+          <Route path="savings" element={<SavingsView />} />
+          <Route path="investments" element={<Navigate to="/money/savings" replace />} />
+          <Route path="plan" element={<PlanView />} />
           <Route path="setup" element={<SetupView />} />
           <Route path="*" element={<Navigate to="/money" replace />} />
         </Routes>
@@ -49,15 +56,23 @@ export function MoneyPage() {
 
 const TABS = [
   { to: "/money", label: "Overview", icon: LayoutDashboard },
+  { to: "/money/accounts", label: "Accounts", icon: CreditCard },
   { to: "/money/transactions", label: "Transactions", icon: ListOrdered },
   { to: "/money/budgets", label: "Budgets", icon: PiggyBank },
-  { to: "/money/subscriptions", label: "Repeating payments", icon: Repeat },
-  { to: "/money/investments", label: "Investments", icon: Landmark },
+  { to: "/money/subscriptions", label: "Subscriptions", icon: Repeat },
+  { to: "/money/savings", label: "Savings", icon: Landmark },
+  { to: "/money/plan", label: "Plan", icon: LineChart },
   { to: "/money/setup", label: "Import and settings", icon: Settings2 },
 ];
 
 function Header() {
-  const home = useLocation().pathname.replace(/\/$/, "") === "/money";
+  const path = useLocation().pathname.replace(/\/$/, "");
+  const home = path === "/money";
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // On a phone the tab row scrolls: keep the open tab in view.
+    nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [path]);
   return (
     <>
       <div className="mb-1 flex items-center gap-3">
@@ -66,7 +81,10 @@ function Header() {
           <Lock size={11} /> Private, read-only
         </span>
       </div>
-      <p className="mb-3 text-sm text-slate-400">Where your money goes, what repeats, and what your funds are worth, from your own emails and statements.</p>
+      <p className="mb-3 text-sm text-slate-400">
+        Every account, card, loan and saving in one place: where money goes, what's due, and where you're heading. Built from
+        your own emails and statements.
+      </p>
       {home && (
         <Guide title="How Money works">
           <div>
@@ -86,14 +104,26 @@ function Header() {
             this merchant”: the rest of that merchant's transactions, and future ones, follow.
           </div>
           <div>
-            <GuideHeading>Budgets and subscriptions</GuideHeading>
-            Set a monthly limit for any category; the tick on each bar shows how far through the month you are, so you can
-            see if you're ahead of pace. Payments that repeat monthly or yearly for about the same amount are found for you.
+            <GuideHeading>Accounts, cards and loans</GuideHeading>
+            Balances come from the latest alert or statement that shows one. Card bills and due dates are read from statement
+            emails, with a reminder three days before. Card EMIs are picked up from the bank's “converted to EMI” email and
+            the EMI lines; the purchase itself is then left out so it isn't counted twice.
+          </div>
+          <div>
+            <GuideHeading>Subscriptions</GuideHeading>
+            Payments that repeat are found for you. Keep, cancel or hide each one: kept ones get a reminder before renewal,
+            and a charge after you cancel or a price rise is flagged.
+          </div>
+          <div>
+            <GuideHeading>Savings and the plan</GuideHeading>
+            Add FDs, RDs, PPF, EPF and NPS once and they're valued from their terms. The Plan tab adds it all up into net
+            worth, forecasts it, and shows what a goal or a monthly SIP would take.
           </div>
           <div>
             <GuideHeading>Private by design</GuideHeading>
             Everything stays on your server. No bank login and no AI model reads your statements; bank wording is encrypted,
-            and only you can open this page. Your assistant sees totals only if you allow it.
+            and only you can open this page. Your assistant can read Money (never the bank's wording or statements) unless
+            you switch it off.
           </div>
           <div>
             <GuideHeading>Getting started</GuideHeading>
@@ -102,7 +132,7 @@ function Header() {
           </div>
         </Guide>
       )}
-      <nav className="-mx-4 mb-5 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Money">
+      <nav ref={nav} className="-mx-4 mb-5 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Money">
         {TABS.map((t) => (
           <NavLink
             key={t.to}
@@ -156,7 +186,11 @@ function OverviewView({ latest }: { latest: string }) {
           sub={data.net_paise >= 0 ? `${rupees(data.net_paise, { whole: true })} left over` : `${rupees(-data.net_paise, { whole: true })} more out than in`}
           title="Left over: what came in, less spending and investing"
         />
-        <Stat label="Repeating payments" value={rupees(data.subscriptions_monthly_paise, { whole: true })} sub="a month: rent, bills, subscriptions" />
+        <Stat
+          label="Subscriptions and bills"
+          value={rupees(data.subscriptions_monthly_paise, { whole: true })}
+          sub={data.subscriptions_to_review ? `a month · ${data.subscriptions_to_review} new to review` : "a month"}
+        />
         <Stat
           label="Mutual funds"
           value={data.funds_value_paise ? rupees(data.funds_value_paise, { whole: true }) : "—"}
@@ -220,26 +254,34 @@ function OverviewView({ latest }: { latest: string }) {
             )}
           </Card>
           <Card
-            title="Coming up in the next two weeks"
+            title="Due in the next two weeks"
             action={
-              <Link to="/money/subscriptions" className="text-sky-300 hover:text-sky-200">
-                All repeating
+              <Link to="/money/accounts" className="text-sky-300 hover:text-sky-200">
+                Accounts
               </Link>
             }
           >
             {data.upcoming.length ? (
               <ul className="space-y-1.5 text-sm">
-                {data.upcoming.map((s) => (
-                  <li key={s.merchant} className="flex items-center gap-2">
-                    <CalendarClock size={14} className="shrink-0 text-slate-500" />
-                    <span className="min-w-0 flex-1 truncate text-slate-200">{s.merchant}</span>
-                    <span className="text-xs text-slate-500">about {dayLabel(s.next_on)}</span>
-                    <span className="w-20 text-right tabular-nums">{rupees(s.typical_paise, { whole: true })}</span>
-                  </li>
-                ))}
+                {data.upcoming.map((u) => {
+                  const Icon = u.kind === "card" ? CreditCard : u.kind === "emi" ? HandCoins : Repeat;
+                  return (
+                    <li key={`${u.kind}-${u.label}-${u.on}`} className="flex items-center gap-2">
+                      <Icon size={14} className="shrink-0 text-slate-500" />
+                      <span className="min-w-0 flex-1 truncate text-slate-200">
+                        {u.label}
+                        {u.kind === "emi" && <span className="ml-1.5 text-xs text-slate-500">{u.detail}</span>}
+                      </span>
+                      <span className={`text-xs ${u.detail === "overdue" ? "text-rose-300" : "text-slate-500"}`}>{dayLabel(u.on)}</span>
+                      <span className="w-20 text-right tabular-nums">{rupees(u.amount_paise, { whole: true })}</span>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
-              <p className="text-sm text-slate-500">No repeating payments due soon.</p>
+              <p className="flex items-center gap-2 text-sm text-slate-500">
+                <CalendarClock size={14} /> Nothing due: no card bills, EMIs or renewals in the next two weeks.
+              </p>
             )}
           </Card>
         </div>
@@ -406,142 +448,6 @@ function BudgetsView({ latest }: { latest: string }) {
           </ul>
         </Card>
       )}
-    </>
-  );
-}
-
-// --- Subscriptions ------------------------------------------------------------------------------
-
-function SubscriptionsView() {
-  const { data } = useMoney(api.moneySubscriptions);
-  const navigate = useNavigate();
-  if (!data) return <Spinner />;
-  return (
-    <>
-      <p className="mb-4 text-sm text-slate-400">
-        Payments that repeat: the same merchant about a month apart three times or more (or a year apart, twice), for about
-        the same amount. Ones you've stopped paying drop off after two missed cycles.
-      </p>
-      {data.items.length ? (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:max-w-md">
-            <Stat label="A month" value={rupees(data.monthly_paise, { whole: true })} />
-            <Stat label="A year" value={rupees(data.yearly_paise, { whole: true })} />
-          </div>
-          <ul className="divide-y divide-edge/60 rounded-xl border border-edge bg-panel">
-            {data.items.map((s) => (
-              <li key={s.merchant}>
-                <button
-                  onClick={() => navigate(`/money/transactions?${new URLSearchParams({ month: "all", q: s.merchant })}`)}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-edge/40"
-                >
-                  <Repeat size={15} className="shrink-0 text-slate-500" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-slate-100">{s.merchant}</span>
-                    <span className="block text-xs text-slate-500">
-                      {s.cadence === "monthly" ? "Monthly" : "Yearly"} · {s.category} · paid {s.count} times · next about {dayLabel(s.next_on)}
-                    </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="block tabular-nums text-sm">{rupees(s.typical_paise, { whole: true })}</span>
-                    {s.cadence === "yearly" && <span className="block text-xs text-slate-500">{rupees(s.monthly_paise, { whole: true })} a month</span>}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <Empty>No repeating payments found yet. They show up after three months of transactions.</Empty>
-      )}
-    </>
-  );
-}
-
-// --- Investments --------------------------------------------------------------------------------
-
-function InvestmentsView() {
-  const { data } = useMoney(api.moneyInvestments);
-  if (!data) return <Spinner />;
-  if (!data.items.length)
-    return (
-      <Empty>
-        No mutual funds yet. Upload a CAS PDF from CAMS in{" "}
-        <Link to="/money/setup" className="text-sky-300 hover:text-sky-200">
-          Import and settings
-        </Link>
-        .
-      </Empty>
-    );
-  const pct = data.cost_paise ? ((data.value_paise - data.cost_paise) / data.cost_paise) * 100 : null;
-  return (
-    <>
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <Stat label="Worth now" value={rupees(data.value_paise, { whole: true })} sub={data.nav_date ? `at prices of ${dayLabel(data.nav_date)}` : undefined} />
-        <Stat label="Put in" value={data.cost_paise ? rupees(data.cost_paise, { whole: true }) : "—"} sub={data.as_of ? `units as of ${dayLabel(data.as_of)}` : undefined} />
-        {data.gain_paise != null && (
-          <Stat label="Gain" value={rupees(data.gain_paise, { whole: true, sign: true })} sub={pct != null ? `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}% overall` : undefined} />
-        )}
-      </div>
-      <p className="mb-3 text-xs text-slate-500">
-        Units come from your latest CAS; a new one after you buy or sell updates them. Values use AMFI's published price
-        each night.
-      </p>
-      <ul className="divide-y divide-edge/60 rounded-xl border border-edge bg-panel sm:hidden">
-        {data.items.map((h) => {
-          const g = h.value_paise != null && h.cost_paise ? h.value_paise - h.cost_paise : null;
-          return (
-            <li key={h.id} className="px-3 py-2.5 text-sm">
-              <p className="text-slate-100">{h.scheme}</p>
-              <p className="mt-1 flex items-baseline gap-2">
-                <span className="tabular-nums text-slate-100">{h.value_paise != null ? rupees(h.value_paise, { whole: true }) : "—"}</span>
-                {g != null && <span className="tabular-nums text-xs text-slate-400">{rupees(g, { whole: true, sign: true })}</span>}
-                <span className="ml-auto text-xs text-slate-500">
-                  {h.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })} units
-                  {h.nav != null && ` × ₹${h.nav.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
-                </span>
-              </p>
-              <p className="text-xs text-slate-500">
-                {h.amc} · folio {h.folio}
-              </p>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="hidden overflow-x-auto rounded-xl border border-edge bg-panel sm:block">
-        <table className="w-full min-w-[36rem] text-sm">
-          <thead className="text-left text-xs text-slate-500">
-            <tr>
-              <th className="px-3 py-2 font-normal">Fund</th>
-              <th className="px-3 py-2 text-right font-normal">Units</th>
-              <th className="px-3 py-2 text-right font-normal">Price</th>
-              <th className="px-3 py-2 text-right font-normal">Worth</th>
-              <th className="px-3 py-2 text-right font-normal">Gain</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((h) => {
-              const g = h.value_paise != null && h.cost_paise ? h.value_paise - h.cost_paise : null;
-              return (
-                <tr key={h.id} className="border-t border-edge/60">
-                  <td className="px-3 py-2">
-                    <span className="block text-slate-100">{h.scheme}</span>
-                    <span className="block text-xs text-slate-500">
-                      {h.amc} · folio {h.folio}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">{h.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">
-                    {h.nav != null ? `₹${h.nav.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-100">{h.value_paise != null ? rupees(h.value_paise, { whole: true }) : "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">{g != null ? rupees(g, { whole: true, sign: true }) : "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }
