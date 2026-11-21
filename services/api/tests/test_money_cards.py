@@ -126,3 +126,84 @@ async def test_another_mailbox_listed_masked_and_removed(owner, sessionmaker, se
     # The connect flow is the owner's, through Google's account picker.
     resp = await owner.get("/auth/google/mailbox", follow_redirects=False)
     assert resp.status_code in (302, 307, 404)
+
+
+async def test_debit_card_expiry_is_kept_and_reminded_daily(owner, sessionmaker):
+    from datetime import timedelta
+
+    from nexus_common import advice
+
+    bank = (await owner.post("/api/money/accounts", json={
+        "kind": "bank", "institution": "ICICI Bank", "mask": "6320"})).json()  # fmt: skip
+    resp = await owner.post("/api/money/accounts", json={
+        "kind": "debit", "mask": "4455", "account_id": bank["id"],
+        "expires_on": "2026-12-01"})  # fmt: skip
+    assert resp.status_code == 201, resp.text
+    (item,) = (await owner.get("/api/money/balances")).json()["items"]
+    assert (item["card_mask"], item["card_expires_on"]) == ("4455", "2026-12-01")
+    # A renewed card: the expiry can be typed on the bank account.
+    edit = await owner.patch(f"/api/money/accounts/{bank['id']}/details",
+                             json={"expires_on": "2026-12-01"})  # fmt: skip
+    assert edit.status_code == 200, edit.text
+
+    async with sessionmaker() as db:
+        user = await _user(db)
+        view = await store.accounts_view(db, user.id, date(2026, 12, 10))
+    subs = {"items": []}
+    # From two weeks before the end of the expiry month, every day, each day's own tag.
+    early = store.reminders(subs, view, date(2026, 12, 16))
+    assert not [r for r in early if r["tag"].startswith("expiry:")]
+    days = [date(2026, 12, 17), date(2026, 12, 18)]
+    tags = [r["tag"] for d in days for r in store.reminders(subs, view, d)
+            if r["tag"].startswith("expiry:")]  # fmt: skip
+    assert len(set(tags)) == 2
+    (one,) = [r for r in store.reminders(subs, view, date(2026, 12, 30)) if "expiry" in r["tag"]]
+    assert one["title"] == "Debit card ••4455 (ICICI Bank ••6320) expires tomorrow"
+    assert not [r for r in store.reminders(subs, view, date(2027, 1, 9)) if "expiry" in r["tag"]]
+
+    # Advice: worth a look six weeks out, "do now" in the last two.
+    facts = advice.Facts(today=date(2026, 11, 20), accounts=view["items"])
+    (look,) = advice.card_expiry(facts)
+    assert look.level == "look" and look.url == "/money/accounts"
+    facts.today = date(2026, 12, 31) - timedelta(days=10)
+    assert advice.card_expiry(facts)[0].level == "act"
+
+
+async def test_two_cards_share_one_limit(owner, sessionmaker, settings):
+    ruby = await owner.post("/api/money/accounts", json={
+        "kind": "card", "institution": "ICICI Bank", "mask": "1111", "name": "Rubyx Visa",
+        "credit_limit_paise": 2_70_000_00})  # fmt: skip
+    ruby = ruby.json()
+    rupay = await owner.post("/api/money/accounts", json={
+        "kind": "card", "institution": "ICICI Bank", "mask": "2222", "name": "Rubyx RuPay",
+        "credit_limit_paise": 2_70_000_00, "limit_with_id": ruby["id"]})  # fmt: skip
+    assert rupay.status_code == 201, rupay.text
+    rupay = rupay.json()
+
+    # An alert on either card says what's left of the shared limit.
+    async with sessionmaker() as db:
+        user = await _user(db)
+        await store.ingest(db, settings, user.id, [
+            money.Parsed(date(2026, 11, 20), 30_000_00, "debit", "Croma", "POS", channel="card",
+                         account_mask="2222", account_kind="card", institution="ICICI Bank",
+                         extra={"available_limit_paise": 2_40_000_00}),
+        ], source="alert")  # fmt: skip
+        await db.commit()
+
+    view = (await owner.get("/api/money/balances")).json()
+    by = {a["mask"]: a for a in view["items"]}
+    assert by["2222"]["limit_with_label"] == "Rubyx Visa"
+    assert by["2222"]["credit_limit_paise"] is None
+    assert by["1111"]["shared_with"] == ["Rubyx RuPay"]
+    assert by["1111"]["credit_limit_paise"] == 2_70_000_00
+    assert by["1111"]["owed_paise"] == 30_000_00
+    # Counted once.
+    assert view["owed_paise"] == 30_000_00
+
+    # A card can't share with itself, someone else's card, or a bank account; and can stop.
+    bad = await owner.patch(f"/api/money/accounts/{ruby['id']}/details",
+                            json={"limit_with_id": rupay["id"]})  # fmt: skip
+    assert bad.status_code == 422
+    stop = await owner.patch(f"/api/money/accounts/{rupay['id']}/details",
+                             json={"limit_with_id": None})  # fmt: skip
+    assert stop.status_code == 200 and stop.json()["limit_with_id"] is None

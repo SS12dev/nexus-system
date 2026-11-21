@@ -196,12 +196,18 @@ export interface AccountView {
   emis?: { id: string; name: string; emi_paise: number }[];
   /** Banks: whether the transactions add up to the balances the bank printed. */
   balance_check?: BalanceCheck | null;
-  /** Banks: the debit card's last four digits. */
+  /** Banks: the debit card's last four digits and expiry month (its first day). */
   card_mask?: string | null;
+  card_expires_on?: string | null;
   /** Credit cards: the expiry month (its first day) and the account the bill is paid from. */
   expires_on?: string | null;
   bill_from_id?: string | null;
   bill_from_label?: string | null;
+  /** Credit cards issued as a pair with one limit: this card uses `limit_with`'s limit, and
+   * `shared_with` names the cards that use this one's. */
+  limit_with_id?: string | null;
+  limit_with_label?: string | null;
+  shared_with?: string[];
 }
 
 export interface AccountEdit {
@@ -216,6 +222,7 @@ export interface AccountEdit {
   expires_on?: string | null;
   bill_from_id?: string | null;
   card_mask?: string | null;
+  limit_with_id?: string | null;
 }
 
 export type LoanKind = "card_emi" | "personal" | "home" | "vehicle" | "education" | "other";
@@ -354,6 +361,7 @@ export interface Savings {
   monthly_paise: number;
   funds_value_paise: number;
   funds_cost_paise: number;
+  stocks_value_paise: number;
   maturing: Asset[];
   kinds: Record<AssetKind, string>;
   default_rates: Partial<Record<AssetKind, number>>;
@@ -744,7 +752,53 @@ export interface NewAccount {
   bill_from_id?: string | null;
   card_mask?: string | null;
   account_id?: string;
+  limit_with_id?: string | null;
 }
+
+// --- Shares ---------------------------------------------------------------------------------------
+
+export interface Stock {
+  id: string;
+  symbol: string;
+  exchange: string;
+  name: string;
+  isin: string | null;
+  quantity: number;
+  avg_price_paise: number | null;
+  bought_on: string | null;
+  price_paise: number | null;
+  price_on: string | null;
+  value_paise: number | null;
+  cost_paise: number | null;
+  gain_paise: number | null;
+  note: string;
+}
+
+export interface Stocks {
+  items: Stock[];
+  value_paise: number;
+  cost_paise: number;
+  gain_paise: number | null;
+  price_on: string | null;
+}
+
+export interface StockFound {
+  symbol: string;
+  name: string;
+  isin: string;
+  price_paise: number;
+  price_on: string;
+}
+
+export interface NewStock {
+  symbol: string;
+  quantity: string;
+  avg_price_paise?: number | null;
+  bought_on?: string | null;
+  note?: string | null;
+}
+
+export type StockEdit = Partial<Omit<NewStock, "symbol">>;
 
 export type ContributionCadence = "monthly" | "quarterly" | "yearly";
 

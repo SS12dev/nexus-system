@@ -8,6 +8,7 @@
 - `send_reminders`: once a day at 9 am local time, renewals coming up, a charge after
   cancelling, a price rise, and card bills due in three days or missed. Each is sent once.
 - `revalue_holdings`: each night, value every holding at AMFI's latest published NAV.
+- `reprice_stocks`: each night, price shares at NSE's latest close (the bhavcopy).
 
 No model sees any of it: alerts and statements are read with plain rules on this machine.
 Logs carry counts and ids only, never amounts, merchants, subjects or senders.
@@ -17,19 +18,20 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 from redis.exceptions import RedisError
 from sqlalchemy import select
 
-from nexus_common import advice_store, money, money_mail, money_orders
+from nexus_common import advice_store, money, money_mail, money_orders, money_stocks
 from nexus_common import money_store as store
 from nexus_common.google import GoogleNotConnected, get_grant, services_in
 from nexus_common.models import (
     MoneyHolding,
     MoneyMailbox,
     MoneySettings,
+    MoneyStock,
     NotificationKind,
     User,
     UserStatus,
@@ -484,6 +486,30 @@ async def revalue_holdings(deps: TurnDeps, navs: dict | None = None) -> int:
     for uid in {h.user_id for h in changed}:
         await store.changed(deps.redis, uid)
     log.info("money.revalued", extra={"count": len(changed), "navs": len(navs)})
+    return len(changed)
+
+
+async def reprice_stocks(
+    deps: TurnDeps, quotes: dict | None = None, today: date | None = None
+) -> int:
+    """Price every share at NSE's latest close and refresh the symbol list the add dialog
+    searches. Returns how many changed."""
+    async with deps.sessionmaker() as db:
+        stocks = (await db.scalars(select(MoneyStock))).all()
+        if quotes is None:
+            try:
+                quotes = await money_stocks.fetch_quotes(today or date.today())
+            except (httpx.HTTPError, ValueError) as exc:
+                log.warning("money.quotes_unavailable", extra={"error": type(exc).__name__})
+                return 0
+            await deps.redis.set(
+                money_stocks.CACHE_KEY, money_stocks.dump(quotes), ex=money_stocks.CACHE_SECONDS
+            )
+        changed = [s for s in stocks if store.reprice(s, quotes)]
+        await db.commit()
+    for uid in {s.user_id for s in changed}:
+        await store.changed(deps.redis, uid)
+    log.info("money.repriced", extra={"count": len(changed), "quotes": len(quotes)})
     return len(changed)
 
 

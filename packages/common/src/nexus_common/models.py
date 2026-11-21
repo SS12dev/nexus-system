@@ -2107,12 +2107,18 @@ class MoneyAccount(Base):
     statement_on: Mapped[date | None] = mapped_column(Date)
     # When the person marked the current bill paid by hand.
     paid_on: Mapped[date | None] = mapped_column(Date)
-    # Cards: the expiry month (stored as its first day), typed in by hand.
+    # The expiry month (stored as its first day), typed in by hand: a credit card's own, or
+    # for a bank account, its debit card's.
     expires_on: Mapped[date | None] = mapped_column(Date)
     # Bank accounts: the debit card's last four digits, so its alerts land on this account.
     card_mask: Mapped[str | None] = mapped_column(String(8))
     # Credit cards: the account the bill is paid from.
     bill_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    # Credit cards issued as a pair (ICICI's Rubyx Visa and RuPay) share one limit: the
+    # second card points at the first, which holds the limit and the available amount.
+    limit_with_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("money_accounts.id", ondelete="SET NULL")
     )
     # Closed or not worth showing; its transactions still count.
@@ -2216,6 +2222,35 @@ class MoneyHolding(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "folio", "scheme"),)
+
+
+class MoneyStock(Base):
+    """Shares held directly (not through a fund), typed in by hand and priced each evening from
+    the exchange's published closing prices (NSE's daily bhavcopy)."""
+
+    __tablename__ = "money_stocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The exchange's ticker, e.g. GUJGASLTD.
+    symbol: Mapped[str] = mapped_column(String(24))
+    exchange: Mapped[str] = mapped_column(String(8), default="NSE", server_default="NSE")
+    name: Mapped[str] = mapped_column(String(160), default="", server_default="")
+    isin: Mapped[str | None] = mapped_column(String(16))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    # What one share cost on average, when known.
+    avg_price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    bought_on: Mapped[date | None] = mapped_column(Date)
+    # The latest closing price and its trading day.
+    price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    price_on: Mapped[date | None] = mapped_column(Date)
+    note: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "exchange", "symbol", name="uq_money_stocks_user_symbol"),
+    )
 
 
 class MoneyImport(Base):

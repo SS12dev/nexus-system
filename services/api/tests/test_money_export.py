@@ -123,7 +123,7 @@ async def test_export_workbook(owner, sessionmaker, caplog):
 
     wb = load_workbook(io.BytesIO(resp.content))
     assert wb.sheetnames == [
-        "Summary", "Accounts and cards", "Savings and deposits", "Mutual funds",
+        "Summary", "Accounts and cards", "Savings and deposits", "Mutual funds", "Shares",
         "Loans and EMIs", "Subscriptions", "Insurance",
     ]  # fmt: skip
 

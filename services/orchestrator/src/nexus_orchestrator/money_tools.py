@@ -107,6 +107,8 @@ def build_money_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
                 f"Mutual funds worth {r(ov['funds_value_paise'])}"
                 + (f" (cost {r(ov['funds_cost_paise'])})" if ov["funds_cost_paise"] else "")
             )
+        if ov.get("stocks_value_paise"):
+            lines.append(f"Shares worth {r(ov['stocks_value_paise'])}")
         lines.append("</money>")
         return "\n".join(lines)
 
@@ -216,6 +218,8 @@ def build_money_tools(ctx: Any, note: Callable) -> dict[str, Callable]:
             lines.append(text)
         if savings["funds_value_paise"]:
             lines.append(f"Mutual funds: {r(savings['funds_value_paise'])}")
+        if savings.get("stocks_value_paise"):
+            lines.append(f"Shares: {r(savings['stocks_value_paise'])}")
         for x in loans["items"]:
             if x["done"] or x["status"] != "active":
                 continue

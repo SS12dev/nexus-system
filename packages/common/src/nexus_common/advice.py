@@ -36,6 +36,8 @@ OTP_LIMIT_PAISE = 15_000_00
 OTP_LIMIT_HIGHER_PAISE = 1_00_000_00
 FOREX_MARKUP = 0.035 * 1.18  # 3.5% plus GST on it
 EXPIRY_DAYS = 45
+# From here, a reminder every morning too (money_store.card_expiry).
+EXPIRY_SOON_DAYS = 14
 MANY_SUBS, MANY_SUBS_PAISE = 5, 2_000_00
 YEARLY_DECIDE_DAYS, YEARLY_DECIDE_PAISE = 30, 1_000_00
 SPIKE_RATIO, SPIKE_PAISE = 1.5, 2_000_00
@@ -207,30 +209,36 @@ def _subs_by_account(f: Facts) -> dict[str, list[dict]]:
 def card_expiry(f: Facts) -> list[Item]:
     out = []
     by = _subs_by_account(f)
-    for c in _cards(f):
-        if not c.get("expires_on"):
+    debit = [a for a in f.accounts if a["kind"] == "bank" and not a.get("hidden")
+             and a.get("card_mask") and a.get("card_expires_on")]  # fmt: skip
+    for c in [*_cards(f), *debit]:
+        label, expires = (
+            (c["label"], c.get("expires_on")) if c["kind"] == "card"
+            else (f"Debit card ••{c['card_mask']} ({c['label']})", c["card_expires_on"])
+        )  # fmt: skip
+        if not expires:
             continue
-        last = month_end(c["expires_on"])
+        last = month_end(expires)
         days = (last - f.today).days
         if days > EXPIRY_DAYS or days < -30:
             continue
-        subs = by.get(c["id"], [])
+        subs = by.get(c["id"], []) if c["kind"] == "card" else []
         names = ", ".join(s["merchant"] for s in subs[:4]) + (" and more" if len(subs) > 4 else "")
         out.append(Item(
-            key=f"card-expiry:{c['id']}:{c['expires_on']}",
+            key=f"card-expiry:{c['id']}:{c['kind']}:{expires}",
             area="cards",
-            level="act" if subs else "look",
-            title=f"{c['label']} expires in {_plural(days, 'day')}"
+            level="act" if subs or days <= EXPIRY_SOON_DAYS else "look",
+            title=f"{label} expires in {_plural(days, 'day')}"
             if days >= 0
-            else f"{c['label']} has expired",
+            else f"{label} has expired",
             body=(f"{_plural(len(subs), 'subscription')} ({names}) are charged to it. When the "
                   "new card arrives, check each one's next charge goes through, and update the "
                   "card where it doesn't." if subs else
-                  "The bank sends a new card before then. Activate it and keep the old one until "
-                  "the new one works."),
+                  "The bank usually sends the new card a few weeks before. If it hasn't come, "
+                  "ask for it; when it does, activate it and type its expiry in Accounts."),
             why="The expiry month you typed",
-            url="/money/subscriptions?by=card",
-            action="See what's on it",
+            url="/money/subscriptions?by=card" if subs else "/money/accounts",
+            action="See what's on it" if subs else "Update the expiry",
         ))  # fmt: skip
     return out
 

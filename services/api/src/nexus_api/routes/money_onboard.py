@@ -58,6 +58,8 @@ class AccountIn(BaseModel):
     # Bank accounts: the debit card's last four digits. Debit cards: the bank account.
     card_mask: str | None = Field(default=None, pattern=r"^(\d{4})?$")
     account_id: uuid.UUID | None = None
+    # Credit cards issued as a pair with one limit: the other card.
+    limit_with_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _needs(self) -> "AccountIn":
@@ -90,6 +92,8 @@ async def add_account(body: AccountIn, user: OwnerUser, db: DbDep, redis: RedisD
         if bank is None or bank.user_id != user.id or bank.kind != "bank":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Bank account not found.")
         moved = await store.attach_debit_card(db, user.id, bank, body.mask)
+        if body.expires_on:
+            bank.expires_on = body.expires_on.replace(day=1)
         await db.commit()
         extra = {"user_id": str(user.id), "account_id": str(bank.id), "moved": moved}
         log.info("money.debit_card_added", extra=extra)
@@ -135,6 +139,12 @@ async def add_account(body: AccountIn, user: OwnerUser, db: DbDep, redis: RedisD
     await db.flush()
     if body.kind == "bank" and body.card_mask:
         await store.attach_debit_card(db, user.id, row, body.card_mask)
+        if body.expires_on:
+            row.expires_on = body.expires_on.replace(day=1)
+    if body.kind == "card" and body.limit_with_id:
+        if problem := await store.share_limit(db, user.id, row, body.limit_with_id):
+            await db.rollback()
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
     await db.commit()
     log.info("money.account_added", extra={"user_id": str(user.id), "account_id": str(row.id)})
     await store.changed(redis, user.id)

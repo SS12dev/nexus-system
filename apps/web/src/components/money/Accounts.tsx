@@ -57,6 +57,9 @@ export function AccountsView() {
   const active = loans.items.filter((l) => l.status === "active" && !l.done);
   const finished = loans.items.filter((l) => l.status !== "active" || l.done);
   const cardOptions = data.items.filter((a) => a.kind === "card");
+  const debits = banks.filter((a) => a.card_mask);
+  // A card sharing another's limit: that card's limit, for its tile.
+  const limitOf = (a: AccountView) => (a.limit_with_id ? (data.items.find((x) => x.id === a.limit_with_id)?.credit_limit_paise ?? null) : null);
 
   return (
     <>
@@ -113,7 +116,20 @@ export function AccountsView() {
           </h2>
           <div className="grid gap-3 md:grid-cols-2">
             {cards.map((a) => (
-              <CardTile key={a.id} a={a} onEdit={() => setDialog({ kind: "card", account: a })} />
+              <CardTile key={a.id} a={a} limitOf={limitOf(a)} onEdit={() => setDialog({ kind: "card", account: a })} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {debits.length > 0 && (
+        <section className="mb-6">
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+            <CreditCard size={15} className="text-slate-500" /> Debit cards
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {debits.map((a) => (
+              <DebitTile key={a.id} a={a} onEdit={() => setDialog({ kind: "balance", account: a })} />
             ))}
           </div>
         </section>
@@ -135,7 +151,6 @@ export function AccountsView() {
                   <span className="block truncate text-xs text-slate-500">
                     Spent {rupees(a.spent_month_paise, { whole: true })} · in {rupees(a.in_month_paise, { whole: true })} this month
                     {a.last_on && ` · last ${dayLabel(a.last_on)}`}
-                    {a.card_mask && ` · debit card ••${a.card_mask}`}
                   </span>
                   {a.balance_check && <BalanceCheckLine check={a.balance_check} accountId={a.id} />}
                 </span>
@@ -221,7 +236,12 @@ export function AccountsView() {
 
       {dialog?.kind === "balance" && <BankDialog a={dialog.account} onClose={() => setDialog(null)} />}
       {dialog?.kind === "card" && (
-        <CardDialog a={dialog.account} banks={data.items.filter((x) => x.kind === "bank")} onClose={() => setDialog(null)} />
+        <CardDialog
+          a={dialog.account}
+          banks={data.items.filter((x) => x.kind === "bank")}
+          cards={cardOptions.filter((x) => x.id !== dialog.account.id && x.limit_with_id !== dialog.account.id)}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "loan" && <LoanDialog loan={dialog.loan} seen={dialog.seen} cards={cardOptions} onClose={() => setDialog(null)} />}
       {adding && <AddAccountDialog card={adding === "card"} onClose={() => setAdding(null)} />}
@@ -240,10 +260,55 @@ function BillBadge({ status, due }: { status: BillStatus; due?: string | null })
   );
 }
 
-function CardTile({ a, onEdit }: { a: AccountView; onEdit: () => void }) {
+/** How an expiry month reads, and whether it needs doing something about: within 45 days it
+ * shows amber, and past it red. */
+function expiryText(first: string | null | undefined): { text: string; tone: string } | null {
+  if (!first) return null;
+  const [y, m] = first.split("-").map(Number);
+  const last = new Date(y, m, 0);
+  const today = new Date(`${isoToday()}T00:00:00`);
+  const days = Math.round((last.getTime() - today.getTime()) / 86_400_000);
+  const month = monthLabel(first.slice(0, 7));
+  if (days < 0) return { text: `expired ${month}`, tone: "text-rose-300" };
+  if (days <= 45) return { text: `expires ${month}, in ${days === 1 ? "a day" : `${days} days`}`, tone: "text-amber-300" };
+  return { text: `expires ${month}`, tone: "text-slate-500" };
+}
+
+function DebitTile({ a, onEdit }: { a: AccountView; onEdit: () => void }) {
+  const expiry = expiryText(a.card_expires_on);
+  return (
+    <div className="rounded-xl border border-edge bg-panel p-3.5">
+      <div className="flex items-start gap-2">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-slate-100">Debit card ••{a.card_mask}</span>
+          <Link to={`/money/transactions?account_id=${a.id}`} className="block truncate text-xs text-slate-400 hover:text-sky-200">
+            Spends from {a.label}
+          </Link>
+        </span>
+        <button onClick={onEdit} className="-m-1 p-1 text-slate-400 hover:text-white" aria-label={`Edit debit card ••${a.card_mask}`}>
+          <Pencil size={13} />
+        </button>
+      </div>
+      {expiry ? (
+        <p className={`mt-2 text-xs ${expiry.tone}`}>{expiry.text[0].toUpperCase() + expiry.text.slice(1)}</p>
+      ) : (
+        <p className="mt-2 text-xs text-slate-500">
+          Expiry not set.{" "}
+          <button onClick={onEdit} className="text-sky-300 hover:text-sky-200">
+            Add it
+          </button>{" "}
+          to be reminded before it runs out.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CardTile({ a, limitOf, onEdit }: { a: AccountView; limitOf: number | null; onEdit: () => void }) {
   const bill = a.bill ?? { status: "none" as const, left_paise: 0 };
   const limit = a.credit_limit_paise ?? null;
   const used = limit && a.owed_paise != null ? Math.min(a.owed_paise / limit, 1) : null;
+  const expiry = expiryText(a.expires_on);
   const markPaid = async (paid: boolean) => {
     try {
       await api.moneyEditAccount(a.id, { paid });
@@ -296,11 +361,19 @@ function CardTile({ a, onEdit }: { a: AccountView; onEdit: () => void }) {
         Spent {rupees(a.spent_month_paise, { whole: true })} this month
         {a.owed_paise != null && ` · about ${rupees(a.owed_paise, { whole: true })} owed now`}
       </p>
-      {(a.bill_from_label || a.expires_on) && (
+      {a.limit_with_label && (
+        <p className="mt-1 truncate text-xs text-slate-400">
+          Shares {limitOf ? `the ${rupees(limitOf, { whole: true })} limit` : "the limit"} of {a.limit_with_label}
+        </p>
+      )}
+      {!!a.shared_with?.length && (
+        <p className="mt-1 truncate text-xs text-slate-400">Limit shared with {a.shared_with.join(", ")}; used and left count both</p>
+      )}
+      {(a.bill_from_label || expiry) && (
         <p className="mt-1 truncate text-xs text-slate-500">
           {a.bill_from_label && `Bill paid from ${a.bill_from_label}`}
-          {a.bill_from_label && a.expires_on && " · "}
-          {a.expires_on && `expires ${monthLabel(a.expires_on.slice(0, 7))}`}
+          {a.bill_from_label && expiry && " · "}
+          {expiry && <span className={expiry.tone}>{expiry.text}</span>}
         </p>
       )}
       {!!a.emis?.length && (
@@ -407,6 +480,17 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
       optional: true,
       placeholder: "5678",
       hint: "Card alerts quote the card's digits, not the account's. With them, those alerts land here.",
+      half: true,
+    },
+    {
+      key: "expires",
+      label: "Debit card expires",
+      kind: "date",
+      value: a.card_expires_on ?? "",
+      optional: true,
+      half: true,
+      when: (v) => !!v.debit.trim(),
+      hint: "Any day in the month. Reminders every morning from two weeks before.",
     },
     { key: "hidden", label: "Hide this account", kind: "check", value: a.hidden ? "1" : "", hint: "Its transactions still count." },
   ];
@@ -424,6 +508,7 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
           balance_paise: read.money(v.balance),
           hidden: v.hidden === "1",
           ...(debit !== (a.card_mask ?? "") ? { card_mask: debit || null } : {}),
+          ...((v.expires || null) !== (a.card_expires_on ?? null) ? { expires_on: debit ? v.expires || null : null } : {}),
         });
         toast("Saved");
       }}
@@ -431,10 +516,23 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
   );
 }
 
-function CardDialog({ a, banks, onClose }: { a: AccountView; banks: AccountView[]; onClose: () => void }) {
+function CardDialog({ a, banks, cards, onClose }: { a: AccountView; banks: AccountView[]; cards: AccountView[]; onClose: () => void }) {
   const fields: Field[] = [
     { key: "name", label: "Name", kind: "text", value: a.name, placeholder: a.label, optional: true },
+    ...(cards.length && !a.shared_with?.length
+      ? [
+          {
+            key: "shares",
+            label: "Limit",
+            kind: "select",
+            value: a.limit_with_id ?? "",
+            options: [["", "Its own limit"], ...cards.map((c) => [c.id, `Shares the limit of ${c.label}`] as [string, string])],
+            hint: "For cards issued as a pair on one account (a Visa and a RuPay, say): what's owed and left then counts once.",
+          } satisfies Field,
+        ]
+      : []),
     {
+      when: (v: Values) => !v.shares,
       key: "limit",
       label: "Credit limit",
       kind: "money",
@@ -466,9 +564,11 @@ function CardDialog({ a, banks, onClose }: { a: AccountView; banks: AccountView[
       onSubmit={async (v) => {
         const due = read.money(v.due);
         const changedBill = due !== (a.due_paise ?? null) || (v.due_on || null) !== (a.due_on ?? null);
+        const shares = v.shares || null;
         await api.moneyEditAccount(a.id, {
           name: v.name,
-          credit_limit_paise: read.money(v.limit),
+          ...(shares ? {} : { credit_limit_paise: read.money(v.limit) }),
+          ...(shares !== (a.limit_with_id ?? null) ? { limit_with_id: shares } : {}),
           hidden: v.hidden === "1",
           min_due_paise: read.money(v.min),
           expires_on: v.expires || null,

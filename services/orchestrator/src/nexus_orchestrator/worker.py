@@ -204,6 +204,7 @@ async def brief_now(ctx: dict, user_id: str) -> None:
 @traced_job
 async def money_navs(ctx: dict) -> None:
     await money.revalue_holdings(ctx["deps"])
+    await money.reprice_stocks(ctx["deps"])
 
 
 @traced_job

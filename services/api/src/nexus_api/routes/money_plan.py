@@ -94,9 +94,11 @@ class AccountEdit(BaseModel):
     due_on: date | None = None
     # True marks the current bill paid; False undoes it.
     paid: bool | None = None
-    # Cards: the expiry month (any day in it), and the account the bill is paid from.
+    # The expiry month (any day in it): a credit card's, or a bank account's debit card's.
     expires_on: date | None = None
+    # Cards: the account the bill is paid from, and the card whose limit this one shares.
     bill_from_id: uuid.UUID | None = None
+    limit_with_id: uuid.UUID | None = None
     # Bank accounts: the debit card's last four digits ("" or null removes it).
     card_mask: str | None = Field(default=None, pattern=r"^(\d{4})?$")
 
@@ -126,8 +128,11 @@ async def edit_account(
         a.min_due_paise = body.min_due_paise
     if body.paid is not None:
         a.paid_on = today if body.paid else None
-    if "expires_on" in fields and a.kind == "card":
+    if "expires_on" in fields:
         a.expires_on = body.expires_on.replace(day=1) if body.expires_on else None
+    if "limit_with_id" in fields and a.kind == "card":
+        if problem := await store.share_limit(db, user.id, a, body.limit_with_id):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
     if "bill_from_id" in fields and a.kind == "card":
         if body.bill_from_id:
             await _own(db, MoneyAccount, user.id, body.bill_from_id, "Account")

@@ -2,12 +2,13 @@ import { CalendarCheck, Coins, Landmark, MoreHorizontal, Plus, Trash2 } from "lu
 import { useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api";
-import { dayLabel, daysUntil, fullDay, isoToday, percent, rupees, type Asset, type AssetIn, type AssetKind, type ContributionCadence, type Investments } from "../../lib/money";
+import { dayLabel, daysUntil, fullDay, isoToday, percent, rupees, type Asset, type AssetIn, type AssetKind, type ContributionCadence, type Investments, type Stock } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, secretChange, type Field } from "./FormDialog";
 import { SecretLine } from "./Secret";
 import { Card, Empty, Spinner, Stat, useMoney } from "./parts";
+import { ShareDialog, SharesSection } from "./Shares";
 
 /** How a deposit's frequency reads after its amount. */
 const EVERY: Record<ContributionCadence | "april", string> = {
@@ -32,27 +33,37 @@ const ADD: { kind: AssetKind; label: string }[] = [
 export function SavingsView() {
   const { data, error } = useMoney(api.moneySavings);
   const funds = useMoney(api.moneyInvestments).data;
+  const stocks = useMoney(api.moneyStocks).data;
   const [dialog, setDialog] = useState<{ kind: AssetKind; asset?: Asset } | null>(null);
+  const [share, setShare] = useState<{ stock?: Stock } | null>(null);
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!data) return <Spinner />;
   const active = data.items.filter((a) => a.status === "active");
   const closed = data.items.filter((a) => a.status !== "active");
   const gain = funds && funds.cost_paise ? funds.value_paise - funds.cost_paise : null;
+  const market = data.funds_value_paise + data.stocks_value_paise;
   return (
     <>
       <p className="mb-4 text-sm text-slate-400">
         Deposits and schemes you add here are valued from their terms: FDs and RDs compound quarterly, PPF takes a yearly
-        deposit each April, EPF a monthly one. Mutual funds come from your CAS and are valued every night.
+        deposit each April, EPF a monthly one. Mutual funds come from your CAS and are valued every night, and shares you add
+        at NSE's closing price each evening.
       </p>
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Savings worth" value={rupees(data.total_paise, { whole: true })} sub={`${active.length} tracked`} />
         <Stat
-          label="Mutual funds"
-          value={data.funds_value_paise ? rupees(data.funds_value_paise, { whole: true }) : "—"}
-          sub={gain != null ? `${rupees(gain, { whole: true, sign: true })} gain` : "from your CAS"}
+          label={data.stocks_value_paise ? "Funds and shares" : "Mutual funds"}
+          value={market ? rupees(market, { whole: true }) : "—"}
+          sub={
+            data.stocks_value_paise
+              ? `shares ${rupees(data.stocks_value_paise, { whole: true })}`
+              : gain != null
+                ? `${rupees(gain, { whole: true, sign: true })} gain`
+                : "from your CAS"
+          }
         />
         <Stat label="Going in each month" value={rupees(data.monthly_paise, { whole: true })} sub="RDs, PPF, EPF, NPS" />
-        <Stat label="Together" value={rupees(data.total_paise + data.funds_value_paise, { whole: true })} sub="savings and funds" />
+        <Stat label="Together" value={rupees(data.total_paise + market, { whole: true })} sub="savings, funds and shares" />
       </div>
       <div className="mb-5 flex flex-wrap gap-1.5" role="group" aria-label="Add savings">
         {ADD.map((a) => (
@@ -60,6 +71,9 @@ export function SavingsView() {
             <Plus size={12} /> {a.label}
           </button>
         ))}
+        <button onClick={() => setShare({})} className="flex items-center gap-1 rounded-full border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60">
+          <Plus size={12} /> Shares
+        </button>
       </div>
       {data.maturing.map((a) => (
         <div key={`m-${a.id}`} className="mb-3 flex items-center gap-2 rounded-xl border border-edge bg-panel px-3 py-2.5 text-sm text-slate-300">
@@ -100,7 +114,9 @@ export function SavingsView() {
           </ul>
         </details>
       )}
+      <SharesSection data={stocks} onAdd={() => setShare({})} onEdit={(stock) => setShare({ stock })} />
       <Funds data={funds} />
+      {share && <ShareDialog stock={share.stock} onClose={() => setShare(null)} />}
       {dialog && <AssetDialog kind={dialog.kind} a={dialog.asset} defaults={data.default_rates} onClose={() => setDialog(null)} />}
     </>
   );
