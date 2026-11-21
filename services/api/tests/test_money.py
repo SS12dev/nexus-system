@@ -157,7 +157,7 @@ async def test_bad_files_explain_themselves(owner):
     assert "header row" in resp.json()["detail"]
     resp = await upload(owner, b"%PDF-1.4 not really", "cas.pdf")
     assert resp.status_code == 422
-    assert "password" in resp.json()["detail"]
+    assert "couldn't be opened" in resp.json()["detail"]
     imports = (await owner.get("/api/money/imports")).json()
     assert [i["status"] for i in imports] == ["failed", "failed"]
 

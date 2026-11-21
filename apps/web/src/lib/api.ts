@@ -31,6 +31,11 @@ import type {
   Subscriptions,
   TxnPage,
   TxnQuery,
+  NewStock,
+  Stock,
+  StockEdit,
+  StockFound,
+  Stocks,
 } from "./money";
 import type { BriefPage, BriefSettings, Place } from "./brief";
 import type { TuneId } from "./tunes";
@@ -364,6 +369,11 @@ export const api = {
     request<{ id: string }>(`/api/money/goals/${id}`, { method: "PATCH", body: json(body) }),
   moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
   moneyInvestments: () => request<Investments>("/api/money/investments"),
+  moneyStocks: () => request<Stocks>("/api/money/stocks"),
+  moneyFindStock: (q: string) => request<{ items: StockFound[]; price_on: string | null }>(`/api/money/stocks/search${orgQuery({ q })}`),
+  moneyAddStock: (body: NewStock) => request<Stock>("/api/money/stocks", { method: "POST", body: json(body) }),
+  moneyEditStock: (id: string, body: StockEdit) => request<Stock>(`/api/money/stocks/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteStock: (id: string) => request<void>(`/api/money/stocks/${id}`, { method: "DELETE" }),
   moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
   moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string; moved?: number }>("/api/money/accounts", { method: "POST", body: json(body) }),
   moneyOrdersToConfirm: () => request<{ items: OrderToConfirm[] }>("/api/money/orders/to-confirm"),

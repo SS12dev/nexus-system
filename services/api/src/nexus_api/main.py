@@ -36,6 +36,7 @@ from nexus_api.routes import (
     money_export,
     money_onboard,
     money_plan,
+    money_stocks,
     notifications,
     ops,
     organiser,
@@ -144,6 +145,7 @@ def create_app(
     app.include_router(organiser.router)
     app.include_router(money.router)
     app.include_router(money_plan.router)
+    app.include_router(money_stocks.router)
     app.include_router(money_onboard.router)
     app.include_router(money_export.router)
     app.include_router(advice.router)

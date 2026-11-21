@@ -218,6 +218,30 @@ async def test_holdings_are_valued_at_the_latest_nav(deps, user, sessionmaker):
         assert h.value_paise == 939675  # 100.5 x 93.5 = 9396.75
 
 
+async def test_shares_are_priced_at_nse_close_and_the_list_cached(
+    deps, user, sessionmaker, monkeypatch
+):
+    from nexus_common import money_stocks
+    from nexus_common.models import MoneyStock
+
+    async with sessionmaker() as db:
+        db.add(MoneyStock(user_id=user, symbol="TCS", name="TCS LTD", quantity=Decimal("2")))
+        await db.commit()
+    day = date(2026, 11, 20)
+    quotes = {"TCS": money_stocks.Quote("TCS", "TCS LTD", "INE467B01029", "EQ", 3_100_50, day)}
+
+    async def fetched(today, client=None):
+        return quotes
+
+    monkeypatch.setattr(money_stocks, "fetch_quotes", fetched)
+    assert await money.reprice_stocks(deps, today=day) == 1
+    async with sessionmaker() as db:
+        s = (await db.scalars(select(MoneyStock))).one()
+        assert (s.price_paise, s.price_on) == (3_100_50, day)
+    # The add dialog's search reads the same list without asking NSE again.
+    assert money_stocks.load(await deps.redis.get(money_stocks.CACHE_KEY)) == quotes
+
+
 async def test_assistant_uses_money_unless_switched_off(deps, user, sessionmaker, settings):
     async def emit(*args, **kwargs):
         pass

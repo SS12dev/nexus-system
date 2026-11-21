@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api";
 import { formatAgo } from "../../lib/format";
-import { dayLabel, type MoneyImport } from "../../lib/money";
+import { dayLabel, type MoneyAccount, type MoneyImport } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { Select } from "../Select";
 import { HistoryRead, ScreenshotImport } from "./Onboard";
@@ -100,9 +100,9 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
   return (
     <Card title="Add a statement">
       <p className="mb-3 text-sm text-slate-400">
-        A bank or card statement downloaded from net banking (<b className="text-slate-300">CSV or Excel .xlsx</b>), or a
-        mutual fund <b className="text-slate-300">CAS PDF</b> from CAMS or KFintech. Files are read here and thrown away;
-        only the transactions are kept. Importing the same file twice adds nothing.
+        A bank or card statement (<b className="text-slate-300">PDF, CSV or Excel .xlsx</b>), including the locked PDFs banks
+        email, or a mutual fund <b className="text-slate-300">CAS PDF</b> from CAMS or KFintech. Files are read here and thrown
+        away; only the transactions are kept. Importing the same file twice adds nothing.
       </p>
       <div
         onDragOver={(e) => {
@@ -136,37 +136,38 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
           {pdf ? (
             <>
               <label className="grid gap-1 text-xs text-slate-400">
-                PDF password {casPasswordSet && "(leave empty to use the saved one)"}
+                PDF password, if it's locked {casPasswordSet && "(a saved CAS password is tried too)"}
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="off"
-                  placeholder="Often your PAN, in capitals"
+                  placeholder="Leave empty if it opens without one"
                   className="rounded-md border border-edge bg-ink px-2.5 py-1.5 text-base sm:text-sm"
                 />
+                <span className="text-slate-500">
+                  Used once to open the file, then dropped. A bank statement's password is never saved or logged.
+                </span>
               </label>
+              <details className="text-xs text-slate-400">
+                <summary className="cursor-pointer select-none hover:text-slate-200">What's the password?</summary>
+                <p className="mt-1.5 leading-relaxed text-slate-500">
+                  The email the statement came in usually says. Common ones: HDFC Bank accounts use the customer ID; ICICI Bank, the
+                  first four letters of your name in lower case and your birth day and month (DDMM); SBI, the last five digits of
+                  your registered mobile and your date of birth (DDMMYY); card statements often use the first four letters of
+                  your name and DDMM. A CAS uses the password you chose when you asked for it, often your PAN in capitals.
+                </p>
+              </details>
               {password && (
                 <label className="flex items-center gap-1.5 text-xs text-slate-400">
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-sky-500" />
-                  Remember it (encrypted), so emailed statements can be read automatically
+                  If it's a CAS, remember the password (encrypted) so emailed CAS statements are read automatically
                 </label>
               )}
+              {accounts.length > 0 && <AccountPick accounts={accounts} value={account} onChange={setAccount} />}
             </>
           ) : (
-            accounts.length > 0 && (
-              <label className="grid gap-1 text-xs text-slate-400">
-                Which account is it for?
-                <Select value={account} onChange={(e) => setAccount(e.target.value)}>
-                  <option value="">Work it out from the file</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.label}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            )
+            accounts.length > 0 && <AccountPick accounts={accounts} value={account} onChange={setAccount} />
           )}
           <button
             onClick={send}
@@ -178,6 +179,22 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
         </div>
       )}
     </Card>
+  );
+}
+
+function AccountPick({ accounts, value, onChange }: { accounts: MoneyAccount[]; value: string; onChange: (id: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs text-slate-400">
+      Which account is it for?
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Work it out from the file</option>
+        {accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+          </option>
+        ))}
+      </Select>
+    </label>
   );
 }
 

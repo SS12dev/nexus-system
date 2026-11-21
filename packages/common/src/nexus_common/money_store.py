@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_links, money_orders
+from nexus_common import money, money_links, money_orders, money_stocks
 from nexus_common import money_plan as plan
 from nexus_common.events import Event, publish
 from nexus_common.models import (
@@ -25,6 +25,7 @@ from nexus_common.models import (
     MoneyImport,
     MoneyLoan,
     MoneySettings,
+    MoneyStock,
     MoneySubscription,
     MoneyTxn,
     utcnow,
@@ -183,6 +184,11 @@ async def ingest(
         )
         if account is not None:
             _note_balance(account, p)
+            if account.limit_with_id:
+                # A card sharing its limit: the available amount is the pair's.
+                shared = await db.get(MoneyAccount, account.limit_with_id)
+                if shared is not None:
+                    _note_balance(shared, p)
         key = money.dedupe_key(p, str(account.id) if account else None)
         if key in keys:
             counts["skipped"] += 1
@@ -408,6 +414,41 @@ async def confirm_order(
     await db.flush()
 
 
+async def share_limit(
+    db: AsyncSession, user_id: uuid.UUID, card: MoneyAccount, other_id: uuid.UUID | None
+) -> str | None:
+    """Make `card` use another card's credit limit (a pair issued together), or stop. The
+    limit lives on the other card; a limit typed on this one moves there when that has none.
+    Returns a problem to show, or None."""
+    if other_id is None:
+        card.limit_with_id = None
+        return None
+    other = await db.get(MoneyAccount, other_id)
+    if other is None or other.user_id != user_id or other.kind != "card" or other.id == card.id:
+        return "Pick another of your credit cards."
+    if other.limit_with_id is not None:
+        # Point at the card that holds the limit, never at another sharer.
+        other = await db.get(MoneyAccount, other.limit_with_id) or other
+    if other.id == card.id:
+        return "Those cards already share this card's limit."
+    if card.credit_limit_paise and not other.credit_limit_paise:
+        other.credit_limit_paise = card.credit_limit_paise
+    # Cards that shared this one's limit now share the other's.
+    for row in (
+        await db.scalars(
+            select(MoneyAccount).where(
+                MoneyAccount.user_id == user_id, MoneyAccount.limit_with_id == card.id
+            )
+        )
+    ).all():
+        row.limit_with_id = other.id
+    card.limit_with_id = other.id
+    card.credit_limit_paise = None
+    card.available_paise = card.available_on = None
+    await db.flush()
+    return None
+
+
 def _note_balance(account: MoneyAccount, p: money.Parsed) -> None:
     """Keep the newest balance (banks) and available limit (cards) a row shows."""
     if p.balance_paise is not None and account.kind == "bank":
@@ -528,6 +569,7 @@ async def overview(db: AsyncSession, user_id: uuid.UUID, month: str, today: date
     subs = await subscriptions_view(db, user_id, today)
     upcoming = await upcoming_payments(db, user_id, today, subs=subs)
     holdings = (await db.scalars(select(MoneyHolding).where(MoneyHolding.user_id == user_id))).all()
+    stocks = await stocks_view(db, user_id)
     prefs = await settings_for(db, user_id)
     return {
         "month": month,
@@ -548,7 +590,8 @@ async def overview(db: AsyncSession, user_id: uuid.UUID, month: str, today: date
         "upcoming": upcoming,
         "funds_value_paise": sum(h.value_paise or 0 for h in holdings),
         "funds_cost_paise": sum(h.cost_paise or 0 for h in holdings),
-        "has_data": bool(txns) or bool(holdings),
+        "stocks_value_paise": stocks["value_paise"],
+        "has_data": bool(txns) or bool(holdings) or bool(stocks["items"]),
         "gmail_sync": prefs.gmail_sync,
         "gmail_synced_at": prefs.gmail_synced_at,
     }
@@ -605,6 +648,63 @@ def revalue(h: MoneyHolding, navs: dict[str, tuple[Decimal, date]]) -> bool:
     return True
 
 
+def stock_out(s: MoneyStock) -> dict:
+    value = money_stocks.value_paise(s.quantity, s.price_paise)
+    cost = money_stocks.value_paise(s.quantity, s.avg_price_paise)
+    return {
+        "id": str(s.id),
+        "symbol": s.symbol,
+        "exchange": s.exchange,
+        "name": s.name,
+        "isin": s.isin,
+        "quantity": float(s.quantity),
+        "avg_price_paise": s.avg_price_paise,
+        "bought_on": s.bought_on,
+        "price_paise": s.price_paise,
+        "price_on": s.price_on,
+        "value_paise": value,
+        "cost_paise": cost,
+        "gain_paise": value - cost if value is not None and cost is not None else None,
+        "note": s.note,
+    }
+
+
+async def stocks_view(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    rows = (
+        await db.scalars(
+            select(MoneyStock).where(MoneyStock.user_id == user_id).order_by(MoneyStock.symbol)
+        )
+    ).all()
+    items = sorted((stock_out(s) for s in rows), key=lambda x: -(x["value_paise"] or 0))
+    priced = [x for x in items if x["value_paise"] is not None]
+    costed = [x for x in priced if x["cost_paise"] is not None]
+    cost = sum(x["cost_paise"] for x in costed)
+    return {
+        "items": items,
+        "value_paise": sum(x["value_paise"] for x in priced),
+        "cost_paise": cost,
+        "gain_paise": sum(x["value_paise"] for x in costed) - cost if costed else None,
+        "price_on": max((x["price_on"] for x in items if x["price_on"]), default=None),
+    }
+
+
+def reprice(s: MoneyStock, quotes: dict[str, money_stocks.Quote]) -> bool:
+    """Price a share at the newest close NSE published for it, found by symbol or, after a
+    rename, by ISIN. Returns whether it changed."""
+    q = quotes.get(s.symbol)
+    if q is None and s.isin:
+        q = next((x for x in quotes.values() if x.isin == s.isin), None)
+    if q is None or (s.price_on and q.day < s.price_on):
+        return False
+    if (s.price_paise, s.price_on, s.symbol) == (q.close_paise, q.day, q.symbol):
+        return False
+    # A rename keeps the ISIN; follow the new symbol and name.
+    s.symbol, s.name = q.symbol, q.name or s.name
+    s.price_paise, s.price_on = q.close_paise, q.day
+    s.updated_at = utcnow()
+    return True
+
+
 async def record_import(
     db: AsyncSession,
     cfg: Settings,
@@ -645,6 +745,7 @@ async def delete_all(db: AsyncSession, user_id: uuid.UUID) -> None:
         MoneyImport,
         MoneyBudget,
         MoneyHolding,
+        MoneyStock,
         MoneyAccount,
         MoneySettings,
     ):
@@ -820,13 +921,16 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
             "balance_check": checks.get(a.id),
             "card_mask": a.card_mask,
         }
+        if a.kind == "bank":
+            item["card_expires_on"] = a.expires_on if a.card_mask else None
         if a.kind == "card":
             payments = _sum(f, "credit", a.statement_on) if a.statement_on else 0
             bill = money.bill_status(
                 a.due_paise, a.due_on, a.statement_on, a.paid_on, payments, today
             )
             owed = None
-            if a.credit_limit_paise and a.available_paise is not None:
+            shares = a.limit_with_id is not None
+            if a.credit_limit_paise and a.available_paise is not None and not shares:
                 owed = max(a.credit_limit_paise - a.available_paise, 0)
             elif a.statement_on:
                 owed = bill["left_paise"] + _sum(f, "debit", a.statement_on + timedelta(days=1))
@@ -852,14 +956,40 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
                 ),
                 "bill": bill,
                 "owed_paise": owed,
-                "owed_from_limit": bool(a.credit_limit_paise and a.available_paise is not None),
+                "owed_from_limit": bool(
+                    a.credit_limit_paise and a.available_paise is not None and not shares
+                ),
                 "emis": emis,
+                # Cards sharing one limit: this one uses `limit_with`'s; `shared_with` use
+                # this one's.
+                "limit_with_id": str(a.limit_with_id) if shares else None,
+                "limit_with_label": next(
+                    (account_label(x) for x in accounts if x.id == a.limit_with_id), None
+                ),
+                "shared_with": [
+                    account_label(x) for x in accounts if x.limit_with_id == a.id and x.id != a.id
+                ],
             }
-            if owed and not a.hidden:
+            # The pair's owed amount is counted once, on the card holding the limit.
+            if owed and not a.hidden and not shares:
                 owed_total += owed
         elif a.balance_paise is not None and not a.hidden:
             cash += a.balance_paise
         items.append(item)
+    # A shared limit without an available amount from alerts: the pair owes what both
+    # statements say, shown on the card holding the limit.
+    for item in items:
+        if item["kind"] != "card" or not item["shared_with"] or item["owed_from_limit"]:
+            continue
+        extra = sum(
+            x["owed_paise"] or 0
+            for x in items
+            if x["kind"] == "card" and x["limit_with_id"] == item["id"]
+        )
+        if extra:
+            item["owed_paise"] = (item["owed_paise"] or 0) + extra
+            if not item["hidden"]:
+                owed_total += extra
     return {
         "items": items,
         "cash_paise": cash,
@@ -1095,6 +1225,41 @@ async def save_subscription(
     return row
 
 
+# A card about to expire is mentioned every morning from two weeks before its last day until
+# a week after, or until its new expiry is typed in.
+EXPIRY_REMIND_DAYS = 14
+
+
+def card_label(a: dict) -> tuple[str, date | None]:
+    """A credit card's own label and expiry, or a bank account's debit card's."""
+    if a["kind"] == "card":
+        return a["label"], a.get("expires_on")
+    if a.get("card_mask"):
+        return f"Debit card ••{a['card_mask']} ({a['label']})", a.get("card_expires_on")
+    return a["label"], None
+
+
+def card_expiry(a: dict, today: date) -> dict | None:
+    label, expires = card_label(a)
+    if not expires or a.get("hidden"):
+        return None
+    last = money.add_months(expires.replace(day=1), 1) - timedelta(days=1)
+    days = (last - today).days
+    if days > EXPIRY_REMIND_DAYS or days < -7:
+        return None
+    when = (
+        "has expired" if days < 0 else "expires today" if days == 0
+        else "expires tomorrow" if days == 1 else f"expires in {days} days"
+    )  # fmt: skip
+    return {
+        "tag": f"expiry:{a['id']}:{'debit' if a['kind'] == 'bank' else 'card'}:{expires}:{today}",
+        "title": f"{label} {when}",
+        "body": "If the new card hasn't come, ask the bank for it now. When it arrives, activate "
+        "it and type its expiry in Money › Accounts; these reminders stop then.",
+        "url": "/money/accounts",
+    }
+
+
 def reminders(subs: dict, accounts: dict, today: date) -> list[dict]:
     """What to tell the person today: renewals coming up, a charge after cancelling, a price
     rise, a card bill due soon or missed. Each has a tag, so it's sent once."""
@@ -1137,6 +1302,8 @@ def reminders(subs: dict, accounts: dict, today: date) -> list[dict]:
                     + (f" (minimum {money.rupees(a['min_due_paise'])})."
                        if a.get("min_due_paise") else "."),
                 })  # fmt: skip
+        if expiry := card_expiry(a, today):
+            out.append(expiry)
         if bill.get("status") == "overdue":
             out.append({
                 "tag": f"card-late:{a['id']}:{a['due_on']}",
@@ -1264,12 +1431,14 @@ async def savings_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dic
         a["received_on"] = back[0] if back else None
     active = [a for a in assets if a["status"] == "active"]
     holdings = (await db.scalars(select(MoneyHolding).where(MoneyHolding.user_id == user_id))).all()
+    stocks = await stocks_view(db, user_id)
     return {
         "items": assets,
         "total_paise": sum(a["value_paise"] for a in active),
         "monthly_paise": sum(a["monthly_paise"] for a in active),
         "funds_value_paise": sum(h.value_paise or 0 for h in holdings),
         "funds_cost_paise": sum(h.cost_paise or 0 for h in holdings),
+        "stocks_value_paise": stocks["value_paise"],
         "maturing": [
             a
             for a in active
@@ -1356,7 +1525,8 @@ async def plan_view(
         today=today,
         months=months,
         cash_paise=cash,
-        funds_paise=savings["funds_value_paise"],
+        # Shares grow like funds do: both are market-linked.
+        funds_paise=savings["funds_value_paise"] + savings["stocks_value_paise"],
         assets=[as_asset(r) for r in asset_rows],
         loans=[as_loan(r) for r in debt_loans],
         history=h,

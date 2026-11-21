@@ -835,7 +835,9 @@ async def import_file(
     remember_password: Annotated[bool, Form()] = True,
     account_id: Annotated[uuid.UUID | None, Form()] = None,
 ) -> ImportOut:
-    """Read a statement (CSV or .xlsx) or a CAS (PDF). The file is read in memory and dropped."""
+    """Read a statement (CSV, .xlsx or PDF) or a CAS (PDF). The file is read in memory and
+    dropped. A PDF's password opens it in memory; only a CAS password is ever kept, sealed, and
+    only when asked."""
     uid = user.id  # the user object expires if a failed import is rolled back
     if wait := await hit(redis, "money-import", str(user.id), IMPORTS_PER_HOUR, 3600):
         raise too_many(wait, "imports")
@@ -853,23 +855,32 @@ async def import_file(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found.")
     prefs = await store.settings_for(db, user.id)
     is_pdf = name.lower().endswith(".pdf") or data[:5] == b"%PDF-"
-    kind = "cas" if is_pdf else "statement"
+    typed = password.strip()
+    kind = "statement"
     try:
         if is_pdf:
-            pw = password.strip() or money.unseal(cfg, prefs.cas_password_enc)
-            if not pw:
-                raise money.StatementError(
-                    "This PDF needs its password (for a CAS, the one you chose when you asked "
-                    "for it, often your PAN in capitals)."
+            # The typed password first, then the saved CAS one. A bank statement's password is
+            # used here, in memory, and never kept.
+            saved = money.unseal(cfg, prefs.cas_password_enc) or ""
+            what, pw = await asyncio.to_thread(money.open_pdf, data, [typed, saved])
+            if what == "cas":
+                kind = "cas"
+                holdings, as_of = await asyncio.to_thread(money.read_cas, data, pw)
+                if not holdings:
+                    raise money.StatementError(
+                        "No mutual fund holdings were found in that statement."
+                    )
+                saved_count = await store.save_holdings(db, user.id, holdings, as_of)
+                counts = {"holdings": saved_count}
+                if typed and pw == typed and remember_password:
+                    prefs.cas_password_enc = money.seal(cfg, typed)
+                prefs.cas_synced_at = utcnow()
+            else:
+                rows = await asyncio.to_thread(money.read_pdf_statement, data, pw, name)
+                counts = await store.ingest(
+                    db, cfg, user.id, rows, source="statement", account_id=account_id
                 )
-            holdings, as_of = await asyncio.to_thread(money.read_cas, data, pw)
-            if not holdings:
-                raise money.StatementError("No mutual fund holdings were found in that statement.")
-            saved = await store.save_holdings(db, user.id, holdings, as_of)
-            counts = {"holdings": saved}
-            if password.strip() and remember_password:
-                prefs.cas_password_enc = money.seal(cfg, password.strip())
-            prefs.cas_synced_at = utcnow()
+            del pw, saved
         else:
             rows = await asyncio.to_thread(money.parse_statement, data, name)
             if not rows:

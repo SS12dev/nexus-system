@@ -20,6 +20,8 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
   if (!data) return null;
   const banks = accounts.filter((a) => a.kind === "bank");
   const bankOptions: [string, string][] = banks.map((a) => [a.id, a.label]);
+  // Credit cards another one can share a limit with: those holding their own limit.
+  const limitOptions: [string, string][] = accounts.filter((a) => a.kind === "card").map((a) => [a.id, a.label]);
   const bankField = (when?: (v: Values) => boolean): Field[] => [
     {
       key: "bank",
@@ -56,9 +58,30 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
           when: (v) => v.type === "debit",
           hint: "Its alerts then land on that account, and spending counts once.",
         },
+        {
+          key: "expires",
+          label: "Expires (any day in the month)",
+          kind: "date",
+          value: "",
+          optional: true,
+          half: true,
+          hint: "From two weeks before, Nexus reminds you every morning until the new card's expiry is typed.",
+        },
         { key: "name", label: "Name", kind: "text", value: "", optional: true, placeholder: "Amazon Pay card, Travel card…", when: credit },
-        { key: "limit", label: "Credit limit", kind: "money", value: "", optional: true, half: true, when: credit },
-        { key: "expires", label: "Expires (any day in the month)", kind: "date", value: "", optional: true, half: true, when: credit, hint: "Advice reminds you before, with what's charged to it." },
+        ...(limitOptions.length
+          ? [
+              {
+                key: "shares",
+                label: "Limit",
+                kind: "select",
+                value: "",
+                options: [["", "Its own limit"], ...limitOptions.map(([id, label]) => [id, `Shares the limit of ${label}`] as [string, string])],
+                when: credit,
+                hint: "Cards issued as a pair (like a Visa and a RuPay on one account) share one limit: pick the other card.",
+              } satisfies Field,
+            ]
+          : []),
+        { key: "limit", label: "Credit limit", kind: "money", value: "", optional: true, half: true, when: (v) => credit(v) && !v.shares },
         {
           key: "bill_from",
           label: "Bill paid from",
@@ -75,6 +98,7 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
         { key: "name", label: "Name", kind: "text", value: "", optional: true, placeholder: "Salary account, Savings…" },
         { key: "balance", label: "Balance now", kind: "money", value: "", optional: true, half: true, hint: "From the app's home screen. Alerts keep it current after." },
         { key: "debit", label: "Debit card's last four", kind: "text", value: "", optional: true, half: true, placeholder: "5678", hint: "Card alerts quote the card's digits, not the account's." },
+        { key: "expires", label: "Debit card expires", kind: "date", value: "", optional: true, half: true, when: (v) => !!v.debit.trim() },
       ];
   const four = (text: string, what: string) => {
     const digits = text.replace(/\D/g, "");
@@ -95,7 +119,7 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
       onSubmit={async (v) => {
         if (card && v.type === "debit") {
           if (!v.account) throw new Error("Add the bank account first, then its debit card.");
-          const r = await api.moneyAddAccount({ kind: "debit", mask: four(v.mask, "card"), account_id: v.account });
+          const r = await api.moneyAddAccount({ kind: "debit", mask: four(v.mask, "card"), account_id: v.account, expires_on: v.expires || null });
           toast(r.moved ? `Added to ${r.label}; ${r.moved} earlier card payments moved there` : `Added to ${r.label}`);
           return;
         }
@@ -107,9 +131,10 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
               institution,
               mask: four(v.mask, "card"),
               name: v.name.trim(),
-              credit_limit_paise: read.money(v.limit),
+              credit_limit_paise: v.shares ? null : read.money(v.limit),
               expires_on: v.expires || null,
               bill_from_id: v.bill_from || null,
+              limit_with_id: v.shares || null,
             })
           : await api.moneyAddAccount({
               kind: "bank",
@@ -118,6 +143,7 @@ export function AddAccountDialog({ onClose, card = false }: { onClose: () => voi
               name: v.name.trim(),
               balance_paise: read.money(v.balance),
               card_mask: v.debit.trim() ? four(v.debit, "debit card") : null,
+              expires_on: v.debit.trim() ? v.expires || null : null,
             });
         toast(`Added ${r.label}`);
       }}

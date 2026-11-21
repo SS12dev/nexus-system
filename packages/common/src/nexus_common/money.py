@@ -22,6 +22,7 @@ import io
 import re
 import statistics
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -882,7 +883,12 @@ def _rows_from(data: bytes, name: str) -> list[list]:
 def parse_statement(data: bytes, name: str) -> list[Parsed]:
     """Rows of a bank or card statement export (CSV or .xlsx), oldest first. The header row is
     found wherever it is (banks put a few lines of account details above it)."""
-    rows = _rows_from(data, name)
+    return parse_rows(_rows_from(data, name), name)
+
+
+def parse_rows(rows: list[list], name: str, *, wrapped: bool = False) -> list[Parsed]:
+    """A statement's table, however it was read. `wrapped` (PDFs) joins a description that runs
+    onto the next lines back onto its transaction."""
     cols = None
     start = 0
     for i, row in enumerate(rows[:60]):
@@ -902,25 +908,49 @@ def parse_statement(data: bytes, name: str) -> list[Parsed]:
     institution = bank_of(" ".join(str(c) for r in rows[: start + 1] for c in r if c)) or bank_of(
         name
     )
+    last: Parsed | None = None
+    wraps = 0
+    signed = "amount" in cols and any(
+        str(r[cols["amount"]] or "").strip().startswith("-")
+        for r in rows[start:]
+        if len(r) > cols["amount"]
+    )
     for row in rows[start:]:
         if len(row) <= max(cols.values()):
             row = list(row) + [None] * (max(cols.values()) + 1 - len(row))
         when = _row_date(row[cols["date"]])
-        if when is None:
-            continue
         narration = " ".join(str(row[cols["narration"]] or "").split())
+        if when is None:
+            # A description's second line: text under the description and nothing else.
+            others = [
+                c for i, c in enumerate(row) if i != cols["narration"] and str(c or "").strip()
+            ]
+            if (
+                wrapped and last is not None and narration and not others
+                and not _NOT_A_WRAP.match(narration) and wraps < MAX_WRAP_LINES
+            ):  # fmt: skip
+                last.narration = f"{last.narration} {narration}"[:600]
+                last.merchant = statement_merchant(last.narration)
+                wraps += 1
+            else:
+                last = None
+            continue
+        wraps = 0
         try:
             if "amount" in cols and not {"debit", "credit"} <= cols.keys():
                 value = _cell_paise(row[cols["amount"]])
-                kind = str(row[cols["type"]] or "").strip().lower() if "type" in cols else ""
+                drcr = str(row[cols["type"]] or "").strip().lower() if "type" in cols else ""
                 raw = str(row[cols["amount"]] or "").strip().lower().rstrip(".")
-                if kind:
-                    is_credit = kind.startswith(("c", "deposit"))
+                if drcr:
+                    is_credit = drcr.startswith(("c", "deposit"))
                 elif raw.endswith(("cr", "dr")):
                     is_credit = raw.endswith("cr")
-                else:
+                elif signed:
                     # A signed amount column: positive is money in.
                     is_credit = value > 0
+                else:
+                    # Unsigned (card statements): a payment out unless marked "Cr".
+                    is_credit = False
                 amount, direction = abs(value), "credit" if is_credit else "debit"
             else:
                 debit = _cell_paise(row[cols["debit"]])
@@ -928,8 +958,10 @@ def parse_statement(data: bytes, name: str) -> list[Parsed]:
                 amount, direction = (debit, "debit") if debit else (credit, "credit")
             balance = _cell_paise(row[cols["balance"]]) if "balance" in cols else None
         except ValueError:
+            last = None
             continue
         if not amount:
+            last = None
             continue
         low = narration.lower()
         channel = (
@@ -940,25 +972,213 @@ def parse_statement(data: bytes, name: str) -> list[Parsed]:
             else "imps" if "imps" in low
             else "other"
         )  # fmt: skip
-        out.append(
-            Parsed(
-                occurred_on=when,
-                amount_paise=abs(amount),
-                direction=direction,
-                merchant=statement_merchant(narration),
-                narration=narration[:600],
-                channel=channel,
-                account_mask=mask,
-                account_kind=kind,
-                institution=institution,
-                ref=str(row[cols["ref"]]).strip() or None
-                if "ref" in cols and row[cols["ref"]]
-                else None,
-                balance_paise=balance,
-            )
+        last = Parsed(
+            occurred_on=when,
+            amount_paise=abs(amount),
+            direction=direction,
+            merchant=statement_merchant(narration),
+            narration=narration[:600],
+            channel=channel,
+            account_mask=mask,
+            account_kind=kind,
+            institution=institution,
+            ref=str(row[cols["ref"]]).strip() or None
+            if "ref" in cols and row[cols["ref"]]
+            else None,
+            balance_paise=balance,
         )
+        out.append(last)
     out.sort(key=lambda p: p.occurred_on)
     return out
+
+
+# --- PDF statements ---------------------------------------------------------------------------
+# Banks email statements as PDFs, usually locked with a password made from the customer's own
+# details. The password is used once, in memory, to open the file and is never stored or logged.
+
+MAX_PDF_PAGES = 80
+_CAS_PDF = re.compile(
+    r"consolidated account statement|\bcams\b|kfintech|kfin technologies|karvy", re.I
+)
+_AMOUNT_WORD = re.compile(r"^-?[\d,]+\.\d{1,2}(?:cr|dr)?$", re.I)
+# Lines that end a table: page footers and summaries, never part of a description.
+_NOT_A_WRAP = re.compile(
+    r"^(?:page\s*\d|statement\s+summary|opening\s+balance|closing\s+balance|"
+    r"total|generated|this\s+is\s+a\s+(?:computer|system)|\*)",
+    re.I,
+)
+# A description rarely runs past this many extra lines; more is a footer.
+MAX_WRAP_LINES = 3
+
+
+class PdfLocked(StatementError):
+    """The PDF needs a password, or none of the ones tried opened it."""
+
+
+def _password_error(exc: BaseException) -> bool:
+    seen: BaseException | None = exc
+    for _ in range(6):
+        if seen is None:
+            return False
+        text = f"{type(seen).__name__} {seen}".lower()
+        if "password" in text or "encrypt" in text:
+            return True
+        nested = [a for a in getattr(seen, "args", ()) if isinstance(a, BaseException)]
+        seen = seen.__cause__ or seen.__context__ or (nested[0] if nested else None)
+    return False
+
+
+def open_pdf(data: bytes, passwords: Sequence[str] = ()) -> tuple[str, str]:
+    """Open a PDF with no password, then each of `passwords`. Returns what it is ("cas" for a
+    CAMS or KFintech statement, else "statement") and the password that opened it."""
+    import pdfplumber
+
+    tried = list(dict.fromkeys(["", *(p for p in passwords if p)]))
+    for pw in tried:
+        try:
+            with pdfplumber.open(io.BytesIO(data), password=pw) as pdf:
+                first = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+        except Exception as exc:  # pdf libraries raise many kinds of error
+            if _password_error(exc):
+                continue
+            raise StatementError("That PDF couldn't be opened.") from exc
+        return ("cas" if _CAS_PDF.search(first[:4000]) else "statement"), pw
+    if len(tried) > 1:
+        raise PdfLocked("That password didn't open the PDF. Check it and try again.")
+    raise PdfLocked("This PDF is locked. Type its password; it's used once to open the file.")
+
+
+def _pdf_lines(page) -> list[list[dict]]:
+    """A page's words grouped into lines, left to right."""
+    words = page.extract_words(x_tolerance=1.5, y_tolerance=2, keep_blank_chars=False)
+    lines: list[list[dict]] = []
+    for w in sorted(words, key=lambda w: (round(w["top"]), w["x0"])):
+        if lines and abs(lines[-1][0]["top"] - w["top"]) <= 3:
+            lines[-1].append(w)
+        else:
+            lines.append([w])
+    return [sorted(line, key=lambda w: w["x0"]) for line in lines]
+
+
+def _cells(words: list[dict], gap: float = 4) -> list[dict]:
+    """Words merged into header cells: those that overlap left to right or sit within `gap`
+    points (about a space) of each other, so a header split over two lines ("Withdrawal /
+    Amt.") is one cell and two headers a little apart are two."""
+    cells: list[dict] = []
+    for w in sorted(words, key=lambda w: w["x0"]):
+        if cells and w["x0"] <= cells[-1]["x1"] + gap:
+            c = cells[-1]
+            c["x1"] = max(c["x1"], w["x1"])
+            c["words"].append(w)
+        else:
+            cells.append({"x0": w["x0"], "x1": w["x1"], "words": [w]})
+    for c in cells:
+        c["text"] = " ".join(
+            w["text"] for w in sorted(c["words"], key=lambda w: (round(w["top"]), w["x0"]))
+        )
+    return cells
+
+
+def _column_of(header: list[dict], w: dict) -> int:
+    """Which column a word belongs to: amounts line up with their header's right edge, text
+    with its left edge."""
+    if _AMOUNT_WORD.match(w["text"]):
+        return min(range(len(header)), key=lambda i: abs(header[i]["x1"] - w["x1"]))
+    best = 0
+    for i, h in enumerate(header):
+        if h["x0"] <= w["x0"] + 3:
+            best = i
+    return best
+
+
+def _layout_rows(pdf) -> list[list[str]]:
+    """Rows from a PDF whose table has no ruling lines: find the header line (or two), then put
+    each word under the column it lines up with."""
+    out: list[list[str]] = []
+    header: list[dict] | None = None
+    header_text: list[str] = []
+    for page in pdf.pages[:MAX_PDF_PAGES]:
+        lines = _pdf_lines(page)
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if header is None:
+                for span in (1, 2):
+                    cells = _cells([w for ln in lines[i : i + span] for w in ln])
+                    if _columns([c["text"] for c in cells]):
+                        # Narrow columns wrap their header ("Value / Dt"): take the next line
+                        # too when it's close below and holds no date or amount.
+                        nxt = lines[i + span] if span == 1 and i + 1 < len(lines) else None
+                        if (
+                            nxt
+                            and nxt[0]["top"] - line[0]["top"] <= 12
+                            and not any(
+                                _row_date(w["text"]) or _AMOUNT_WORD.match(w["text"]) for w in nxt
+                            )
+                        ):
+                            cells, span = _cells(line + nxt), 2
+                        header, header_text = cells, [c["text"] for c in cells]
+                        out.append(header_text)
+                        i += span
+                        break
+                else:
+                    out.append([" ".join(w["text"] for w in line)])
+                    i += 1
+                continue
+            # The header repeats at the top of each page.
+            if _norm_header(" ".join(w["text"] for w in line)).startswith(
+                _norm_header(" ".join(header_text))[:20]
+            ):
+                i += 1
+                continue
+            row = [""] * len(header)
+            for w in line:
+                col = _column_of(header, w)
+                row[col] = f"{row[col]} {w['text']}".strip()
+            out.append(row)
+            i += 1
+    return out
+
+
+def _table_rows(pdf, first_text: str) -> list[list[str]]:
+    """Rows from ruled tables, after the first page's text (it names the bank and account)."""
+    rows: list[list[str]] = [[line] for line in first_text.splitlines()[:40]]
+    for page in pdf.pages[:MAX_PDF_PAGES]:
+        for table in page.extract_tables():
+            rows.extend([" ".join(str(c or "").split()) for c in r] for r in table)
+    return rows
+
+
+def read_pdf_statement(data: bytes, password: str, name: str) -> list[Parsed]:
+    """Transactions from a bank or card statement PDF, opened with `password` ("" for none)."""
+    import pdfplumber
+
+    try:
+        with pdfplumber.open(io.BytesIO(data), password=password) as pdf:
+            if len(pdf.pages) > MAX_PDF_PAGES:
+                raise StatementError(
+                    f"That PDF has {len(pdf.pages)} pages; up to {MAX_PDF_PAGES} can be read. "
+                    "Download a shorter period."
+                )
+            first = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+            attempts = (lambda: _table_rows(pdf, first), lambda: _layout_rows(pdf))
+            for rows_of in attempts:
+                try:
+                    found = parse_rows(rows_of(), name, wrapped=True)
+                except StatementError:
+                    continue
+                if found:
+                    return found
+    except StatementError:
+        raise
+    except Exception as exc:  # pdf libraries raise many kinds of error
+        if _password_error(exc):
+            raise PdfLocked("That password didn't open the PDF.") from exc
+        raise StatementError("That PDF couldn't be read.") from exc
+    raise StatementError(
+        "No transactions were found in that PDF. If it's a scanned copy, download the statement "
+        "from net banking instead (PDF, CSV or Excel)."
+    )
 
 
 def statement_mask(text: str) -> str | None:

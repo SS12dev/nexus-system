@@ -1,7 +1,7 @@
 """Money as an Excel workbook, for the person's records or to hand over to family.
 
 One sheet each for the summary (net worth and what goes out each month), accounts and cards,
-savings and deposits (with account numbers, maturity and nominees), mutual funds, loans and
+savings and deposits (with account numbers, maturity and nominees), mutual funds, shares, loans and
 EMIs, subscriptions and insurance. Amounts are real numbers in rupees with a ₹ format, dates
 are real dates, and every table has a bold, frozen header row, so the file sorts and filters
 like any other.
@@ -123,6 +123,7 @@ async def gather(db: AsyncSession, settings: Settings, user: User, today: date) 
             )
         ).all()
     )
+    stocks = await store.stocks_view(db, user.id)
     subs = await store.subscriptions_view(db, user.id, today)
     prefs = await store.settings_for(db, user.id)
     assume = plan.Assumptions.from_dict(prefs.plan)
@@ -263,6 +264,35 @@ async def gather(db: AsyncSession, settings: Settings, user: User, today: date) 
         8: _r(sum(h.cost_paise or 0 for h in holdings)),
     }
 
+    # --- Shares
+    sh = Table(
+        "Shares",
+        "Shares",
+        "Shares held directly, as typed in; values use NSE's latest closing price.",
+        [
+            Col("Company", width=30, wrap=True),
+            Col("Symbol", width=14),
+            Col("ISIN", width=14),
+            Col("Shares", UNITS, 10),
+            Col("Price", RUPEES, 12),
+            Col("Price on", DAY, 12),
+            Col("Value", RUPEES, 16),
+            Col("Bought at (each)", RUPEES, 14),
+            Col("Invested", RUPEES, 16),
+            Col("Gain", RUPEES, 14),
+            Col("Bought on", DAY, 12),
+            Col("Note", width=30, wrap=True),
+        ],
+        empty="No shares added. Add them in Money › Savings.",
+    )
+    for x in stocks["items"]:
+        sh.rows.append([
+            x["name"], x["symbol"], x["isin"] or "", x["quantity"], _r(x["price_paise"]),
+            x["price_on"], _r(x["value_paise"]), _r(x["avg_price_paise"]), _r(x["cost_paise"]),
+            _r(x["gain_paise"]), x["bought_on"], x["note"] or "",
+        ])  # fmt: skip
+    sh.totals = {6: _r(stocks["value_paise"]), 8: _r(stocks["cost_paise"])}
+
     # --- Loans and EMIs
     ln = Table(
         "Loans and EMIs",
@@ -366,7 +396,8 @@ async def gather(db: AsyncSession, settings: Settings, user: User, today: date) 
     saved = sum(a["value_paise"] for a in active_assets)
     owed_cards = accounts["owed_paise"]
     owed_loans = sum(x["outstanding_paise"] for x in live_loans)
-    worth = cash + saved + funds_value - owed_cards - owed_loans
+    shares = stocks["value_paise"]
+    worth = cash + saved + funds_value + shares - owed_cards - owed_loans
     by_kind: dict[str, int] = {}
     for a in active_assets:
         by_kind[a["kind_label"]] = by_kind.get(a["kind_label"], 0) + a["value_paise"]
@@ -388,7 +419,8 @@ async def gather(db: AsyncSession, settings: Settings, user: User, today: date) 
         ["Cash in bank accounts", _r(cash), note_unknown],
         *[[f"   {k}", _r(v), None] for k, v in sorted(by_kind.items())],
         ["Mutual funds", _r(funds_value), None],
-        ["Total you have", _r(cash + saved + funds_value), None],
+        ["Shares", _r(shares), None],
+        ["Total you have", _r(cash + saved + funds_value + shares), None],
         ["What you owe", None, None],
         ["Credit cards", _r(owed_cards), None],
         ["Loans and EMIs", _r(owed_loans), None],
@@ -401,7 +433,7 @@ async def gather(db: AsyncSession, settings: Settings, user: User, today: date) 
         ["Going into savings", _r(sum(a["monthly_paise"] for a in active_assets)),
          "RDs, PPF, EPF, NPS and the rest"],
     ]  # fmt: skip
-    return [summary, acct, sav, mf, ln, sb, ins]
+    return [summary, acct, sav, mf, sh, ln, sb, ins]
 
 
 # --- Writing -----------------------------------------------------------------------------------
