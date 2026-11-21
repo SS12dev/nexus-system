@@ -140,6 +140,15 @@ function AssetTile({ a, onEdit }: { a: Asset; onEdit: () => void }) {
         {["epf", "nps", "gold", "other"].includes(a.kind) &&
           `${rupees(a.amount_paise, { whole: true })} on ${a.balance_on ? dayLabel(a.balance_on) : "—"}${a.contribution_paise ? ` · ${rupees(a.contribution_paise, { whole: true })} a month` : ""}`}
       </p>
+      {(a.last_paid_on || a.received_on) && (
+        <p className="mt-1 text-xs text-slate-500">
+          {a.received_on
+            ? `Money came back on ${dayLabel(a.received_on)}${a.status === "active" ? ": mark it closed if it has ended" : ""}`
+            : a.kind === "rd" && a.status === "active" && !a.paid_this_month && !a.matured && new Date().getDate() > Number(a.start_on?.slice(8, 10) ?? 1) + 3
+              ? `This month's instalment not seen yet · last paid ${dayLabel(a.last_paid_on!)}`
+              : `Last paid on ${dayLabel(a.last_paid_on!)}`}
+        </p>
+      )}
       <SecretLine
         label={NUMBER_LABEL[a.kind]}
         masked={a.account_no_masked}

@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
-from nexus_common import config, graph_sync, widgets
+from nexus_common import config, graph_sync, money_store, widgets
 from nexus_common.db import make_engine, make_sessionmaker
 from nexus_common.deployer import DeployerClient
 from nexus_common.embeddings import CachedEmbedder, LiteLLMEmbedder
@@ -107,6 +107,8 @@ async def startup(ctx: dict) -> None:
     ctx["telegram_webhook"] = asyncio.create_task(telegram.register_webhook(ctx["deps"]))
     # Keys made before an alias existed can't call it (voice notes need nexus-transcribe).
     ctx["widen_keys"] = asyncio.create_task(_widen_keys(ctx["deps"]))
+    # Money's sealed values move to MONEY_ENCRYPTION_KEYS once it is set (or rotated).
+    ctx["money_reseal"] = asyncio.create_task(_reseal_money(ctx["deps"]))
     async with ctx["deps"].sessionmaker() as db:
         changed = await sync_library(db, Path(settings.library_path))
     if changed:
@@ -120,6 +122,14 @@ async def _widen_keys(deps: TurnDeps) -> None:
         log.info("litellm.keys_widened", extra={"count": done})
     except Exception:
         log.warning("litellm.widen_skipped", exc_info=True)
+
+
+async def _reseal_money(deps: TurnDeps) -> None:
+    try:
+        async with deps.sessionmaker() as db:
+            await money_store.reseal(db, deps.settings)
+    except Exception:
+        log.warning("money.reseal_skipped", exc_info=True)
 
 
 async def shutdown(ctx: dict) -> None:

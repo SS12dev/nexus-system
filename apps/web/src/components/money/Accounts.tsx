@@ -13,6 +13,7 @@ import {
   rupees,
   whenLabel,
   type AccountView,
+  type BalanceCheck,
   type BillStatus,
   type EmiSeen,
   type Loan,
@@ -126,6 +127,7 @@ export function AccountsView() {
                     Spent {rupees(a.spent_month_paise, { whole: true })} · in {rupees(a.in_month_paise, { whole: true })} this month
                     {a.last_on && ` · last ${dayLabel(a.last_on)}`}
                   </span>
+                  {a.balance_check && <BalanceCheckLine check={a.balance_check} accountId={a.id} />}
                 </span>
                 <span className="text-right">
                   {a.balance_paise != null ? (
@@ -340,6 +342,30 @@ function LoanTile({ loan, onEdit }: { loan: Loan; onEdit: () => void }) {
         <SecretLine label="Loan account" masked={loan.account_no_masked} reveal={() => api.moneyLoanDetails(loan.id)} onAdd={() => {}} />
       )}
     </div>
+  );
+}
+
+/** Whether this account's transactions add up to the balances the bank printed beside them. */
+function BalanceCheckLine({ check, accountId }: { check: BalanceCheck; accountId: string }) {
+  if (!check.gap_count)
+    return (
+      <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500" title={`Checked over ${check.days_checked} days with printed balances`}>
+        <CheckCircle2 size={11} className="text-[#0ca30c]" /> Balances add up
+      </span>
+    );
+  const last = check.gaps[check.gaps.length - 1];
+  return (
+    <Link
+      to={`/money/transactions?account_id=${accountId}&month=all`}
+      className="mt-0.5 flex items-start gap-1 text-xs text-amber-200/90 hover:text-amber-100"
+      title="The bank's printed balance moved by more than the transactions here explain: a row is missing (an alert that never came) or counted twice. Upload that month's statement to fill it in."
+    >
+      <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+      <span>
+        {rupees(Math.abs(last.gap_paise), { whole: true })} {last.gap_paise > 0 ? "came in" : "went out"} around {dayLabel(last.on)} that no transaction explains
+        {check.gap_count > 1 && ` (${check.gap_count} gaps in 4 months)`}
+      </span>
+    </Link>
   );
 }
 

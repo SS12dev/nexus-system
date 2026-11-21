@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money
+from nexus_common import money, money_links
 from nexus_common import money_plan as plan
 from nexus_common.events import Event, publish
 from nexus_common.models import (
@@ -210,6 +210,8 @@ async def ingest(
     await db.flush()
     for credit_row in conversions:
         await _pair_emi_conversion(db, user_id, credit_row)
+    if counts["added"]:
+        await money_links.link(db, cfg, user_id, min(r.occurred_on for r in rows))
     log.info("money.ingested", extra={"user_id": str(user_id), "source": source, **counts})
     return counts
 
@@ -263,7 +265,8 @@ async def set_rule(db: AsyncSession, user_id: uuid.UUID, merchant: str, category
             select(MoneyTxn).where(
                 MoneyTxn.user_id == user_id,
                 MoneyTxn.merchant == merchant,
-                MoneyTxn.category_by != "user",
+                # Not one the person set, nor half of a transfer or refund.
+                MoneyTxn.category_by.not_in(("user", "pair")),
             )
         )
     ).all()
@@ -284,6 +287,7 @@ async def load(db: AsyncSession, user_id: uuid.UUID, start: date, end: date) -> 
                 MoneyTxn.category,
                 MoneyTxn.excluded,
                 MoneyTxn.account_id,
+                MoneyTxn.channel,
             ).where(
                 MoneyTxn.user_id == user_id,
                 MoneyTxn.occurred_on >= start,
@@ -291,7 +295,10 @@ async def load(db: AsyncSession, user_id: uuid.UUID, start: date, end: date) -> 
             )
         )
     ).all()
-    return [money.Txn(*r[:6], account_id=str(r[6]) if r[6] else None) for r in rows]
+    return [
+        money.Txn(*r[:6], account_id=str(r[6]) if r[6] else None, channel=r[7] or "other")
+        for r in rows
+    ]
 
 
 def shift_month(month: str, by: int) -> str:
@@ -484,6 +491,29 @@ async def record_emi_booking(
     """Track a purchase turned into EMIs, from the card's confirmation email. The first
     instalment is taken to be on the next statement, about a month on; it can be edited."""
     account = await account_for(db, user_id, booking.institution, booking.account_mask, "card")
+    # The purchase itself isn't spending any more: the instalments are, as they're billed.
+    purchase = await db.scalar(
+        select(MoneyTxn)
+        .where(
+            MoneyTxn.user_id == user_id,
+            MoneyTxn.account_id == (account.id if account else None),
+            MoneyTxn.direction == "debit",
+            MoneyTxn.excluded.is_(False),
+            MoneyTxn.amount_paise == booking.principal_paise,
+            MoneyTxn.occurred_on.between(
+                booking.booked_on - timedelta(days=5), booking.booked_on + timedelta(days=2)
+            ),
+        )
+        .limit(1)
+    )
+    if purchase is not None:
+        purchase.excluded = True
+        purchase.note = purchase.note or "Turned into EMIs: the instalments count as spending."
+    if booking.months is None:
+        # The term is only in the attached schedule: Money lists the EMIs once the card bills
+        # them (Accounts › EMIs seen), and the person adds the term there.
+        await db.flush()
+        return None
     existing = await db.scalar(
         select(MoneyLoan).where(
             MoneyLoan.user_id == user_id,
@@ -575,6 +605,7 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
             select(MoneyLoan).where(MoneyLoan.user_id == user_id, MoneyLoan.status == "active")
         )
     ).all()
+    checks = await balance_checks(db, user_id, today)
     items = []
     cash = owed_total = 0
     for a in accounts:
@@ -594,6 +625,7 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
             "balance_on": a.balance_on,
             "spent_month_paise": _sum(f, "debit", month_start, counted_only=True),
             "in_month_paise": _sum(f, "credit", month_start, counted_only=True),
+            "balance_check": checks.get(a.id),
         }
         if a.kind == "card":
             payments = _sum(f, "credit", a.statement_on) if a.statement_on else 0
@@ -638,6 +670,46 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
             1 for a in accounts if a.kind == "bank" and a.balance_paise is None and not a.hidden
         ),
     }
+
+
+BALANCE_CHECK_DAYS = 120
+
+
+async def balance_checks(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
+    """For each bank account, whether its transactions add up to the balances the bank printed
+    over the last four months (money.reconcile). Gaps mean a missing or doubled row."""
+    rows = (
+        await db.execute(
+            select(
+                MoneyTxn.account_id,
+                MoneyTxn.occurred_on,
+                MoneyTxn.amount_paise,
+                MoneyTxn.direction,
+                MoneyTxn.balance_paise,
+            )
+            .join(MoneyAccount, MoneyAccount.id == MoneyTxn.account_id)
+            .where(
+                MoneyTxn.user_id == user_id,
+                MoneyAccount.kind == "bank",
+                MoneyTxn.occurred_on >= today - timedelta(days=BALANCE_CHECK_DAYS),
+            )
+            .order_by(MoneyTxn.occurred_on, MoneyTxn.created_at)
+        )
+    ).all()
+    by_account: dict[uuid.UUID, list] = {}
+    for account_id, on, amount, direction, balance in rows:
+        signed = amount if direction == "credit" else -amount
+        by_account.setdefault(account_id, []).append((on, signed, balance))
+    out = {}
+    for account_id, flows in by_account.items():
+        checked, gaps = money.reconcile(flows)
+        if checked:
+            out[account_id] = {
+                "days_checked": checked,
+                "gaps": [{"on": g.on, "gap_paise": g.gap_paise} for g in gaps[-3:]],
+                "gap_count": len(gaps),
+            }
+    return out
 
 
 # --- Subscriptions -----------------------------------------------------------------------------
@@ -912,6 +984,27 @@ async def _rows(db: AsyncSession, model, user_id: uuid.UUID) -> list:
 
 async def savings_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
     assets = [asset_out(r, today) for r in await _rows(db, MoneyAsset, user_id)]
+    month_start = date(today.year, today.month, 1)
+    moves = (
+        await db.execute(
+            select(
+                MoneyTxn.asset_id,
+                MoneyTxn.direction,
+                func.max(MoneyTxn.occurred_on),
+                func.count().filter(MoneyTxn.occurred_on >= month_start),
+            )
+            .where(MoneyTxn.user_id == user_id, MoneyTxn.asset_id.is_not(None))
+            .group_by(MoneyTxn.asset_id, MoneyTxn.direction)
+        )
+    ).all()
+    seen = {(str(a), d): (last, this_month) for a, d, last, this_month in moves}
+    for a in assets:
+        paid = seen.get((a["id"], "debit"))
+        back = seen.get((a["id"], "credit"))
+        # Linked payments in (money_links): when the last went in, and whether this month's has.
+        a["last_paid_on"] = paid[0] if paid else None
+        a["paid_this_month"] = bool(paid and paid[1])
+        a["received_on"] = back[0] if back else None
     active = [a for a in assets if a["status"] == "active"]
     holdings = (await db.scalars(select(MoneyHolding).where(MoneyHolding.user_id == user_id))).all()
     return {
@@ -1196,3 +1289,49 @@ async def upcoming_payments(
                 "detail": f"EMI {state['paid'] + 1} of {row.months}",
             })  # fmt: skip
     return sorted(out, key=lambda x: x["on"])
+
+
+# --- Moving sealed values to Money's own key ---------------------------------------------------
+
+
+def _sealed_columns():
+    return [
+        (MoneyTxn, MoneyTxn.id, MoneyTxn.narration_enc),
+        (MoneySettings, MoneySettings.user_id, MoneySettings.cas_password_enc),
+        (MoneyImport, MoneyImport.id, MoneyImport.filename_enc),
+        (MoneyAsset, MoneyAsset.id, MoneyAsset.account_no_enc),
+        (MoneyAsset, MoneyAsset.id, MoneyAsset.nominee_enc),
+        (MoneyLoan, MoneyLoan.id, MoneyLoan.account_no_enc),
+    ]
+
+
+async def reseal(db: AsyncSession, cfg: Settings, batch: int = 500) -> int:
+    """Re-encrypt sealed values still under an older key (the token keys, before
+    MONEY_ENCRYPTION_KEYS was set, or a rotated-out money key) under the current one. Values no
+    configured key opens are left alone. Returns how many changed; run until it returns 0."""
+    if not cfg.money_encryption_keys.strip():
+        return 0
+    moved = 0
+    for model, key, column in _sealed_columns():
+        last = None
+        while True:
+            q = select(key, column).where(column.is_not(None), column != "").order_by(key)
+            if last is not None:
+                q = q.where(key > last)
+            rows = (await db.execute(q.limit(batch))).all()
+            if not rows:
+                break
+            last = rows[-1][0]
+            for row_id, value in rows:
+                if money.sealed_current(cfg, value):
+                    continue
+                plain = money.unseal(cfg, value)
+                if not plain:
+                    continue
+                obj = await db.get(model, row_id)
+                setattr(obj, column.key, money.seal(cfg, plain))
+                moved += 1
+            await db.commit()
+    if moved:
+        log.info("money.resealed", extra={"count": moved})
+    return moved

@@ -588,3 +588,88 @@ def test_subscription_price_change():
 def test_savings_instalments_are_investing_not_emis():
     for narration in ("RD INSTALLMENT 000123 HDFC", "SIP INSTALMENT GROWW"):
         assert money.categorise(money.clean_merchant(narration), narration) == "Investments"
+
+
+# Real formats from November 2026 (names, numbers and IDs changed). Banks now send from
+# .bank.in addresses.
+NOV_2026 = date(2026, 11, 21)
+
+
+def test_icici_and_hdfc_alerts_from_bank_in_addresses():
+    cc = money.parse_alert(
+        "Transaction alert for your ICICI Bank Credit Card",
+        "Dear Customer, Your ICICI Bank Credit Card XX4321 has been used for a transaction of "
+        "INR 6,618.00 on Nov 19, 2026 at 03:15:47. Info: PLAYSTATION. The Available Credit "
+        "Limit on your card is INR 1,30,520.22 and Total Credit Limit is INR 2,70,000.00.",
+        NOV_2026, sender="credit_cards@icici.bank.in",
+    )  # fmt: skip
+    assert (cc.amount_paise, cc.direction, cc.merchant, cc.account_kind) == (
+        661800, "debit", "Playstation", "card",
+    )  # fmt: skip
+    assert cc.extra["available_limit_paise"] == 13052022 and cc.institution == "ICICI Bank"
+
+    dc = money.parse_alert(
+        "Transaction alert for your ICICI Bank debit card",
+        "Dear Customer, Greetings from ICICI Bank. A purchase of Rs. 7,808.70 has been made "
+        "using your Debit Card linked to ICICI Bank Account XX777 on 18-Nov-26. Info: "
+        "VIN*PLAYSTATION. The Available Balance in your account is Rs. 4,712.74.",
+        NOV_2026, sender="alert@icici.bank.in",
+    )  # fmt: skip
+    # A debit card spends from the bank account, whose balance the alert gives.
+    assert (dc.merchant, dc.account_kind, dc.account_mask) == ("Playstation", "bank", "777")
+    assert dc.balance_paise == 471274 and dc.occurred_on == date(2026, 11, 18)
+
+    autopay = money.parse_alert(
+        "View: Account update for your HDFC Bank A/c",
+        "Dear Customer, Greetings from HDFC Bank! Your EZVIZ bill, set up through E-mandate "
+        "(Auto payment), has been successfully paid using your HDFC Bank Debit Card ending "
+        "1111. Transaction Details: Amount: INR 970.53 Date: 19/11/2026 Mandate ID: AbCd12",
+        NOV_2026, sender="HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+    )  # fmt: skip
+    assert (autopay.merchant, autopay.amount_paise, autopay.channel) == ("Ezviz", 97053, "autopay")
+    # Setting a mandate up isn't a payment.
+    assert (
+        money.parse_alert(
+            "E-mandate registration",
+            "Your E-mandate for Rs 999.00 has been registered.",
+            NOV_2026,
+            sender="alerts@hdfcbank.bank.in",
+        )  # fmt: skip
+        is None
+    )
+
+    upi = money.parse_alert(
+        "View: Account update for your HDFC Bank A/c",
+        "Dear Customer, We're writing to inform you that Rs.3000.00 has been successfully "
+        "credited to your HDFC Bank account ending in 2222. Transaction Details: a. Date: "
+        "18-11-26 b. Sender: RAVI KUMAR (VPA: ****arch@oksbi) c. UPI Reference No.: 6322417",
+        NOV_2026, sender="alerts@hdfcbank.bank.in",
+    )  # fmt: skip
+    assert (upi.merchant, upi.direction, upi.amount_paise) == ("Ravi Kumar", "credit", 300000)
+
+
+def test_emi_booking_without_a_term_in_the_email():
+    booking = money.parse_emi_booking(
+        "ICICI Bank Credit Cards- EMI on Card 19-Nov-2026 to 19-Nov-2026",
+        "Dear Mr Ravi Kumar, As per your request, we have converted the purchase made on your "
+        "Credit Card 4375XXXXXXXX4321 for Rs 69,250.00 on November 19, 2026 into Equated "
+        "Monthly Instalments (EMIs). Please find enclosed the Amortisation/Repayment schedule. "
+        "To know more about our EMI offers, please visit EMI Fest Offers. click here",
+        NOV_2026, sender="credit_cards@icici.bank.in",
+    )  # fmt: skip
+    assert booking.account_mask == "4321" and booking.principal_paise == 6925000
+    assert booking.months is None and booking.booked_on == date(2026, 11, 19)
+
+
+def test_autopay_is_a_subscription_from_its_first_charge():
+    t = money.Txn(date(2026, 11, 19), 97053, "debit", "Ezviz", "Bills and utilities",
+                  channel="autopay")  # fmt: skip
+    (sub,) = money.find_subscriptions([t], NOV_2026)
+    assert sub.merchant == "Ezviz" and sub.next_on == date(2026, 12, 19)
+    plain = money.Txn(date(2026, 11, 19), 97053, "debit", "Ezviz", "Bills and utilities")
+    assert money.find_subscriptions([plain], NOV_2026) == []
+
+
+def test_alert_search_reaches_bank_in_senders():
+    assert "from:bank.in" in money.ALERT_QUERY and "from:icici" in money.ALERT_QUERY
+    assert "-category:promotions" not in money.ALERT_QUERY

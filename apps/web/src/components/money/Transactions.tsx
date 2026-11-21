@@ -1,4 +1,4 @@
-import { Banknote, CheckCheck, EyeOff, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowLeftRight, Banknote, CheckCheck, EyeOff, Link2, Loader2, PiggyBank, Plus, Search, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { api } from "../../lib/api";
@@ -9,7 +9,9 @@ import {
   rupees,
   SOURCE_LABEL,
   type MoneyAccount,
+  type Linked,
   type MoneyTxn,
+  type TxnMatches,
   type TxnPage,
 } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
@@ -88,9 +90,10 @@ export function TransactionsView({ latest }: { latest: string }) {
             All time
           </button>
         )}
+        <ScanLinks />
         <button
           onClick={() => setAdding((a) => !a)}
-          className="ml-auto flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge"
+          className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge"
         >
           <Plus size={14} /> Add cash spend
         </button>
@@ -199,6 +202,41 @@ export function TransactionsView({ latest }: { latest: string }) {
   );
 }
 
+/** Look back two years for transfers, card bill payments, refunds and savings payments that
+ * aren't tied yet. New rows are tied as they arrive; this catches the ones from before. */
+function ScanLinks() {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const c = await api.moneyScanLinks();
+      const parts = [
+        [c.transfers + c.self_transfers, "transfer"],
+        [c.card_payments, "card bill payment"],
+        [c.refunds, "refund"],
+        [c.savings, "savings payment"],
+      ]
+        .filter(([n]) => n)
+        .map(([n, what]) => `${n} ${what}${n === 1 ? "" : "s"}`);
+      toast(parts.length ? `Tied ${parts.join(", ")}` : "Nothing new to tie: everything that matches is already tied");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      onClick={run}
+      disabled={busy}
+      className="ml-auto flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge disabled:opacity-50"
+      title="Pairs money moved between your own accounts, card bills paid from the bank, refunds with their purchases, and payments into your RDs, PPF and other savings, so none of it counts twice"
+    >
+      {busy ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />} Find transfers
+    </button>
+  );
+}
+
 function Amount({ txn }: { txn: MoneyTxn }) {
   const credit = txn.direction === "credit";
   return (
@@ -236,6 +274,16 @@ function TxnRow({
                 <EyeOff size={11} /> left out
               </span>
             )}
+            {txn.pair_kind && (
+              <span className="flex items-center gap-0.5" title={PAIR_TITLE[txn.pair_kind]}>
+                <Link2 size={11} /> {PAIR_SHORT[txn.pair_kind]}
+              </span>
+            )}
+            {txn.asset_id && !txn.pair_kind && (
+              <span className="flex items-center gap-0.5">
+                <PiggyBank size={11} /> savings
+              </span>
+            )}
             {txn.note && <span className="truncate italic">{txn.note}</span>}
           </span>
         </span>
@@ -260,6 +308,8 @@ function TxnDetail({ txn, categories }: { txn: MoneyTxn; categories: string[] })
     setBusy(true);
     try {
       const r = await api.moneyUpdateTxn(txn.id, body);
+      setFull(r.txn);
+      setCategory(r.txn.category);
       toast(r.also_changed ? `${done}, and ${r.also_changed} more from ${txn.merchant}` : done);
     } catch (e) {
       toast((e as Error).message, "error");
@@ -345,10 +395,116 @@ function TxnDetail({ txn, categories }: { txn: MoneyTxn; categories: string[] })
           </button>
         )}
       </div>
+      {full && <Links txn={full} busy={busy} save={save} />}
       {full?.narration && (
         <p className="break-words rounded-md bg-ink/60 px-2.5 py-1.5 font-mono text-xs text-slate-400" title="What the bank wrote">
           {full.narration}
         </p>
+      )}
+    </div>
+  );
+}
+
+const PAIR_SHORT = { transfer: "transfer", card: "card bill", refund: "refund" } as const;
+const PAIR_TITLE = {
+  transfer: "Money moved between your own accounts: not spending or income",
+  card: "A card bill paid from your bank: the card's purchases are what count",
+  refund: "A refund tied to its purchase: it lowers that spending",
+} as const;
+
+function linkedText(txn: MoneyTxn, other: Linked): string {
+  const where = other.account ?? other.merchant;
+  const on = dayLabel(other.occurred_on);
+  if (txn.pair_kind === "refund")
+    return txn.direction === "credit" ? `Refund of ${rupees(other.amount_paise)} at ${other.merchant} on ${on}` : `Refunded ${rupees(other.amount_paise)} on ${on}`;
+  const what = txn.pair_kind === "card" ? "Card bill payment" : "Moved";
+  return txn.direction === "debit" ? `${what} to ${where}, arrived ${on}` : `${what} from ${where}, sent ${on}`;
+}
+
+/** What this row is tied to (a transfer's other half, a refunded purchase, a saving), with
+ * Undo; or, when it isn't, the rows and savings it could be tied to by hand. */
+function Links({ txn, busy, save }: { txn: MoneyTxn; busy: boolean; save: (body: Parameters<typeof api.moneyUpdateTxn>[1], done: string) => Promise<void> }) {
+  const [matches, setMatches] = useState<TxnMatches | null>(null);
+  const [looking, setLooking] = useState(false);
+  const find = async () => {
+    setLooking(true);
+    try {
+      setMatches(await api.moneyTxnMatches(txn.id));
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setLooking(false);
+    }
+  };
+  const row = "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-ink/60 px-2.5 py-1.5 text-xs text-slate-300";
+  const undo = "ml-auto flex items-center gap-1 text-slate-400 hover:text-white";
+  return (
+    <div className="space-y-1.5">
+      {txn.paired && (
+        <p className={row}>
+          <ArrowLeftRight size={13} className="shrink-0 text-sky-300" />
+          <span>{linkedText(txn, txn.paired)}</span>
+          <button disabled={busy} onClick={() => save({ unpair: true }, "Untied")} className={undo}>
+            <Undo2 size={12} /> Not the same money
+          </button>
+        </p>
+      )}
+      {txn.saving && (
+        <p className={row}>
+          <PiggyBank size={13} className="shrink-0 text-sky-300" />
+          <span>
+            {txn.direction === "debit" ? "Went into" : "Came back from"} <b className="font-medium text-slate-100">{txn.saving}</b>
+          </span>
+          <button disabled={busy} onClick={() => save({ asset_id: null }, "Untied from the saving")} className={undo}>
+            <Undo2 size={12} /> Not this saving
+          </button>
+        </p>
+      )}
+      {!txn.paired && !matches && (
+        <button onClick={find} disabled={looking} className="flex items-center gap-1 text-xs text-sky-300 hover:text-sky-200">
+          {looking ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />} Tie to a transfer, refund or saving
+        </button>
+      )}
+      {!txn.paired && matches && (
+        <div className="rounded-md border border-edge/70 p-2 text-xs text-slate-400">
+          <p className="mb-1.5">
+            Tied rows don't count twice: a transfer's halves aren't spending or income, and a refund lowers the spending it undoes.
+          </p>
+          {[...matches.transfers.map((m) => ["transfer", m] as const), ...matches.refunds.map((m) => ["refund", m] as const)].map(([kind, m]) => (
+            <div key={`${kind}-${m.id}`} className="flex items-center gap-2 border-t border-edge/50 py-1.5 first:border-t-0">
+              <span className="min-w-0 flex-1 truncate">
+                {m.direction === "credit" ? "In to" : "Out of"} {m.account ?? "an account"} · {m.merchant} · {dayLabel(m.occurred_on)} · {rupees(m.amount_paise)}
+              </span>
+              <button
+                disabled={busy}
+                onClick={() => save({ pair_with: m.id, pair_as: kind }, kind === "refund" ? "Tied as a refund" : "Tied as a transfer")}
+                className="shrink-0 rounded border border-edge px-2 py-0.5 text-slate-200 hover:bg-edge"
+              >
+                {kind === "refund" ? "Refund of this" : "Same money"}
+              </button>
+            </div>
+          ))}
+          {!matches.transfers.length && !matches.refunds.length && <p>No row of the same amount the other way within a week, and no earlier purchase here to refund.</p>}
+          {!txn.saving && matches.savings.length > 0 && (
+            <label className="mt-1.5 flex items-center gap-2 border-t border-edge/50 pt-1.5">
+              <PiggyBank size={13} className="shrink-0" />
+              {txn.direction === "debit" ? "Went into" : "Came back from"}
+              <Select
+                value=""
+                onChange={(e) => e.target.value && save({ asset_id: e.target.value }, "Tied to the saving")}
+                className="min-w-40"
+                aria-label="Saving"
+              >
+                <option value="">Choose a saving…</option>
+                {matches.savings.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+        </div>
       )}
     </div>
   );

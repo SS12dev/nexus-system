@@ -2151,12 +2151,24 @@ class MoneyTxn(Base):
     # Left out of totals (a refund pair, a transfer between own accounts...).
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    # The other half of a pair (money_links): the same money leaving one of the person's
+    # accounts and arriving in another ("transfer"), a bank paying a card bill ("card"), or a
+    # refund of an earlier purchase ("refund").
+    pair_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_txns.id", ondelete="SET NULL")
+    )
+    pair_kind: Mapped[str | None] = mapped_column(String(8))
+    # The saving this money went into (an RD instalment, a PPF deposit) or came back from.
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_assets.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
         UniqueConstraint("user_id", "dedupe_key"),
         Index("ix_money_txns_user_day", "user_id", "occurred_on"),
         Index("ix_money_txns_account", "account_id"),
+        Index("ix_money_txns_asset", "asset_id"),
     )
 
 

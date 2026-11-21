@@ -144,7 +144,8 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
     assert counts == {
         "messages": 3, "added": 2, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}  # fmt: skip
     query = google.sent("GET", f"{GMAIL}/messages").url.params["q"]
-    assert "debited" in query and "after:" in query
+    assert "debited" in query and "after:" in query and "from:hdfcbank" in query
+    assert "-category:promotions" not in query
 
     async with sessionmaker() as db:
         rows = (await db.scalars(select(MoneyTxn).order_by(MoneyTxn.occurred_on))).all()
@@ -173,7 +174,9 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
         assert prefs.gmail_synced_until == datetime(2026, 11, 18, 14, 0, tzinfo=UTC)
 
     logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
-    for secret in ("Swiggy", "swiggy", "Blinkit", "25000", "hdfcbank", "UPI txn"):
+    # The search itself names banks in general (money.ALERT_SENDERS); what must not show is
+    # anything from the person's mail: merchants, amounts, the sender's address.
+    for secret in ("Swiggy", "swiggy", "Blinkit", "25000", "alerts@hdfcbank.net", "UPI txn"):
         assert secret not in logged, secret
 
 
@@ -312,3 +315,21 @@ async def test_card_bills_emi_emails_and_reminders(deps, user, sessionmaker, mon
     assert await money.send_reminders(deps, nine) == 1
     assert await money.send_reminders(deps, nine) == 0  # once only
     assert await money.send_reminders(deps, nine + timedelta(hours=1)) == 0
+
+
+def test_history_read_says_what_it_found():
+    from nexus_orchestrator.money import history_note
+
+    base = {"messages": 0, "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0}
+    title, body = history_note(12, base, None)
+    assert title == "No bank alert emails found" and "12 months" in body
+    title, body = history_note(12, {**base, "messages": 40}, None)
+    assert "none could be understood" in title and "40 possible" in body
+    title, body = history_note(
+        6, {**base, "messages": 50, "added": 30, "skipped": 5, "bills": 2}, None
+    )
+    assert title == "Read 6 months of alert emails"
+    assert body.startswith("30 new transactions, 5 already in Money, 2 card bills.")
+    assert "13 other emails" in body
+    title, body = history_note(6, None, "Gmail isn't connected.")
+    assert title.startswith("Couldn't") and "Gmail isn't connected." in body

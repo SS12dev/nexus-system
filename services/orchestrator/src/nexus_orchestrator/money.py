@@ -114,8 +114,6 @@ async def _read_alerts(
     async with deps.sessionmaker() as db:
         for bill in sorted(bills, key=lambda b: b.statement_on):
             counts["bills"] += await store.record_card_bill(db, user.id, bill)
-        for booking in bookings:
-            counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
         # Oldest first, so an account's rows arrive in order.
         for p, mid in sorted(parsed, key=lambda x: x[0].occurred_on):
             got = await store.ingest(
@@ -123,6 +121,9 @@ async def _read_alerts(
             )
             for k, v in got.items():
                 counts[k] += v
+        # After the alerts, so the purchase an EMI replaces is already in.
+        for booking in bookings:
+            counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
         row = await store.settings_for(db, user.id)
         # Reading old mail never moves the mark backwards.
         if newest and (row.gmail_synced_until is None or newest > row.gmail_synced_until):
@@ -220,13 +221,66 @@ async def sync_user(
         log.warning(
             "money.sync_failed", extra={"user_id": str(user_id), "error": type(exc).__name__}
         )
+        if back_days:
+            await _tell_history(deps, user_id, back_days, None, str(exc))
         return None
     if holdings is not None:
         counts["holdings"] = holdings
+    if back_days:
+        await _tell_history(deps, user_id, back_days, counts, None)
     log.info("money.synced", extra={"user_id": str(user_id), **counts})
     if any(counts.get(k) for k in ("added", "matched", "bills", "emis")) or holdings:
         await store.changed(deps.redis, user_id, **counts)
     return counts
+
+
+def history_note(months: int, counts: dict | None, error: str | None) -> tuple[str, str]:
+    """The bell notice after reading old alerts: what was found, in counts only. Reading back
+    runs in the background, so without this a read that finds nothing looks like it never ran."""
+    if error:
+        return (
+            "Couldn't read your old alert emails",
+            f"{error[:200]} Fix it in Money › Import and settings, then try again.",
+        )
+    found = counts["added"] + counts["matched"] + counts["skipped"]
+    if not counts["messages"]:
+        return (
+            "No bank alert emails found",
+            f"Nothing in the last {months} months of Gmail looked like a bank or card alert. If "
+            "your banks send alerts by SMS only, switch on email alerts in each bank's app, or add "
+            "statements and screenshots instead.",
+        )
+    if not found and not counts["bills"] and not counts["emis"]:
+        return (
+            "Old alert emails read, but none could be understood",
+            f"{counts['messages']} possible alert emails, but none matched the formats Money "
+            "knows. Send feedback naming the bank and Nexus can learn its format; meanwhile "
+            "statements and screenshots work.",
+        )
+    parts = [f"{counts['added']} new transactions"]
+    if counts["matched"] + counts["skipped"]:
+        parts.append(f"{counts['matched'] + counts['skipped']} already in Money")
+    if counts["bills"]:
+        parts.append(f"{counts['bills']} card bills")
+    if counts["emis"]:
+        parts.append(f"{counts['emis']} EMIs")
+    rest = counts["messages"] - found - counts["bills"] - counts["emis"]
+    tail = (
+        f" {rest} other emails weren't transactions (OTPs, reminders, offers)." if rest > 0 else ""
+    )
+    return f"Read {months} months of alert emails", ", ".join(parts) + "." + tail
+
+
+async def _tell_history(
+    deps: TurnDeps, user_id: uuid.UUID, back_days: int, counts: dict | None, error: str | None
+) -> None:
+    title, body = history_note(max(back_days // 31, 1), counts, error)
+    async with deps.sessionmaker() as db:
+        await notify(
+            db, deps.redis, deps.settings, user_id, NotificationKind.info, title, body,
+            url="/money/transactions?month=all", tag="money-history",
+        )  # fmt: skip
+        await db.commit()
 
 
 async def sync_all(deps: TurnDeps) -> int:

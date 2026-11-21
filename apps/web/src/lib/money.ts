@@ -23,13 +23,44 @@ export interface MoneyTxn {
   direction: Direction;
   merchant: string;
   category: string;
-  category_by: "auto" | "rule" | "user";
+  category_by: "auto" | "rule" | "user" | "pair";
   channel: string;
   source: "alert" | "statement" | "manual";
   confirmed: boolean;
   excluded: boolean;
   note: string;
+  /** Tied to another row: money between your accounts, a card bill payment, or a refund. */
+  pair_id: string | null;
+  pair_kind: PairKind | null;
+  /** The saving this went into or came back from. */
+  asset_id: string | null;
   narration?: string | null;
+  /** Details only: the other half of the pair and the saving's name. */
+  paired?: Linked | null;
+  saving?: string | null;
+}
+
+export type PairKind = "transfer" | "card" | "refund";
+
+export interface Linked {
+  id: string;
+  occurred_on: string;
+  amount_paise: number;
+  direction: Direction;
+  merchant: string;
+  account: string | null;
+}
+
+export interface TxnMatches {
+  transfers: Linked[];
+  refunds: Linked[];
+  savings: { id: string; name: string; kind: AssetKind }[];
+}
+
+export interface BalanceCheck {
+  days_checked: number;
+  gap_count: number;
+  gaps: { on: string; gap_paise: number }[];
 }
 
 export interface TxnPage {
@@ -143,6 +174,8 @@ export interface AccountView {
   owed_paise?: number | null;
   owed_from_limit?: boolean;
   emis?: { id: string; name: string; emi_paise: number }[];
+  /** Banks: whether the transactions add up to the balances the bank printed. */
+  balance_check?: BalanceCheck | null;
 }
 
 export interface AccountEdit {
@@ -251,6 +284,11 @@ export interface Asset {
   maturity_value_paise: number | null;
   monthly_paise: number;
   matured: boolean;
+  /** From payments tied to it: the last one in, whether this month's has gone in, and when
+   * money came back (a maturity). */
+  last_paid_on?: string | null;
+  paid_this_month?: boolean;
+  received_on?: string | null;
 }
 
 export interface AssetIn {

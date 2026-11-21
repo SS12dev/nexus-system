@@ -21,6 +21,7 @@ import type {
   Plan,
   Savings,
   SecretDetails,
+  TxnMatches,
   Subscription,
   SubscriptionSave,
   Subscriptions,
@@ -260,9 +261,21 @@ export const api = {
   moneyTxns: (q: TxnQuery = {}) =>
     request<TxnPage>(`/api/money/transactions${orgQuery(q)}`),
   moneyTxn: (id: string) => request<MoneyTxn>(`/api/money/transactions/${id}`),
+  moneyTxnMatches: (id: string) => request<TxnMatches>(`/api/money/transactions/${id}/matches`),
+  moneyScanLinks: () =>
+    request<{ transfers: number; card_payments: number; refunds: number; savings: number; self_transfers: number }>("/api/money/links/scan", { method: "POST" }),
   moneyUpdateTxn: (
     id: string,
-    body: { category?: string; for_merchant?: boolean; excluded?: boolean; note?: string },
+    body: {
+      category?: string;
+      for_merchant?: boolean;
+      excluded?: boolean;
+      note?: string;
+      unpair?: boolean;
+      pair_with?: string;
+      pair_as?: "transfer" | "refund";
+      asset_id?: string | null;
+    },
   ) =>
     request<{ txn: MoneyTxn; also_changed: number }>(`/api/money/transactions/${id}`, {
       method: "PATCH",

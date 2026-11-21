@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -21,10 +21,11 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import google, money
+from nexus_common import google, money, money_links
 from nexus_common import money_store as store
 from nexus_common.models import (
     MoneyAccount,
+    MoneyAsset,
     MoneyBudget,
     MoneyHolding,
     MoneyImport,
@@ -175,7 +176,27 @@ class TxnOut(BaseModel):
     confirmed: bool
     excluded: bool
     note: str
+    # Tied to another row (money_links): transfer, card or refund; and the saving it went into.
+    pair_id: uuid.UUID | None = None
+    pair_kind: str | None = None
+    asset_id: uuid.UUID | None = None
     narration: str | None = None
+
+
+class Linked(BaseModel):
+    """The other half of a pair, or a row that could be, as the details panel shows it."""
+
+    id: uuid.UUID
+    occurred_on: date
+    amount_paise: int
+    direction: str
+    merchant: str
+    account: str | None
+
+
+class TxnDetail(TxnOut):
+    paired: Linked | None = None
+    saving: str | None = None
 
 
 def _txn(t: MoneyTxn, cfg=None) -> TxnOut:
@@ -193,7 +214,32 @@ def _txn(t: MoneyTxn, cfg=None) -> TxnOut:
         confirmed=t.confirmed,
         excluded=t.excluded,
         note=t.note,
+        pair_id=t.pair_id,
+        pair_kind=t.pair_kind,
+        asset_id=t.asset_id,
         narration=money.unseal(cfg, t.narration_enc) if cfg else None,
+    )
+
+
+async def _linked(db, t: MoneyTxn) -> Linked:
+    account = await db.get(MoneyAccount, t.account_id) if t.account_id else None
+    return Linked(
+        id=t.id,
+        occurred_on=t.occurred_on,
+        amount_paise=t.amount_paise,
+        direction=t.direction,
+        merchant=t.merchant,
+        account=store.account_label(account) if account else None,
+    )
+
+
+async def _detail(db, t: MoneyTxn, cfg) -> TxnDetail:
+    other = await db.get(MoneyTxn, t.pair_id) if t.pair_id else None
+    asset = await db.get(MoneyAsset, t.asset_id) if t.asset_id else None
+    return TxnDetail(
+        **_txn(t, cfg).model_dump(),
+        paired=await _linked(db, other) if other is not None else None,
+        saving=(asset.name or asset.kind.upper()) if asset is not None else None,
     )
 
 
@@ -236,12 +282,21 @@ async def list_transactions(
         await db.execute(
             select(
                 func.count(),
+                # Spending and income the way the overview counts them (money.spending,
+                # money.refund, money.income): refunds lower spending.
                 func.coalesce(
-                    # Spending and income the way the overview counts them (money.spending).
                     func.sum(MoneyTxn.amount_paise).filter(
                         MoneyTxn.direction == "debit",
                         ~MoneyTxn.excluded,
                         MoneyTxn.category.not_in(("Transfers", "Investments")),
+                    ),
+                    0,
+                )
+                - func.coalesce(
+                    func.sum(MoneyTxn.amount_paise).filter(
+                        MoneyTxn.direction == "credit",
+                        ~MoneyTxn.excluded,
+                        MoneyTxn.category.not_in(tuple(money.NOT_SPENDING)),
                     ),
                     0,
                 ),
@@ -249,7 +304,7 @@ async def list_transactions(
                     func.sum(MoneyTxn.amount_paise).filter(
                         MoneyTxn.direction == "credit",
                         ~MoneyTxn.excluded,
-                        MoneyTxn.category != "Transfers",
+                        MoneyTxn.category == "Income",
                     ),
                     0,
                 ),
@@ -278,11 +333,76 @@ async def _own_txn(db, user_id: uuid.UUID, txn_id: uuid.UUID) -> MoneyTxn:
     return t
 
 
-@router.get("/transactions/{txn_id}", response_model=TxnOut)
+@router.get("/transactions/{txn_id}", response_model=TxnDetail)
 async def get_transaction(
     txn_id: uuid.UUID, user: OwnerUser, db: DbDep, cfg: SettingsDep
-) -> TxnOut:
-    return _txn(await _own_txn(db, user.id, txn_id), cfg)
+) -> TxnDetail:
+    return await _detail(db, await _own_txn(db, user.id, txn_id), cfg)
+
+
+MATCH_DAYS = 7
+
+
+@router.get("/transactions/{txn_id}/matches")
+async def transaction_matches(txn_id: uuid.UUID, user: OwnerUser, db: DbDep) -> dict:
+    """Rows this one could be paired with by hand: the same amount the other way on another
+    account within a week (a transfer), or, for money in, an earlier purchase from the same
+    merchant (a refund). And the savings it could belong to."""
+    t = await _own_txn(db, user.id, txn_id)
+    other = "credit" if t.direction == "debit" else "debit"
+    near = (
+        await db.scalars(
+            select(MoneyTxn)
+            .where(
+                MoneyTxn.user_id == user.id,
+                MoneyTxn.id != t.id,
+                MoneyTxn.direction == other,
+                MoneyTxn.amount_paise == t.amount_paise,
+                MoneyTxn.pair_id.is_(None),
+                MoneyTxn.occurred_on.between(
+                    t.occurred_on - timedelta(days=MATCH_DAYS),
+                    t.occurred_on + timedelta(days=MATCH_DAYS),
+                ),
+            )
+            .order_by(MoneyTxn.occurred_on)
+            .limit(10)
+        )
+    ).all()
+    transfers = [x for x in near if x.account_id != t.account_id or x.account_id is None]
+    refunds = []
+    if t.direction == "credit" and t.merchant != "Unknown":
+        refunds = (
+            await db.scalars(
+                select(MoneyTxn)
+                .where(
+                    MoneyTxn.user_id == user.id,
+                    MoneyTxn.direction == "debit",
+                    MoneyTxn.merchant == t.merchant,
+                    MoneyTxn.amount_paise >= t.amount_paise,
+                    MoneyTxn.occurred_on.between(
+                        t.occurred_on - timedelta(days=money_links.REFUND_DAYS), t.occurred_on
+                    ),
+                )
+                .order_by(MoneyTxn.occurred_on.desc())
+                .limit(5)
+            )
+        ).all()
+    savings = (
+        await db.scalars(
+            select(MoneyAsset)
+            .where(MoneyAsset.user_id == user.id)
+            .order_by(MoneyAsset.status, MoneyAsset.created_at)
+        )
+    ).all()
+    return {
+        "transfers": [await _linked(db, x) for x in transfers],
+        "refunds": [await _linked(db, x) for x in refunds],
+        "savings": [
+            {"id": str(a.id), "name": a.name or a.kind.upper(), "kind": a.kind}
+            for a in savings
+            if a.status == "active" or a.id == t.asset_id
+        ],
+    }
 
 
 class TxnPatch(BaseModel):
@@ -291,10 +411,16 @@ class TxnPatch(BaseModel):
     for_merchant: bool = False
     excluded: bool | None = None
     note: str | None = Field(default=None, max_length=500)
+    # Undo this row's pair; or pair it with another row as a transfer or a refund.
+    unpair: bool = False
+    pair_with: uuid.UUID | None = None
+    pair_as: Literal["transfer", "refund"] = "transfer"
+    # The saving it went into or came from; null clears it.
+    asset_id: uuid.UUID | None = None
 
 
 class TxnPatchOut(BaseModel):
-    txn: TxnOut
+    txn: TxnDetail
     also_changed: int = 0
 
 
@@ -309,6 +435,20 @@ async def update_transaction(
 ) -> TxnPatchOut:
     t = await _own_txn(db, user.id, txn_id)
     also = 0
+    if body.unpair or body.pair_with:
+        prefs = await store.settings_for(db, user.id)
+        partner = await db.get(MoneyTxn, t.pair_id) if t.pair_id else None
+        money_links.unpair(t, partner, rules=prefs.rules or {})
+    if body.pair_with:
+        await _pair_by_hand(db, user.id, t, body.pair_with, body.pair_as)
+    if "asset_id" in body.model_fields_set:
+        if body.asset_id is not None:
+            asset = await db.get(MoneyAsset, body.asset_id)
+            if asset is None or asset.user_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Saving not found.")
+            if t.category_by != "user":
+                t.category, t.category_by = "Investments", "pair"
+        t.asset_id = body.asset_id
     if body.category is not None:
         category = _category(body.category)
         if body.for_merchant and t.merchant != "Unknown":
@@ -323,7 +463,46 @@ async def update_transaction(
     await db.commit()
     await db.refresh(t)
     await store.changed(redis, user.id)
-    return TxnPatchOut(txn=_txn(t, cfg), also_changed=also)
+    return TxnPatchOut(txn=await _detail(db, t, cfg), also_changed=also)
+
+
+async def _pair_by_hand(
+    db, user_id: uuid.UUID, t: MoneyTxn, other_id: uuid.UUID, kind: str
+) -> None:
+    other = await _own_txn(db, user_id, other_id)
+    if other.id == t.id or other.direction == t.direction:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pair money out with money in.")
+    if kind == "transfer" and other.amount_paise != t.amount_paise:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A transfer's two halves are the same amount."
+        )
+    if other.pair_id:
+        prefs = await store.settings_for(db, user_id)
+        money_links.unpair(other, await db.get(MoneyTxn, other.pair_id), rules=prefs.rules or {})
+    if kind == "refund":
+        debit, credit = (t, other) if t.direction == "debit" else (other, t)
+        credit.pair_id, credit.pair_kind = debit.id, "refund"
+        debit.pair_id, debit.pair_kind = credit.id, "refund"
+        credit.category, credit.category_by = debit.category, "pair"
+        return
+    accounts = [await db.get(MoneyAccount, x.account_id) for x in (t, other) if x.account_id]
+    card = any(a is not None and a.kind == "card" for a in accounts)
+    money_links.pair(t, other, "card" if card else "transfer")
+    # Chosen by hand: keep it even if the word list would say otherwise.
+    for x in (t, other):
+        x.category, x.category_by = "Transfers", "user"
+
+
+@router.post("/links/scan")
+async def scan_links(user: OwnerUser, db: DbDep, cfg: SettingsDep, redis: RedisDep) -> dict:
+    """Look through the last two years for transfers, card payments, refunds and savings
+    payments that aren't tied yet (new rows are checked as they arrive)."""
+    if wait := await hit(redis, "money-links", str(user.id), 6, 3600):
+        raise too_many(wait, "scans")
+    counts = await money_links.link(db, cfg, user.id, local_today(user) - timedelta(days=730))
+    await db.commit()
+    await store.changed(redis, user.id)
+    return counts.__dict__
 
 
 class TxnIn(BaseModel):
@@ -395,6 +574,9 @@ async def delete_transaction(
             status.HTTP_400_BAD_REQUEST,
             "Only rows you added by hand can be deleted. Leave this one out of totals instead.",
         )
+    if t.pair_id:
+        prefs = await store.settings_for(db, user.id)
+        money_links.unpair(t, await db.get(MoneyTxn, t.pair_id), rules=prefs.rules or {})
     await db.delete(t)
     await db.commit()
     await store.changed(redis, user.id)
