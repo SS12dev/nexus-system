@@ -1,5 +1,7 @@
 import type {
   AccountEdit,
+  Advice,
+  AdviceAction,
   AccountView,
   Asset,
   AssetIn,
@@ -361,7 +363,11 @@ export const api = {
   moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
   moneyInvestments: () => request<Investments>("/api/money/investments"),
   moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
-  moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string }>("/api/money/accounts", { method: "POST", body: json(body) }),
+  moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string; moved?: number }>("/api/money/accounts", { method: "POST", body: json(body) }),
+  moneyRemoveMailbox: (id: string) => request<void>(`/api/money/mailboxes/${id}`, { method: "DELETE" }),
+  advice: () => request<Advice>("/api/advice"),
+  adviceState: (key: string, action: AdviceAction, days?: number) =>
+    request<Advice>("/api/advice/state", { method: "POST", body: json({ key, action, days }) }),
   moneyReadScreenshot: (file: File) => {
     const form = new FormData();
     form.append("file", file);

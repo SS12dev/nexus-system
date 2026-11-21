@@ -28,6 +28,24 @@ export function SetupView() {
   const { data: settings, reload } = useMoneySettings();
   const ready = !!settings;
   useEffect(() => {
+    // Back from connecting another Gmail.
+    const result = new URLSearchParams(window.location.search).get("mailbox");
+    if (!result) return;
+    const said: Record<string, [string, "error" | undefined]> = {
+      added: ["Connected. Reading its alerts from the last 90 days now; read further back below.", undefined],
+      same: ["That's the account you sign in with, which Money already reads. Pick the other one.", "error"],
+      no_access: ["Google didn't give read access to that mailbox. Try again and tick “Read your email”.", "error"],
+      too_many: ["Money reads up to three other mailboxes. Remove one first.", "error"],
+      cancelled: ["Connecting was cancelled.", "error"],
+      unverified: ["Google hasn't verified that address yet.", "error"],
+      failed: ["Couldn't connect it. Sign in again and retry.", "error"],
+    };
+    const [text, kind] = said[result] ?? said.failed;
+    toast(text, kind);
+    window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    if (result === "added") reload();
+  }, [reload]);
+  useEffect(() => {
     // "Add screenshots" on the first screen links here with #screenshots.
     if (ready && window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ block: "start" });
   }, [ready]);
@@ -35,6 +53,7 @@ export function SetupView() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <AlertSync settings={settings} onChange={reload} />
+      <Mailboxes settings={settings} onChange={reload} />
       <div id="screenshots" className="contents">
         <ScreenshotImport />
       </div>
@@ -179,7 +198,14 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
   return (
     <Card
       title="Bank and card alert emails"
-      action={<Toggle checked={settings.gmail_sync} onChange={set} label="Read alert emails" disabled={busy || (!settings.gmail_connected && !settings.gmail_sync)} />}
+      action={
+        <Toggle
+          checked={settings.gmail_sync}
+          onChange={set}
+          label="Read alert emails"
+          disabled={busy || (!settings.gmail_connected && !settings.mailboxes.length && !settings.gmail_sync)}
+        />
+      }
     >
       <p className="text-sm text-slate-400">
         Every hour, new transaction alerts in your Gmail (“Rs 250 debited from a/c XX1234…”) become transactions, so this
@@ -187,12 +213,16 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
         cards. One-time passwords, reminders and declined payments are skipped. When a statement arrives later, its rows
         are matched to the alerts instead of counted twice.
       </p>
-      {!settings.gmail_connected ? (
-        <p className="mt-3 flex items-center gap-1.5 text-sm text-amber-200">
-          <Mail size={14} /> Gmail isn't connected.{" "}
-          <Link to="/settings" className="text-sky-300 hover:text-sky-200">
-            Allow Gmail in Settings
-          </Link>
+      {!settings.gmail_connected && !settings.mailboxes.length ? (
+        <p className="mt-3 flex items-start gap-1.5 text-sm text-amber-200">
+          <Mail size={14} className="mt-[3px] shrink-0" />
+          <span>
+            Gmail isn't connected.{" "}
+            <Link to="/settings" className="text-sky-300 hover:text-sky-200">
+              Allow Gmail in Settings
+            </Link>
+            , or connect the Gmail your alerts go to under “Alerts in another Gmail”.
+          </span>
         </p>
       ) : settings.gmail_sync ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -221,7 +251,68 @@ function AlertSync({ settings, onChange }: { settings: NonNullable<ReturnType<ty
           </button>
         </div>
       ) : null}
-      {settings.gmail_connected && settings.gmail_sync && <HistoryRead />}
+      {(settings.gmail_connected || settings.mailboxes.length > 0) && settings.gmail_sync && <HistoryRead />}
+    </Card>
+  );
+}
+
+/** Other Gmail accounts to read alerts from, for alerts that go to a different address from
+ * the one used to sign in. Read-only access; only a masked address is shown. */
+function Mailboxes({ settings, onChange }: { settings: NonNullable<ReturnType<typeof useMoneySettings>["data"]>; onChange: () => void }) {
+  return (
+    <Card title="Alerts in another Gmail">
+      <p className="text-sm text-slate-400">
+        If your bank and card alerts go to a different Gmail from the one you sign in with, connect it here. Google asks you
+        to pick the account and allow read-only access to its mail; Nexus only looks for bank and card alerts, can't send
+        or delete anything, and you still sign in as you do now. Up to three.
+      </p>
+      {settings.mailboxes.length > 0 && (
+        <ul className="mt-3 divide-y divide-edge/60 rounded-lg border border-edge">
+          {settings.mailboxes.map((m) => (
+            <li key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <Mail size={14} className="shrink-0 text-slate-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-slate-200">{m.email_masked}</span>
+                <span className={`block text-xs ${m.last_error ? "text-[#fab219]" : "text-slate-500"}`}>
+                  {m.last_error ?? (m.synced_at ? `Checked ${formatAgo(m.synced_at)}` : "First check running")}
+                </span>
+              </span>
+              {m.last_error && (
+                <a href="/auth/google/mailbox" className="text-xs text-sky-300 hover:text-sky-200">
+                  Connect again
+                </a>
+              )}
+              <button
+                onClick={async () => {
+                  if (!(await confirmAction({ title: `Stop reading ${m.email_masked}?`, body: "Its access is revoked at Google. Transactions already read stay.", confirmLabel: "Stop reading", danger: true }))) return;
+                  try {
+                    await api.moneyRemoveMailbox(m.id);
+                    toast("Stopped reading it");
+                    onChange();
+                  } catch (e) {
+                    toast((e as Error).message, "error");
+                  }
+                }}
+                className="p-1 text-slate-400 hover:text-rose-300"
+                aria-label={`Stop reading ${m.email_masked}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {settings.mailboxes.length < 3 && (
+        <a
+          href="/auth/google/mailbox"
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm text-slate-200 hover:bg-edge/60"
+        >
+          <Mail size={14} /> Connect another Gmail
+        </a>
+      )}
+      {settings.mailboxes.length > 0 && !settings.gmail_sync && (
+        <p className="mt-2 text-xs text-slate-500">Switch on alert emails above to start reading it.</p>
+      )}
     </Card>
   );
 }

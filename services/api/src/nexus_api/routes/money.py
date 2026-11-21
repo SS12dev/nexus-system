@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import google, money, money_links
+from nexus_common import google, money, money_links, money_mail
 from nexus_common import money_store as store
 from nexus_common.models import (
     MoneyAccount,
@@ -29,6 +29,7 @@ from nexus_common.models import (
     MoneyBudget,
     MoneyHolding,
     MoneyImport,
+    MoneyMailbox,
     MoneyTxn,
     utcnow,
 )
@@ -59,6 +60,8 @@ class SettingsOut(BaseModel):
     cas_password_set: bool
     gmail_connected: bool
     gmail_synced_at: datetime | None
+    # Other Gmail accounts alerts are read from (masked addresses only).
+    mailboxes: list[dict]
     cas_synced_at: datetime | None
     last_error: str | None
     rules: int
@@ -86,6 +89,7 @@ async def get_settings(user: OwnerUser, db: DbDep, cfg: SettingsDep) -> Settings
         cas_password_set=bool(prefs.cas_password_enc),
         gmail_connected=await _gmail_connected(db, cfg, user.id),
         gmail_synced_at=prefs.gmail_synced_at,
+        mailboxes=[money_mail.view(b) for b in await money_mail.mailboxes(db, user.id)],
         cas_synced_at=prefs.cas_synced_at,
         last_error=prefs.last_error,
         rules=len(prefs.rules or {}),
@@ -102,10 +106,15 @@ async def update_settings(
     prefs = await store.settings_for(db, user.id)
     start_sync = False
     if body.gmail_sync is not None:
-        if body.gmail_sync and not await _gmail_connected(db, cfg, user.id):
+        if (
+            body.gmail_sync
+            and not await _gmail_connected(db, cfg, user.id)
+            and not await money_mail.mailboxes(db, user.id)
+        ):
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "Gmail isn't connected. Allow Gmail on the Settings page first.",
+                "Gmail isn't connected. Allow Gmail on the Settings page, or connect the Gmail "
+                "your bank alerts go to, first.",
             )
         start_sync = body.gmail_sync and not prefs.gmail_sync
         prefs.gmail_sync = body.gmail_sync
@@ -130,6 +139,23 @@ async def update_settings(
     if start_sync:
         await queue.enqueue_money_sync(user.id)
     return await get_settings(user, db, cfg)
+
+
+@router.delete("/mailboxes/{mailbox_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_mailbox(
+    mailbox_id: uuid.UUID, user: OwnerUser, db: DbDep, cfg: SettingsDep
+) -> Response:
+    """Stop reading another Gmail account: its access is revoked at Google and forgotten.
+    Transactions already read from it stay."""
+    box = await db.get(MoneyMailbox, mailbox_id)
+    if box is None or box.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mailbox not found.")
+    await money_mail.remove(db, cfg, box)
+    await db.commit()
+    log.info(
+        "money.mailbox_removed", extra={"user_id": str(user.id), "mailbox_id": str(mailbox_id)}
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)

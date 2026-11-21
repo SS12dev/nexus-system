@@ -8,6 +8,7 @@ import { useEventSocket } from "./lib/socket";
 import { useTheme } from "./lib/theme";
 import { hasRole, isOwner } from "./lib/types";
 import { AdminPage } from "./pages/AdminPage";
+import { AdvicePage } from "./pages/AdvicePage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -93,6 +94,7 @@ export function App() {
         </Route>
         <Route path="search" element={<SearchPage />} />
         <Route path="brief" element={<BriefPage />} />
+        <Route path="advice" element={<AdvicePage />} />
         <Route path="organiser/*" element={<OrganiserPage />} />
         <Route path="money/*" element={<MoneyPage />} />
         <Route path="library" element={<LibraryPage />} />

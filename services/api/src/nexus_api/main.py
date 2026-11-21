@@ -15,6 +15,7 @@ from nexus_api.routes import (
     access_requests,
     account_recovery,
     admin,
+    advice,
     app_access,
     apps,
     auth,
@@ -145,6 +146,7 @@ def create_app(
     app.include_router(money_plan.router)
     app.include_router(money_onboard.router)
     app.include_router(money_export.router)
+    app.include_router(advice.router)
     app.include_router(brief.router)
     app.include_router(links.router)
     app.include_router(notifications.router)

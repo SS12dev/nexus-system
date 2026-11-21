@@ -18,7 +18,7 @@ import statistics
 from dataclasses import asdict, dataclass, field
 from datetime import date
 
-from nexus_common.money import add_months
+from nexus_common.money import CADENCE_MONTHS, add_months
 
 ASSET_KINDS = {
     "fd": "Fixed deposit",
@@ -77,6 +77,19 @@ class Asset:
     contribution_paise: int = 0
     payout: bool = False
     status: str = "active"
+    # How often contribution_paise goes in; None is the usual for the kind.
+    cadence: str | None = None
+
+
+CONTRIBUTION_CADENCES = ("monthly", "quarterly", "yearly")
+
+
+def contribution_cadence(kind: str, cadence: str | None) -> str:
+    """Yearly for PPF (the deposit best made by 5 April), monthly for EPF, NPS and the rest,
+    unless the person said otherwise."""
+    if cadence in CONTRIBUTION_CADENCES:
+        return cadence
+    return "yearly" if kind == "ppf" else "monthly"
 
 
 def _fd_value(a: Asset, on: date) -> int:
@@ -106,21 +119,25 @@ def _rd_value(a: Asset, on: date) -> int:
 
 
 def _balance_value(a: Asset, on: date) -> int:
-    """A balance that earns interest and takes contributions: monthly for EPF and NPS, each
-    April for PPF (the yearly deposit is best made by 5 April)."""
+    """A balance that earns interest and takes contributions: monthly, quarterly or yearly
+    (a yearly PPF deposit goes in each April, best by 5 April; other yearly ones on the
+    anniversary of the start)."""
     since = a.balance_on or a.start_on or on
     value = float(a.amount_paise)
     r = _monthly(a.rate_bp)
     months = _months_between(since, on)
     if a.maturity_on:
         months = min(months, _months_between(since, a.maturity_on))
+    cadence = contribution_cadence(a.kind, a.cadence)
+    yearly_month = 4 if a.kind == "ppf" else (a.start_on or since).month
     for i in range(1, months + 1):
         value *= 1 + r
         month = add_months(since, i)
-        if a.kind == "ppf":
-            if month.month == 4:
-                value += a.contribution_paise
-        else:
+        if (
+            cadence == "monthly"
+            or (cadence == "quarterly" and i % 3 == 0)
+            or (cadence == "yearly" and month.month == yearly_month)
+        ):
             value += a.contribution_paise
     return round(value)
 
@@ -144,10 +161,9 @@ def monthly_contribution(a: Asset) -> int:
         return 0
     if a.kind == "rd":
         return a.amount_paise
-    if a.kind == "ppf":
-        return a.contribution_paise // 12
     if a.kind in BALANCE_KINDS:
-        return a.contribution_paise
+        months = CADENCE_MONTHS[contribution_cadence(a.kind, a.cadence)]
+        return a.contribution_paise // months
     return 0
 
 

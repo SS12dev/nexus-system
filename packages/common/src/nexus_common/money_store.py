@@ -60,6 +60,38 @@ def account_label(account: MoneyAccount | None) -> str:
     return f"{bank} ••{account.mask}" if account.mask else bank
 
 
+async def attach_debit_card(
+    db: AsyncSession, user_id: uuid.UUID, account: MoneyAccount, mask: str | None
+) -> int:
+    """Give a bank account its debit card's last four digits. Rows already read from that
+    card's alerts (which made an account of their own) move onto the bank account, and the
+    stand-in account goes. Returns how many rows moved."""
+    account.card_mask = mask
+    if not mask:
+        return 0
+    moved = 0
+    for dup in (
+        await db.scalars(
+            select(MoneyAccount).where(
+                MoneyAccount.user_id == user_id,
+                MoneyAccount.kind == "bank",
+                MoneyAccount.mask == mask,
+                MoneyAccount.id != account.id,
+            )
+        )
+    ).all():
+        if dup.institution and account.institution and dup.institution != account.institution:
+            continue
+        rows = (await db.scalars(select(MoneyTxn).where(MoneyTxn.account_id == dup.id))).all()
+        for t in rows:
+            t.account_id = account.id
+        moved += len(rows)
+        await db.flush()
+        await db.delete(dup)
+    await db.flush()
+    return moved
+
+
 async def account_for(
     db: AsyncSession, user_id: uuid.UUID, institution: str | None, mask: str | None, kind: str
 ) -> MoneyAccount | None:
@@ -67,6 +99,19 @@ async def account_for(
     four digits there's nothing reliable to tie it to."""
     if not mask:
         return None
+    if kind == "bank":
+        # A debit card's alerts quote the card's digits: they belong to its bank account.
+        for row in (
+            await db.scalars(
+                select(MoneyAccount).where(
+                    MoneyAccount.user_id == user_id,
+                    MoneyAccount.kind == "bank",
+                    MoneyAccount.card_mask == mask,
+                )
+            )
+        ).all():
+            if not institution or not row.institution or row.institution == institution:
+                return row
     rows = (
         await db.scalars(
             select(MoneyAccount).where(MoneyAccount.user_id == user_id, MoneyAccount.mask == mask)
@@ -626,6 +671,7 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
             "spent_month_paise": _sum(f, "debit", month_start, counted_only=True),
             "in_month_paise": _sum(f, "credit", month_start, counted_only=True),
             "balance_check": checks.get(a.id),
+            "card_mask": a.card_mask,
         }
         if a.kind == "card":
             payments = _sum(f, "credit", a.statement_on) if a.statement_on else 0
@@ -652,6 +698,11 @@ async def accounts_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> di
                 "statement_on": a.statement_on,
                 "paid_on": a.paid_on,
                 "paid_since_statement_paise": payments,
+                "expires_on": a.expires_on,
+                "bill_from_id": str(a.bill_from_id) if a.bill_from_id else None,
+                "bill_from_label": next(
+                    (account_label(x) for x in accounts if x.id == a.bill_from_id), None
+                ),
                 "bill": bill,
                 "owed_paise": owed,
                 "owed_from_limit": bool(a.credit_limit_paise and a.available_paise is not None),
@@ -727,12 +778,20 @@ async def subscriptions_view(db: AsyncSession, user_id: uuid.UUID, today: date) 
             await db.scalars(select(MoneySubscription).where(MoneySubscription.user_id == user_id))
         ).all()
     }
+    accounts = {
+        str(a.id): a
+        for a in (
+            await db.scalars(select(MoneyAccount).where(MoneyAccount.user_id == user_id))
+        ).all()
+    }
     items = []
     for sub in detected:
         items.append(_subscription_item(sub, saved.pop(money.merchant_key(sub.merchant), None),
-                                        txns, today))  # fmt: skip
+                                        txns, today, accounts))  # fmt: skip
     for row in saved.values():
-        items.append(_subscription_item(None, row, txns, today))
+        items.append(_subscription_item(None, row, txns, today, accounts))
+    if any(i.pop("_moved", False) for i in items):
+        await db.flush()
     live = [i for i in items if i["status"] in ("new", "active")]
 
     def monthly(group: str) -> int:
@@ -757,6 +816,7 @@ def _subscription_item(
     row: MoneySubscription | None,
     txns: list[money.Txn],
     today: date,
+    accounts: dict[str, MoneyAccount] | None = None,
 ) -> dict:
     merchant = row.merchant if row else sub.merchant  # type: ignore[union-attr]
     category = (sub.category if sub else None) or (row.category if row else "Subscriptions")
@@ -772,6 +832,29 @@ def _subscription_item(
         (t for t in txns if t.merchant == merchant and t.direction == "debit" and not t.excluded),
         key=lambda t: t.occurred_on,
     )
+    accounts = accounts or {}
+    moved = _follow_move(row, charges, accounts)
+    account_id = (
+        str(row.account_id)
+        if row and row.account_id
+        else (charges[-1].account_id if charges else None)
+    )
+    account = accounts.get(account_id) if account_id else None
+    moving = None
+    if row and row.move_to_id:
+        to = accounts.get(str(row.move_to_id))
+        stuck = [
+            t for t in charges
+            if row.move_since and t.occurred_on >= row.move_since
+            and t.account_id and t.account_id != str(row.move_to_id)
+        ]  # fmt: skip
+        moving = {
+            "to_id": str(row.move_to_id),
+            "to_label": account_label(to) if to else "the new card",
+            "from_label": account_label(account) if account else None,
+            "since": row.move_since,
+            "stuck_on": stuck[-1].occurred_on if stuck else None,
+        }
     after_cancel = None
     if row and status == "cancelled" and row.cancelled_on:
         late = [t for t in charges if t.occurred_on > row.cancelled_on]
@@ -801,7 +884,32 @@ def _subscription_item(
         "manage_url": (row.manage_url if row else None) or money.manage_url(merchant),
         "note": row.note if row else None,
         "cancelled_on": row.cancelled_on if row else None,
+        "account_id": account_id,
+        "account_label": account_label(account) if account else None,
+        "account_kind": account.kind if account else None,
+        "account_set": bool(row and row.account_id),
+        "moving": moving,
+        "moved_on": row.moved_on if row else None,
+        "_moved": moved,
     }
+
+
+def _follow_move(
+    row: MoneySubscription | None, charges: list[money.Txn], accounts: dict[str, MoneyAccount]
+) -> bool:
+    """A move to another card is done once a charge on or after the day it was asked for lands
+    on that card: the card becomes the subscription's, and the move is cleared."""
+    if row is None or row.move_to_id is None or row.move_since is None:
+        return False
+    target = str(row.move_to_id)
+    landed = [t for t in charges if t.occurred_on >= row.move_since and t.account_id == target]
+    if not landed:
+        return False
+    row.account_id = row.move_to_id
+    row.move_to_id = None
+    row.moved_on = landed[0].occurred_on
+    row.updated_at = utcnow()
+    return True
 
 
 async def save_subscription(
@@ -906,6 +1014,7 @@ def as_asset(row: MoneyAsset) -> plan.Asset:
         contribution_paise=row.contribution_paise,
         payout=row.payout,
         status=row.status,
+        cadence=row.contribution_cadence,
     )
 
 
@@ -936,6 +1045,7 @@ def asset_out(row: MoneyAsset, today: date) -> dict:
         "maturity_on": row.maturity_on,
         "balance_on": row.balance_on,
         "contribution_paise": row.contribution_paise,
+        "contribution_cadence": plan.contribution_cadence(row.kind, row.contribution_cadence),
         "payout": row.payout,
         "status": row.status,
         "note": row.note,

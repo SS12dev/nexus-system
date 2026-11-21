@@ -282,4 +282,5 @@ def _plan_asset(row: MoneyAsset) -> plan.Asset:
         contribution_paise=row.contribution_paise,
         payout=row.payout,
         status=row.status,
+        cadence=row.contribution_cadence,
     )

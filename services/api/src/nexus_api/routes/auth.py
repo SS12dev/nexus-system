@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_api import access, account_recovery
-from nexus_api.deps import CurrentUser, DbDep, QueueDep, RedisDep, SettingsDep
+from nexus_api.deps import CurrentUser, DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.schemas import (
     AccessRequestIn,
     AccessStateOut,
@@ -19,7 +19,8 @@ from nexus_api.schemas import (
 )
 from nexus_api.sessions import revoke_token, set_session_cookie, start_session, user_for_token
 from nexus_api.users import SignInRefused, normalize_email, resolve_sign_in
-from nexus_common import google
+from nexus_common import google, money_mail
+from nexus_common.models import RoleName
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -98,22 +99,49 @@ async def google_connect(request: Request, user: CurrentUser, settings: Settings
     )
 
 
+@router.get("/google/mailbox")
+async def google_mailbox(request: Request, user: OwnerUser, settings: SettingsDep):
+    """Connect another Gmail account for Money to read bank alerts from: read-only mail
+    access, with Google's account picker so a different account can be chosen. Nexus sign-in
+    stays with the account it is."""
+    if not settings.oidc_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Google sign-in is not configured")
+    redirect_uri = str(request.url_for("auth_callback"))
+    request.session.pop("google_connect", None)
+    request.session["google_mailbox"] = str(user.id)
+    return await request.app.state.oauth.oidc.authorize_redirect(
+        request,
+        redirect_uri,
+        scope=money_mail.CONNECT_SCOPE,
+        access_type="offline",
+        prompt="consent select_account",
+    )
+
+
 @router.get("/callback", name="auth_callback")
-async def callback(request: Request, db: DbDep, settings: SettingsDep):
+async def callback(request: Request, db: DbDep, settings: SettingsDep, queue: QueueDep):
     if not settings.oidc_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OIDC sign-in is not configured")
     # Set when a signed-in user came from /auth/google/connect rather than the sign-in page.
     connecting = request.session.pop("google_connect", None)
+    # Set when the owner came from /auth/google/mailbox to add a mailbox for Money.
+    mailbox_for = request.session.pop("google_mailbox", None)
     try:
         token = await request.app.state.oauth.oidc.authorize_access_token(request)
     except OAuthError as exc:
         log.warning("OIDC callback failed: %s", exc)
+        if mailbox_for:
+            return RedirectResponse(f"{MAILBOX_PAGE}?mailbox=cancelled", status.HTTP_303_SEE_OTHER)
         if connecting:
             return RedirectResponse("/settings?error=google_cancelled", status.HTTP_303_SEE_OTHER)
         return RedirectResponse("/login?error=oidc_failed", status.HTTP_303_SEE_OTHER)
     info = token.get("userinfo") or {}
     if not info.get("email") or not info.get("email_verified", False):
+        if mailbox_for:
+            return RedirectResponse(f"{MAILBOX_PAGE}?mailbox=unverified", status.HTTP_303_SEE_OTHER)
         return RedirectResponse("/login?error=email_unverified", status.HTTP_303_SEE_OTHER)
+    if mailbox_for:
+        return await _finish_mailbox(request, db, settings, queue, mailbox_for, token, info)
     if connecting:
         return await _finish_connect(request, db, settings, connecting, token, info)
     try:
@@ -149,6 +177,45 @@ async def callback(request: Request, db: DbDep, settings: SettingsDep):
     response = RedirectResponse(next_url, status.HTTP_303_SEE_OTHER)
     set_session_cookie(response, settings, request, session_token)
     return response
+
+
+MAILBOX_PAGE = "/money/setup"
+
+
+async def _finish_mailbox(
+    request: Request,
+    db: AsyncSession,
+    settings: Settings,
+    queue,
+    user_id: str,
+    token: dict,
+    info: dict,
+) -> RedirectResponse:
+    """Keep the mailbox the owner just connected for Money, then read its recent alerts. The
+    signed-in session must be the one that started it; the mailbox may be any Google account."""
+    user = await user_for_token(db, request.cookies.get(settings.session_cookie_name))
+    if user is None or str(user.id) != user_id or user.role != RoleName.owner:
+        return RedirectResponse(f"{MAILBOX_PAGE}?mailbox=failed", status.HTTP_303_SEE_OTHER)
+
+    def done(result: str) -> RedirectResponse:
+        return RedirectResponse(f"{MAILBOX_PAGE}?mailbox={result}", status.HTTP_303_SEE_OTHER)
+
+    if normalize_email(info["email"]) == user.email:
+        return done("same")
+    existing = await money_mail.mailboxes(db, user.id)
+    known = {b.email_hash for b in existing}
+    if (
+        money_mail.email_hash(info["email"]) not in known
+        and len(existing) >= money_mail.MAX_MAILBOXES
+    ):
+        return done("too_many")
+    box = await money_mail.save(db, settings, user.id, info["email"], token)
+    if box is None:
+        return done("no_access")
+    await db.commit()
+    log.info("money.mailbox_added", extra={"user_id": str(user.id), "mailbox_id": str(box.id)})
+    await queue.enqueue_money_sync(user.id)
+    return done("added")
 
 
 async def _finish_connect(

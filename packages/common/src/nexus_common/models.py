@@ -2107,6 +2107,14 @@ class MoneyAccount(Base):
     statement_on: Mapped[date | None] = mapped_column(Date)
     # When the person marked the current bill paid by hand.
     paid_on: Mapped[date | None] = mapped_column(Date)
+    # Cards: the expiry month (stored as its first day), typed in by hand.
+    expires_on: Mapped[date | None] = mapped_column(Date)
+    # Bank accounts: the debit card's last four digits, so its alerts land on this account.
+    card_mask: Mapped[str | None] = mapped_column(String(8))
+    # Credit cards: the account the bill is paid from.
+    bill_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
     # Closed or not worth showing; its transactions still count.
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -2260,10 +2268,65 @@ class MoneySubscription(Base):
     manage_url: Mapped[str | None] = mapped_column(String(300))
     note: Mapped[str | None] = mapped_column(String(300))
     cancelled_on: Mapped[date | None] = mapped_column(Date)
+    # The card or account it is charged to, when the person set it (otherwise the latest
+    # charge's account), and a move to another card in progress: set with the day it was asked
+    # for, cleared (with moved_on stamped) once a charge lands on the new card.
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    move_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    move_since: Mapped[date | None] = mapped_column(Date)
+    moved_on: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "key"),)
+
+
+class MoneyMailbox(Base):
+    """Another Gmail account that Money reads bank and card alerts from, for someone whose
+    alerts go to a different address from the one they sign in with. Read-only mail access;
+    the address and tokens are encrypted, and only a masked address is shown."""
+
+    __tablename__ = "money_mailboxes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # sha256 of the lower-cased address, so the same mailbox isn't added twice.
+    email_hash: Mapped[str] = mapped_column(String(64))
+    email_enc: Mapped[str] = mapped_column(Text)
+    email_masked: Mapped[str] = mapped_column(String(80))
+    refresh_token: Mapped[str] = mapped_column(Text)
+    access_token: Mapped[str | None] = mapped_column(Text)
+    access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    synced_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "email_hash", name="uq_money_mailboxes_user_email"),
+    )
+
+
+class AdviceState(Base):
+    """What the person did with an advice item: done, snoozed until a day, or dismissed. Keys
+    name the rule and what it is about (and often the period), so a new occurrence shows
+    again."""
+
+    __tablename__ = "advice_states"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(String(160))
+    # done, snoozed or dismissed.
+    status: Mapped[str] = mapped_column(String(10))
+    until: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_advice_states_user_key"),)
 
 
 class MoneyAsset(Base):
@@ -2287,6 +2350,9 @@ class MoneyAsset(Base):
     balance_on: Mapped[date | None] = mapped_column(Date)
     # What goes in each month (EPF, NPS, other) or each year (PPF).
     contribution_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    # How often contribution_paise goes in: monthly, quarterly or yearly. None means the usual
+    # for the kind (yearly for PPF, monthly for the rest).
+    contribution_cadence: Mapped[str | None] = mapped_column(String(10))
     # FD: interest paid out rather than added to the deposit.
     payout: Mapped[bool] = mapped_column(Boolean, default=False)
     # active or closed.

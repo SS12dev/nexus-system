@@ -26,7 +26,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money
+from nexus_common import advice_store, money
 from nexus_common import money_store as store
 from nexus_common import organiser as org
 from nexus_common.google import GoogleNotConnected, access_token
@@ -36,6 +36,8 @@ from nexus_common.settings import Settings
 log = logging.getLogger(__name__)
 
 SECTIONS = ("weather", "calendar", "tasks", "money")
+# Advice items marked "do now" shown under Money.
+ADVICE_LINES = 3
 DEFAULT_SEND_AT = "07:30"
 # A brief that couldn't go at its time (the Mac was asleep) still goes within this window.
 SEND_WINDOW = timedelta(hours=3)
@@ -415,7 +417,12 @@ async def money_lines(db: AsyncSession, user: User, today: date) -> dict | None:
     spent = [t for t in txns if money.spending(t)]
     safe = health["safe_to_spend"]
     step = health["next_step"]
+    todo = [
+        i for i in (await advice_store.view(db, user, today))["items"]
+        if i["level"] == "act" and i["area"] != "life"
+    ][:ADVICE_LINES]  # fmt: skip
     return {
+        "advice": [{"title": i["title"], "url": i["url"]} for i in todo],
         "safe": {
             "known": safe["known"],
             "left_paise": safe["left_paise"],
@@ -617,6 +624,8 @@ def as_text(b: dict, *, with_money: bool = True, url: str | None = None) -> str:
             rows.append(
                 f"- Yesterday: {whole(y['spent_paise'])} across {_plural(y['count'], 'payment')}"
             )
+        for a in m.get("advice") or []:
+            rows.append(f"- To sort out: {a['title']}")
         if m["next_step"] and m["next_step"]["status"] != "good":
             step = m["next_step"]
             rows.append(

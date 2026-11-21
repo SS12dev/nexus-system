@@ -9,6 +9,7 @@ import {
   emiFor,
   fullDay,
   isoToday,
+  monthLabel,
   percent,
   rupees,
   whenLabel,
@@ -46,7 +47,7 @@ export function AccountsView() {
   const { data, error } = useMoney(api.moneyBalances);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [showHidden, setShowHidden] = useState(false);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<"bank" | "card" | null>(null);
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!data) return <Spinner />;
   const banks = data.items.filter((a) => a.kind === "bank" && (showHidden || !a.hidden));
@@ -64,12 +65,20 @@ export function AccountsView() {
           Every account and card, from what you add here, alert emails, screenshots and statements, with the latest balance each
           one showed. Card bills come from statement emails; type anything that's missing.
         </p>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60"
-        >
-          <Plus size={12} /> Add an account
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setAdding("bank")}
+            className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60"
+          >
+            <Plus size={12} /> Add a bank account
+          </button>
+          <button
+            onClick={() => setAdding("card")}
+            className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60"
+          >
+            <Plus size={12} /> Add a card
+          </button>
+        </div>
       </div>
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat
@@ -86,7 +95,7 @@ export function AccountsView() {
       {data.items.length === 0 && (
         <Empty>
           No accounts yet.{" "}
-          <button onClick={() => setAdding(true)} className="text-sky-300 hover:text-sky-200">
+          <button onClick={() => setAdding("bank")} className="text-sky-300 hover:text-sky-200">
             Add your accounts and cards
           </button>{" "}
           with their last four digits, then switch on alert emails or add screenshots in{" "}
@@ -126,6 +135,7 @@ export function AccountsView() {
                   <span className="block truncate text-xs text-slate-500">
                     Spent {rupees(a.spent_month_paise, { whole: true })} · in {rupees(a.in_month_paise, { whole: true })} this month
                     {a.last_on && ` · last ${dayLabel(a.last_on)}`}
+                    {a.card_mask && ` · debit card ••${a.card_mask}`}
                   </span>
                   {a.balance_check && <BalanceCheckLine check={a.balance_check} accountId={a.id} />}
                 </span>
@@ -210,9 +220,11 @@ export function AccountsView() {
       )}
 
       {dialog?.kind === "balance" && <BankDialog a={dialog.account} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "card" && <CardDialog a={dialog.account} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "card" && (
+        <CardDialog a={dialog.account} banks={data.items.filter((x) => x.kind === "bank")} onClose={() => setDialog(null)} />
+      )}
       {dialog?.kind === "loan" && <LoanDialog loan={dialog.loan} seen={dialog.seen} cards={cardOptions} onClose={() => setDialog(null)} />}
-      {adding && <AddAccountDialog onClose={() => setAdding(false)} />}
+      {adding && <AddAccountDialog card={adding === "card"} onClose={() => setAdding(null)} />}
     </>
   );
 }
@@ -284,6 +296,13 @@ function CardTile({ a, onEdit }: { a: AccountView; onEdit: () => void }) {
         Spent {rupees(a.spent_month_paise, { whole: true })} this month
         {a.owed_paise != null && ` · about ${rupees(a.owed_paise, { whole: true })} owed now`}
       </p>
+      {(a.bill_from_label || a.expires_on) && (
+        <p className="mt-1 truncate text-xs text-slate-500">
+          {a.bill_from_label && `Bill paid from ${a.bill_from_label}`}
+          {a.bill_from_label && a.expires_on && " · "}
+          {a.expires_on && `expires ${monthLabel(a.expires_on.slice(0, 7))}`}
+        </p>
+      )}
       {!!a.emis?.length && (
         <p className="mt-1 truncate text-xs text-slate-500">
           EMIs: {a.emis.map((e) => `${e.name} ${rupees(e.emi_paise, { whole: true })}`).join(", ")}
@@ -380,6 +399,15 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
       optional: true,
       hint: "Updated again automatically by the next alert or statement that shows a balance.",
     },
+    {
+      key: "debit",
+      label: "Debit card's last four",
+      kind: "text",
+      value: a.card_mask ?? "",
+      optional: true,
+      placeholder: "5678",
+      hint: "Card alerts quote the card's digits, not the account's. With them, those alerts land here.",
+    },
     { key: "hidden", label: "Hide this account", kind: "check", value: a.hidden ? "1" : "", hint: "Its transactions still count." },
   ];
   return (
@@ -389,14 +417,21 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
       submitLabel="Save"
       onClose={onClose}
       onSubmit={async (v) => {
-        await api.moneyEditAccount(a.id, { name: v.name, balance_paise: read.money(v.balance), hidden: v.hidden === "1" });
+        const debit = v.debit.replace(/\D/g, "");
+        if (debit && debit.length !== 4) throw new Error("Type the debit card's last four digits.");
+        await api.moneyEditAccount(a.id, {
+          name: v.name,
+          balance_paise: read.money(v.balance),
+          hidden: v.hidden === "1",
+          ...(debit !== (a.card_mask ?? "") ? { card_mask: debit || null } : {}),
+        });
         toast("Saved");
       }}
     />
   );
 }
 
-function CardDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
+function CardDialog({ a, banks, onClose }: { a: AccountView; banks: AccountView[]; onClose: () => void }) {
   const fields: Field[] = [
     { key: "name", label: "Name", kind: "text", value: a.name, placeholder: a.label, optional: true },
     {
@@ -410,6 +445,15 @@ function CardDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
     { key: "due", label: "Current bill", kind: "money", value: moneyText(a.due_paise), optional: true, half: true },
     { key: "min", label: "Minimum due", kind: "money", value: moneyText(a.min_due_paise), optional: true, half: true },
     { key: "due_on", label: "Due date", kind: "date", value: a.due_on ?? "", optional: true },
+    { key: "expires", label: "Expires (any day in the month)", kind: "date", value: a.expires_on ?? "", optional: true, half: true },
+    {
+      key: "bill_from",
+      label: "Bill paid from",
+      kind: "select",
+      value: a.bill_from_id ?? "",
+      options: [["", "Not set"], ...banks.map((b) => [b.id, b.label] as [string, string])],
+      half: true,
+    },
     { key: "hidden", label: "Hide this card", kind: "check", value: a.hidden ? "1" : "", hint: "Its transactions still count." },
   ];
   return (
@@ -427,6 +471,8 @@ function CardDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
           credit_limit_paise: read.money(v.limit),
           hidden: v.hidden === "1",
           min_due_paise: read.money(v.min),
+          expires_on: v.expires || null,
+          bill_from_id: v.bill_from || null,
           ...(changedBill ? { due_paise: due, due_on: v.due_on || null } : {}),
         });
         toast("Saved");

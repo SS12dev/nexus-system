@@ -13,6 +13,16 @@ export interface MoneySettings {
   last_error: string | null;
   rules: number;
   categories: string[];
+  /** Other Gmail accounts alerts are read from, with masked addresses. */
+  mailboxes: Mailbox[];
+}
+
+export interface Mailbox {
+  id: string;
+  email_masked: string;
+  synced_at: string | null;
+  last_error: string | null;
+  created_at: string;
 }
 
 export interface MoneyTxn {
@@ -119,6 +129,14 @@ export interface Subscription {
   manage_url: string | null;
   note: string | null;
   cancelled_on: string | null;
+  /** The card or account it is charged to: set by hand, or the latest charge's. */
+  account_id: string | null;
+  account_label: string | null;
+  account_kind: "bank" | "card" | null;
+  account_set: boolean;
+  /** A move to another card in progress; stuck_on is a charge that still hit another account. */
+  moving: { to_id: string; to_label: string; from_label: string | null; since: string; stuck_on: string | null } | null;
+  moved_on: string | null;
 }
 
 export interface Subscriptions {
@@ -142,6 +160,8 @@ export interface SubscriptionSave {
   next_on?: string;
   category?: string;
   cancelled_on?: string;
+  account_id?: string | null;
+  move_to_id?: string | null;
 }
 
 export type BillStatus = "none" | "due" | "part" | "paid" | "overdue";
@@ -176,6 +196,12 @@ export interface AccountView {
   emis?: { id: string; name: string; emi_paise: number }[];
   /** Banks: whether the transactions add up to the balances the bank printed. */
   balance_check?: BalanceCheck | null;
+  /** Banks: the debit card's last four digits. */
+  card_mask?: string | null;
+  /** Credit cards: the expiry month (its first day) and the account the bill is paid from. */
+  expires_on?: string | null;
+  bill_from_id?: string | null;
+  bill_from_label?: string | null;
 }
 
 export interface AccountEdit {
@@ -187,6 +213,9 @@ export interface AccountEdit {
   min_due_paise?: number | null;
   due_on?: string | null;
   paid?: boolean;
+  expires_on?: string | null;
+  bill_from_id?: string | null;
+  card_mask?: string | null;
 }
 
 export type LoanKind = "card_emi" | "personal" | "home" | "vehicle" | "education" | "other";
@@ -272,6 +301,7 @@ export interface Asset {
   maturity_on: string | null;
   balance_on: string | null;
   contribution_paise: number;
+  contribution_cadence: ContributionCadence;
   payout: boolean;
   status: "active" | "closed";
   note: string | null;
@@ -301,6 +331,7 @@ export interface AssetIn {
   maturity_on?: string | null;
   balance_on?: string | null;
   contribution_paise?: number;
+  contribution_cadence?: ContributionCadence | null;
   payout?: boolean;
   status?: "active" | "closed";
   note?: string | null;
@@ -687,13 +718,49 @@ export function addMonths(day: string, months: number): string {
 }
 
 export interface NewAccount {
-  kind: "bank" | "card";
-  institution: string;
+  /** A debit card isn't an account of its own: it is added to its bank account (account_id). */
+  kind: "bank" | "card" | "debit";
+  institution?: string;
   mask: string;
   name?: string;
   balance_paise?: number | null;
   credit_limit_paise?: number | null;
+  expires_on?: string | null;
+  bill_from_id?: string | null;
+  card_mask?: string | null;
+  account_id?: string;
 }
+
+export type ContributionCadence = "monthly" | "quarterly" | "yearly";
+
+// --- Advice ---------------------------------------------------------------------------------------
+
+export type AdviceLevel = "act" | "look" | "good";
+export type AdviceArea = "cards" | "subscriptions" | "spending" | "safety" | "life";
+
+export interface AdviceItem {
+  key: string;
+  area: AdviceArea;
+  level: AdviceLevel;
+  title: string;
+  body: string;
+  /** How Nexus knows, in a few words. */
+  why: string;
+  url: string;
+  action: string;
+  amount_paise: number;
+}
+
+export interface Advice {
+  items: AdviceItem[];
+  counts: Record<AdviceLevel, number>;
+  hidden: number;
+  /** Items the person marked done, dismissed or snoozed that still hold today. */
+  set_aside: { key: string; title: string; status: "done" | "dismissed" | "snoozed"; until: string | null }[];
+  money: boolean;
+}
+
+export type AdviceAction = "done" | "dismissed" | "snoozed" | "restore";
 
 export interface ScreenshotRow {
   occurred_on: string;

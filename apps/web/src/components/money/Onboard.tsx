@@ -5,29 +5,22 @@ import { api } from "../../lib/api";
 import { dayLabel, mergeScreenshotRows, rupees, type MoneySettings, type ScreenshotReading, type ScreenshotRow } from "../../lib/money";
 import { toast } from "../Feedback";
 import { Select } from "../Select";
-import { FormDialog, read, type Field } from "./FormDialog";
+import { FormDialog, read, type Field, type Values } from "./FormDialog";
 import { Card, useAccounts, useMoney } from "./parts";
 
-// --- Adding an account by hand --------------------------------------------------------------------
+// --- Adding an account or a card by hand ------------------------------------------------------------
 
-/** Type in a bank account or card so alert emails with the same last four digits land on it,
- * with its balance or limit from the app. */
-export function AddAccountDialog({ onClose }: { onClose: () => void }) {
+/** Type in a bank account or a card so alert emails with the same last four digits land on it,
+ * with its balance or limit from the app. A debit card isn't an account of its own: it spends
+ * straight from a bank account, so it is added to that account. A credit card is: it has its own
+ * limit and a monthly bill, paid from a bank account. */
+export function AddAccountDialog({ onClose, card = false }: { onClose: () => void; card?: boolean }) {
   const { data } = useMoney(api.moneyBanks);
+  const accounts = useAccounts();
   if (!data) return null;
-  const fields: Field[] = [
-    {
-      key: "kind",
-      label: "Type",
-      kind: "select",
-      value: "bank",
-      options: [
-        ["bank", "Bank account"],
-        ["card", "Credit card"],
-      ],
-      half: true,
-    },
-    { key: "mask", label: "Last four digits", kind: "text", value: "", half: true, placeholder: "1234", hint: "As shown in the app or on the card." },
+  const banks = accounts.filter((a) => a.kind === "bank");
+  const bankOptions: [string, string][] = banks.map((a) => [a.id, a.label]);
+  const bankField = (when?: (v: Values) => boolean): Field[] => [
     {
       key: "bank",
       label: "Bank",
@@ -35,32 +28,97 @@ export function AddAccountDialog({ onClose }: { onClose: () => void }) {
       value: data.banks[0] ?? "",
       options: [...data.banks.map((b) => [b, b] as [string, string]), ["other", "Another bank…"]],
       half: true,
+      when,
     },
-    { key: "other", label: "Bank name", kind: "text", value: "", half: true, when: (v) => v.bank === "other" },
-    { key: "name", label: "Name (optional)", kind: "text", value: "", optional: true, placeholder: "Salary account, Travel card…" },
-    { key: "balance", label: "Balance now", kind: "money", value: "", optional: true, when: (v) => v.kind === "bank", hint: "From the app's home screen. Alerts keep it current after." },
-    { key: "limit", label: "Credit limit", kind: "money", value: "", optional: true, when: (v) => v.kind === "card" },
+    { key: "other", label: "Bank name", kind: "text", value: "", half: true, when: (v) => (!when || when(v)) && v.bank === "other" },
   ];
+  const credit = (v: Values) => v.type === "credit";
+  const fields: Field[] = card
+    ? [
+        {
+          key: "type",
+          label: "Type of card",
+          kind: "select",
+          value: "credit",
+          options: [
+            ["credit", "Credit card: its own limit and a monthly bill"],
+            ["debit", "Debit card: spends straight from a bank account"],
+          ],
+        },
+        { key: "mask", label: "Last four digits of the card", kind: "text", value: "", half: true, placeholder: "1234" },
+        ...bankField(credit),
+        {
+          key: "account",
+          label: "Bank account it spends from",
+          kind: "select",
+          value: bankOptions[0]?.[0] ?? "",
+          options: bankOptions.length ? bankOptions : [["", "Add the bank account first"]],
+          when: (v) => v.type === "debit",
+          hint: "Its alerts then land on that account, and spending counts once.",
+        },
+        { key: "name", label: "Name", kind: "text", value: "", optional: true, placeholder: "Amazon Pay card, Travel card…", when: credit },
+        { key: "limit", label: "Credit limit", kind: "money", value: "", optional: true, half: true, when: credit },
+        { key: "expires", label: "Expires (any day in the month)", kind: "date", value: "", optional: true, half: true, when: credit, hint: "Advice reminds you before, with what's charged to it." },
+        {
+          key: "bill_from",
+          label: "Bill paid from",
+          optional: true,
+          kind: "select",
+          value: "",
+          options: [["", "Not set"], ...bankOptions],
+          when: credit,
+        },
+      ]
+    : [
+        ...bankField(),
+        { key: "mask", label: "Last four digits of the account", kind: "text", value: "", half: true, placeholder: "1234", hint: "As shown in the app." },
+        { key: "name", label: "Name", kind: "text", value: "", optional: true, placeholder: "Salary account, Savings…" },
+        { key: "balance", label: "Balance now", kind: "money", value: "", optional: true, half: true, hint: "From the app's home screen. Alerts keep it current after." },
+        { key: "debit", label: "Debit card's last four", kind: "text", value: "", optional: true, half: true, placeholder: "5678", hint: "Card alerts quote the card's digits, not the account's." },
+      ];
+  const four = (text: string, what: string) => {
+    const digits = text.replace(/\D/g, "");
+    if (digits.length !== 4) throw new Error(`Type the last four digits of the ${what}.`);
+    return digits;
+  };
   return (
     <FormDialog
-      title="Add an account"
-      description="For each account or card you use. Alert emails and screenshots with the same bank and last four digits then land on it."
+      title={card ? "Add a card" : "Add a bank account"}
+      description={
+        card
+          ? "Alert emails and screenshots with the same last four digits then land on it. A debit card is added to its bank account; a credit card gets its own limit and bill."
+          : "For each bank account you use. Alert emails and screenshots with the same bank and last four digits then land on it."
+      }
       fields={fields}
       submitLabel="Add"
       onClose={onClose}
       onSubmit={async (v) => {
-        const mask = v.mask.replace(/\D/g, "");
-        if (mask.length !== 4) throw new Error("Type the last four digits of the account or card number.");
+        if (card && v.type === "debit") {
+          if (!v.account) throw new Error("Add the bank account first, then its debit card.");
+          const r = await api.moneyAddAccount({ kind: "debit", mask: four(v.mask, "card"), account_id: v.account });
+          toast(r.moved ? `Added to ${r.label}; ${r.moved} earlier card payments moved there` : `Added to ${r.label}`);
+          return;
+        }
         const institution = v.bank === "other" ? v.other.trim() : v.bank;
         if (!institution) throw new Error("Type the bank's name.");
-        const r = await api.moneyAddAccount({
-          kind: v.kind as "bank" | "card",
-          institution,
-          mask,
-          name: v.name.trim(),
-          balance_paise: v.kind === "bank" ? read.money(v.balance) : null,
-          credit_limit_paise: v.kind === "card" ? read.money(v.limit) : null,
-        });
+        const r = card
+          ? await api.moneyAddAccount({
+              kind: "card",
+              institution,
+              mask: four(v.mask, "card"),
+              name: v.name.trim(),
+              credit_limit_paise: read.money(v.limit),
+              expires_on: v.expires || null,
+              bill_from_id: v.bill_from || null,
+            })
+          : await api.moneyAddAccount({
+              kind: "bank",
+              institution,
+              mask: four(v.mask, "account"),
+              name: v.name.trim(),
+              balance_paise: read.money(v.balance),
+              card_mask: v.debit.trim() ? four(v.debit, "debit card") : null,
+            });
         toast(`Added ${r.label}`);
       }}
     />

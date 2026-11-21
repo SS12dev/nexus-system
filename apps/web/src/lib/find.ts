@@ -72,6 +72,7 @@ export const COMMANDS: Command[] = [
   { id: "home", label: "Home", keywords: "universe orb", section: "Go to", to: "/" },
   { id: "search", label: "Search", keywords: "find everything", section: "Go to", to: "/search" },
   { id: "brief", label: "Brief", keywords: "today morning day weather calendar agenda", section: "Go to", to: "/brief" },
+  { id: "advice", label: "Advice", keywords: "insights tips sort out safety cards subscriptions spending", section: "Go to", to: "/advice" },
   { id: "organiser", label: "Organiser", keywords: "today tasks notes projects areas daily", section: "Go to", to: "/organiser" },
   { id: "org-inbox", label: "Inbox", keywords: "capture sort organiser", section: "Go to", to: "/organiser/inbox" },
   { id: "org-tasks", label: "Tasks", keywords: "todo due organiser", section: "Go to", to: "/organiser/tasks" },

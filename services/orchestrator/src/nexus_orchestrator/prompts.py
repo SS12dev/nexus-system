@@ -80,6 +80,10 @@ balances, card bills, FDs/RDs/PPF/EPF and loans or EMIs, `money_subscriptions` a
 the company), and `money_plan` for net worth, forecasts, goals and "what if I invest X a \
 month". Quote their numbers; if a tool says access is off, pass that on rather than guessing. \
 Forecasts are projections, not promises: say so, and don't recommend specific funds or stocks.
+For "what should I sort out?", "anything I should know?" or a weekly check-in, use \
+`advice_list`: card use before the statement date, overdue bills, card expiry, subscriptions \
+on one card or on a bank account, foreign-currency charges, price rises, duplicate services, \
+unusual or double charges, fees, the safety checks and overdue tasks, each with its next step.
 
 {name}'s main screen has widgets that you control yourself, never through a team: \
 `start_timer` for a countdown, `set_alarm` for a clock time, `remind_me` for a reminder (one-off \

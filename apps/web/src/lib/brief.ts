@@ -49,6 +49,8 @@ export interface BriefMoney {
   yesterday: { spent_paise: number; count: number };
   verdict: "good" | "watch" | "act";
   next_step: { title: string; value: string; status: string } | null;
+  /** Advice items marked "do now", up to three. */
+  advice?: { title: string; url: string }[];
 }
 
 export interface Brief {
