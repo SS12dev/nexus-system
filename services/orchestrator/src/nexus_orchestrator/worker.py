@@ -25,6 +25,7 @@ from nexus_common.skills import sync_library
 from nexus_common.storage import S3Storage
 from nexus_orchestrator import (
     accounts,
+    brief,
     chat_import,
     deploy,
     graph_local,
@@ -165,6 +166,18 @@ async def money_sync(ctx: dict, user_id: str, back_days: int | None = None) -> N
 async def money_hourly(ctx: dict) -> None:
     await money.sync_all(ctx["deps"])
     await money.send_reminders(ctx["deps"])
+
+
+@traced_job
+async def brief_due(ctx: dict) -> None:
+    """Morning briefs due now, at each person's time in their own time zone."""
+    await brief.send_due(ctx["deps"])
+
+
+@traced_job
+async def brief_now(ctx: dict, user_id: str) -> None:
+    """The Brief page's "Send me one now", to try the channels."""
+    await brief.deliver(ctx["deps"], uuid.UUID(user_id))
 
 
 @traced_job
@@ -419,6 +432,7 @@ class WorkerSettings:
         # A filing suggestion is a nice-to-have: one try, and the item is fine without it.
         func(organiser_suggest, timeout=90, keep_result=0, max_tries=1),
         func(money_sync, timeout=1800, keep_result=0, max_tries=1),
+        func(brief_now, timeout=120, keep_result=0, max_tries=1),
     ]
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
@@ -432,6 +446,8 @@ class WorkerSettings:
         cron(money_hourly, minute=20, unique=True, timeout=1800),
         # AMFI publishes the day's NAVs by about 11 pm IST (17:30 UTC); read them after.
         cron(money_navs, hour=19, minute=15, unique=True, timeout=300),
+        # Every five minutes, so a brief set for 7:30 (or 7:45 in Kathmandu) goes on time.
+        cron(brief_due, minute=set(range(2, 60, 5)), unique=True, timeout=240),
         # Five minutes after, so a chat summarised at :00 is in the graph by :05.
         cron(
             graph_extract,

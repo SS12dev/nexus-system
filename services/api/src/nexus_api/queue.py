@@ -33,6 +33,7 @@ class JobQueue(Protocol):
     async def enqueue_money_sync(
         self, user_id: uuid.UUID, back_days: int | None = None
     ) -> None: ...
+    async def enqueue_brief(self, user_id: uuid.UUID) -> None: ...
 
 
 class ArqJobQueue:
@@ -152,6 +153,10 @@ class ArqJobQueue:
         await self.enqueue_job(
             "organiser_suggest", str(item_id), _job_id=f"organiser-suggest:{item_id}"
         )
+
+    async def enqueue_brief(self, user_id: uuid.UUID) -> None:
+        """Send one person's morning brief now, to try the channels. One at a time."""
+        await self.enqueue_job("brief_now", str(user_id), _job_id=f"brief-now:{user_id}")
 
     async def enqueue_money_sync(self, user_id: uuid.UUID, back_days: int | None = None) -> None:
         """Read new bank alert and CAS emails for one person now (or, with back_days, old alerts

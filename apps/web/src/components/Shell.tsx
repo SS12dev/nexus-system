@@ -17,6 +17,7 @@ import {
   Search,
   Settings,
   Sparkles,
+  Sunrise,
   Trash2,
   Users,
   Wallet,
@@ -225,6 +226,9 @@ export function Shell() {
           ))}
         </nav>
         <div className={`border-t border-edge p-3 text-sm ${collapsed ? "md:px-2" : ""}`}>
+          <NavLink to="/brief" className={navClass} title={tip("Brief")}>
+            <Sunrise size={16} className="shrink-0" /> <span className={label}>Brief</span>
+          </NavLink>
           <NavLink to="/organiser" className={(p) => `relative ${navClass(p)}`} title={tip("Organiser")}>
             <LayoutList size={16} className="shrink-0" /> <span className={label}>Organiser</span>
             {orgInbox > 0 && (

@@ -2333,3 +2333,40 @@ class MoneyGoal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (Index("ix_money_goals_user", "user_id"),)
+
+
+# --- Morning brief (nexus_common/brief.py) -------------------------------------------------------
+
+
+class BriefSettings(Base):
+    """When and where one person's morning brief goes. The brief itself is built fresh each
+    time from the organiser, the calendar, the weather and Money; nothing of it is stored."""
+
+    __tablename__ = "brief_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Local time, "HH:MM", in the person's time zone.
+    send_at: Mapped[str] = mapped_column(String(5), default="07:30")
+    # "every" day or "weekdays" (Monday to Friday).
+    days: Mapped[str] = mapped_column(String(10), default="every")
+    # A notice in the bell, pushed to the phone when push is set up.
+    push: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # The whole brief as a Telegram message, when Telegram is linked.
+    telegram: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # Money lines in the Telegram message too. Off by default: Telegram isn't end-to-end.
+    telegram_money: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    # Where the weather is for, picked from Open-Meteo's place search.
+    place: Mapped[str | None] = mapped_column(String(120))
+    lat: Mapped[float | None] = mapped_column(Float)
+    lon: Mapped[float | None] = mapped_column(Float)
+    # Which parts to show: a list from brief.SECTIONS. Empty means all.
+    sections: Mapped[list] = mapped_column(JSON, default=list)
+    # The local day the last scheduled brief went out, so it goes once a day.
+    last_sent_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

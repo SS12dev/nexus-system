@@ -650,6 +650,73 @@ async def review_state(db: AsyncSession, user: User, today: date | None = None) 
     return ReviewState(monday, review, inbox, overdue, stalled, done, upcoming, candidates)
 
 
+@dataclass
+class Agenda:
+    """The organiser's part of a day: what's late, due, in hand and in focus."""
+
+    today: date
+    overdue: list[OrgItem]
+    due: list[OrgItem]
+    doing: list[OrgItem]
+    focus: list[OrgItem]
+    inbox: int
+    review_done: bool
+
+
+async def agenda(db: AsyncSession, user: User, today: date, limit: int = 30) -> Agenda:
+    """Open tasks overdue, due today or being done, this week's focus from the weekly review,
+    and how many things wait in the Inbox. Lighter than review_state, for the morning brief."""
+    base = live(user.id)
+    open_tasks = list(
+        (
+            await db.scalars(
+                select(OrgItem)
+                .where(
+                    base,
+                    OrgItem.type == "task",
+                    OrgItem.status.in_(("todo", "doing")),
+                    or_(OrgItem.due_on <= today, OrgItem.status == "doing"),
+                )
+                .order_by(OrgItem.due_on.asc().nulls_last(), OrgItem.priority.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    overdue = [t for t in open_tasks if t.due_on and t.due_on < today]
+    due = [t for t in open_tasks if t.due_on == today]
+    doing = [t for t in open_tasks if t not in overdue and t not in due]
+    review = await db.scalar(
+        select(OrgReview).where(OrgReview.user_id == user.id, OrgReview.week_of == week_of(today))
+    )
+    focus: list[OrgItem] = []
+    if review and review.focus:
+        ids = []
+        for i in review.focus:
+            try:
+                ids.append(uuid.UUID(str(i)))
+            except ValueError:
+                continue
+        found = {
+            x.id: x
+            for x in (
+                await db.scalars(
+                    select(OrgItem).where(
+                        base,
+                        OrgItem.id.in_(ids),
+                        OrgItem.status.not_in(("done", "dropped", "archived")),
+                    )
+                )
+            ).all()
+        }
+        focus = [found[i] for i in ids if i in found]
+    inbox = await db.scalar(
+        select(func.count()).select_from(OrgItem).where(base, OrgItem.status == "inbox")
+    )
+    return Agenda(
+        today, overdue, due, doing, focus, int(inbox or 0), bool(review and review.completed_at)
+    )
+
+
 async def complete_review(
     db: AsyncSession, user: User, focus: list[uuid.UUID], notes: str, stats: dict
 ) -> OrgReview:
