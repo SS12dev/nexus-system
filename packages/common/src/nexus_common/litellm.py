@@ -1,5 +1,6 @@
 """Admin client for the LiteLLM proxy: one virtual key per user carries that user's budget."""
 
+import logging
 import uuid
 from decimal import Decimal
 
@@ -11,8 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexus_common.models import ApiKey, Budget, RoleName, User, utcnow
 from nexus_common.settings import Settings
 
+log = logging.getLogger(__name__)
+
 PROVIDER = "litellm"
 MODEL_ALIASES = ["nexus-nano", "nexus-mini", "nexus-pro", "nexus-max"]
+# What a person's own key may call: the chat tiers plus speech to text (Telegram voice notes).
+USER_MODELS = [*MODEL_ALIASES, "nexus-transcribe"]
 
 
 class GatewayError(RuntimeError):
@@ -46,7 +51,7 @@ class LiteLLMAdmin:
             {
                 "key_alias": f"nexus-user-{user.id}",
                 "user_id": str(user.id),
-                "models": MODEL_ALIASES,
+                "models": USER_MODELS,
                 "max_budget": float(max_usd),
                 "budget_duration": duration,
                 "metadata": {"email": user.email, "source": "nexus-api"},
@@ -79,6 +84,9 @@ class LiteLLMAdmin:
             "/key/update",
             {"key": key, "max_budget": float(max_usd), "budget_duration": duration},
         )
+
+    async def set_models(self, key: str, models: list[str]) -> None:
+        await self._post("/key/update", {"key": key, "models": models})
 
     async def set_blocked(self, key: str, blocked: bool) -> None:
         await self._post("/key/block" if blocked else "/key/unblock", {"key": key})
@@ -161,3 +169,23 @@ async def ensure_user_key(
             raise
         return existing.secret
     return secret
+
+
+async def widen_user_keys(session: AsyncSession, admin: LiteLLMAdmin) -> int:
+    """Give every person's key the models in USER_MODELS. Keys made before an alias was added
+    (nexus-transcribe, 2026-11) can't call it otherwise. Safe to repeat; run at worker start."""
+    keys = (
+        await session.scalars(
+            select(ApiKey).where(ApiKey.provider == PROVIDER, ApiKey.revoked_at.is_(None))
+        )
+    ).all()
+    done = 0
+    for key in keys:
+        try:
+            await admin.set_models(key.secret, USER_MODELS)
+            done += 1
+        except GatewayError as exc:
+            log.warning(
+                "litellm.widen_failed", extra={"user_id": str(key.user_id), "error": str(exc)[:200]}
+            )
+    return done

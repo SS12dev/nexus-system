@@ -128,6 +128,10 @@ class FakeGateway:
         self.keys[key]["max_usd"] = max_usd
         self.calls.append(("update_budget", key, max_usd))
 
+    async def set_models(self, key: str, models: list[str]) -> None:
+        self.keys.setdefault(key, {})["models"] = list(models)
+        self.calls.append(("set_models", key))
+
     async def set_blocked(self, key: str, blocked: bool) -> None:
         self.keys[key]["blocked"] = blocked
         self.calls.append(("set_blocked", key, blocked))
