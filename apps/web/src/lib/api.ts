@@ -5,6 +5,9 @@ import type {
   AssetIn,
   Assumptions,
   Health,
+  NewAccount,
+  ScreenshotReading,
+  ScreenshotSave,
   Balances,
   Investments,
   Loan,
@@ -314,6 +317,16 @@ export const api = {
     request<{ id: string }>(`/api/money/goals/${id}`, { method: "PATCH", body: json(body) }),
   moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
   moneyInvestments: () => request<Investments>("/api/money/investments"),
+  moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
+  moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string }>("/api/money/accounts", { method: "POST", body: json(body) }),
+  moneyReadScreenshot: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ScreenshotReading>("/api/money/screenshots/read", { method: "POST", body: form });
+  },
+  moneySaveScreenshots: (body: ScreenshotSave) =>
+    request<{ added: number; matched: number; skipped: number; account_label: string | null }>("/api/money/screenshots/save", { method: "POST", body: json(body) }),
+  moneyReadHistory: (months: number) => request<{ queued: boolean; months: number }>("/api/money/sync/history", { method: "POST", body: json({ months }) }),
   moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
   moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string } = {}) => {
     const form = new FormData();

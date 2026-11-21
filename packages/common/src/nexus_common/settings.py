@@ -124,6 +124,9 @@ class Settings(BaseSettings):
     graph_extractor: str = "local"
     graph_local_model: str = "qwen3.5:9b"
     ollama_base_url: str = "http://host.docker.internal:11434"
+    # The Ollama model that reads banking-app screenshots for Money; empty uses the graph's
+    # local model (qwen3.5:9b reads images). Screenshots never go to a cloud model.
+    money_vision_model: str = ""
     # Nightly memory upkeep (decay, merge, profile rebuild), in UTC. 21:30 UTC is 03:00 IST.
     memory_nightly_hour_utc: int = 21
     memory_nightly_minute_utc: int = 30

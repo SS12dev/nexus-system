@@ -21,6 +21,7 @@ import {
 import { confirmAction, toast } from "../Feedback";
 import { SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, type Field, type Values } from "./FormDialog";
+import { AddAccountDialog } from "./Onboard";
 import { Empty, Spinner, Stat, useMoney } from "./parts";
 
 const STATUS_STYLE: Record<BillStatus, { icon: typeof CheckCircle2; colour: string }> = {
@@ -43,6 +44,7 @@ export function AccountsView() {
   const { data, error } = useMoney(api.moneyBalances);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [adding, setAdding] = useState(false);
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!data) return <Spinner />;
   const banks = data.items.filter((a) => a.kind === "bank" && (showHidden || !a.hidden));
@@ -55,10 +57,18 @@ export function AccountsView() {
 
   return (
     <>
-      <p className="mb-4 text-sm text-slate-400">
-        Every account and card found in your alert emails and statements, with the latest balance each one showed. Card bills
-        come from statement emails; type anything that's missing.
-      </p>
+      <div className="mb-4 flex flex-wrap items-start gap-3">
+        <p className="min-w-[16rem] flex-1 text-sm text-slate-400">
+          Every account and card, from what you add here, alert emails, screenshots and statements, with the latest balance each
+          one showed. Card bills come from statement emails; type anything that's missing.
+        </p>
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60"
+        >
+          <Plus size={12} /> Add an account
+        </button>
+      </div>
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat
           label="In the bank"
@@ -73,7 +83,11 @@ export function AccountsView() {
 
       {data.items.length === 0 && (
         <Empty>
-          No accounts yet. They appear when alert emails are read or a statement is uploaded in{" "}
+          No accounts yet.{" "}
+          <button onClick={() => setAdding(true)} className="text-sky-300 hover:text-sky-200">
+            Add your accounts and cards
+          </button>{" "}
+          with their last four digits, then switch on alert emails or add screenshots in{" "}
           <Link to="/money/setup" className="text-sky-300 hover:text-sky-200">
             Import and settings
           </Link>
@@ -195,6 +209,7 @@ export function AccountsView() {
       {dialog?.kind === "balance" && <BankDialog a={dialog.account} onClose={() => setDialog(null)} />}
       {dialog?.kind === "card" && <CardDialog a={dialog.account} onClose={() => setDialog(null)} />}
       {dialog?.kind === "loan" && <LoanDialog loan={dialog.loan} seen={dialog.seen} cards={cardOptions} onClose={() => setDialog(null)} />}
+      {adding && <AddAccountDialog onClose={() => setAdding(false)} />}
     </>
   );
 }

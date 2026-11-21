@@ -1,4 +1,4 @@
-import { CalendarClock, CreditCard, FileUp, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { CalendarClock, CreditCard, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "../components/Feedback";
@@ -7,6 +7,7 @@ import { BudgetMeter, CategoryBars, TrendBars } from "../components/money/Charts
 import { Card, Empty, MonthPicker, Spinner, Stat, useMoney, useMoneySettings } from "../components/money/parts";
 import { AccountsView } from "../components/money/Accounts";
 import { HealthStrip, HealthView } from "../components/money/Health";
+import { AddAccountDialog, GettingStarted } from "../components/money/Onboard";
 import { PlanView } from "../components/money/Plan";
 import { SavingsView } from "../components/money/Savings";
 import { SetupView } from "../components/money/Setup";
@@ -311,40 +312,12 @@ function SyncLine({ on, at }: { on: boolean; at: string | null }) {
 
 function Welcome() {
   const { data: settings } = useMoneySettings();
+  const [adding, setAdding] = useState(false);
   return (
-    <div className="mx-auto max-w-2xl rounded-xl border border-edge bg-panel p-5">
-      <h2 className="mb-1 text-lg font-semibold">Let's get your numbers in</h2>
-      <p className="mb-4 text-sm text-slate-400">Two minutes, no bank login. Do either or both; they're matched so nothing counts twice.</p>
-      <ol className="space-y-3 text-sm">
-        <li className="flex gap-3">
-          <FileUp size={18} className="mt-0.5 shrink-0 text-sky-300" />
-          <span>
-            <b className="text-slate-200">Upload a statement</b> for history: download the last few months from net banking as
-            CSV or Excel and add it in{" "}
-            <Link to="/money/setup" className="text-sky-300 hover:text-sky-200">
-              Import and settings
-            </Link>
-            .
-          </span>
-        </li>
-        <li className="flex gap-3">
-          <Mail size={18} className="mt-0.5 shrink-0 text-sky-300" />
-          <span>
-            <b className="text-slate-200">Switch on alert emails</b> to stay current: the debit and credit alerts your bank
-            already emails you are read every hour{settings && !settings.gmail_connected ? " (allow Gmail in Settings first)" : ""}.
-          </span>
-        </li>
-        <li className="flex gap-3">
-          <Landmark size={18} className="mt-0.5 shrink-0 text-sky-300" />
-          <span>
-            <b className="text-slate-200">Add your mutual funds</b> with a CAS PDF from CAMS; values update every night.
-          </span>
-        </li>
-      </ol>
-      <Link to="/money/setup" className="mt-5 inline-flex rounded-md bg-sky-500 px-3 py-1.5 text-sm font-medium text-ink hover:bg-sky-400">
-        Open Import and settings
-      </Link>
-    </div>
+    <>
+      <GettingStarted settings={settings} onAddAccount={() => setAdding(true)} />
+      {adding && <AddAccountDialog onClose={() => setAdding(false)} />}
+    </>
   );
 }
 

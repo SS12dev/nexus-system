@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, balanceShares, budgetState, compact, daysUntil, emiFor, monthLabel, parsePercent, parseRupees, percent, rupees, shiftMonth, whenLabel } from "./money";
+import { addMonths, balanceShares, budgetState, mergeScreenshotRows, compact, daysUntil, emiFor, monthLabel, parsePercent, parseRupees, percent, rupees, shiftMonth, whenLabel } from "./money";
 
 describe("money helpers", () => {
   it("formats rupees the Indian way", () => {
@@ -72,5 +72,18 @@ describe("balanceShares", () => {
     const guide = { essentials: 0.5, lifestyle: 0.3, saved: 0.2 };
     expect(balanceShares({ income_paise: 0, essentials_paise: 1, lifestyle_paise: 1, saved_paise: -2, guide })).toBeNull();
     expect(balanceShares({ income_paise: 100, essentials_paise: 80, lifestyle_paise: 40, saved_paise: -20, guide })?.saved).toBeCloseTo(-0.2);
+  });
+});
+
+describe("mergeScreenshotRows", () => {
+  const row = (occurred_on: string, merchant: string, amount_paise: number) => ({ occurred_on, merchant, amount_paise, direction: "debit" as const });
+  it("keeps overlapping screenshots' rows once, newest first", () => {
+    const a = [row("2026-11-20", "Swiggy", 34900), row("2026-11-19", "Zepto", 81240)];
+    const b = [row("2026-11-19", "zepto", 81240), row("2026-11-18", "Uber", 25000)];
+    expect(mergeScreenshotRows([a, b]).map((r) => r.merchant)).toEqual(["Swiggy", "Zepto", "Uber"]);
+  });
+  it("keeps two identical rows on one screenshot", () => {
+    const a = [row("2026-11-20", "Chai Point", 2000), row("2026-11-20", "Chai Point", 2000)];
+    expect(mergeScreenshotRows([a, a.slice(0, 1)])).toHaveLength(2);
   });
 });

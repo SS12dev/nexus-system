@@ -122,7 +122,15 @@ async def ingest(
     fixed = await db.get(MoneyAccount, account_id) if account_id else None
     if fixed is not None and fixed.user_id != user_id:
         fixed = None
-    other = {"alert": "statement", "statement": "alert"}.get(source)
+    # Which other sources can hold the same transaction. A screenshot can repeat anything already
+    # in (or another screenshot of the same list), so it only adds what's new.
+    others = {
+        "alert": ("statement", "screenshot"),
+        "statement": ("alert", "screenshot"),
+        "screenshot": ("alert", "statement", "screenshot", "manual"),
+    }.get(source, ())
+    before = list(nearby)
+    used: set[uuid.UUID] = set()
     conversions: list[MoneyTxn] = []
     for p in rows:
         account = fixed or await account_for(
@@ -136,13 +144,14 @@ async def ingest(
             continue
         keys.add(key)
         twin = None
-        if other:
+        if others:
             twin = next(
                 (
                     t
-                    for t in nearby
-                    if t.source == other
-                    and not t.confirmed
+                    for t in (before if source == "screenshot" else nearby)
+                    if t.source in others
+                    and (source == "screenshot" or not t.confirmed)
+                    and t.id not in used
                     and t.amount_paise == p.amount_paise
                     and t.direction == p.direction
                     and abs((t.occurred_on - p.occurred_on).days) <= MATCH_DAYS
@@ -150,7 +159,17 @@ async def ingest(
                 ),
                 None,
             )
+        if twin is not None and source == "screenshot":
+            # Already in Money; a screenshot only confirms an alert, it never overrides it.
+            used.add(twin.id)
+            if twin.source == "alert":
+                twin.confirmed = True
+            if account is not None and twin.account_id is None:
+                twin.account_id = account.id
+            counts["matched"] += 1
+            continue
         if twin is not None:
+            used.add(twin.id)
             twin.confirmed = True
             twin.alt_key = key
             if source == "statement":

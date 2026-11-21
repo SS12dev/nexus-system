@@ -453,6 +453,15 @@ OPTIONS: tuple[Option, ...] = (
         allow_empty=False,
     ),
     Option(
+        "money_vision_model",
+        "Memory and context",
+        "Money screenshot model",
+        "The Ollama model that reads banking-app screenshots on the Money page. It must read "
+        "images; empty uses the local graph model (qwen3.5:9b does). Screenshots never go to a "
+        "cloud model.",
+        "text",
+    ),
+    Option(
         "memory_nightly_hour_utc",
         "Memory and context",
         "Nightly memory upkeep hour (UTC)",

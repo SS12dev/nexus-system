@@ -456,7 +456,7 @@ export interface Investments {
 
 export interface MoneyImport {
   id: string;
-  kind: "statement" | "cas";
+  kind: "statement" | "cas" | "screenshot";
   origin: "upload" | "gmail";
   filename: string;
   status: "done" | "failed";
@@ -626,4 +626,74 @@ export function addMonths(day: string, months: number): string {
   const mm = (n % 12) + 1;
   const last = new Date(yy, mm, 0).getDate();
   return `${yy}-${String(mm).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
+
+export interface NewAccount {
+  kind: "bank" | "card";
+  institution: string;
+  mask: string;
+  name?: string;
+  balance_paise?: number | null;
+  credit_limit_paise?: number | null;
+}
+
+export interface ScreenshotRow {
+  occurred_on: string;
+  merchant: string;
+  amount_paise: number;
+  direction: "debit" | "credit";
+  category: string;
+  /** Looks like a transaction already in Money. */
+  seen: boolean;
+}
+
+export interface ScreenshotReading {
+  screen: "transactions" | "balance" | "card" | "other";
+  bank: string | null;
+  known_bank: boolean;
+  mask: string | null;
+  kind: "bank" | "card";
+  balance_paise: number | null;
+  card_limit_paise: number | null;
+  card_due_paise: number | null;
+  card_due_on: string | null;
+  dropped: number;
+  account_id: string | null;
+  account_label: string | null;
+  rows: ScreenshotRow[];
+}
+
+export interface ScreenshotSave {
+  account_id?: string | null;
+  institution?: string | null;
+  mask?: string | null;
+  kind: "bank" | "card";
+  balance_paise?: number | null;
+  card_limit_paise?: number | null;
+  card_due_paise?: number | null;
+  card_due_on?: string | null;
+  rows: { occurred_on: string; merchant: string; amount_paise: number; direction: "debit" | "credit" }[];
+  images: number;
+}
+
+/** Several screenshots of one list overlap: keep each transaction once (same day, amount,
+ * direction and merchant), in date order, newest first. */
+export function mergeScreenshotRows<T extends Pick<ScreenshotRow, "occurred_on" | "merchant" | "amount_paise" | "direction">>(lists: T[][]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const list of lists) {
+    // Within one screenshot, identical rows are real (two ₹20 teas); only repeats across
+    // screenshots are dropped.
+    const here = new Map<string, number>();
+    for (const r of list) {
+      const key = `${r.occurred_on}|${r.amount_paise}|${r.direction}|${r.merchant.toLowerCase()}`;
+      const n = (here.get(key) ?? 0) + 1;
+      here.set(key, n);
+      const nth = `${key}|${n}`;
+      if (seen.has(nth)) continue;
+      seen.add(nth);
+      out.push(r);
+    }
+  }
+  return out.sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : a.occurred_on > b.occurred_on ? -1 : 0));
 }

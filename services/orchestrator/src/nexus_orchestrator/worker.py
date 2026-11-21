@@ -155,9 +155,10 @@ async def organiser_export(ctx: dict) -> None:
 
 
 @traced_job
-async def money_sync(ctx: dict, user_id: str) -> None:
-    """Money's "Check now": new alert emails and the newest CAS for one person."""
-    await money.sync_user(ctx["deps"], uuid.UUID(user_id))
+async def money_sync(ctx: dict, user_id: str, back_days: int | None = None) -> None:
+    """Money's "Check now": new alert emails and the newest CAS for one person; with back_days,
+    old alerts that far back too, to fill in history."""
+    await money.sync_user(ctx["deps"], uuid.UUID(user_id), back_days=back_days)
 
 
 @traced_job
@@ -417,7 +418,7 @@ class WorkerSettings:
         func(telegram_update, timeout=900, keep_result=0, max_tries=1),
         # A filing suggestion is a nice-to-have: one try, and the item is fine without it.
         func(organiser_suggest, timeout=90, keep_result=0, max_tries=1),
-        func(money_sync, timeout=900, keep_result=0, max_tries=1),
+        func(money_sync, timeout=1800, keep_result=0, max_tries=1),
     ]
     cron_jobs = [
         cron(routines_due, second=5, unique=True, timeout=60),
