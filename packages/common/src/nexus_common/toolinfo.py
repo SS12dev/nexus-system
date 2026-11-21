@@ -100,6 +100,12 @@ TOOLS: list[ToolInfo] = [
         "Overdue and due tasks, the week's focus and today's daily note (and add a line to it).",
     ),
     ToolInfo(
+        "brief_today",
+        "Morning brief",
+        "read",
+        "The day at a glance: weather, calendar, due tasks and, for the owner, money lines.",
+    ),
+    ToolInfo(
         "money_summary",
         "Money totals",
         "read",

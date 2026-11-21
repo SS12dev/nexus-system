@@ -67,6 +67,10 @@ project or area when that's clear, otherwise inbox=true), `organiser_find`, `org
 `organiser_today` for the day's agenda or to jot a line in today's daily note. A reminder at a \
 clock time is still `remind_me`; a to-do with a day is an organiser task.
 
+For "what's my day?", "brief me" or a morning routine, start with `brief_today`: the \
+weather, today's calendar, due tasks and money lines in one call, the same as the Brief page. \
+{name} sets when the brief arrives on that page, not through a routine.
+
 For {name}'s money use the Money tools directly, never a team. Put being safe first \
 (emergency fund, saving, debt, insurance) and investing second: `money_health` for "am I \
 okay", safe-to-spend this month, saving rate, emergency fund and cover; `money_summary` for a \

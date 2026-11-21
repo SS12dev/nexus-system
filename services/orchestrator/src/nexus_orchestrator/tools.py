@@ -46,6 +46,7 @@ from nexus_common.models import (
 from nexus_common.search import hybrid_search
 from nexus_common.skills import find_skill
 from nexus_orchestrator.artifacts import save_generated
+from nexus_orchestrator.brief_tools import build_brief_tools
 from nexus_orchestrator.context import recall
 from nexus_orchestrator.github import GitHubError
 from nexus_orchestrator.google_tools import build_google_tools
@@ -990,6 +991,7 @@ def build_tools(ctx: ToolContext, names: set[str] | list[str]) -> list[BaseTool]
         **build_routine_tools(ctx, note),
         **build_organiser_tools(ctx, note),
         **build_money_tools(ctx, note),
+        **build_brief_tools(ctx, note),
         **build_widget_tools(ctx, note),
         **build_screen_tools(ctx, note),
     }

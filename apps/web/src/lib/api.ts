@@ -26,6 +26,7 @@ import type {
   TxnPage,
   TxnQuery,
 } from "./money";
+import type { BriefPage, BriefSettings, Place } from "./brief";
 import type { TuneId } from "./tunes";
 import type {
   Universe,
@@ -308,6 +309,11 @@ export const api = {
   moneyDeleteLoan: (id: string) => request<void>(`/api/money/loans/${id}`, { method: "DELETE" }),
   moneyPlan: (q: { months?: number; new_sip_paise?: number; fund_return_bp?: number } = {}) =>
     request<Plan>(`/api/money/plan${orgQuery(q)}`),
+  brief: () => request<BriefPage>("/api/brief"),
+  briefPlaces: (q: string) => request<{ places: Place[] }>(`/api/brief/places${orgQuery({ q })}`),
+  briefSaveSettings: (body: Partial<BriefSettings>) =>
+    request<BriefSettings>("/api/brief/settings", { method: "PUT", body: json(body) }),
+  briefSendNow: () => request<{ queued: boolean }>("/api/brief/send", { method: "POST" }),
   moneyHealth: () => request<Health>("/api/money/health"),
   moneySaveAssumptions: (body: Partial<Assumptions>) =>
     request<Assumptions>("/api/money/plan/assumptions", { method: "PUT", body: json(body) }),
