@@ -21,10 +21,12 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from sqlalchemy import select
 
-from nexus_common import money
+from nexus_common import advice_store, money, money_mail
 from nexus_common import money_store as store
+from nexus_common.google import GoogleNotConnected, get_grant, services_in
 from nexus_common.models import (
     MoneyHolding,
+    MoneyMailbox,
     MoneySettings,
     NotificationKind,
     User,
@@ -37,6 +39,38 @@ from nexus_orchestrator.google_tools import GMAIL, Google, GoogleError, _b64deco
 from nexus_orchestrator.turn import TurnDeps
 
 log = logging.getLogger(__name__)
+
+
+class MailboxGoogle(Google):
+    """Gmail calls as another mailbox the person connected for Money (read-only)."""
+
+    def __init__(self, deps: TurnDeps, user_id: uuid.UUID, mailbox_id: uuid.UUID):
+        super().__init__(deps, user_id)
+        self.mailbox_id = mailbox_id
+
+    async def token(self, service: str) -> str:
+        async with self._lock:
+            cached = self._tokens.get(service)
+            if cached and cached[1] > datetime.now(UTC):
+                return cached[0]
+            async with self.deps.sessionmaker() as db:
+                box = await db.get(MoneyMailbox, self.mailbox_id)
+                try:
+                    if box is None:
+                        raise GoogleNotConnected(service)
+                    token = await money_mail.access_token(
+                        db, self.deps.settings, box, self.deps.google_http
+                    )
+                except GoogleNotConnected:
+                    raise GoogleError(money_mail.REFUSED) from None
+                except httpx.HTTPError as exc:
+                    raise GoogleError(f"Couldn't reach Google: {type(exc).__name__}") from exc
+                finally:
+                    # Keep a refreshed token, or the note that Google refused it.
+                    await db.commit()
+            self._tokens[service] = (token, datetime.now(UTC) + timedelta(minutes=2))
+        return token
+
 
 # On the first sync, read this far back.
 FIRST_SYNC = timedelta(days=90)
@@ -74,13 +108,20 @@ def _header(msg: dict, name: str) -> str:
 
 
 async def _read_alerts(
-    deps: TurnDeps, g: Google, user: User, prefs: MoneySettings, back_days: int | None = None
+    deps: TurnDeps,
+    g: Google,
+    user: User,
+    mark: datetime | None,
+    back_days: int | None = None,
+    mailbox_id: uuid.UUID | None = None,
 ) -> dict:
+    """Alerts since `mark` (the newest mail read last time) from one mailbox: the sign-in
+    Gmail, or another one connected for Money (mailbox_id)."""
     if back_days:
         since = utcnow() - timedelta(days=back_days)
         cap = MAX_HISTORY_MESSAGES
     else:
-        since = (prefs.gmail_synced_until or utcnow() - FIRST_SYNC) - OVERLAP
+        since = (mark or utcnow() - FIRST_SYNC) - OVERLAP
         cap = MAX_MESSAGES
     after = f"after:{int(since.timestamp())}"
     ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", cap)
@@ -90,7 +131,7 @@ async def _read_alerts(
     parsed: list[tuple[money.Parsed, str]] = []
     bills: list[money.CardBill] = []
     bookings: list[money.EmiBooking] = []
-    newest = prefs.gmail_synced_until
+    newest = mark
     gate = asyncio.Semaphore(PARALLEL)
 
     async def one(mid: str) -> None:
@@ -124,14 +165,23 @@ async def _read_alerts(
         # After the alerts, so the purchase an EMI replaces is already in.
         for booking in bookings:
             counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
-        row = await store.settings_for(db, user.id)
-        # Reading old mail never moves the mark backwards.
-        if newest and (row.gmail_synced_until is None or newest > row.gmail_synced_until):
-            row.gmail_synced_until = newest
-        elif row.gmail_synced_until is None:
-            row.gmail_synced_until = utcnow()
-        row.gmail_synced_at = utcnow()
-        row.last_error = None
+        box = await db.get(MoneyMailbox, mailbox_id) if mailbox_id else None
+        if box is not None:
+            # Reading old mail never moves the mark backwards.
+            if newest and (box.synced_until is None or newest > box.synced_until):
+                box.synced_until = newest
+            elif box.synced_until is None:
+                box.synced_until = utcnow()
+            box.synced_at = utcnow()
+            box.last_error = None
+        elif mailbox_id is None:
+            row = await store.settings_for(db, user.id)
+            if newest and (row.gmail_synced_until is None or newest > row.gmail_synced_until):
+                row.gmail_synced_until = newest
+            elif row.gmail_synced_until is None:
+                row.gmail_synced_until = utcnow()
+            row.gmail_synced_at = utcnow()
+            row.last_error = None
         await db.commit()
     return counts
 
@@ -206,24 +256,59 @@ async def sync_user(
             or not prefs.gmail_sync
         ):
             return None
+        grant = await get_grant(db, deps.settings, user_id)
+        primary = grant is not None and "gmail" in services_in(grant.scopes)
+        boxes = [(b.id, b.synced_until) for b in await money_mail.mailboxes(db, user_id)]
         db.expunge(prefs)
         db.expunge(user)
-    g = Google(deps, user_id)
-    try:
-        counts = await _read_alerts(deps, g, user, prefs, back_days)
-        holdings = await _read_cas(deps, g, user, prefs)
-    except GoogleError as exc:
-        # The text is about the connection (not connected, API off), never the mail itself.
+    counts: dict | None = None
+    holdings = None
+    error: str | None = None
+    if primary or not boxes:
+        g = Google(deps, user_id)
+        try:
+            counts = await _read_alerts(deps, g, user, prefs.gmail_synced_until, back_days)
+            holdings = await _read_cas(deps, g, user, prefs)
+        except GoogleError as exc:
+            # The text is about the connection (not connected, API off), never the mail itself.
+            error = str(exc)
+            async with deps.sessionmaker() as db:
+                row = await store.settings_for(db, user_id)
+                row.last_error = error[:300]
+                await db.commit()
+            log.warning(
+                "money.sync_failed", extra={"user_id": str(user_id), "error": type(exc).__name__}
+            )
+    for box_id, mark in boxes:
+        try:
+            got = await _read_alerts(
+                deps, MailboxGoogle(deps, user_id, box_id), user, mark, back_days, box_id
+            )
+        except GoogleError as exc:
+            error = error or str(exc)
+            async with deps.sessionmaker() as db:
+                box = await db.get(MoneyMailbox, box_id)
+                if box is not None:
+                    box.last_error = box.last_error or str(exc)[:300]
+                    await db.commit()
+            log.warning(
+                "money.sync_failed",
+                extra={"user_id": str(user_id), "mailbox_id": str(box_id),
+                       "error": type(exc).__name__},
+            )  # fmt: skip
+            continue
+        counts = got if counts is None else {k: counts.get(k, 0) + v for k, v in got.items()}
+    if counts is None:
+        if back_days:
+            await _tell_history(deps, user_id, back_days, None, error)
+        return None
+    if not primary:
+        # Only other mailboxes are read: the check still counts as done.
         async with deps.sessionmaker() as db:
             row = await store.settings_for(db, user_id)
-            row.last_error = str(exc)[:300]
+            row.gmail_synced_at = utcnow()
+            row.last_error = None if error is None else row.last_error
             await db.commit()
-        log.warning(
-            "money.sync_failed", extra={"user_id": str(user_id), "error": type(exc).__name__}
-        )
-        if back_days:
-            await _tell_history(deps, user_id, back_days, None, str(exc))
-        return None
     if holdings is not None:
         counts["holdings"] = holdings
     if back_days:
@@ -374,7 +459,30 @@ async def send_reminders(deps: TurnDeps, now: datetime | None = None) -> int:
                     r["title"], r["body"], url=url, tag=f"money-{r['tag']}"[:120],
                 )  # fmt: skip
                 sent += 1
+            sent += await _tell_advice(deps, db, user, today)
         await db.commit()
     if sent:
         log.info("money.reminders_sent", extra={"count": sent})
     return sent
+
+
+async def _tell_advice(deps: TurnDeps, db, user: User, today) -> int:
+    """One bell notice when new items land in Advice's "Do now", with a count only: the
+    lock screen never shows what they are."""
+    out = await advice_store.view(db, user, today)
+    fresh = []
+    for item in out["items"]:
+        if item["level"] != "act":
+            continue
+        if await deps.redis.set(f"advice:told:{user.id}:{item['key']}", "1", nx=True,
+                                ex=REMIND_KEEP):  # fmt: skip
+            fresh.append(item)
+    if not fresh:
+        return 0
+    n = len(fresh)
+    await notify(
+        db, deps.redis, deps.settings, user.id, NotificationKind.reminder,
+        f"{n} new thing{'s' if n != 1 else ''} to sort out",
+        "Open Advice to see what and why.", url="/advice", tag=f"advice-{today}",
+    )  # fmt: skip
+    return 1

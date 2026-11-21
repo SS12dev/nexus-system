@@ -333,3 +333,101 @@ def test_history_read_says_what_it_found():
     assert "13 other emails" in body
     title, body = history_note(6, None, "Gmail isn't connected.")
     assert title.startswith("Couldn't") and "Gmail isn't connected." in body
+
+
+async def test_alerts_from_another_mailbox(deps, user, sessionmaker, settings, caplog):
+    """Bank alerts that go to a different Gmail: read with that mailbox's own token, with no
+    Gmail on the sign-in account at all. Its address never reaches the logs."""
+    from nexus_common import money_mail
+    from nexus_common.models import MoneyMailbox
+
+    caplog.set_level(logging.INFO)
+    await switch_on(sessionmaker, user)
+    async with sessionmaker() as db:
+        box = await money_mail.save(db, settings, user, "Alerts.Person@gmail.com", {
+            "scope": f"openid email {money_mail.SCOPE}", "refresh_token": "box-refresh",
+            "access_token": "box-access", "expires_in": 3600,
+        })  # fmt: skip
+        await db.commit()
+        assert box.email_masked == "al•••@gmail.com"
+        assert "Alerts" not in box.email_enc
+    google = fake_gmail()
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(google))
+
+    counts = await money.sync_user(deps, user)
+    assert counts["added"] == 2
+    assert google.sent("GET", f"{GMAIL}/messages").headers["authorization"] == "Bearer box-access"
+    async with sessionmaker() as db:
+        box = await db.scalar(select(MoneyMailbox))
+        assert box.synced_until == datetime(2026, 11, 18, 14, 0, tzinfo=UTC)
+        prefs = await db.get(MoneySettings, user)
+        assert prefs.last_error is None and prefs.gmail_synced_at is not None
+
+    # Google refusing the mailbox's sign-in is noted on it; the sync says it got nothing.
+    async with sessionmaker() as db:
+        box = await db.scalar(select(MoneyMailbox))
+        box.access_expires_at = utcnow() - timedelta(minutes=5)
+        await db.commit()
+
+    def refusing(request: httpx.Request) -> httpx.Response:
+        if str(request.url).startswith("https://oauth2.googleapis.com/token"):
+            return httpx.Response(400, json={"error": "invalid_grant"})
+        return google(request)
+
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(refusing))
+    assert await money.sync_user(deps, user) is None
+    async with sessionmaker() as db:
+        box = await db.scalar(select(MoneyMailbox))
+        assert box.last_error == money_mail.REFUSED
+
+    logged = " ".join(r.getMessage() + str(r.__dict__) for r in caplog.records)
+    assert "alerts.person" not in logged.lower()
+
+
+async def test_assistant_reads_advice_and_one_counted_notice(deps, user, sessionmaker, settings,
+                                                             monkeypatch):  # fmt: skip
+    """`advice_list` reads the Advice page as text and leaves Money out once access is off;
+    a new "do now" item sends one notice, with a count only, and only once."""
+    from nexus_common import advice_store
+    from nexus_common.models import Notification
+
+    async def emit(*args, **kwargs):
+        pass
+
+    ctx = ToolContext(deps=deps, user_id=user, chat_id=None, emit=emit)
+    tool = {t.name: t for t in build_tools(ctx, ["advice_list"])}["advice_list"]
+    async with sessionmaker() as db:
+        rows = [
+            m.Parsed(date(2026, 11, 2), 64900, "debit", "Netflix", "NETFLIX A"),
+            m.Parsed(date(2026, 11, 2), 64900, "debit", "Netflix", "NETFLIX B"),
+        ]
+        await store.ingest(db, settings, user, rows, source="statement")
+        await db.commit()
+    out = await tool.ainvoke({})
+    assert out.startswith("<advice>") or out == "Nothing needs a decision right now."
+    assert "NETFLIX A" not in out  # never the bank's narration
+
+    async with sessionmaker() as db:
+        prefs = await store.settings_for(db, user)
+        prefs.assistant_access = False
+        await db.commit()
+    off = await tool.ainvoke({})
+    assert "Netflix" not in off
+
+    items = [
+        {"key": "card_overdue:c1:2026-11", "level": "act", "title": "Pay the HDFC card bill"},
+        {"key": "forex:s1:2026-11", "level": "look", "title": "Foreign charge on a card"},
+    ]
+
+    async def fake_view(db, u, today, **kw):
+        return {"items": items, "counts": {}, "hidden": 0, "set_aside": [], "money": True}
+
+    monkeypatch.setattr(advice_store, "view", fake_view)
+    async with sessionmaker() as db:
+        me = await db.get(User, user)
+        assert await money._tell_advice(deps, db, me, date(2026, 11, 21)) == 1
+        assert await money._tell_advice(deps, db, me, date(2026, 11, 21)) == 0  # told once
+        await db.commit()
+        (notice,) = (await db.scalars(select(Notification))).all()
+    assert notice.title == "1 new thing to sort out" and notice.url == "/advice"
+    assert "HDFC" not in f"{notice.title} {notice.body}"

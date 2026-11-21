@@ -106,6 +106,12 @@ TOOLS: list[ToolInfo] = [
         "The day at a glance: weather, calendar, due tasks and, for the owner, money lines.",
     ),
     ToolInfo(
+        "advice_list",
+        "Advice",
+        "read",
+        "What deserves a decision: cards, subscriptions, unusual charges, safety and tasks.",
+    ),
+    ToolInfo(
         "money_summary",
         "Money totals",
         "read",

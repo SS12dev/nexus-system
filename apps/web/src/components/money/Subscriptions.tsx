@@ -1,11 +1,11 @@
 import { AlertTriangle, BellRing, Check, ExternalLink, HelpCircle, OctagonAlert, Plus, Repeat, Settings2, Undo2, X } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { api } from "../../lib/api";
 import { CADENCE_LABEL, dayLabel, isoToday, rupees, whenLabel, type Cadence, type Subscription, type SubscriptionSave } from "../../lib/money";
 import { toast } from "../Feedback";
 import { FormDialog, moneyText, read, type Field } from "./FormDialog";
-import { Empty, Spinner, Stat, useMoney } from "./parts";
+import { Empty, Spinner, Stat, useAccounts, useMoney } from "./parts";
 
 const CATEGORIES = ["Subscriptions", "Entertainment", "Bills and utilities", "Rent and housing", "Health", "Education", "Investments", "Other"];
 
@@ -24,6 +24,8 @@ async function save(body: SubscriptionSave, done: string) {
 export function SubscriptionsView() {
   const { data, error } = useMoney(api.moneySubscriptions);
   const [editing, setEditing] = useState<Subscription | "new" | null>(null);
+  const [params, setParams] = useSearchParams();
+  const byCard = params.get("by") === "card";
   if (error) return <p className="text-sm text-rose-400">{error}</p>;
   if (!data) return <Spinner />;
   const live = data.items.filter((s) => s.status === "new" || s.status === "active");
@@ -40,9 +42,23 @@ export function SubscriptionsView() {
           Found from payments that repeat, plus any you add. Tell Money which to keep and it reminds you before each renewal;
           mark one cancelled and it watches for a charge that shouldn't happen.
         </p>
-        <button onClick={() => setEditing("new")} className="flex shrink-0 items-center gap-1 rounded-md border border-edge px-2.5 py-1.5 text-sm text-slate-200 hover:bg-edge/60">
-          <Plus size={14} /> Add one
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex rounded-md border border-edge p-0.5 text-xs" role="group" aria-label="Group by">
+            {([["", "By status"], ["card", "By card"]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setParams(value ? { by: value } : {}, { replace: true })}
+                aria-pressed={(value === "card") === byCard}
+                className={`rounded px-2 py-1 ${(value === "card") === byCard ? "bg-edge text-white" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setEditing("new")} className="flex items-center gap-1 rounded-md border border-edge px-2.5 py-1.5 text-sm text-slate-200 hover:bg-edge/60">
+            <Plus size={14} /> Add one
+          </button>
+        </div>
       </div>
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Subscriptions" value={rupees(data.subscriptions_monthly_paise, { whole: true })} sub="a month" />
@@ -57,7 +73,9 @@ export function SubscriptionsView() {
 
       {data.items.length === 0 && <Empty>Nothing repeating found yet. Payments show up here after three months of transactions, or add one yourself.</Empty>}
 
-      {review.length > 0 && (
+      {byCard && <ByCard live={live} onOpen={setEditing} />}
+
+      {!byCard && review.length > 0 && (
         <Group title={`New, to review (${review.length})`} hint="Keep it, mark it cancelled, or say it isn't a subscription.">
           {review.map((s) => (
             <Row key={s.key} s={s} onOpen={() => setEditing(s)}>
@@ -77,7 +95,7 @@ export function SubscriptionsView() {
         </Group>
       )}
 
-      {(["subscription", "bill"] as const).map((group) => {
+      {!byCard && (["subscription", "bill"] as const).map((group) => {
         const rows = keeping.filter((s) => s.group === group);
         if (!rows.length) return null;
         return (
@@ -89,7 +107,7 @@ export function SubscriptionsView() {
         );
       })}
 
-      {cancelled.length > 0 && (
+      {!byCard && cancelled.length > 0 && (
         <Group title="Cancelled" hint="Kept here so a charge after cancelling is caught.">
           {cancelled.map((s) => (
             <Row key={s.key} s={s} onOpen={() => setEditing(s)} muted />
@@ -97,7 +115,7 @@ export function SubscriptionsView() {
         </Group>
       )}
 
-      {ignored.length > 0 && (
+      {!byCard && ignored.length > 0 && (
         <details className="mt-2 text-sm">
           <summary className="cursor-pointer text-xs text-slate-400">Not subscriptions ({ignored.length})</summary>
           <ul className="mt-2 divide-y divide-edge/60 rounded-xl border border-edge bg-panel">
@@ -120,6 +138,71 @@ export function SubscriptionsView() {
       )}
 
       {editing && <SubscriptionDialog s={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+/** Live subscriptions grouped by the card or account they are charged to, with what would
+ * stop if that card were blocked or reissued, and each one's manage link to update the card. */
+function ByCard({ live, onOpen }: { live: Subscription[]; onOpen: (s: Subscription) => void }) {
+  const groups = new Map<string, { label: string; kind: string | null; rows: Subscription[] }>();
+  for (const s of live) {
+    const id = s.account_id ?? "";
+    const g = groups.get(id) ?? { label: s.account_label ?? "Not known yet", kind: s.account_kind, rows: [] };
+    g.rows.push(s);
+    groups.set(id, g);
+  }
+  const ordered = [...groups.entries()].sort(([a, x], [b, y]) => (a ? 0 : 1) - (b ? 0 : 1) || (x.kind === "card" ? 0 : 1) - (y.kind === "card" ? 0 : 1));
+  return (
+    <>
+      <p className="mb-3 text-xs text-slate-500">
+        Where each one's latest charge landed. A blocked, lost or reissued card can stop everything on it: banks may carry autopays to
+        the new card, but merchants and saved cards often need the new number. Use “Move to card” in a subscription's settings to
+        switch it; it shows as moved once a charge arrives on the new card.
+      </p>
+      {ordered.map(([id, g]) => {
+        const monthly = g.rows.reduce((n, s) => n + s.monthly_paise, 0);
+        return (
+          <section key={id || "unknown"} className="mb-5">
+            <h2 className="mb-1 flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-slate-300">
+              {g.label}
+              <span className="text-xs font-normal text-slate-500">
+                {g.rows.length} · {rupees(monthly, { whole: true })} a month{g.kind === "bank" ? " · from a bank account" : ""}
+              </span>
+            </h2>
+            <ul className="divide-y divide-edge/60 rounded-xl border border-edge bg-panel">
+              {g.rows.map((s) => (
+                <Row key={s.key} s={s} onOpen={() => onOpen(s)} />
+              ))}
+            </ul>
+            {id && g.kind === "card" && (
+              <details className="mt-1.5 text-xs">
+                <summary className="cursor-pointer text-slate-400 hover:text-slate-200">If this card is blocked or replaced</summary>
+                <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-slate-400">
+                  <li>Activate the new card, and keep the old one until the new one works.</li>
+                  <li>
+                    Update the card at each of these:{" "}
+                    {g.rows.map((s, i) => (
+                      <span key={s.key}>
+                        {i > 0 && ", "}
+                        {s.manage_url ? (
+                          <a href={s.manage_url} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">
+                            {s.merchant}
+                          </a>
+                        ) : (
+                          <span className="text-slate-300">{s.merchant}</span>
+                        )}
+                      </span>
+                    ))}
+                    .
+                  </li>
+                  <li>Add the new card in Money (Accounts › Add a card), then use “Move to card” on each, so Money confirms every switch.</li>
+                </ol>
+              </details>
+            )}
+          </section>
+        );
+      })}
     </>
   );
 }
@@ -155,6 +238,8 @@ function Row({ s, onOpen, muted, children }: { s: Subscription; onOpen: () => vo
         : null,
     s.status === "active" && s.remind_days ? `reminder ${s.remind_days} day${s.remind_days === 1 ? "" : "s"} before` : null,
     s.manual ? "added by you" : s.count ? `paid ${s.count}×` : null,
+    s.account_label && !s.moving ? `on ${s.account_label}` : null,
+    s.moving && !s.moving.stuck_on ? `moving to ${s.moving.to_label}` : null,
   ].filter(Boolean);
   return (
     <li className="px-3 py-2.5">
@@ -168,6 +253,7 @@ function Row({ s, onOpen, muted, children }: { s: Subscription; onOpen: () => vo
           <span className={`block truncate text-sm ${muted ? "text-slate-400" : "text-slate-100"}`}>
             {s.merchant}
             {s.not_seen && <span className="ml-2 text-xs text-slate-500">no charge lately: cancelled already?</span>}
+            {s.moving?.stuck_on && <span className="ml-2 text-xs text-[#fab219]">still charged to {s.moving.from_label ?? "the old card"}</span>}
           </span>
           <span className="block truncate text-xs text-slate-500">{bits.join(" · ")}</span>
         </button>
@@ -228,6 +314,8 @@ function Alert({ s, onOpen }: { s: Subscription; onOpen: () => void }) {
 
 function SubscriptionDialog({ s, onClose }: { s: Subscription | null; onClose: () => void }) {
   const manual = !s || s.manual;
+  const accounts = useAccounts();
+  const cards = accounts.filter((a) => a.kind === "card");
   const fields: Field[] = [
     ...(s ? [] : [{ key: "merchant", label: "Name", kind: "text", value: "", placeholder: "Gym, Netflix, cloud storage…" } as Field]),
     {
@@ -271,6 +359,25 @@ function SubscriptionDialog({ s, onClose }: { s: Subscription | null; onClose: (
       when: (v) => v.status === "active",
     },
     { key: "cancelled_on", label: "Cancelled on", kind: "date", value: s?.cancelled_on ?? isoToday(), when: (v) => v.status === "cancelled", hint: "A charge after this day is flagged." },
+    {
+      key: "account",
+      label: "Charged to",
+      kind: "select",
+      value: s?.account_set ? (s.account_id ?? "") : "",
+      options: [["", s?.account_label && !s.account_set ? `Latest charge: ${s.account_label}` : "Work it out from the charges"], ...accounts.map((a) => [a.id, a.label] as [string, string])],
+      half: true,
+      when: (v) => v.status !== "ignored",
+    },
+    {
+      key: "move_to",
+      label: "Move to card",
+      kind: "select",
+      value: s?.moving?.to_id ?? "",
+      options: [["", "Not moving"], ...cards.filter((c) => c.id !== s?.account_id).map((c) => [c.id, c.label] as [string, string])],
+      half: true,
+      when: (v) => v.status === "active" && !!s && !s.manual,
+      hint: "Change the card in the service's billing settings too. It shows as moved once a charge lands on the new card.",
+    },
     { key: "manage_url", label: "Manage or cancel at", kind: "url", value: s?.manage_url ?? "", optional: true, placeholder: "https://…" },
     { key: "note", label: "Note", kind: "text", value: s?.note ?? "", optional: true, placeholder: "Shared with family, annual plan cheaper…" },
   ];
@@ -314,6 +421,8 @@ function SubscriptionDialog({ s, onClose }: { s: Subscription | null; onClose: (
         };
         if (v.status === "cancelled") Object.assign(body, { cancelled_on: v.cancelled_on });
         if (manual) Object.assign(body, { manual: true, amount_paise: read.money(v.amount)!, cadence: v.cadence as Cadence, next_on: v.next_on, category: v.category });
+        if ((v.account ?? "") !== (s?.account_set ? (s.account_id ?? "") : "")) body.account_id = v.account || null;
+        if (v.status === "active" && (v.move_to ?? "") !== (s?.moving?.to_id ?? "")) body.move_to_id = v.move_to || null;
         await api.moneySaveSubscription(body);
         toast("Saved");
       }}

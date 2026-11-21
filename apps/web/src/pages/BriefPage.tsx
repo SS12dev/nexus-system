@@ -574,6 +574,16 @@ function MoneyCard({ brief }: { brief: Brief }) {
               {m.yesterday.count} payment{m.yesterday.count === 1 ? "" : "s"}.
             </div>
           )}
+          {(m.advice ?? []).map((a) => (
+            <Link
+              key={a.title}
+              to={a.url}
+              className="flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-sm text-slate-200 hover:bg-amber-400/10"
+            >
+              <span className="min-w-0 flex-1">To sort out: {a.title}</span>
+              <ArrowRight size={14} className="shrink-0 text-slate-500" />
+            </Link>
+          ))}
           {m.next_step && m.next_step.status !== "good" && (
             <Link
               to="/money/health"

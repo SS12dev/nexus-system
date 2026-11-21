@@ -13,7 +13,7 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
@@ -43,12 +43,29 @@ async def banks(user: OwnerUser) -> dict:
 
 
 class AccountIn(BaseModel):
-    kind: Literal["bank", "card"]
-    institution: str = Field(min_length=1, max_length=60)
+    """A bank account, a credit card, or a debit card. A debit card isn't an account of its
+    own: it spends from a bank account, so it is that account's card_mask (account_id)."""
+
+    kind: Literal["bank", "card", "debit"]
+    institution: str = Field(default="", max_length=60)
     mask: str
     name: str = Field(default="", max_length=120)
     balance_paise: Paise | None = None
     credit_limit_paise: Paise | None = None
+    # Credit cards: the expiry month and the account the bill is paid from.
+    expires_on: date | None = None
+    bill_from_id: uuid.UUID | None = None
+    # Bank accounts: the debit card's last four digits. Debit cards: the bank account.
+    card_mask: str | None = Field(default=None, pattern=r"^(\d{4})?$")
+    account_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _needs(self) -> "AccountIn":
+        if self.kind == "debit" and not self.account_id:
+            raise ValueError("Pick the bank account the debit card spends from.")
+        if self.kind != "debit" and not self.institution:
+            raise ValueError("Which bank is it with?")
+        return self
 
     @field_validator("mask")
     @classmethod
@@ -68,6 +85,16 @@ class AccountIn(BaseModel):
 async def add_account(body: AccountIn, user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
     """An account or card typed in. Alert emails and statements with the same bank and last
     four digits then land on it."""
+    if body.kind == "debit":
+        bank = await db.get(MoneyAccount, body.account_id)
+        if bank is None or bank.user_id != user.id or bank.kind != "bank":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Bank account not found.")
+        moved = await store.attach_debit_card(db, user.id, bank, body.mask)
+        await db.commit()
+        extra = {"user_id": str(user.id), "account_id": str(bank.id), "moved": moved}
+        log.info("money.debit_card_added", extra=extra)
+        await store.changed(redis, user.id)
+        return {"id": str(bank.id), "label": store.account_label(bank), "moved": moved}
     institution = money.bank_of(body.institution) or body.institution
     existing = (
         await db.scalars(
@@ -97,7 +124,17 @@ async def add_account(body: AccountIn, user: OwnerUser, db: DbDep, redis: RedisD
         row.balance_paise, row.balance_on = body.balance_paise, today
     if body.kind == "card" and body.credit_limit_paise:
         row.credit_limit_paise = body.credit_limit_paise
+    if body.kind == "card" and body.expires_on:
+        row.expires_on = body.expires_on.replace(day=1)
+    if body.kind == "card" and body.bill_from_id:
+        payer = await db.get(MoneyAccount, body.bill_from_id)
+        if payer is None or payer.user_id != user.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found.")
+        row.bill_from_id = payer.id
     db.add(row)
+    await db.flush()
+    if body.kind == "bank" and body.card_mask:
+        await store.attach_debit_card(db, user.id, row, body.card_mask)
     await db.commit()
     log.info("money.account_added", extra={"user_id": str(user.id), "account_id": str(row.id)})
     await store.changed(redis, user.id)

@@ -2,12 +2,20 @@ import { CalendarCheck, Coins, Landmark, MoreHorizontal, Plus, Trash2 } from "lu
 import { useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api";
-import { dayLabel, daysUntil, fullDay, isoToday, percent, rupees, type Asset, type AssetIn, type AssetKind, type Investments } from "../../lib/money";
+import { dayLabel, daysUntil, fullDay, isoToday, percent, rupees, type Asset, type AssetIn, type AssetKind, type ContributionCadence, type Investments } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, secretChange, type Field } from "./FormDialog";
 import { SecretLine } from "./Secret";
 import { Card, Empty, Spinner, Stat, useMoney } from "./parts";
+
+/** How a deposit's frequency reads after its amount. */
+const EVERY: Record<ContributionCadence | "april", string> = {
+  monthly: "a month",
+  quarterly: "every three months",
+  yearly: "a year",
+  april: "each April",
+};
 
 const ADD: { kind: AssetKind; label: string }[] = [
   { kind: "fd", label: "Fixed deposit" },
@@ -136,9 +144,8 @@ function AssetTile({ a, onEdit }: { a: Asset; onEdit: () => void }) {
       <p className="mt-1.5 text-xs text-slate-500">
         {a.kind === "fd" && `${rupees(a.amount_paise, { whole: true })} deposited${a.start_on ? ` on ${dayLabel(a.start_on)}` : ""}`}
         {a.kind === "rd" && `${rupees(a.amount_paise, { whole: true })} a month`}
-        {a.kind === "ppf" && `${rupees(a.amount_paise, { whole: true })} on ${a.balance_on ? dayLabel(a.balance_on) : "—"}${a.contribution_paise ? ` · ${rupees(a.contribution_paise, { whole: true })} each April` : ""}`}
-        {["epf", "nps", "gold", "other"].includes(a.kind) &&
-          `${rupees(a.amount_paise, { whole: true })} on ${a.balance_on ? dayLabel(a.balance_on) : "—"}${a.contribution_paise ? ` · ${rupees(a.contribution_paise, { whole: true })} a month` : ""}`}
+        {["ppf", "epf", "nps", "gold", "other"].includes(a.kind) &&
+          `${rupees(a.amount_paise, { whole: true })} on ${a.balance_on ? dayLabel(a.balance_on) : "—"}${a.contribution_paise ? ` · ${rupees(a.contribution_paise, { whole: true })} ${EVERY[a.kind === "ppf" && a.contribution_cadence === "yearly" ? "april" : a.contribution_cadence]}` : ""}`}
       </p>
       {(a.last_paid_on || a.received_on) && (
         <p className="mt-1 text-xs text-slate-500">
@@ -185,7 +192,7 @@ function AssetDialog({ kind, a, defaults, onClose }: { kind: AssetKind; a?: Asse
   const term = kind === "fd" || kind === "rd";
   const balance = !term;
   const amountLabel = kind === "fd" ? "Deposit" : kind === "rd" ? "Each month" : "Balance today";
-  const contributionLabel = kind === "ppf" ? "Put in each year" : "Put in each month";
+  const usual: ContributionCadence = kind === "ppf" ? "yearly" : "monthly";
   const fields: Field[] = [
     { key: "name", label: "Name", kind: "text", value: a?.name ?? "", optional: true, placeholder: ADD.find((x) => x.kind === kind)?.label, half: true },
     { key: "institution", label: "Where", kind: "text", value: a?.institution ?? "", optional: true, placeholder: kind === "epf" ? "EPFO" : "SBI, HDFC Bank…", half: true },
@@ -204,7 +211,20 @@ function AssetDialog({ kind, a, defaults, onClose }: { kind: AssetKind; a?: Asse
           { key: "maturity_on", label: "Matures", kind: "date", value: a?.maturity_on ?? "", half: true },
         ] as Field[])
       : ([
-          { key: "contribution", label: contributionLabel, kind: "money", value: moneyText(a?.contribution_paise || null), optional: true, half: true },
+          { key: "contribution", label: "Put in", kind: "money", value: moneyText(a?.contribution_paise || null), optional: true, half: true },
+          {
+            key: "cadence",
+            label: "How often",
+            kind: "select",
+            value: a?.contribution_cadence ?? usual,
+            options: [
+              ["monthly", "Every month"],
+              ["quarterly", "Every three months"],
+              ["yearly", kind === "ppf" ? "Once a year, in April" : "Once a year"],
+            ],
+            half: true,
+            hint: kind === "ppf" ? "PPF takes ₹500 to ₹1.5 lakh a year, in one go or monthly. Deposits by the 5th earn that month's interest." : undefined,
+          },
           { key: "maturity_on", label: "Matures", kind: "date", value: a?.maturity_on ?? "", optional: true, half: true, when: () => kind === "ppf" || kind === "nps" },
         ] as Field[])),
     ...(kind === "fd" ? ([{ key: "payout", label: "Interest is paid out to my account", kind: "check", value: a?.payout ? "1" : "", hint: "Rather than added to the deposit." }] as Field[]) : []),
@@ -275,7 +295,12 @@ function AssetDialog({ kind, a, defaults, onClose }: { kind: AssetKind; a?: Asse
           nominee: secretChange(v, "nominee"),
         };
         if (term) Object.assign(body, { start_on: v.start_on, maturity_on: v.maturity_on });
-        if (balance) Object.assign(body, { contribution_paise: read.money(v.contribution ?? "") ?? 0, maturity_on: v.maturity_on || null });
+        if (balance)
+          Object.assign(body, {
+            contribution_paise: read.money(v.contribution ?? "") ?? 0,
+            contribution_cadence: (v.cadence as ContributionCadence) || usual,
+            maturity_on: v.maturity_on || null,
+          });
         if (a) {
           const { kind: _k, ...patch } = body;
           void _k;

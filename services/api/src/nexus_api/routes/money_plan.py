@@ -94,6 +94,11 @@ class AccountEdit(BaseModel):
     due_on: date | None = None
     # True marks the current bill paid; False undoes it.
     paid: bool | None = None
+    # Cards: the expiry month (any day in it), and the account the bill is paid from.
+    expires_on: date | None = None
+    bill_from_id: uuid.UUID | None = None
+    # Bank accounts: the debit card's last four digits ("" or null removes it).
+    card_mask: str | None = Field(default=None, pattern=r"^(\d{4})?$")
 
 
 @router.patch("/accounts/{account_id}/details")
@@ -121,6 +126,14 @@ async def edit_account(
         a.min_due_paise = body.min_due_paise
     if body.paid is not None:
         a.paid_on = today if body.paid else None
+    if "expires_on" in fields and a.kind == "card":
+        a.expires_on = body.expires_on.replace(day=1) if body.expires_on else None
+    if "bill_from_id" in fields and a.kind == "card":
+        if body.bill_from_id:
+            await _own(db, MoneyAccount, user.id, body.bill_from_id, "Account")
+        a.bill_from_id = body.bill_from_id
+    if "card_mask" in fields and a.kind == "bank":
+        await store.attach_debit_card(db, user.id, a, body.card_mask or None)
     await db.commit()
     log.info("money.account_edited", extra={"user_id": str(user.id), "account_id": str(a.id)})
     await store.changed(redis, user.id)
@@ -151,6 +164,10 @@ class SubscriptionIn(BaseModel):
     cadence: Literal["monthly", "quarterly", "yearly"] | None = None
     next_on: date | None = None
     category: str | None = Field(default=None, max_length=40)
+    # The card or account it is charged to (None: follow the latest charge), and a move to
+    # another card (None cancels a move in progress).
+    account_id: uuid.UUID | None = None
+    move_to_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _manual_needs_terms(self) -> "SubscriptionIn":
@@ -172,6 +189,13 @@ async def save_subscription(
     if "note" in fields:
         fields["note"] = _clean(body.note)
     merchant = _clean(body.merchant) or body.merchant
+    for name in ("account_id", "move_to_id"):
+        if fields.get(name) is not None:
+            await _own(db, MoneyAccount, user.id, fields[name], "Account")
+    if "move_to_id" in fields:
+        fields["move_since"] = local_today(user) if body.move_to_id else None
+        if body.move_to_id:
+            fields["moved_on"] = None
     row = await store.save_subscription(db, user.id, merchant, **fields)
     await db.commit()
     log.info(
@@ -211,6 +235,8 @@ class AssetIn(BaseModel):
     maturity_on: date | None = None
     balance_on: date | None = None
     contribution_paise: Paise = 0
+    # How often it goes in; left out, the usual for the kind (yearly for PPF, else monthly).
+    contribution_cadence: Literal["monthly", "quarterly", "yearly"] | None = None
     payout: bool = False
     status: Literal["active", "closed"] = "active"
     note: Note
@@ -239,6 +265,7 @@ class AssetPatch(BaseModel):
     maturity_on: date | None = None
     balance_on: date | None = None
     contribution_paise: Paise | None = None
+    contribution_cadence: Literal["monthly", "quarterly", "yearly"] | None = None
     payout: bool | None = None
     status: Literal["active", "closed"] | None = None
     note: Note
