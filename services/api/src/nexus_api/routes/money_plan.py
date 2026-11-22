@@ -146,6 +146,33 @@ async def edit_account(
     return next(x for x in view["items"] if x["id"] == str(a.id))
 
 
+class MergeIn(BaseModel):
+    into_id: uuid.UUID
+
+
+@router.post("/accounts/{account_id}/merge")
+async def merge_account(
+    account_id: uuid.UUID, body: MergeIn, user: OwnerUser, db: DbDep, redis: RedisDep
+) -> dict:
+    """The same account seen twice (a statement that quoted other digits): fold this one into
+    `into_id`, keeping every transaction once."""
+    src = await _own(db, MoneyAccount, user.id, account_id, "Account")
+    dst = await _own(db, MoneyAccount, user.id, body.into_id, "Account")
+    if src.id == dst.id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pick a different account.")
+    if src.kind != dst.kind:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A bank account can only be merged into a bank account, and a card into a card.",
+        )
+    label = store.account_label(dst)
+    counts = await store.merge_account(db, user.id, src, dst)
+    db.add(AuditLog(actor_id=user.id, action="money.account_merged", target=f"account:{dst.id}"))
+    await db.commit()
+    await store.changed(redis, user.id)
+    return {**counts, "into": label}
+
+
 # --- Subscriptions -----------------------------------------------------------------------------
 
 

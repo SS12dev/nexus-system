@@ -19,6 +19,7 @@ function importSummary(i: MoneyImport): string {
   const bits = [`${i.counts.added ?? 0} new`];
   if (i.counts.matched) bits.push(`${i.counts.matched} matched to alert emails`);
   if (i.counts.skipped) bits.push(`${i.counts.skipped} already here`);
+  if (i.counts.new_accounts) bits.push("put on a new account: if you already had it, merge it into yours under Accounts");
   return bits.join(", ");
 }
 

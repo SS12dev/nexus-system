@@ -72,9 +72,22 @@ export function PlanView() {
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Net worth now" value={rupees(s.net_worth_paise, { whole: true })} sub="everything less loans" />
         <Stat label="Bank, less card dues" value={rupees(s.cash_paise, { whole: true })} sub={data.unknown_balances ? `${data.unknown_balances} without a balance` : undefined} />
-        <Stat label="Funds and savings" value={rupees(s.funds_paise + s.savings_paise, { whole: true })} sub={`${compact(s.funds_paise)} funds · ${compact(s.savings_paise)} savings`} />
+        <Stat label="Investments and savings" value={rupees(s.funds_paise + s.savings_paise, { whole: true })} sub={`${compact(s.funds_paise)} funds and shares · ${compact(s.savings_paise)} savings`} />
         <Stat label="Loans" value={rupees(-s.debt_paise, { whole: true })} sub="principal still owed" />
       </div>
+      {!i.months_of_history && data.saved_assumptions.income_paise == null && (
+        <div className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-sm text-slate-300">
+          <Info size={15} className="mt-0.5 shrink-0 text-amber-300" />
+          <span className="min-w-0 flex-1">
+            Money hasn't seen a full month of your income and spending yet, so this forecast only grows what you already
+            have, with nothing coming in. It fills in on its own as alert emails and statements are read; to forecast
+            now, type your monthly take-home pay and usual spending.
+          </span>
+          <button onClick={() => setDialog("assumptions")} className="rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60">
+            Type them now
+          </button>
+        </div>
+      )}
       {data.unknown_balances > 0 && (
         <p className="mb-4 flex items-center gap-2 text-xs text-slate-400">
           <Info size={13} className="shrink-0 text-slate-500" />
@@ -122,8 +135,10 @@ export function PlanView() {
               <p className="mb-3 flex items-start gap-2 rounded-lg border border-edge bg-ink/40 px-3 py-2 text-xs leading-relaxed text-slate-300">
                 <AlertTriangle size={13} className="mt-0.5 shrink-0" style={{ color: "#fab219" }} aria-hidden />
                 <span>
-                  Safety first: your emergency fund covers {data.emergency_months ?? 0} of {data.assumptions.emergency_months} months. Investing is for money you
-                  won't need for five years or more, so it comes after the cushion.{" "}
+                  {i.spend_paise > 0
+                    ? `Safety first: your emergency fund covers ${data.emergency_months ?? 0} of ${data.assumptions.emergency_months} months.`
+                    : `Safety first: an emergency fund of ${data.assumptions.emergency_months} months' spending comes before investing; Money sizes it once it has seen a month of your spending.`}{" "}
+                  Investing is for money you won't need for five years or more, so it comes after the cushion.{" "}
                   <Link to="/money/health" className="text-sky-300 hover:text-sky-200">
                     See the health checks
                   </Link>

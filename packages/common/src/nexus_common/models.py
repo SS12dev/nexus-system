@@ -2121,6 +2121,9 @@ class MoneyAccount(Base):
     limit_with_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("money_accounts.id", ondelete="SET NULL")
     )
+    # Other last-four digits this account is known by: those of an account merged into it
+    # (a statement that quoted different digits), so their rows keep landing here.
+    aliases: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # Closed or not worth showing; its transactions still count.
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

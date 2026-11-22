@@ -541,3 +541,66 @@ async def test_a_read_back_cut_short_is_not_counted(deps, user, sessionmaker, se
     title, body = history_note(2, base, "Gmail said: 403.")
     assert title == "Read some of your old emails, but not all"
     assert body.startswith("4 new transactions.") and "didn't count" in body
+
+
+async def test_reading_keeps_what_it_read_when_google_slows_it(
+    deps, user, sessionmaker, settings, monkeypatch
+):
+    """Google's per-minute quota part way through a long read: the batches before it are saved
+    and the mark moves past them, and the next run fetches only what's left."""
+    from nexus_orchestrator.google_tools import Google as RealGoogle
+
+    monkeypatch.setattr(money, "READS_PER_SECOND", 10_000.0)
+    monkeypatch.setattr(RealGoogle, "retry_waits", ())
+    start = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    mails = {}
+    for i in range(250):
+        when = start + timedelta(hours=8 * i)
+        mails[f"m{i:03d}"] = _mail(
+            f"m{i:03d}",
+            "You have done a UPI txn",
+            f"Rs.{100 + i}.00 has been debited from account **1234 to VPA shop{i}@icici SHOP "
+            f"on {when:%d-%m-%y}. Your UPI transaction reference number is {400000000000 + i}.",
+            "HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+            when,
+        )
+    newest_first = [{"id": k} for k in sorted(mails, reverse=True)]
+    fetched: list[str] = []
+    slow = {"on": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/messages"):
+            q = request.url.params.get("q", "")
+            return httpx.Response(200, json={"messages": newest_first if "debited" in q else []})
+        mid = path.rsplit("/", 1)[-1]
+        if slow["on"] and int(mid[1:]) >= 150:
+            return httpx.Response(429, json={"error": {"message": "Rate limit exceeded"}})
+        fetched.append(mid)
+        return httpx.Response(200, json=mails[mid])
+
+    await grant(sessionmaker, settings, user, ["gmail"])
+    await switch_on(sessionmaker, user)
+    deps.google_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    first = await money.sync_user(deps, user)
+    assert first["added"] == 100
+    async with sessionmaker() as db:
+        assert len((await db.scalars(select(MoneyTxn))).all()) == 100
+        prefs = await db.get(MoneySettings, user)
+        assert prefs.gmail_synced_until == start + timedelta(hours=8 * 99)
+        assert "limiting" in prefs.last_error
+
+    slow["on"] = False
+    fetched.clear()
+    second = await money.sync_user(deps, user)
+    assert second["added"] == 150
+    assert len(fetched) == 150 and "m000" not in fetched
+    async with sessionmaker() as db:
+        prefs = await db.get(MoneySettings, user)
+        assert prefs.last_error is None
+        assert prefs.gmail_synced_until == start + timedelta(hours=8 * 249)
+
+    # One read at a time: a second one while the first runs is skipped.
+    await deps.redis.set(money.READING_KEY.format(user), "1")
+    assert await money.sync_user(deps, user) is None

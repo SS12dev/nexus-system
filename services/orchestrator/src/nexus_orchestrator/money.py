@@ -32,6 +32,7 @@ from nexus_common.models import (
     MoneyMailbox,
     MoneySettings,
     MoneyStock,
+    MoneyTxn,
     NotificationKind,
     User,
     UserStatus,
@@ -83,10 +84,12 @@ OVERLAP = timedelta(days=1)
 MAX_MESSAGES = 1500
 # Reading old mail for history goes further, up to two years of alerts.
 MAX_HISTORY_MESSAGES = 6000
-PARALLEL = 5
+PARALLEL = 4
 # Gmail allows 15,000 quota units a minute per mailbox and reading one message costs 5, so at
-# most 50 a second; a long read back stays well under that, so other Gmail use keeps working.
-READS_PER_SECOND = 20.0
+# most 50 a second in theory; in practice Google slows a mailbox down well before that, so a
+# long read goes gently and saves as it goes (BATCH messages at a time).
+READS_PER_SECOND = 8.0
+BATCH = 100
 
 
 class Pace:
@@ -134,6 +137,37 @@ def _header(msg: dict, name: str) -> str:
     return ""
 
 
+class PartlyRead(GoogleError):
+    """Google stopped a read part way; what was read before it is saved (`counts`)."""
+
+    def __init__(self, message: str, counts: dict):
+        super().__init__(message)
+        self.counts = counts
+
+
+def _empty_counts() -> dict:
+    return {"messages": 0, "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
+            "orders": 0, "orders_matched": 0}  # fmt: skip
+
+
+async def _already_read(deps: TurnDeps, user_id: uuid.UUID, ids: list[str]) -> set[str]:
+    """Messages already in Money as a transaction or an order, so a read that's repeated after
+    Google stopped it part way doesn't fetch them again."""
+    found: set[str] = set()
+    async with deps.sessionmaker() as db:
+        for i in range(0, len(ids), 1000):
+            found |= set(
+                (
+                    await db.scalars(
+                        select(MoneyTxn.source_ref).where(
+                            MoneyTxn.user_id == user_id, MoneyTxn.source_ref.in_(ids[i : i + 1000])
+                        )
+                    )
+                ).all()
+            )
+    return found
+
+
 async def _read_alerts(
     deps: TurnDeps,
     g: Google,
@@ -143,7 +177,12 @@ async def _read_alerts(
     mailbox_id: uuid.UUID | None = None,
 ) -> dict:
     """Alerts since `mark` (the newest mail read last time) from one mailbox: the sign-in
-    Gmail, or another one connected for Money (mailbox_id)."""
+    Gmail, or another one connected for Money (mailbox_id).
+
+    Mail is read oldest first in batches, and each batch is saved before the next is fetched, so
+    when Google slows the reading down part way (its per-minute quota), what came before is
+    kept and the mark only moves past mail that was read. The next run carries on from there.
+    """
     if back_days:
         since = utcnow() - timedelta(days=back_days)
         cap = MAX_HISTORY_MESSAGES
@@ -159,20 +198,58 @@ async def _read_alerts(
     order_ids = [
         i for i in await _list_ids(g, f"{money_orders.ORDER_QUERY} {after}", cap) if i not in seen
     ]
+    counts = _empty_counts()
+    counts["messages"] = len(ids)
+    done = await _already_read(deps, user.id, [*ids, *order_ids])
+    counts["skipped"] = len(done & seen)
+    # Gmail lists newest first; read oldest first so the mark can follow.
+    todo = [i for i in reversed(ids) if i not in done]
+    todo_orders = [i for i in reversed(order_ids) if i not in done]
     tz = zone(user)
+    pace = Pace(READS_PER_SECOND)
+    gate = asyncio.Semaphore(PARALLEL)
+
+    async def fetch(mid: str) -> tuple[str, dict]:
+        async with gate:
+            await pace.wait()
+            return mid, await g.call(
+                "gmail", "GET", f"{GMAIL}/messages/{mid}", params={"format": "full"}
+            )
+
+    # Orders last, so each can find the payment its bank already reported.
+    batches = [todo[i : i + BATCH] for i in range(0, len(todo), BATCH)]
+    batches += [todo_orders[i : i + BATCH] for i in range(0, len(todo_orders), BATCH)]
+    for batch in batches:
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = [tg.create_task(fetch(mid)) for mid in batch]
+        except* GoogleError as group:
+            # The rest of the batch was cancelled with it; nothing more is fetched this run.
+            raise PartlyRead(str(group.exceptions[0]), counts) from group.exceptions[0]
+        await _save_batch(
+            deps, user, tz, [t.result() for t in tasks], counts, mailbox_id, bool(back_days)
+        )
+    if not batches:
+        await _save_batch(deps, user, tz, [], counts, mailbox_id, bool(back_days))
+    return counts
+
+
+async def _save_batch(
+    deps: TurnDeps,
+    user: User,
+    tz,
+    messages: list[tuple[str, dict]],
+    counts: dict,
+    mailbox_id: uuid.UUID | None,
+    history: bool,
+) -> None:
+    """Parse and store one batch of messages, then move the mailbox's mark past them."""
     parsed: list[tuple[money.Parsed, str]] = []
     bills: list[money.CardBill] = []
     bookings: list[money.EmiBooking] = []
     orders: list[tuple[money_orders.Order, str]] = []
-    newest = mark
-    gate = asyncio.Semaphore(PARALLEL)
-    pace = Pace(READS_PER_SECOND)
-
-    async def one(mid: str) -> None:
-        nonlocal newest
-        async with gate:
-            await pace.wait()
-            msg = await g.call("gmail", "GET", f"{GMAIL}/messages/{mid}", params={"format": "full"})
+    newest: datetime | None = None
+    for mid, msg in messages:
         received = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000, UTC)
         newest = max(newest or received, received)
         body, _ = message_body(msg.get("payload") or {})
@@ -186,10 +263,6 @@ async def _read_alerts(
             parsed.append((p, mid))
         elif order := money_orders.parse_order(subject, body, day, sender=sender):
             orders.append((order, mid))
-
-    await asyncio.gather(*(one(m) for m in [*ids, *order_ids]))
-    counts = {"messages": len(ids), "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
-              "orders": 0, "orders_matched": 0}  # fmt: skip
     async with deps.sessionmaker() as db:
         for bill in sorted(bills, key=lambda b: b.statement_on):
             counts["bills"] += await store.record_card_bill(db, user.id, bill)
@@ -203,30 +276,29 @@ async def _read_alerts(
         # After the alerts, so the purchase an EMI replaces is already in.
         for booking in bookings:
             counts["emis"] += await store.record_emi_booking(db, user.id, booking) is not None
-        # Last, so each order can find the payment its bank already reported.
         for order, mid in sorted(orders, key=lambda x: x[0].occurred_on):
             got = await store.record_order(db, deps.settings, user.id, order, mid)
             counts["orders"] += got == "added"
             counts["orders_matched"] += got == "matched"
+        # Reading old mail for history never moves the mark; a batch of new mail moves it past
+        # what's just been read (oldest first, so everything before it is in too).
         box = await db.get(MoneyMailbox, mailbox_id) if mailbox_id else None
+        row = box if box is not None else await store.settings_for(db, user.id)
+        field = "synced_until" if box is not None else "gmail_synced_until"
+        mark = getattr(row, field)
+        if mailbox_id and box is None:
+            pass  # the mailbox was removed while it was being read
+        elif newest and not history and (mark is None or newest > mark):
+            setattr(row, field, newest)
+        elif mark is None and not messages:
+            setattr(row, field, utcnow())
         if box is not None:
-            # Reading old mail never moves the mark backwards.
-            if newest and (box.synced_until is None or newest > box.synced_until):
-                box.synced_until = newest
-            elif box.synced_until is None:
-                box.synced_until = utcnow()
             box.synced_at = utcnow()
             box.last_error = None
         elif mailbox_id is None:
-            row = await store.settings_for(db, user.id)
-            if newest and (row.gmail_synced_until is None or newest > row.gmail_synced_until):
-                row.gmail_synced_until = newest
-            elif row.gmail_synced_until is None:
-                row.gmail_synced_until = utcnow()
             row.gmail_synced_at = utcnow()
             row.last_error = None
         await db.commit()
-    return counts
 
 
 def _pdf_part(payload: dict) -> dict | None:
@@ -284,7 +356,38 @@ async def _read_cas(deps: TurnDeps, g: Google, user: User, prefs: MoneySettings)
     return saved
 
 
+READING_KEY = "nexus:money:reading:{}"
+
+
 async def sync_user(
+    deps: TurnDeps, user_id: uuid.UUID, *, back_days: int | None = None
+) -> dict | None:
+    """One read at a time per person: the hourly check and a read back running together would
+    double the rate Gmail sees, which is what made Google slow the reading down."""
+    key = READING_KEY.format(user_id)
+    try:
+        free = await deps.redis.set(key, "1", nx=True, ex=1800)
+    except RedisError:
+        free = True
+    if not free:
+        log.info("money.sync_busy", extra={"user_id": str(user_id)})
+        if back_days:
+            await _refund_history(deps, user_id)
+            await _tell_history(
+                deps, user_id, back_days, None,
+                "Money was already reading your mail. Try the read back again in a few minutes.",
+            )  # fmt: skip
+        return None
+    try:
+        return await _sync_user(deps, user_id, back_days=back_days)
+    finally:
+        try:
+            await deps.redis.delete(key)
+        except RedisError:
+            pass
+
+
+async def _sync_user(
     deps: TurnDeps, user_id: uuid.UUID, *, back_days: int | None = None
 ) -> dict | None:
     """Read new alerts and the newest CAS for one person (with back_days, every alert that far
@@ -313,6 +416,8 @@ async def sync_user(
             counts = await _read_alerts(deps, g, user, prefs.gmail_synced_until, back_days)
             holdings = await _read_cas(deps, g, user, prefs)
         except GoogleError as exc:
+            if isinstance(exc, PartlyRead):
+                counts = exc.counts
             # The text is about the connection (not connected, API off), never the mail itself.
             error = str(exc)
             async with deps.sessionmaker() as db:
@@ -329,6 +434,11 @@ async def sync_user(
             )
         except GoogleError as exc:
             error = error or str(exc)
+            if isinstance(exc, PartlyRead):
+                got = exc.counts
+                counts = (
+                    got if counts is None else {k: counts.get(k, 0) + v for k, v in got.items()}
+                )
             async with deps.sessionmaker() as db:
                 box = await db.get(MoneyMailbox, box_id)
                 if box is not None:

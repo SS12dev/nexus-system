@@ -857,6 +857,9 @@ async def import_file(
     is_pdf = name.lower().endswith(".pdf") or data[:5] == b"%PDF-"
     typed = password.strip()
     kind = "statement"
+    known = set(
+        (await db.scalars(select(MoneyAccount.id).where(MoneyAccount.user_id == user.id))).all()
+    )
     try:
         if is_pdf:
             # The typed password first, then the saved CAS one. A bank statement's password is
@@ -888,6 +891,14 @@ async def import_file(
             counts = await store.ingest(
                 db, cfg, user.id, rows, source="statement", account_id=account_id
             )
+        if kind == "statement" and not account_id and known:
+            now = set(
+                (await db.scalars(select(MoneyAccount.id).where(MoneyAccount.user_id == uid))).all()
+            )
+            # Rows that landed on an account Money hadn't seen: the statement quoted other
+            # digits. The upload says so, and Accounts can merge it into the right one.
+            if made := len(now - known):
+                counts["new_accounts"] = made
     except money.StatementError as exc:
         await db.rollback()
         row = await store.record_import(

@@ -93,6 +93,70 @@ async def attach_debit_card(
     return moved
 
 
+async def merge_account(
+    db: AsyncSession, user_id: uuid.UUID, src: MoneyAccount, dst: MoneyAccount
+) -> dict:
+    """Fold `src` into `dst`: the same account seen under other digits (a statement that quoted
+    a different number, or an account added twice). Its transactions move over, a row that's
+    already on `dst` (the same amount and direction within MATCH_DAYS, from another source) is
+    dropped rather than counted twice, everything that pointed at `src` points at `dst`, and
+    `src`'s digits keep leading to `dst`. Returns {"moved", "matched"}."""
+    from nexus_common.models import MoneyLoan
+
+    existing = (await db.scalars(select(MoneyTxn).where(MoneyTxn.account_id == dst.id))).all()
+    taken: set[uuid.UUID] = set()
+    moved = matched = 0
+    for t in (await db.scalars(select(MoneyTxn).where(MoneyTxn.account_id == src.id))).all():
+        twin = next(
+            (
+                e
+                for e in existing
+                if e.id not in taken
+                and e.amount_paise == t.amount_paise
+                and e.direction == t.direction
+                and e.source != t.source
+                and abs((e.occurred_on - t.occurred_on).days) <= MATCH_DAYS
+            ),
+            None,
+        )
+        if twin is not None:
+            taken.add(twin.id)
+            await db.delete(t)
+            matched += 1
+        else:
+            t.account_id = dst.id
+            moved += 1
+    for model, column in (
+        (MoneyImport, MoneyImport.account_id),
+        (MoneySubscription, MoneySubscription.account_id),
+        (MoneySubscription, MoneySubscription.move_to_id),
+        (MoneyLoan, MoneyLoan.account_id),
+        (MoneyAccount, MoneyAccount.bill_from_id),
+        (MoneyAccount, MoneyAccount.limit_with_id),
+    ):
+        for row in (
+            await db.scalars(select(model).where(model.user_id == user_id, column == src.id))
+        ).all():
+            setattr(row, column.key, dst.id)
+    if src.balance_on and (dst.balance_on is None or src.balance_on > dst.balance_on):
+        dst.balance_paise, dst.balance_on = src.balance_paise, src.balance_on
+    dst.institution = dst.institution or src.institution
+    dst.card_mask = dst.card_mask or src.card_mask
+    dst.expires_on = dst.expires_on or src.expires_on
+    if dst.kind == "card":
+        dst.credit_limit_paise = dst.credit_limit_paise or src.credit_limit_paise
+    known = {dst.mask, dst.card_mask}
+    extra = [m for m in (src.mask, src.card_mask, *(src.aliases or [])) if m and m not in known]
+    dst.aliases = list(dict.fromkeys([*(dst.aliases or []), *extra]))
+    await db.flush()
+    await db.delete(src)
+    await db.flush()
+    log.info(
+        "money.accounts_merged", extra={"user_id": str(user_id), "moved": moved, "matched": matched}
+    )
+    return {"moved": moved, "matched": matched}
+
+
 async def account_for(
     db: AsyncSession, user_id: uuid.UUID, institution: str | None, mask: str | None, kind: str
 ) -> MoneyAccount | None:
@@ -113,6 +177,16 @@ async def account_for(
         ).all():
             if not institution or not row.institution or row.institution == institution:
                 return row
+    # Digits of an account that was merged into another.
+    for row in (
+        await db.scalars(
+            select(MoneyAccount).where(MoneyAccount.user_id == user_id, MoneyAccount.kind == kind)
+        )
+    ).all():
+        if mask in (row.aliases or []) and (
+            not institution or not row.institution or row.institution == institution
+        ):
+            return row
     rows = (
         await db.scalars(
             select(MoneyAccount).where(MoneyAccount.user_id == user_id, MoneyAccount.mask == mask)

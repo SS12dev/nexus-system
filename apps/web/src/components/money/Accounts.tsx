@@ -21,6 +21,7 @@ import {
   type LoanKind,
 } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
+import { Select } from "../Select";
 import { SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, secretChange, type Field, type Values } from "./FormDialog";
 import { SecretLine } from "./Secret";
@@ -234,12 +235,19 @@ export function AccountsView() {
         </button>
       )}
 
-      {dialog?.kind === "balance" && <BankDialog a={dialog.account} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "balance" && (
+        <BankDialog
+          a={dialog.account}
+          others={data.items.filter((x) => x.kind === "bank" && x.id !== dialog.account.id)}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog?.kind === "card" && (
         <CardDialog
           a={dialog.account}
           banks={data.items.filter((x) => x.kind === "bank")}
           cards={cardOptions.filter((x) => x.id !== dialog.account.id && x.limit_with_id !== dialog.account.id)}
+          others={cardOptions.filter((x) => x.id !== dialog.account.id)}
           onClose={() => setDialog(null)}
         />
       )}
@@ -461,7 +469,53 @@ function BalanceCheckLine({ check, accountId }: { check: BalanceCheck; accountId
   );
 }
 
-function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
+/** "This is the same account as…": fold it into another of the same kind. For an account a
+ * statement made under other digits. */
+function MergeBox({ a, others, onDone }: { a: AccountView; others: AccountView[]; onDone: () => void }) {
+  const [into, setInto] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!others.length) return null;
+  const merge = async () => {
+    const target = others.find((o) => o.id === into);
+    if (!target) return;
+    const ok = await confirmAction({
+      title: `Merge ${a.label} into ${target.label}?`,
+      body: `Its transactions move to ${target.label} (any already there aren't counted twice), and ${a.label} goes. Later statements and alerts with its digits land on ${target.label} too.`,
+      confirmLabel: "Merge",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await api.moneyMergeAccount(a.id, target.id);
+      toast(`Merged into ${r.into}: ${r.moved} moved${r.matched ? `, ${r.matched} were already there` : ""}`);
+      onDone();
+    } catch (e) {
+      toast((e as Error).message, "error");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="border-t border-edge/70 pt-3">
+      <p className="text-sm text-slate-300">Same account as another?</p>
+      <p className="mt-0.5 text-xs text-slate-500">If a statement or alert made this one under other digits, merge it into the right account.</p>
+      <div className="mt-2 flex gap-2">
+        <Select value={into} onChange={(e) => setInto(e.target.value)} className="min-w-0 flex-1" aria-label="Merge into">
+          <option value="">Pick the account…</option>
+          {others.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <button type="button" onClick={merge} disabled={!into || busy} className="rounded-md border border-edge px-3 py-1 text-sm text-slate-200 hover:bg-edge/60 disabled:opacity-50">
+          Merge
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BankDialog({ a, others, onClose }: { a: AccountView; others: AccountView[]; onClose: () => void }) {
   const fields: Field[] = [
     { key: "name", label: "Name", kind: "text", value: a.name, placeholder: a.label, optional: true },
     {
@@ -500,6 +554,7 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
       fields={fields}
       submitLabel="Save"
       onClose={onClose}
+      extra={<MergeBox a={a} others={others} onDone={onClose} />}
       onSubmit={async (v) => {
         const debit = v.debit.replace(/\D/g, "");
         if (debit && debit.length !== 4) throw new Error("Type the debit card's last four digits.");
@@ -516,7 +571,19 @@ function BankDialog({ a, onClose }: { a: AccountView; onClose: () => void }) {
   );
 }
 
-function CardDialog({ a, banks, cards, onClose }: { a: AccountView; banks: AccountView[]; cards: AccountView[]; onClose: () => void }) {
+function CardDialog({
+  a,
+  banks,
+  cards,
+  others,
+  onClose,
+}: {
+  a: AccountView;
+  banks: AccountView[];
+  cards: AccountView[];
+  others: AccountView[];
+  onClose: () => void;
+}) {
   const fields: Field[] = [
     { key: "name", label: "Name", kind: "text", value: a.name, placeholder: a.label, optional: true },
     ...(cards.length && !a.shared_with?.length
@@ -561,6 +628,7 @@ function CardDialog({ a, banks, cards, onClose }: { a: AccountView; banks: Accou
       fields={fields}
       submitLabel="Save"
       onClose={onClose}
+      extra={<MergeBox a={a} others={others} onDone={onClose} />}
       onSubmit={async (v) => {
         const due = read.money(v.due);
         const changedBill = due !== (a.due_paise ?? null) || (v.due_on || null) !== (a.due_on ?? null);
