@@ -106,6 +106,77 @@ def _centred_pdf() -> bytes:
     return buf.getvalue()
 
 
+def _icici_year_pdf() -> bytes:
+    """ICICI's yearly statement: a summary naming the PPF account first, an opening "B/F" line,
+    remarks of one to four lines centred on the date line with every line evenly spaced (so a
+    line between two rows is as close to either), the whole payee name glued to a reference
+    at the end, then the PPF account's own section."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica", 7)
+    y = 800
+    for line in ["Summary of Accounts held under Cust ID: 123456789 as on April 30, 2026",
+                 "PPF A/c 000518009999 3,000.00 0.00 3,000.00 Registered",
+                 "Savings A/c 000101500777 51,353.18 0.00 51,353.18 Registered",
+                 "Statement of Transactions in Savings Account Number: 000101500777 in INR for "
+                 "the period April 01, 2026 - April 30, 2026"]:  # fmt: skip
+        c.drawString(27, y, line)
+        y -= 14
+    heads = [(27, "DATE", "l"), (76, "MODE**", "l"), (158, "PARTICULARS", "l"),
+             (430, "DEPOSITS", "r"), (510, "WITHDRAWALS", "r"), (590, "BALANCE", "r")]  # fmt: skip
+
+    def header(y: float) -> None:
+        for x, text, align in heads:
+            (c.drawString if align == "l" else c.drawRightString)(x, y, text)
+
+    def rows(y: float, items: list) -> float:
+        for day, mode, remark, inn, out, balance in items:
+            # The date line sits in the middle of the remark; every line is 10 points apart.
+            mid = y - (len(remark) - 1) * 5
+            c.drawString(27, mid, day)
+            if mode:
+                c.drawString(76, mid, mode)
+            for k, part in enumerate(remark):
+                c.drawString(158, y - k * 10, part)
+            if inn:
+                c.drawRightString(430, mid, inn)
+            if out:
+                c.drawRightString(510, mid, out)
+            c.drawRightString(590, mid, balance)
+            y -= max(len(remark), 1) * 10
+        return y
+
+    header(y)
+    y = rows(y - 14, [
+        ("01-04-2026", "", ["B/F"], "", "", "0.00"),
+        ("29-04-2026", "CMS TRANSACTION",
+         ["CMS/ REGULAR SALARY APR26/ACME", "TECHNOLOGY INTERNATI"], "85,000.00", "", "85,000.00"),
+        ("29-04-2026", "ICICI DIRECT", ["EBA/PUR_DEMO000/20260429120000"], "", "1,178.82",
+         "83,821.18"),
+        ("30-04-2026", "", ["UPI/RIYA MENON/riyamenon@oksbi/UPI",
+                            "Paymen//500000000001/ICI0a0b0c0d0e0f0a0b0c0d0e",
+                            "0f0e0d0c0b0a/RIYA MENON K"], "", "500.00", "83,321.18"),
+        ("30-04-2026", "", ["UPI/100000000002/Upi", "Transaction/makemytrip.demo/HDFC BANK",
+                            "LTD/HDFD00000000000000000000000000000000/", "MAKEMYTRIP COM"],
+         "", "14,468.00", "68,853.18"),
+        ("30-04-2026", "", ["UPI/ANAND KUMA/anandk@okaxis/rent/FEDERAL",
+                            "BA/500000000003/SBI0a1b2c3d4e5f6a7b8c9d0e1f2",
+                            "3a4b5c6dANAND KUMAR"], "", "17,000.00", "51,853.18"),
+        ("30-04-2026", "", ["Trf to PPF 000518009999"], "", "500.00", "51,353.18"),
+    ])  # fmt: skip
+    c.drawString(27, y - 4, "TOTAL 85,000.00 33,646.82 51,353.18")
+    c.drawString(27, y - 24, "Statement of Transactions in Account Number: 000518009999 in INR")
+    header(y - 38)
+    ppf = [("01-04-2026", "", ["B/F"], "", "", "2,500.00"),
+           ("30-04-2026", "", ["Trf frm SB 000101500777"], "500.00", "", "3,000.00")]  # fmt: skip
+    rows(y - 52, ppf)
+    c.save()
+    return buf.getvalue()
+
+
 def _card_pdf() -> bytes:
     """A card statement with a ruled table and unsigned amounts."""
     from reportlab.lib.pagesizes import A4
@@ -194,6 +265,24 @@ def test_a_centred_layout_keeps_each_remark_with_its_row():
     assert rows[0].narration.startswith("UPI/ZEPTO MARK") and "512345678901" in rows[0].narration
     assert "SAL ARY FEB26" in rows[1].narration and "512345678901" not in rows[1].narration
     assert rows[0].account_mask == "6320"
+
+
+def test_an_icici_year_reads_each_remark_with_its_own_row():
+    rows = money.read_pdf_statement(_icici_year_pdf(), "", "statement.pdf")
+    got = [(p.amount_paise, p.direction, p.merchant) for p in rows]
+    assert got == [
+        (85_000_00, "credit", "Acme Technology Internati"),
+        (1_178_82, "debit", "Eba"),
+        (500_00, "debit", "Riya Menon K"),
+        (14_468_00, "debit", "MakeMyTrip"),
+        (17_000_00, "debit", "Anand Kumar"),
+        (500_00, "debit", "Trf to PPF"),
+    ]
+    assert rows[1].narration == "EBA/PUR_DEMO000/20260429120000"
+    assert rows[3].narration.endswith("MAKEMYTRIP COM")
+    assert rows[3].narration.startswith("UPI/100000000002/Upi Transaction")
+    # The savings account, not the PPF the summary names first; the PPF's own section is left.
+    assert {p.account_mask for p in rows} == {"0777"}
 
 
 def test_reads_a_card_statement_pdf():
