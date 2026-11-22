@@ -163,6 +163,29 @@ def test_reads_a_bank_statement_pdf(two_line_header):
     assert (rows[0].account_mask, rows[0].institution) == ("1298", "HDFC Bank")
 
 
+def _padded(data: bytes, pages: int) -> bytes:
+    """The statement followed by blank pages, to stand in for a long one."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for page in PdfReader(io.BytesIO(data)).pages:
+        writer.add_page(page)
+    for _ in range(pages - 1):
+        writer.add_blank_page(width=595, height=842)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def test_a_year_long_statement_is_read(monkeypatch):
+    # A busy account's year runs past 90 pages; that used to be turned away at 80.
+    rows = money.read_pdf_statement(_padded(_bank_pdf(), 92), "", "year.pdf")
+    assert [p.amount_paise for p in rows] == [452_50, 85_000_00, 1_299_00]
+    monkeypatch.setattr(money, "MAX_PDF_PAGES", 10)
+    with pytest.raises(money.StatementError, match="12 pages; up to 10.*two halves"):
+        money.read_pdf_statement(_padded(_bank_pdf(), 12), "", "long.pdf")
+
+
 def test_a_centred_layout_keeps_each_remark_with_its_row():
     rows = money.read_pdf_statement(_centred_pdf(), "", "statement.pdf")
     got = [(p.amount_paise, p.direction, p.merchant) for p in rows]

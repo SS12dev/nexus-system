@@ -1072,7 +1072,9 @@ def parse_rows(rows: list[list], name: str, *, wrapped: bool = False) -> list[Pa
 # Banks email statements as PDFs, usually locked with a password made from the customer's own
 # details. The password is used once, in memory, to open the file and is never stored or logged.
 
-MAX_PDF_PAGES = 80
+# A year of a busy account runs to about 100 pages; past this a file takes too long to read in
+# one request (a reader works through about two to four pages a second).
+MAX_PDF_PAGES = 250
 _CAS_PDF = re.compile(
     r"consolidated account statement|\bcams\b|kfintech|kfin technologies|karvy", re.I
 )
@@ -1294,7 +1296,7 @@ def read_pdf_statement(data: bytes, password: str, name: str) -> list[Parsed]:
             if len(pdf.pages) > MAX_PDF_PAGES:
                 raise StatementError(
                     f"That PDF has {len(pdf.pages)} pages; up to {MAX_PDF_PAGES} can be read. "
-                    "Download a shorter period."
+                    "Download it in two halves (say April to September, then October to March)."
                 )
             first = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
             attempts = (lambda: _table_rows(pdf, first), lambda: _layout_rows(pdf))
