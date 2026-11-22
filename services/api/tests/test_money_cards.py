@@ -247,3 +247,11 @@ async def test_an_account_made_under_other_digits_merges_in(owner, sessionmaker,
         ], source="statement")  # fmt: skip
         await db.commit()
         assert len((await db.scalars(select(MoneyAccount))).all()) == 1
+        # A statement quoting a card first and the account second goes to the known account.
+        await store.ingest(db, settings, user.id, [
+            money.Parsed(date(2026, 4, 3), 300_00, "debit", "Ola", "UPI/OLA/3",
+                         account_mask="7788", mask_options=("7788", "6320"),
+                         institution="ICICI Bank"),
+        ], source="statement")  # fmt: skip
+        await db.commit()
+        assert len((await db.scalars(select(MoneyAccount))).all()) == 1

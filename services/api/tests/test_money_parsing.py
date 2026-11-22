@@ -388,6 +388,16 @@ def test_statement_account_mask():
     assert money.statement_mask("Savings statement") is None
     rows = money.parse_statement(HDFC_CSV, "Acct_Statement_XX1234.csv")
     assert {r.account_mask for r in rows} == {"1234"}
+    # A label never runs on into a date, and every number quoted is kept, best first.
+    assert money.statement_masks("Account Number ********6320 01-04-2025 - 31-03-2026") == ["6320"]
+    assert money.statement_mask("Account opened 12-04-2025") is None
+    assert money.statement_masks("A/C No: 000401006320 Debit Card 4xxx xxxx xxxx 3443") == [
+        "6320", "3443"
+    ]  # fmt: skip
+    # The heading wins over the file name.
+    head = b"Debit Card XXXX3443\nAccount Number,XXXXXXXX6320\n"
+    rows = money.parse_statement(head + HDFC_CSV, "Statement_XX9999.csv")
+    assert rows[0].account_mask == "3443" and rows[0].mask_options == ("3443", "6320")
 
 
 def test_card_bill_payment_is_a_transfer():
