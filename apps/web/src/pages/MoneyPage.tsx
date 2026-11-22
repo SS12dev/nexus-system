@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "../components/Feedback";
 import { Guide, GuideHeading } from "../components/Guide";
-import { OrdersToConfirm } from "../components/money/Orders";
+import { MoneySuggests } from "../components/money/Suggestions";
 import { BudgetMeter, CategoryBars, TrendBars } from "../components/money/Charts";
 import { Card, Empty, MonthPicker, Spinner, Stat, useMoney, useMoneySettings } from "../components/money/parts";
 import { AccountsView } from "../components/money/Accounts";
@@ -216,7 +216,7 @@ function OverviewView({ latest }: { latest: string }) {
     <>
       <TrackingStrip />
       {month === latest && <HealthStrip />}
-      <OrdersToConfirm />
+      <MoneySuggests />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <MonthPicker month={month} latest={latest} onChange={pick} />
         <SyncLine on={data.gmail_sync} at={data.gmail_synced_at} />

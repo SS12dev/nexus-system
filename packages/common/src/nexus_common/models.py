@@ -2077,6 +2077,8 @@ class MoneySettings(Base):
     last_error: Mapped[str | None] = mapped_column(String(300))
     # The forecast's assumptions (money_plan.Assumptions as a dict); empty means defaults.
     plan: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # Money's one-tap questions already answered: question key -> the answer picked.
+    answered: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -2379,7 +2381,7 @@ class MoneySubscription(Base):
     manual: Mapped[bool] = mapped_column(Boolean, default=False)
     category: Mapped[str] = mapped_column(String(40), default="Subscriptions")
     amount_paise: Mapped[int | None] = mapped_column(BigInteger)
-    # monthly, quarterly or yearly.
+    # monthly, bimonthly (every two months: many electricity boards), quarterly or yearly.
     cadence: Mapped[str] = mapped_column(String(12), default="monthly")
     next_on: Mapped[date | None] = mapped_column(Date)
     # Days before a renewal to remind; 0 means no reminder.

@@ -51,7 +51,13 @@ BAND = PatternFill("solid", fgColor="F3F6FA")
 TOTAL = PatternFill("solid", fgColor="E6EEF7")
 THIN = Side(style="thin", color="C9D3DF")
 
-CADENCE = {"weekly": "Weekly", "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"}
+CADENCE = {
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "bimonthly": "Every 2 months",
+    "quarterly": "Quarterly",
+    "yearly": "Yearly",
+}
 STATUS = {
     "new": "To review",
     "active": "Active",

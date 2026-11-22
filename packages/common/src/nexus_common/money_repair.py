@@ -7,6 +7,7 @@ Run once per person (the orchestrator keeps a Redis flag per version):
 - categories the word list chose worked out again (never one the person or a rule set);
 - (version 2) alerts read again from mail for the last REREAD_DAYS, for emails an earlier
   version couldn't read (the orchestrator does the reading);
+- (version 3) statement lines paid through Google Pay's bills named "Google Pay bills";
 - two emails about one payment (a card's "debited" and the autopay's "bill paid", or one alert
   in two mailboxes) made one row.
 
@@ -14,6 +15,7 @@ Owner's rows only; logs carry ids and counts, never amounts or names.
 """
 
 import logging
+import re
 import uuid
 
 from sqlalchemy import delete, select
@@ -27,7 +29,9 @@ from nexus_common.settings import Settings
 log = logging.getLogger(__name__)
 
 # 2: ICICI card alerts (thrown away for the OTP warning in their footer) read again.
-VERSION = 2
+# 3: Google Pay bill payments (electricity, recharges) named and filed as bills; pay-later
+#    repayments and GRE prep given their categories.
+VERSION = 3
 # How far back alerts are read again when a new version's reading fixes call for it.
 REREAD_DAYS = 45
 
@@ -69,6 +73,12 @@ async def repair(db: AsyncSession, cfg: Settings, user_id: uuid.UUID) -> dict[st
         text = money.unseal(cfg, t.narration_enc) or ""
         p = money.parse_alert("", text, t.occurred_on) if t.source == "alert" and text else None
         cleaned = p.narration if p else text
+        if t.source == "statement" and text and re.search(r"gpayrecharge", text, re.I):
+            # Statement lines paid through Google Pay's bills were named just "Google".
+            name = money.statement_merchant(text)
+            if name != t.merchant:
+                t.merchant = name[:120]
+                counts["payees"] += 1
         if p is not None and p.merchant != t.merchant and p.merchant != "Unknown":
             if _payee_lost(t.merchant, cleaned):
                 t.merchant = p.merchant[:120]

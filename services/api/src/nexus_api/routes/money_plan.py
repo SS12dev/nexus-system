@@ -195,7 +195,7 @@ class SubscriptionIn(BaseModel):
     # Adding one by hand.
     manual: bool | None = None
     amount_paise: Paise | None = None
-    cadence: Literal["monthly", "quarterly", "yearly"] | None = None
+    cadence: Literal["monthly", "bimonthly", "quarterly", "yearly"] | None = None
     next_on: date | None = None
     category: str | None = Field(default=None, max_length=40)
     # The card or account it is charged to (None: follow the latest charge), and a move to

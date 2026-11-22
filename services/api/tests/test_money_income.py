@@ -109,6 +109,11 @@ async def test_repair_fixes_payees_categories_and_merges_pairs(owner, sessionmak
         db.add(row(merchant="Support You In Every Step", category="Shopping", category_by="user",
                    occurred_on=date(2026, 9, 1), ref="512345678902", source_ref="m4",
                    dedupe_key="k4"))  # fmt: skip
+        # An electricity bill paid through Google Pay, read from a statement as "Google".
+        gpay = "UPI/Google Ind/gpayrecharge@o/UPI/AXIS BANK/500000000009/ICI0a0b/Google India"
+        db.add(row(merchant="Google", source="statement", source_ref=None, ref=None,
+                   narration_enc=money.seal(settings, gpay), amount_paise=2500_00,
+                   occurred_on=date(2026, 10, 31), dedupe_key="k5"))  # fmt: skip
         await db.commit()
 
         counts = await money_repair.repair(db, settings, uid)
@@ -117,7 +122,8 @@ async def test_repair_fixes_payees_categories_and_merges_pairs(owner, sessionmak
             r.dedupe_key: r
             for r in (await db.scalars(select(MoneyTxn).where(MoneyTxn.user_id == uid))).all()
         }
-    assert counts == {"payees": 2, "categories": 3, "merged": 1}
+    assert counts == {"payees": 3, "categories": 4, "merged": 1}
+    assert (rows["k5"].merchant, rows["k5"].category) == ("Google Pay bills", "Bills and utilities")
     assert (rows["k1"].merchant, rows["k1"].category) == ("Zepto", "Groceries")
     assert (rows["k4"].merchant, rows["k4"].category) == ("Zepto", "Shopping")
     youtube = [r for r in rows.values() if r.merchant == "YouTube"]

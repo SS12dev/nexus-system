@@ -104,7 +104,7 @@ export interface MoneyAccount {
 }
 
 export type SubStatus = "new" | "active" | "cancelled" | "ignored";
-export type Cadence = "monthly" | "quarterly" | "yearly";
+export type Cadence = "monthly" | "bimonthly" | "quarterly" | "yearly";
 
 export interface Subscription {
   key: string;
@@ -678,6 +678,27 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
   salary: "Expected from your salary details (Plan): no credit like it was read for this month. It goes by itself once the real one is read.",
 };
 
+/** One of Money's one-tap questions, with its best guess (a choice id) when it has one. */
+export interface Suggestion {
+  key: string;
+  kind: "order" | "subscription" | "rent" | "category" | "emi" | "yearly";
+  merchant: string;
+  amount_paise: number;
+  on: string | null;
+  cadence?: Cadence;
+  count?: number;
+  plan?: string;
+  why: string;
+  choices: { id: string; label: string }[];
+  guess: string | null;
+}
+
+export interface Suggestions {
+  items: Suggestion[];
+  /** Orders matched to payments without asking, this time. */
+  matched: number;
+}
+
 /** An order from a shop's email that no bank or card payment explains yet. */
 export interface OrderToConfirm {
   id: string;
@@ -732,7 +753,8 @@ export function whenLabel(day: string, now = new Date()): string {
   return n > 0 ? `in ${n} days` : `${-n} days ago`;
 }
 
-export const CADENCE_LABEL: Record<Cadence, string> = { monthly: "Monthly", quarterly: "Every 3 months", yearly: "Yearly" };
+export const CADENCE_LABEL: Record<Cadence, string> = { monthly: "Monthly", bimonthly: "Every 2 months", quarterly: "Every 3 months", yearly: "Yearly" };
+export const CADENCE_MONTHS: Record<Cadence, number> = { monthly: 1, bimonthly: 2, quarterly: 3, yearly: 12 };
 
 export const BILL_LABEL: Record<BillStatus, string> = {
   none: "No bill read yet",
