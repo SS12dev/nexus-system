@@ -5,6 +5,8 @@ Run once per person (the orchestrator keeps a Redis flag per version):
 - an alert's payee read again from its stored text, now that a bank's sign-off ("we're here to
   support you in every step") is cut first and a UPI payee in brackets is read;
 - categories the word list chose worked out again (never one the person or a rule set);
+- (version 2) alerts read again from mail for the last REREAD_DAYS, for emails an earlier
+  version couldn't read (the orchestrator does the reading);
 - two emails about one payment (a card's "debited" and the autopay's "bill paid", or one alert
   in two mailboxes) made one row.
 
@@ -24,7 +26,10 @@ from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
 
-VERSION = 1
+# 2: ICICI card alerts (thrown away for the OTP warning in their footer) read again.
+VERSION = 2
+# How far back alerts are read again when a new version's reading fixes call for it.
+REREAD_DAYS = 45
 
 
 def _payee_lost(old: str, cleaned: str) -> bool:

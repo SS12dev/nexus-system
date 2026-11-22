@@ -39,7 +39,7 @@ export function SalaryCard() {
                         {s.from_on > isoToday() ? "From" : "Since"} {fullDay(s.from_on)}
                         {s.employer && ` · ${s.employer}`}
                         {s.account_id && names.get(s.account_id) && ` · into ${names.get(s.account_id)}`}
-                        {` · around the ${ordinal(s.pay_day)}`}
+                        {s.pay_day ? ` · around the ${ordinal(s.pay_day)}` : " · last working day"}
                       </span>
                     </span>
                     {now && <span className="text-xs text-[#0ca30c]">now</span>}
@@ -95,7 +95,7 @@ function SalaryDialog({ salary, last, onClose }: { salary: Salary | null; last?:
       hint: last ? "The first month paid at the new amount." : "Roughly when you started at this amount.",
       half: true,
     },
-    { key: "employer", label: "Employer", kind: "text", value: base?.employer ?? "", optional: true, placeholder: "Shown as the payee" },
+    { key: "employer", label: "Employer", kind: "text", value: base?.employer ?? "", optional: true, placeholder: "Shown as the payee", hint: "Only a label: the real credit is found by account, date and amount, whatever the bank calls it." },
     {
       key: "account_id",
       label: "Paid into",
@@ -108,9 +108,10 @@ function SalaryDialog({ salary, last, onClose }: { salary: Salary | null; last?:
     {
       key: "pay_day",
       label: "Pay day",
-      kind: "int",
-      value: String(base?.pay_day ?? 1),
-      hint: "Day of the month it usually arrives; a credit within six days counts.",
+      kind: "select",
+      value: String(base?.pay_day ?? 0),
+      options: [["0", "Last working day"], ...Array.from({ length: 31 }, (_, i) => [String(i + 1), ordinal(i + 1)] as [string, string])],
+      hint: "A credit up to ten days before or six after counts, so early pay before a holiday is still found.",
       half: true,
     },
   ];
@@ -139,8 +140,7 @@ function SalaryDialog({ salary, last, onClose }: { salary: Salary | null; last?:
         )
       }
       onSubmit={async (v) => {
-        const day = read.int(v.pay_day) ?? 1;
-        if (day < 1 || day > 31) throw new Error("Pay day: a day of the month, 1 to 31");
+        const day = read.int(v.pay_day) ?? 0;
         const body = {
           monthly_paise: read.money(v.amount)!,
           from_on: v.from_on,

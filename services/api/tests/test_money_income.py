@@ -212,3 +212,156 @@ async def test_a_statement_read_again_replaces_the_earlier_import(owner):
     assert again.json()["counts"] == {"added": 2, "matched": 0, "skipped": 0, "replaced": 2}
     items = (await owner.get("/api/money/transactions", params={"limit": 200})).json()["items"]
     assert sorted(t["merchant"] for t in items) == ["Cred Club", "Swiggy"]
+
+
+# --- ICICI card alerts, three-digit accounts, statements in the mail, tracking ---------------
+
+ICICI_FOOTER = (
+    " In case you have not done this transaction, to report it please call on 18001080 or SMS "
+    "BLOCK 9006 to 9215676766 from your registered mobile number. NEVER SHARE your Card number, "
+    "CVV, PIN, OTP, Internet Banking User ID, Password or URN with anyone."
+)
+
+
+def test_icici_card_alerts_are_read_despite_the_otp_warning():
+    cc = money.parse_alert(
+        "Transaction alert for your ICICI Bank Credit Card",
+        "Dear Customer, Your ICICI Bank Credit Card XX9006 has been used for a transaction of "
+        "INR 6,618.00 on Nov 19, 2026 at 03:15:47. Info: PLAYSTATION. The Available Credit "
+        "Limit on your card is INR 1,30,520.22." + ICICI_FOOTER,
+        date(2026, 11, 19),
+        sender="credit_cards@icici.bank.in",
+    )
+    assert cc is not None
+    assert (cc.amount_paise, cc.account_kind, cc.account_mask) == (6618_00, "card", "9006")
+    dc = money.parse_alert(
+        "Transaction alert for your ICICI Bank debit card",
+        "Dear Customer, A purchase of Rs. 7,808.70 has been made using your Debit Card linked to "
+        "ICICI Bank Account XX320 on 18-Nov-26. Info: VIN*PLAYSTATION. The Available Balance in "
+        "your account is Rs. 4,712.74." + ICICI_FOOTER,
+        date(2026, 11, 18),
+        sender="customercare@icici.bank.in",
+    )
+    assert dc is not None
+    assert (dc.account_kind, dc.account_mask, dc.balance_paise) == ("bank", "320", 4712_74)
+    # A real OTP email is still not a transaction.
+    assert (
+        money.parse_alert(
+            "OTP for online transaction",
+            "Your OTP for the transaction of Rs. 500.00 on your card XX9006 is 123456.",
+            date(2026, 11, 19),
+            sender="credit_cards@icici.bank.in",
+        )
+        is None
+    )
+
+
+async def test_three_digits_find_the_account_ending_with_them(owner, sessionmaker, settings):
+    async with sessionmaker() as db:
+        uid = (await _user(db)).id
+        full = await store.account_for(db, uid, "ICICI Bank", "6320", "bank")
+        assert await store.account_for(db, uid, "ICICI Bank", "320", "bank") is full
+        # Another bank's account ending the same way isn't it.
+        other = await store.account_for(db, uid, "HDFC Bank", "320", "bank")
+        assert other is not full
+
+
+def test_statement_emails_are_recognised():
+    day = date(2026, 11, 22)
+    icici = money.parse_statement_mail(
+        "Bank Statement from 01-03-2026 to 22-11-2026 for XXXXXXXXXX20", day,
+        "estatement@icici.bank.in",
+    )  # fmt: skip
+    assert icici == money.StatementMail("ICICI Bank", "20", date(2026, 3, 1), date(2026, 11, 22))
+    hdfc = money.parse_statement_mail(
+        "Email Account Statement of your HDFC Bank Account ***1298 for the period 01-Apr-2026 "
+        "TO 21-Nov-2026", day, "emailstatements@hdfcbank.bank.in",
+    )  # fmt: skip
+    assert (hdfc.mask, hdfc.period_to) == ("1298", date(2026, 11, 21))
+    assert (
+        money.parse_statement_mail("Consolidated Account Statement", day, "x@camsonline.com")
+        is None
+    )
+    assert (
+        money.parse_statement_mail("Your statement is ready to view", day, "a@hdfcbank.bank.in")
+        is None
+    )
+    assert (
+        money.parse_statement_mail("Bank Statement", day, "a@icici.bank.in", has_pdf=False) is None
+    )
+
+
+def test_last_working_day():
+    from nexus_common import money_salary
+
+    assert money_salary.pay_date(2026, 1, 0) == date(2026, 1, 30)  # 31st is a Saturday
+    assert money_salary.pay_date(2026, 3, 0) == date(2026, 3, 31)
+    assert money_salary.pay_date(2026, 5, 0) == date(2026, 5, 29)  # 31st is a Sunday
+    assert money_salary.pay_date(2026, 2, 30) == date(2026, 2, 28)
+
+
+async def test_import_a_statement_from_the_mail(app, owner, sessionmaker, settings):
+    import base64
+    from datetime import timedelta as td
+
+    import httpx
+
+    from nexus_common.google import SERVICE_SCOPES, encrypt
+    from nexus_common.models import GoogleGrant, MoneyMailStatement, utcnow
+
+    from .test_money_pdf import _bank_pdf
+
+    pdf = _bank_pdf(password="open sesame")
+    gmail = "https://gmail.googleapis.com/gmail/v1/users/me"
+    seen: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/messages/m-stmt"):
+            return httpx.Response(200, json={"payload": {"parts": [
+                {"mimeType": "text/plain", "body": {"data": ""}},
+                {"filename": "Statement.pdf", "body": {"attachmentId": "a1"}}]}})  # fmt: skip
+        if request.url.path.endswith("/attachments/a1"):
+            data = base64.urlsafe_b64encode(pdf).decode().rstrip("=")
+            return httpx.Response(200, json={"data": data})
+        return httpx.Response(404, json={})
+
+    app.state.google_http = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    async with sessionmaker() as db:
+        uid = (await _user(db)).id
+        db.add(GoogleGrant(
+            user_id=uid, scopes=f"openid {SERVICE_SCOPES['gmail']}",
+            refresh_token=encrypt(settings, "r"), access_token=encrypt(settings, "a"),
+            access_expires_at=utcnow() + td(hours=1)))  # fmt: skip
+        row = MoneyMailStatement(
+            user_id=uid, message_id="m-stmt", received_at=utcnow(), institution="HDFC Bank",
+            mask="1298", period_from=date(2026, 11, 1), period_to=date(2026, 11, 30),
+            created_at=utcnow())  # fmt: skip
+        db.add(row)
+        await db.commit()
+        sid = row.id
+    listed = (await owner.get("/api/money/mail-statements")).json()
+    assert [(s["status"], s["mask"], s["mailbox"]) for s in listed] == [
+        ("new", "1298", "Your sign-in Gmail")
+    ]
+    url = f"/api/money/mail-statements/{sid}/import"
+    wrong = await owner.post(url, json={"password": "nope"})
+    assert wrong.status_code == 422 and "password" in wrong.json()["detail"]
+    got = await owner.post(url, json={"password": "open sesame"})
+    assert got.status_code == 200, got.text
+    assert got.json()["counts"]["added"] > 0 and got.json()["origin"] == "gmail"
+    assert f"{gmail.split('googleapis.com')[1]}/messages/m-stmt/attachments/a1" in seen
+    assert (await owner.get("/api/money/mail-statements")).json()[0]["status"] == "imported"
+    async with sessionmaker() as db:
+        from nexus_common.models import MoneySettings
+
+        prefs = await db.get(MoneySettings, uid)
+        assert prefs is None or prefs.cas_password_enc is None  # never kept
+
+    tracking = (await owner.get("/api/money/tracking")).json()
+    hdfc = next(a for a in tracking["accounts"] if a["label"].endswith("1298"))
+    assert hdfc["last_statement_on"] and hdfc["status"] in ("ok", "stale")
+    assert len(tracking["months"]) == 12 and tracking["statements_waiting"] == 0
+    assert tracking["mail"][0]["label"] == "Your sign-in Gmail"
+    nov = next(m for m in hdfc["months"] if m["month"] == "2026-11")
+    assert nov.get("statements", 0) > 0

@@ -524,7 +524,10 @@ def _amount(text: str) -> int | None:
 _BOILERPLATE = re.compile(
     r"we(?:'re| are) here to (?:support|help) you[^.]*\.?|"
     r"if you did not authori[sz]e this transaction.*?(?=warm regards|$)|"
-    r"for more details on service charges.*$|warm regards.*$|greetings from [a-z ]+bank!?",
+    r"for more details on service charges.*$|warm regards.*$|greetings from [a-z ]+bank!?|"
+    # Safety footers mention OTPs and declined cards without being about either (ICICI).
+    r"in case you have not done this transaction.*$|"
+    r"(?:please )?never share your.*$|(?:please )?do not share your (?:otp|card|pin|cvv).*$",
     re.I,
 )
 
@@ -659,6 +662,58 @@ CARD_BILL_QUERY = (
     '"credit card" statement ("total amount due" OR "total due" OR "total payment due" '
     'OR "total amt due") -category:promotions'
 )
+
+
+# Statement PDFs banks email (an account's e-statement, a card's monthly statement).
+STATEMENT_QUERY = (
+    "({" + " ".join(f"from:{s}" for s in ALERT_SENDERS) + "}) subject:statement "
+    "has:attachment filename:pdf"
+)
+
+
+@dataclass
+class StatementMail:
+    """A bank or card statement PDF emailed by the bank."""
+
+    institution: str | None
+    mask: str | None
+    period_from: date | None
+    period_to: date | None
+
+
+# "Bank Statement from 01-03-2026 to 22-11-2026 for XXXXXXXXXX20" (ICICI), "Email Account
+# Statement of your HDFC Bank Account ***1298 for the period 01-Apr-2026 TO 21-Nov-2026".
+_STATEMENT_SUBJECT = re.compile(r"\bstatement\b", re.I)
+_NOT_A_STATEMENT = re.compile(
+    r"mini statement|consolidated account statement|\bcas\b|mutual fund|demat|"
+    r"interest certificate|tax|form 16|tds|request|reminder|available on|ready to view",
+    re.I,
+)
+_PERIOD = re.compile(r"(?:from|period)\s+(.+?)\s+to\s+(.+)", re.I)
+_SUBJECT_DIGITS = re.compile(r"(?:[x*#]{2,}\s?(\d{2,4})\b)", re.I)
+
+
+def parse_statement_mail(
+    subject: str, received: date, sender: str = "", has_pdf: bool = True
+) -> StatementMail | None:
+    """A statement PDF from a bank (not a CAS, a tax form or a reminder). The period and the
+    account digits come from the subject when it says them."""
+    if not has_pdf or not _STATEMENT_SUBJECT.search(subject) or _NOT_A_STATEMENT.search(subject):
+        return None
+    bank = bank_of(sender)
+    if bank is None:
+        return None
+    start = end = None
+    if m := _PERIOD.search(subject):
+        start = _date(m.group(1), None)
+        end = _date(m.group(2), None)
+    digits = _SUBJECT_DIGITS.search(subject)
+    return StatementMail(
+        institution=bank,
+        mask=digits.group(1) if digits else None,
+        period_from=start,
+        period_to=end,
+    )
 
 
 def parse_card_bill(subject: str, body: str, received: date, sender: str = "") -> CardBill | None:
