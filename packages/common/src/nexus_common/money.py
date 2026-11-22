@@ -159,11 +159,13 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                    "thank you for your payment",
                    "self transfer", "own account", "sweep")),
     ("Subscriptions", ("netflix", "spotify", "prime video", "hotstar", "youtube premium",
-                       "apple.com/bill", "google play", "icloud", "openai", "chatgpt", "anthropic",
+                       "apple.com/bill", "apple media", "apple services", "google play",
+                       "googleplay", "youtube", "icloud", "openai", "chatgpt", "anthropic",
                        "notion", "github", "jiocinema", "sonyliv", "zee5", "audible", "linkedin")),
     ("Food and dining", ("swiggy", "zomato", "eatsure", "dominos", "domino's", "mcdonald",
                          "kfc", "starbucks", "cafe", "restaurant", "pizza", "burger", "chaayos",
-                         "third wave", "blue tokai", "haldiram", "barbeque")),
+                         "third wave", "blue tokai", "haldiram", "barbeque", "waffle", "bakery",
+                         "biryani", "juice", "eatclub", "box8", "faasos")),
     ("Groceries", ("bigbasket", "blinkit", "zepto", "instamart", "dmart", "jiomart", "grofers",
                    "more retail", "reliance fresh", "nature's basket", "spencer", "milkbasket",
                    "country delight", "kirana", "supermarket")),
@@ -388,6 +390,8 @@ _MERCHANT_PATTERNS = [
     re.compile(r"\bsender\s*:\s*([A-Za-z][\w .&-]{1,40}?)\s*(?:\(|\.\s|,|$)", re.I),
     # "Your EZVIZ bill, set up through E-mandate, has been successfully paid".
     re.compile(r"\byour\s+([A-Za-z][\w .&-]{1,40}?)\s+bill\b", re.I),
+    # "towards VPA x@kotakpay (ZEPTO MARKETPLACE PRIVATE LIMITED) on 25-10-26" (HDFC, 2026).
+    re.compile(r"\bvpa\s+[\w.*-]+@[\w.-]+\s*\(([^()]{2,60})\)", re.I),
     re.compile(r"\bvpa\s+([\w.-]+@[\w.-]+)(?:\s+([A-Z][A-Z0-9 &.]{2,40}?))?"
                r"(?=\s+on\b|\.|\s*$|\s+ref)", re.I),
     re.compile(r";\s*([A-Za-z][\w .&-]{1,40}?)\s+credited\b", re.I),
@@ -515,6 +519,16 @@ def _amount(text: str) -> int | None:
     return None
 
 
+# Sign-offs and help lines that read like payees to the patterns ("here to support you in
+# every step of the way" became a merchant for every HDFC UPI alert).
+_BOILERPLATE = re.compile(
+    r"we(?:'re| are) here to (?:support|help) you[^.]*\.?|"
+    r"if you did not authori[sz]e this transaction.*?(?=warm regards|$)|"
+    r"for more details on service charges.*$|warm regards.*$|greetings from [a-z ]+bank!?",
+    re.I,
+)
+
+
 def _merchant(text: str, direction: str) -> str:
     for pattern in _MERCHANT_PATTERNS:
         m = pattern.search(text)
@@ -541,7 +555,8 @@ def parse_alert(subject: str, body: str, received: date, sender: str = "") -> Pa
     """Read one bank or card alert email. None when it isn't a completed transaction (an OTP, a
     due-date reminder, a declined payment, a promotion). The bank comes from the sender's
     address when there is one, since the text names other banks too ("VPA x@icici")."""
-    text = " ".join(f"{subject}. {body}".split())[:4000]
+    text = _BOILERPLATE.sub(" ", " ".join(f"{subject}. {body}".split()))[:4000]
+    text = " ".join(text.split())
     if (stop := _NOT_A_TRANSACTION.search(text)) and not (
         # An autopay that has gone through is a payment; only its set-up notices aren't.
         re.fullmatch(r"e-?mandate", stop.group(1), re.I) and _PAID_DONE.search(text)
@@ -1103,7 +1118,9 @@ def _layout_rows(pdf) -> list[list[str]]:
     out: list[list[str]] = []
     header: list[dict] | None = None
     header_text: list[str] = []
-    for page in pdf.pages[:MAX_PDF_PAGES]:
+    # Rows under the header with their page and height on it, to place wrapped descriptions.
+    placed: list[tuple[int, float, list[str]]] = []
+    for page_no, page in enumerate(pdf.pages[:MAX_PDF_PAGES]):
         lines = _pdf_lines(page)
         i = 0
         while i < len(lines):
@@ -1141,8 +1158,59 @@ def _layout_rows(pdf) -> list[list[str]]:
             for w in line:
                 col = _column_of(header, w)
                 row[col] = f"{row[col]} {w['text']}".strip()
-            out.append(row)
+            placed.append((page_no, line[0]["top"], row))
             i += 1
+    cols = _columns(header_text) if header else None
+    if cols and "narration" in cols and "date" in cols:
+        return out + _centred(placed, cols["date"], cols["narration"])
+    return out + [row for _, _, row in placed]
+
+
+# How far (points) a wrapped description line can sit from its transaction's line.
+WRAP_REACH = 30
+
+
+def _centred(
+    placed: list[tuple[int, float, list[str]]], date_col: int, text_col: int
+) -> list[list[str]]:
+    """Some banks (ICICI) centre each row's cells vertically, so a description that wraps has
+    lines above its transaction's date as well as below. When the first transaction has a
+    description line above it, give each such line to the nearest transaction's description
+    instead of the one before; otherwise leave the rows as they are (parse_rows joins lines
+    below)."""
+
+    def dated(row: list[str]) -> bool:
+        return _row_date(row[date_col]) is not None
+
+    def loose(row: list[str]) -> bool:
+        return bool(row[text_col]) and not any(c for i, c in enumerate(row) if i != text_col and c)
+
+    first = next((k for k, (_, _, r) in enumerate(placed) if dated(r)), None)
+    if not first or not loose(placed[first - 1][2]):
+        return [row for _, _, row in placed]
+    above: dict[int, list[str]] = {}
+    below: dict[int, list[str]] = {}
+    keep: list[int] = []
+    for k, (page, top, row) in enumerate(placed):
+        if not loose(row):
+            keep.append(k)
+            continue
+        near = [
+            (abs(t - top), j)
+            for j, (p, t, r) in enumerate(placed)
+            if p == page and dated(r) and abs(t - top) <= WRAP_REACH
+        ]
+        if not near:
+            keep.append(k)  # a page footer or a note: parse_rows decides
+            continue
+        _, j = min(near)
+        (above if top < placed[j][1] else below).setdefault(j, []).append(row[text_col])
+    out = []
+    for k in keep:
+        row = list(placed[k][2])
+        if k in above or k in below:
+            row[text_col] = " ".join([*above.get(k, []), row[text_col], *below.get(k, [])]).strip()
+        out.append(row)
     return out
 
 
@@ -1229,13 +1297,15 @@ def statement_merchant(narration: str) -> str:
     """The payee inside a statement narration: 'UPI-SWIGGY-swiggy@icici-ICIC0001-4321...'
     -> 'Swiggy'; 'POS 1234XXXX AMAZON PAY' -> 'Amazon'."""
     text = re.sub(r"^(?:to|by)\s+transfer-", "", narration.strip(), flags=re.I)
-    m = re.match(
-        r"^(?:upi|imps|neft|rtgs|ach|nach)(?:\s*cr|\s*dr)?[-/:](?:p2[am]/|[dc]r/)?(?:\d+/)?([^-/]+)",
-        text,
-        re.I,
-    )
+    m = re.match(r"^(?:upi|imps|neft|rtgs|ach|nach)(?:\s*cr|\s*dr)?[-/:]", text, re.I)
     if m:
-        return clean_merchant(m.group(1))
+        # The first part that names someone: not a bank's IFSC, a reference or a direction.
+        for part in re.split(r"[-/]", text[m.end() :]):
+            part = part.strip()
+            if len(part) >= 2 and not re.fullmatch(
+                r"[A-Za-z]{4}0[A-Za-z0-9]{6}|[\d ]+|p2[am]|[dc]r", part, re.I
+            ):
+                return clean_merchant(part)
     m = re.match(r"^(?:pos|ecom|ecs)\s+(?:\d+x+\d*\s+)?(.+)$", text, re.I)
     if m:
         return clean_merchant(m.group(1))

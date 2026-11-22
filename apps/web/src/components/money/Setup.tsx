@@ -16,7 +16,7 @@ function importSummary(i: MoneyImport): string {
     const already = (i.counts.matched ?? 0) + (i.counts.skipped ?? 0);
     return `${i.counts.added ?? 0} new${already ? `, ${already} already in Money` : ""}`;
   }
-  const bits = [`${i.counts.added ?? 0} new`];
+  const bits = [i.counts.replaced ? `${i.counts.added ?? 0} read again in place of ${i.counts.replaced}` : `${i.counts.added ?? 0} new`];
   if (i.counts.matched) bits.push(`${i.counts.matched} matched to alert emails`);
   if (i.counts.skipped) bits.push(`${i.counts.skipped} already here`);
   if (i.counts.new_accounts) bits.push("put on a new account: if you already had it, merge it into yours under Accounts");
@@ -78,6 +78,7 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [account, setAccount] = useState("");
+  const [replace, setReplace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const pdf = file?.name.toLowerCase().endsWith(".pdf") ?? false;
@@ -86,10 +87,11 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
     if (!file) return;
     setBusy(true);
     try {
-      const r = await api.moneyImport(file, { password, remember, account_id: account || undefined });
+      const r = await api.moneyImport(file, { password, remember, account_id: account || undefined, replace });
       toast(`${file.name}: ${importSummary(r)}`);
       setFile(null);
       setPassword("");
+      setReplace(false);
       if (input.current) input.current.value = "";
     } catch (e) {
       toast((e as Error).message, "error");
@@ -170,6 +172,17 @@ function Upload({ casPasswordSet }: { casPasswordSet: boolean }) {
           ) : (
             accounts.length > 0 && <AccountPick accounts={accounts} value={account} onChange={setAccount} />
           )}
+          <label className="flex items-start gap-1.5 text-xs text-slate-400">
+            <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="mt-0.5 accent-sky-500" />
+            <span>
+              Replace what an earlier import read for these dates
+              <span className="block text-slate-500">
+                For a statement read badly before (odd payees, a description on the wrong row). Rows from statements for this account and these dates are
+                dropped and read again; alert emails and rows you added stay. A category or note you set on a dropped row goes with it, though rules for a
+                merchant still apply.
+              </span>
+            </span>
+          </label>
           <button
             onClick={send}
             disabled={busy}

@@ -23,6 +23,8 @@ import type {
   MoneySettings,
   MoneyTxn,
   Plan,
+  Salaries,
+  SalaryIn,
   Savings,
   SecretDetails,
   TxnMatches,
@@ -372,6 +374,10 @@ export const api = {
   moneyEditGoal: (id: string, body: { name?: string; target_paise?: number; by_on?: string; saved_paise?: number; asset_ids?: string[] }) =>
     request<{ id: string }>(`/api/money/goals/${id}`, { method: "PATCH", body: json(body) }),
   moneyDeleteGoal: (id: string) => request<void>(`/api/money/goals/${id}`, { method: "DELETE" }),
+  moneySalary: () => request<Salaries>("/api/money/salary"),
+  moneyAddSalary: (body: SalaryIn) => request<Salaries>("/api/money/salary", { method: "POST", body: json(body) }),
+  moneyEditSalary: (id: string, body: Partial<SalaryIn>) => request<Salaries>(`/api/money/salary/${id}`, { method: "PATCH", body: json(body) }),
+  moneyDeleteSalary: (id: string) => request<Salaries>(`/api/money/salary/${id}`, { method: "DELETE" }),
   moneyInvestments: () => request<Investments>("/api/money/investments"),
   moneyStocks: () => request<Stocks>("/api/money/stocks"),
   moneyGrowth: (range: GrowthRange) => request<Growth>(`/api/money/investments/history?range=${range}`),
@@ -397,12 +403,13 @@ export const api = {
     request<{ added: number; matched: number; skipped: number; account_label: string | null }>("/api/money/screenshots/save", { method: "POST", body: json(body) }),
   moneyReadHistory: (months: number) => request<{ queued: boolean; months: number }>("/api/money/sync/history", { method: "POST", body: json({ months }) }),
   moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
-  moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string } = {}) => {
+  moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string; replace?: boolean } = {}) => {
     const form = new FormData();
     form.append("file", file);
     if (opts.password) form.append("password", opts.password);
     form.append("remember_password", String(opts.remember ?? true));
     if (opts.account_id) form.append("account_id", opts.account_id);
+    if (opts.replace) form.append("replace", "true");
     return request<MoneyImport>("/api/money/imports", { method: "POST", body: form });
   },
   moneyDeleteAll: () =>

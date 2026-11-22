@@ -34,6 +34,8 @@ from nexus_common import (
     money_history,
     money_mail,
     money_orders,
+    money_repair,
+    money_salary,
     money_stocks,
 )
 from nexus_common import money_store as store
@@ -575,6 +577,39 @@ async def sync_all(deps: TurnDeps) -> int:
                 done += 1
         except Exception:
             log.exception("money.sync_crashed", extra={"user_id": str(uid)})
+    return done
+
+
+async def repair_all(deps: TurnDeps) -> int:
+    """Each person's one-off repair (money_repair), once per version, then their expected
+    salary rows brought up to date. Returns how many people were repaired."""
+    async with deps.sessionmaker() as db:
+        ids = list(
+            (
+                await db.scalars(
+                    select(MoneySettings.user_id)
+                    .join(User, User.id == MoneySettings.user_id)
+                    .where(User.status == UserStatus.active)
+                )
+            ).all()
+        )
+    done = 0
+    for uid in ids:
+        flag = f"money:repaired:{money_repair.VERSION}:{uid}"
+        try:
+            async with deps.sessionmaker() as db:
+                fixed = None
+                if not await deps.redis.exists(flag):
+                    fixed = await money_repair.repair(db, deps.settings, uid)
+                filled = await money_salary.fill(db, uid, local_today(await db.get(User, uid)))
+                await db.commit()
+            if fixed is not None:
+                await deps.redis.set(flag, "1")
+                done += 1
+            if (fixed and any(fixed.values())) or any(filled.values()):
+                await store.changed(deps.redis, uid)
+        except Exception:
+            log.exception("money.repair_crashed", extra={"user_id": str(uid)})
     return done
 
 

@@ -2259,6 +2259,28 @@ class MoneyStock(Base):
     )
 
 
+class MoneySalary(Base):
+    """Take-home pay from a date on: one row per raise. Months with no salary credit read from
+    an alert or statement get an expected row (money_salary.fill)."""
+
+    __tablename__ = "money_salaries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    monthly_paise: Mapped[int] = mapped_column(BigInteger)
+    from_on: Mapped[date] = mapped_column(Date)
+    employer: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    # The account it's paid into.
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_accounts.id", ondelete="SET NULL")
+    )
+    # The day of the month it usually arrives.
+    pay_day: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "from_on", name="uq_money_salaries_user_from"),)
+
+
 class MoneySnapshot(Base):
     """What one share or fund holding was worth on a day, for the investments graph. Written
     each night after prices come in, and for shares filled in back to the day they were bought

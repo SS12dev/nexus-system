@@ -14,11 +14,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import money
+from nexus_common import money, money_salary
 from nexus_common import money_plan as plan
 from nexus_common import money_store as store
 from nexus_common.models import (
@@ -27,7 +27,9 @@ from nexus_common.models import (
     MoneyAsset,
     MoneyGoal,
     MoneyLoan,
+    MoneySalary,
     MoneySubscription,
+    MoneyTxn,
     utcnow,
 )
 from nexus_common.organiser import local_today
@@ -522,6 +524,125 @@ async def delete_loan(loan_id: uuid.UUID, user: OwnerUser, db: DbDep, redis: Red
     await db.commit()
     await store.changed(redis, user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Salary -----------------------------------------------------------------------------------
+
+
+class SalaryIn(BaseModel):
+    """Take-home pay from a date: one row per raise."""
+
+    monthly_paise: Annotated[int, Field(gt=0, le=10**12)]
+    from_on: date
+    employer: str | None = Field(default=None, max_length=80)
+    account_id: uuid.UUID | None = None
+    pay_day: int = Field(default=1, ge=1, le=31)
+
+
+class SalaryPatch(BaseModel):
+    monthly_paise: Annotated[int, Field(gt=0, le=10**12)] | None = None
+    from_on: date | None = None
+    employer: str | None = Field(default=None, max_length=80)
+    account_id: uuid.UUID | None = None
+    pay_day: int | None = Field(default=None, ge=1, le=31)
+
+
+def _salary_out(row: MoneySalary) -> dict:
+    return {
+        "id": str(row.id),
+        "monthly_paise": row.monthly_paise,
+        "from_on": row.from_on.isoformat(),
+        "employer": row.employer,
+        "account_id": str(row.account_id) if row.account_id else None,
+        "pay_day": row.pay_day,
+    }
+
+
+async def _salary_view(db, user) -> dict:
+    rows = sorted(
+        (await db.scalars(select(MoneySalary).where(MoneySalary.user_id == user.id))).all(),
+        key=lambda r: r.from_on,
+        reverse=True,
+    )
+    now = money_salary.current(rows, local_today(user))
+    return {
+        "items": [_salary_out(r) for r in rows],
+        "current_id": str(now.id) if now else None,
+        "expected": await db.scalar(
+            select(func.count())
+            .select_from(MoneyTxn)
+            .where(MoneyTxn.user_id == user.id, MoneyTxn.source == money_salary.SOURCE)
+        ),
+    }
+
+
+async def _salary_changed(db, redis, user) -> dict:
+    out = await money_salary.fill(db, user.id, local_today(user))
+    await db.commit()
+    await store.changed(redis, user.id)
+    return out
+
+
+async def _salary_clash(db, user_id: uuid.UUID, from_on: date, row_id=None) -> None:
+    other = await db.scalar(
+        select(MoneySalary.id).where(MoneySalary.user_id == user_id, MoneySalary.from_on == from_on)
+    )
+    if other and other != row_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "There's already a salary from that date.")
+
+
+@router.get("/salary")
+async def salary(user: OwnerUser, db: DbDep) -> dict:
+    return await _salary_view(db, user)
+
+
+@router.post("/salary", status_code=status.HTTP_201_CREATED)
+async def add_salary(body: SalaryIn, user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+    await _check_account(db, user.id, body.account_id)
+    await _salary_clash(db, user.id, body.from_on)
+    row = MoneySalary(
+        user_id=user.id,
+        monthly_paise=body.monthly_paise,
+        from_on=body.from_on,
+        employer=_clean(body.employer) or "",
+        account_id=body.account_id,
+        pay_day=body.pay_day,
+        created_at=utcnow(),
+    )
+    db.add(row)
+    await db.flush()
+    filled = await _salary_changed(db, redis, user)
+    log.info("money.salary_added", extra={"user_id": str(user.id), **filled})
+    return await _salary_view(db, user)
+
+
+@router.patch("/salary/{salary_id}")
+async def edit_salary(
+    salary_id: uuid.UUID, body: SalaryPatch, user: OwnerUser, db: DbDep, redis: RedisDep
+) -> dict:
+    row = await _own(db, MoneySalary, user.id, salary_id, "Salary")
+    fields = body.model_dump(exclude_unset=True)
+    if "account_id" in fields:
+        await _check_account(db, user.id, body.account_id)
+    if fields.get("from_on"):
+        await _salary_clash(db, user.id, fields["from_on"], row.id)
+    if "employer" in fields:
+        fields["employer"] = _clean(fields["employer"]) or ""
+    for name, value in fields.items():
+        if value is not None or name == "account_id":
+            setattr(row, name, value)
+    await db.flush()
+    await _salary_changed(db, redis, user)
+    return await _salary_view(db, user)
+
+
+@router.delete("/salary/{salary_id}")
+async def delete_salary(salary_id: uuid.UUID, user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+    row = await _own(db, MoneySalary, user.id, salary_id, "Salary")
+    await db.delete(row)
+    await db.flush()
+    await _salary_changed(db, redis, user)
+    return await _salary_view(db, user)
 
 
 # --- Plan: forecast, goals and assumptions ----------------------------------------------------

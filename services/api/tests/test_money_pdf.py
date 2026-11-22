@@ -66,6 +66,46 @@ def _bank_pdf(password: str = "", two_line_header: bool = False) -> bytes:
     return _lock(buf.getvalue(), password) if password else buf.getvalue()
 
 
+def _centred_pdf() -> bytes:
+    """ICICI's layout: each row's cells centred, so a three-line remark has a line above the
+    date and one below, and the remark wraps mid-word."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica", 8)
+    c.drawString(40, 800, "ICICI Bank Statement of Transactions in Savings Account XXXXXXXX6320")
+    y = 770
+    for x, text, align in [(40, "S No.", "l"), (70, "Transaction Date", "l"),
+                           (150, "Transaction Remarks", "l"), (400, "Withdrawal Amount", "r"),
+                           (470, "Deposit Amount", "r"), (550, "Balance", "r")]:  # fmt: skip
+        (c.drawString if align == "l" else c.drawRightString)(x, y, text)
+    y -= 26
+    rows = [
+        ("1", "01/03/2026", ["UPI/ZEPTO MARK/zepto@ybl/Pa", "yment fo/YES BA", "NK/512345678901"],
+         "412.00", "", "50,000.00"),
+        ("2", "02/03/2026", ["NEFT-UTIB0000001-ACME TECHNOL", "OGY INTERNATI-REGULAR SAL",
+                             "ARY FEB26"], "", "84,000.00", "1,34,000.00"),
+        ("3", "03/03/2026", ["UPI/NETFLIX/netflix@axis/Su", "bscription/AXIS BA",
+                             "NK/512345678902"], "499.00", "", "1,33,501.00"),
+    ]  # fmt: skip
+    for no, day, remark, out, inn, balance in rows:
+        c.drawString(150, y + 10, remark[0])
+        c.drawString(40, y, no)
+        c.drawString(70, y, day)
+        c.drawString(150, y, remark[1])
+        if out:
+            c.drawRightString(400, y, out)
+        if inn:
+            c.drawRightString(470, y, inn)
+        c.drawRightString(550, y, balance)
+        c.drawString(150, y - 10, remark[2])
+        y -= 40
+    c.save()
+    return buf.getvalue()
+
+
 def _card_pdf() -> bytes:
     """A card statement with a ruled table and unsigned amounts."""
     from reportlab.lib.pagesizes import A4
@@ -121,6 +161,16 @@ def test_reads_a_bank_statement_pdf(two_line_header):
     assert rows[0].narration.endswith("631234567890-PAYMENT")
     assert "Page" not in rows[-1].narration
     assert (rows[0].account_mask, rows[0].institution) == ("1298", "HDFC Bank")
+
+
+def test_a_centred_layout_keeps_each_remark_with_its_row():
+    rows = money.read_pdf_statement(_centred_pdf(), "", "statement.pdf")
+    got = [(p.amount_paise, p.direction, p.merchant) for p in rows]
+    assert got == [(412_00, "debit", "Zepto"), (84_000_00, "credit", "Acme Technol Ogy Internati"),
+                   (499_00, "debit", "Netflix")]  # fmt: skip
+    assert rows[0].narration.startswith("UPI/ZEPTO MARK") and "512345678901" in rows[0].narration
+    assert "SAL ARY FEB26" in rows[1].narration and "512345678901" not in rows[1].narration
+    assert rows[0].account_mask == "6320"
 
 
 def test_reads_a_card_statement_pdf():

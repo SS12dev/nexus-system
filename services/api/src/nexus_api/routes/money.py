@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import google, money, money_history, money_links, money_mail
+from nexus_common import google, money, money_history, money_links, money_mail, money_salary
 from nexus_common import money_store as store
 from nexus_common.models import (
     MoneyAccount,
@@ -613,6 +613,10 @@ async def add_transaction(
         created_at=utcnow(),
     )
     db.add(t)
+    if credit:
+        # Income typed in for a month stands in for that month's expected salary.
+        await db.flush()
+        await money_salary.fill(db, user.id, local_today(user))
     await db.commit()
     await db.refresh(t)
     log.info("money.manual_added", extra={"user_id": str(user.id), "txn_id": str(t.id)})
@@ -633,7 +637,11 @@ async def delete_transaction(
     if t.pair_id:
         prefs = await store.settings_for(db, user.id)
         money_links.unpair(t, await db.get(MoneyTxn, t.pair_id), rules=prefs.rules or {})
+    credit = t.direction == "credit"
     await db.delete(t)
+    if credit:
+        await db.flush()
+        await money_salary.fill(db, user.id, local_today(user))
     await db.commit()
     await store.changed(redis, user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -844,6 +852,7 @@ async def import_file(
     password: Annotated[str, Form(max_length=100)] = "",
     remember_password: Annotated[bool, Form()] = True,
     account_id: Annotated[uuid.UUID | None, Form()] = None,
+    replace: Annotated[bool, Form()] = False,
 ) -> ImportOut:
     """Read a statement (CSV, .xlsx or PDF) or a CAS (PDF). The file is read in memory and
     dropped. A PDF's password opens it in memory; only a CAS password is ever kept, sealed, and
@@ -891,7 +900,13 @@ async def import_file(
             else:
                 rows = await asyncio.to_thread(money.read_pdf_statement, data, pw, name)
                 counts = await store.ingest(
-                    db, cfg, user.id, rows, source="statement", account_id=account_id
+                    db,
+                    cfg,
+                    user.id,
+                    rows,
+                    source="statement",
+                    account_id=account_id,
+                    replace=replace,
                 )
             del pw, saved
         else:
@@ -899,7 +914,13 @@ async def import_file(
             if not rows:
                 raise money.StatementError("No transactions were found in that file.")
             counts = await store.ingest(
-                db, cfg, user.id, rows, source="statement", account_id=account_id
+                db,
+                cfg,
+                user.id,
+                rows,
+                source="statement",
+                account_id=account_id,
+                replace=replace,
             )
         if kind == "statement" and not account_id and known:
             now = set(

@@ -35,7 +35,7 @@ export interface MoneyTxn {
   category: string;
   category_by: "auto" | "rule" | "user" | "pair";
   channel: string;
-  source: "alert" | "statement" | "manual" | "screenshot" | "receipt";
+  source: "alert" | "statement" | "manual" | "screenshot" | "receipt" | "salary";
   confirmed: boolean;
   excluded: boolean;
   note: string;
@@ -489,6 +489,33 @@ export interface Plan {
   goals: Goal[];
   goals_monthly_paise: number;
   insights: Insight[];
+  /** Take-home pay today from the salary details, when there are any. */
+  salary_paise: number | null;
+}
+
+/** Take-home pay from a date: one row per raise. */
+export interface Salary {
+  id: string;
+  monthly_paise: number;
+  from_on: string;
+  employer: string;
+  account_id: string | null;
+  pay_day: number;
+}
+
+export interface Salaries {
+  items: Salary[];
+  current_id: string | null;
+  /** Months with an expected row because no credit like the salary was read. */
+  expected: number;
+}
+
+export interface SalaryIn {
+  monthly_paise: number;
+  from_on: string;
+  employer?: string;
+  account_id?: string | null;
+  pay_day?: number;
 }
 
 export interface Upcoming {
@@ -568,10 +595,7 @@ export function rupees(paise: number, opts: { whole?: boolean; sign?: boolean } 
   const abs = Math.abs(paise);
   const whole = opts.whole ? Math.round(abs / 100) : Math.floor(abs / 100);
   const digits = String(whole);
-  const grouped =
-    digits.length > 3
-      ? digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + digits.slice(-3)
-      : digits;
+  const grouped = digits.length > 3 ? digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + digits.slice(-3) : digits;
   const frac = opts.whole ? "" : "." + String(abs % 100).padStart(2, "0");
   const sign = neg ? "−" : opts.sign && paise > 0 ? "+" : "";
   return `${sign}₹${grouped}${frac}`;
@@ -650,6 +674,7 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
   manual: "Added by you",
   screenshot: "From a screenshot",
   receipt: "From an order email",
+  salary: "Expected from your salary details (Plan): no credit like it was read for this month. It goes by itself once the real one is read.",
 };
 
 /** An order from a shop's email that no bank or card payment explains yet. */

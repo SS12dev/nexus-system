@@ -4,7 +4,9 @@ nightly NAVs). Parsing lives in nexus_common.money; this file stores and adds up
 Every function takes the user id and only ever touches that person's rows. Logs carry counts.
 """
 
+import dataclasses
 import logging
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -13,7 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_links, money_orders, money_stocks
+from nexus_common import money, money_links, money_orders, money_salary, money_stocks
 from nexus_common import money_plan as plan
 from nexus_common.events import Event, publish
 from nexus_common.models import (
@@ -24,6 +26,7 @@ from nexus_common.models import (
     MoneyHolding,
     MoneyImport,
     MoneyLoan,
+    MoneySalary,
     MoneySettings,
     MoneyStock,
     MoneySubscription,
@@ -233,6 +236,113 @@ async def _new_account(
     return account
 
 
+# "at 18:09:02" in a card alert: two charges at different times are two charges.
+_ALERT_TIME = re.compile(r"\bat\s+(\d{1,2}:\d{2}(?::\d{2})?)\b")
+
+
+def _alert_time(text: str) -> str | None:
+    m = _ALERT_TIME.search(text or "")
+    return m.group(1) if m else None
+
+
+def same_alert(
+    cfg: Settings,
+    nearby: list[MoneyTxn],
+    p: money.Parsed,
+    account_id: uuid.UUID | None,
+    source_ref: str | None,
+) -> MoneyTxn | None:
+    """An alert already stored from another email for the same payment: same account, amount
+    and direction within a day, the same payee or one of them an autopay notice, and no
+    reference number or time telling them apart."""
+    for t in nearby:
+        if (
+            t.source != "alert"
+            or t.direction != p.direction
+            or t.amount_paise != p.amount_paise
+            or t.account_id != account_id
+            or abs((t.occurred_on - p.occurred_on).days) > 1
+            or (source_ref and t.source_ref == source_ref)
+        ):
+            continue
+        if t.ref and p.ref and t.ref != p.ref[:40]:
+            continue
+        payee = money.merchant_key(t.merchant) == money.merchant_key(p.merchant)
+        if not payee and "autopay" not in (t.channel, p.channel):
+            continue
+        mine, theirs = _alert_time(p.narration), _alert_time(money.unseal(cfg, t.narration_enc))
+        if mine and theirs and mine != theirs:
+            continue
+        return t
+    return None
+
+
+async def _clear_period(
+    db: AsyncSession, user_id: uuid.UUID, rows: list[money.Parsed], account_id: uuid.UUID | None
+) -> int:
+    """Drop the statement rows already stored for these accounts and dates, and let the alerts
+    they confirmed be matched again. Returns how many rows went."""
+    targets: set[uuid.UUID] = set()
+    if account_id:
+        targets.add(account_id)
+    else:
+        seen: set[tuple] = set()
+        for p in rows:
+            what = (p.institution, p.account_mask, p.account_kind, tuple(p.mask_options or ()))
+            if what in seen:
+                continue
+            seen.add(what)
+            account = await account_for(
+                db, user_id, p.institution, p.account_mask, p.account_kind, options=p.mask_options
+            )
+            if account is not None:
+                targets.add(account.id)
+    if not targets:
+        return 0
+    lo, hi = min(r.occurred_on for r in rows), max(r.occurred_on for r in rows)
+    old = list(
+        (
+            await db.scalars(
+                select(MoneyTxn).where(
+                    MoneyTxn.user_id == user_id,
+                    MoneyTxn.source == "statement",
+                    MoneyTxn.account_id.in_(targets),
+                    MoneyTxn.occurred_on >= lo,
+                    MoneyTxn.occurred_on <= hi,
+                )
+            )
+        ).all()
+    )
+    ids = {t.id for t in old}
+    rules = (await settings_for(db, user_id)).rules or {}
+    for t in old:
+        # The other half of a transfer or refund goes back to standing alone; linking runs
+        # again once the new rows are in.
+        if t.pair_id and t.pair_id not in ids and (other := await db.get(MoneyTxn, t.pair_id)):
+            money_links.unpair(other, None, rules=rules)
+    if ids:
+        await db.execute(delete(MoneyTxn).where(MoneyTxn.id.in_(ids)))
+    for t in (
+        await db.scalars(
+            select(MoneyTxn).where(
+                MoneyTxn.user_id == user_id,
+                MoneyTxn.account_id.in_(targets),
+                MoneyTxn.source != "statement",
+                MoneyTxn.alt_key.is_not(None),
+                MoneyTxn.occurred_on >= lo - timedelta(days=MATCH_DAYS),
+                MoneyTxn.occurred_on <= hi + timedelta(days=MATCH_DAYS),
+            )
+        )
+    ).all():
+        t.alt_key, t.confirmed = None, False
+    await db.flush()
+    log.info(
+        "money.statement_replaced",
+        extra={"user_id": str(user_id), "accounts": len(targets), "removed": len(ids)},
+    )
+    return len(ids)
+
+
 async def ingest(
     db: AsyncSession,
     cfg: Settings,
@@ -242,12 +352,17 @@ async def ingest(
     source: str,
     source_ref: str | None = None,
     account_id: uuid.UUID | None = None,
+    replace: bool = False,
 ) -> dict[str, int]:
     """Store parsed transactions. A row seen before (same source) is skipped; an alert and a
-    statement row for the same transaction become one row, marked confirmed."""
+    statement row for the same transaction become one row, marked confirmed. With replace (a
+    statement only), the rows an earlier import of the same account and dates left are dropped
+    first, so a file read better this time replaces what was read before."""
     counts = {"added": 0, "matched": 0, "skipped": 0}
     if not rows:
         return counts
+    if replace and source == "statement":
+        counts["replaced"] = await _clear_period(db, user_id, rows, account_id)
     prefs = await settings_for(db, user_id)
     rules = prefs.rules or {}
     lo = min(r.occurred_on for r in rows) - timedelta(days=MATCH_DAYS)
@@ -293,6 +408,17 @@ async def ingest(
             counts["skipped"] += 1
             continue
         keys.add(key)
+        if source == "alert" and (
+            same := same_alert(cfg, nearby, p, account.id if account else None, source_ref)
+        ):
+            # A second email about the same payment (the card's "debited" and the autopay's
+            # "bill paid", or the same alert in two mailboxes): one transaction.
+            if p.channel == "autopay":
+                same.channel = "autopay"
+            if same.merchant == "Unknown" and p.merchant != "Unknown":
+                same.merchant = p.merchant[:120]
+            counts["matched"] += 1
+            continue
         twin = None
         if others:
             twin = next(
@@ -367,6 +493,9 @@ async def ingest(
         await _pair_emi_conversion(db, user_id, credit_row)
     if counts["added"]:
         await money_links.link(db, cfg, user_id, min(r.occurred_on for r in rows))
+        if any(p.direction == "credit" for p in rows):
+            # A salary credit read at last replaces the expected row for its month.
+            await money_salary.fill(db, user_id)
     log.info("money.ingested", extra={"user_id": str(user_id), "source": source, **counts})
     return counts
 
@@ -1598,6 +1727,12 @@ async def history(db: AsyncSession, user_id: uuid.UUID, today: date, months: int
     return h
 
 
+async def salary_now(db: AsyncSession, user_id: uuid.UUID, today: date) -> int | None:
+    rows = list((await db.scalars(select(MoneySalary).where(MoneySalary.user_id == user_id))).all())
+    now = money_salary.current(rows, today)
+    return now.monthly_paise if now else None
+
+
 async def plan_view(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -1619,6 +1754,12 @@ async def plan_view(
     debt_loans = [r for r in loan_rows if r.account_id not in from_limit]
     asset_rows = [r for r in await _rows(db, MoneyAsset, user_id) if r.status == "active"]
     h = await history(db, user_id, today)
+    salary = await salary_now(db, user_id, today)
+    ahead = assume
+    if assume.income_paise is None and salary:
+        # Today's salary, not an average across a raise; more when other income adds to it.
+        # Only the forecast uses it: the saved assumptions still say "from recent months".
+        ahead = dataclasses.replace(assume, income_paise=max(salary, plan.recent(h.income) or 0))
     cash = accounts["cash_paise"] - accounts["owed_paise"]
     result = plan.forecast(
         today=today,
@@ -1629,7 +1770,7 @@ async def plan_view(
         assets=[as_asset(r) for r in asset_rows],
         loans=[as_loan(r) for r in debt_loans],
         history=h,
-        assume=assume,
+        assume=ahead,
     )
     # EMIs on limit-based cards still come out of cash each month.
     inputs = result["inputs"]
@@ -1661,6 +1802,7 @@ async def plan_view(
         **result,
         "assumptions": assume.to_dict(),
         "saved_assumptions": prefs.plan or {},
+        "salary_paise": salary,
         "accounts_known": len([a for a in accounts["items"] if a["kind"] == "bank"])
         - accounts["unknown_balances"],
         "unknown_balances": accounts["unknown_balances"],
@@ -1688,6 +1830,8 @@ async def health_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict
     assume = plan.Assumptions.from_dict(prefs.plan)
     h = await history(db, user_id, today)
     income = assume.income_paise if assume.income_paise is not None else plan.recent(h.income)
+    if assume.income_paise is None and (salary := await salary_now(db, user_id, today)):
+        income = max(salary, income or 0)
     spend = assume.spend_paise if assume.spend_paise is not None else plan.recent(h.spend)
     accounts = await accounts_view(db, user_id, today)
     subs = await subscriptions_view(db, user_id, today)
