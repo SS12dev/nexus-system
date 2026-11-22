@@ -24,6 +24,13 @@ import httpx
 BHAVCOPY_URL = (
     "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{day:%Y%m%d}_F_0000.csv.zip"
 )
+# Before 2024 NSE's archive has only the older file, with other column names.
+OLD_BHAVCOPY_URL = (
+    "https://nsearchives.nseindia.com/content/historical/EQUITIES/{day:%Y}/{mon}/cm{day:%d}{mon}"
+    "{day:%Y}bhav.csv.zip"
+)
+NEW_FORMAT_FROM = date(2024, 1, 1)
+_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 # NSE's archive refuses requests without a browser-like User-Agent.
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "*/*"}
 # Equity series: EQ (normal), BE/BZ (trade-to-trade), SM/ST (SME platform).
@@ -32,6 +39,15 @@ EQUITY_SERIES = {"EQ", "BE", "BZ", "SM", "ST"}
 LOOK_BACK_DAYS = 7
 CACHE_KEY = "nexus:money:nse-quotes"
 CACHE_SECONDS = 60 * 60 * 36
+# One past day's closes by ISIN, kept while a share's history is filled in.
+CLOSES_KEY = "nexus:money:nse-closes:{}"
+CLOSES_SECONDS = 60 * 60 * 24 * 3
+
+
+def bhavcopy_url(day: date) -> str:
+    if day >= NEW_FORMAT_FROM:
+        return BHAVCOPY_URL.format(day=day)
+    return OLD_BHAVCOPY_URL.format(day=day, mon=_MONTHS[day.month - 1])
 
 
 @dataclass
@@ -44,8 +60,23 @@ class Quote:
     day: date
 
 
+def _field(row: dict, *names: str) -> str:
+    for n in names:
+        if row.get(n):
+            return row[n].strip()
+    return ""
+
+
+def _day(text: str) -> date:
+    """2026-11-20 in the newer file, 20-NOV-2026 in the older one."""
+    if "-" in text and text[:4].isdigit():
+        return date.fromisoformat(text)
+    d, m, y = text.split("-")
+    return date(int(y), _MONTHS.index(m.upper()) + 1, int(d))
+
+
 def parse_bhavcopy(data: bytes) -> dict[str, Quote]:
-    """NSE's zipped bhavcopy -> {symbol: Quote} for equity series only."""
+    """NSE's zipped bhavcopy (either format) -> {symbol: Quote} for equity series only."""
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         names = [n for n in z.namelist() if n.lower().endswith(".csv")]
         if not names:
@@ -53,14 +84,14 @@ def parse_bhavcopy(data: bytes) -> dict[str, Quote]:
         text = z.read(names[0]).decode("utf-8", "replace")
     out: dict[str, Quote] = {}
     for row in csv.DictReader(io.StringIO(text)):
-        series = (row.get("SctySrs") or "").strip()
-        symbol = (row.get("TckrSymb") or "").strip().upper()
+        series = _field(row, "SctySrs", "SERIES")
+        symbol = _field(row, "TckrSymb", "SYMBOL").upper()
         if series not in EQUITY_SERIES or not symbol:
             continue
         try:
-            close = Decimal((row.get("ClsPric") or "").strip())
-            day = date.fromisoformat((row.get("TradDt") or "").strip())
-        except (InvalidOperation, ValueError):
+            close = Decimal(_field(row, "ClsPric", "CLOSE"))
+            day = _day(_field(row, "TradDt", "TIMESTAMP"))
+        except (InvalidOperation, ValueError, IndexError):
             continue
         if close <= 0:
             continue
@@ -69,8 +100,8 @@ def parse_bhavcopy(data: bytes) -> dict[str, Quote]:
             continue
         out[symbol] = Quote(
             symbol=symbol,
-            name=" ".join((row.get("FinInstrmNm") or "").split())[:160],
-            isin=(row.get("ISIN") or "").strip().upper()[:16],
+            name=" ".join(_field(row, "FinInstrmNm").split())[:160],
+            isin=_field(row, "ISIN").upper()[:16],
             series=series,
             close_paise=int((close * 100).quantize(Decimal(1))),
             day=day,
@@ -90,7 +121,7 @@ async def fetch_quotes(today: date, client: httpx.AsyncClient | None = None) -> 
             if day.weekday() >= 5:
                 continue
             try:
-                resp = await client.get(BHAVCOPY_URL.format(day=day), headers=HEADERS)
+                resp = await client.get(bhavcopy_url(day), headers=HEADERS)
             except httpx.HTTPError as exc:
                 last = exc
                 continue
@@ -132,6 +163,41 @@ async def cached_quotes(redis, today: date) -> dict[str, Quote]:
     quotes = await fetch_quotes(today)
     await redis.set(CACHE_KEY, dump(quotes), ex=CACHE_SECONDS)
     return quotes
+
+
+async def closes_from(
+    redis, day: date, today: date, client: httpx.AsyncClient
+) -> tuple[date, dict[str, int]] | None:
+    """The first trading day's closes on or after `day` (within a week, before `today`), by
+    ISIN, from Redis or NSE. None when NSE has no file for that week. Raises httpx.HTTPError
+    when NSE can't be reached."""
+    for ahead in range(7):
+        d = day + timedelta(days=ahead)
+        if d >= today:
+            return None
+        if d.weekday() >= 5:
+            continue
+        key = CLOSES_KEY.format(d.isoformat())
+        cached = await redis.get(key)
+        if cached is not None:
+            closes = json.loads(cached)
+            if closes:
+                return d, closes
+            continue
+        resp = await client.get(bhavcopy_url(d), headers=HEADERS)
+        closes: dict[str, int] = {}
+        if resp.status_code != 404:
+            resp.raise_for_status()
+            try:
+                closes = {q.isin: q.close_paise for q in parse_bhavcopy(resp.content).values()
+                          if q.isin}  # fmt: skip
+            except (ValueError, zipfile.BadZipFile):
+                closes = {}
+        # A holiday is remembered too, so it isn't asked for again.
+        await redis.set(key, json.dumps(closes, separators=(",", ":")), ex=CLOSES_SECONDS)
+        if closes:
+            return d, closes
+    return None
 
 
 _WORD = re.compile(r"[a-z0-9&]+")

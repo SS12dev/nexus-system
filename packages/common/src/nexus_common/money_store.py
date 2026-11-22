@@ -158,12 +158,31 @@ async def merge_account(
 
 
 async def account_for(
-    db: AsyncSession, user_id: uuid.UUID, institution: str | None, mask: str | None, kind: str
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    institution: str | None,
+    mask: str | None,
+    kind: str,
+    *,
+    options: tuple[str, ...] = (),
 ) -> MoneyAccount | None:
     """The account a transaction belongs to, made the first time it is seen. Without the last
-    four digits there's nothing reliable to tie it to."""
+    four digits there's nothing reliable to tie it to. `options` are other digits the same
+    statement quotes: one that's already an account is used before a new one is made."""
     if not mask:
         return None
+    for other in options:
+        if other != mask and (found := await _known_account(db, user_id, institution, other, kind)):
+            known = await _known_account(db, user_id, institution, mask, kind)
+            return known or found
+    return await _known_account(db, user_id, institution, mask, kind) or await _new_account(
+        db, user_id, institution, mask, kind
+    )
+
+
+async def _known_account(
+    db: AsyncSession, user_id: uuid.UUID, institution: str | None, mask: str, kind: str
+) -> MoneyAccount | None:
     if kind == "bank":
         # A debit card's alerts quote the card's digits: they belong to its bank account.
         for row in (
@@ -200,6 +219,12 @@ async def account_for(
             if institution and not row.institution:
                 row.institution = institution
             return row
+    return None
+
+
+async def _new_account(
+    db: AsyncSession, user_id: uuid.UUID, institution: str | None, mask: str, kind: str
+) -> MoneyAccount:
     account = MoneyAccount(
         user_id=user_id, institution=institution, mask=mask, kind=kind, name="", created_at=utcnow()
     )
@@ -254,7 +279,7 @@ async def ingest(
     conversions: list[MoneyTxn] = []
     for p in rows:
         account = fixed or await account_for(
-            db, user_id, p.institution, p.account_mask, p.account_kind
+            db, user_id, p.institution, p.account_mask, p.account_kind, options=p.mask_options
         )
         if account is not None:
             _note_balance(account, p)

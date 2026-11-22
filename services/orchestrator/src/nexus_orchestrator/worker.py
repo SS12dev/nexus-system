@@ -205,6 +205,14 @@ async def brief_now(ctx: dict, user_id: str) -> None:
 async def money_navs(ctx: dict) -> None:
     await money.revalue_holdings(ctx["deps"])
     await money.reprice_stocks(ctx["deps"])
+    await money.record_history(ctx["deps"])
+    await money.fill_share_history(ctx["deps"])
+
+
+@traced_job
+async def money_share_history(ctx: dict, user_id: str) -> None:
+    """A share added or changed: fill in its earlier closes now rather than tonight."""
+    await money.fill_share_history(ctx["deps"], uuid.UUID(user_id))
 
 
 @traced_job
@@ -454,6 +462,7 @@ class WorkerSettings:
         # A filing suggestion is a nice-to-have: one try, and the item is fine without it.
         func(organiser_suggest, timeout=90, keep_result=0, max_tries=1),
         func(money_sync, timeout=1800, keep_result=0, max_tries=1),
+        func(money_share_history, timeout=900, keep_result=0, max_tries=1),
         func(brief_now, timeout=120, keep_result=0, max_tries=1),
     ]
     cron_jobs = [
@@ -467,7 +476,7 @@ class WorkerSettings:
         cron(organiser_export, hour=2, minute=40, unique=True, timeout=900),
         cron(money_hourly, minute=20, unique=True, timeout=1800),
         # AMFI publishes the day's NAVs by about 11 pm IST (17:30 UTC); read them after.
-        cron(money_navs, hour=19, minute=15, unique=True, timeout=300),
+        cron(money_navs, hour=19, minute=15, unique=True, timeout=1200),
         # Every five minutes, so a brief set for 7:30 (or 7:45 in Kathmandu) goes on time.
         cron(brief_due, minute=set(range(2, 60, 5)), unique=True, timeout=240),
         # Five minutes after, so a chat summarised at :00 is in the graph by :05.

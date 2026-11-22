@@ -8,6 +8,7 @@ import { SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, secretChange, type Field } from "./FormDialog";
 import { SecretLine } from "./Secret";
 import { Card, Empty, Spinner, Stat, useMoney } from "./parts";
+import { GrowthCard } from "./Growth";
 import { ShareDialog, SharesSection } from "./Shares";
 
 /** How a deposit's frequency reads after its amount. */
@@ -65,6 +66,7 @@ export function SavingsView() {
         <Stat label="Going in each month" value={rupees(data.monthly_paise, { whole: true })} sub="RDs, PPF, EPF, NPS" />
         <Stat label="Together" value={rupees(data.total_paise + market, { whole: true })} sub="savings, funds and shares" />
       </div>
+      <GrowthCard />
       <div className="mb-5 flex flex-wrap gap-1.5" role="group" aria-label="Add savings">
         {ADD.map((a) => (
           <button key={a.kind} onClick={() => setDialog({ kind: a.kind })} className="flex items-center gap-1 rounded-full border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60">

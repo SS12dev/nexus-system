@@ -2248,11 +2248,40 @@ class MoneyStock(Base):
     price_paise: Mapped[int | None] = mapped_column(BigInteger)
     price_on: Mapped[date | None] = mapped_column(Date)
     note: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    # The day earlier closes were filled in from (bought_on when it was done); None while
+    # they still need fetching (money_history).
+    history_from: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
         UniqueConstraint("user_id", "exchange", "symbol", name="uq_money_stocks_user_symbol"),
+    )
+
+
+class MoneySnapshot(Base):
+    """What one share or fund holding was worth on a day, for the investments graph. Written
+    each night after prices come in, and for shares filled in back to the day they were bought
+    from NSE's old daily files (filled=True). Deposits aren't stored: their terms give any
+    day's value."""
+
+    __tablename__ = "money_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # A MoneyStock's id, or money_history.fund_id for a fund (fund rows are replaced by each
+    # CAS, so their own ids don't last).
+    item_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    # share or fund.
+    kind: Mapped[str] = mapped_column(String(8))
+    day: Mapped[date] = mapped_column(Date)
+    value_paise: Mapped[int] = mapped_column(BigInteger)
+    cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    filled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_id", "day", name="uq_money_snapshots_item_day"),
+        Index("ix_money_snapshots_user_day", "user_id", "day"),
     )
 
 

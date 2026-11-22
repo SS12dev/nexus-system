@@ -9,6 +9,10 @@
   cancelling, a price rise, and card bills due in three days or missed. Each is sent once.
 - `revalue_holdings`: each night, value every holding at AMFI's latest published NAV.
 - `reprice_stocks`: each night, price shares at NSE's latest close (the bhavcopy).
+- `record_history`: each night after that, store what each share and fund is worth, for the
+  investments graph (money_history).
+- `fill_share_history`: for shares with a purchase date, fetch NSE's closes back to it, once,
+  and again after the quantity, price paid or date changes.
 
 No model sees any of it: alerts and statements are read with plain rules on this machine.
 Logs carry counts and ids only, never amounts, merchants, subjects or senders.
@@ -24,7 +28,14 @@ import httpx
 from redis.exceptions import RedisError
 from sqlalchemy import select
 
-from nexus_common import advice_store, money, money_mail, money_orders, money_stocks
+from nexus_common import (
+    advice_store,
+    money,
+    money_history,
+    money_mail,
+    money_orders,
+    money_stocks,
+)
 from nexus_common import money_store as store
 from nexus_common.google import GoogleNotConnected, get_grant, services_in
 from nexus_common.models import (
@@ -621,6 +632,81 @@ async def reprice_stocks(
         await store.changed(deps.redis, uid)
     log.info("money.repriced", extra={"count": len(changed), "quotes": len(quotes)})
     return len(changed)
+
+
+async def record_history(deps: TurnDeps) -> int:
+    """Store tonight's value of every share and fund holding. Returns how many rows."""
+    async with deps.sessionmaker() as db:
+        users = set(await db.scalars(select(MoneyStock.user_id).distinct()))
+        users |= set(await db.scalars(select(MoneyHolding.user_id).distinct()))
+        stored = 0
+        for uid in users:
+            stored += await money_history.record(db, uid)
+        await db.commit()
+    log.info("money.history_recorded", extra={"users": len(users), "count": stored})
+    return stored
+
+
+# A pause between NSE files, so a five-year fill doesn't hammer their archive.
+FILL_PAUSE = 0.4
+
+
+async def fill_share_history(
+    deps: TurnDeps,
+    user_id: uuid.UUID | None = None,
+    today: date | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> int:
+    """Fill in earlier closes for shares whose history isn't there yet (history_from isn't
+    their bought_on). Stops at the first NSE failure, keeping what it has; the next night
+    carries on. Returns how many days were stored."""
+    today = today or date.today()
+    own = client is None
+    client = client or httpx.AsyncClient(
+        timeout=60, follow_redirects=True, headers=money_stocks.HEADERS
+    )
+    stored = 0
+    try:
+        async with deps.sessionmaker() as db:
+            q = select(MoneyStock).where(MoneyStock.bought_on.is_not(None))
+            if user_id:
+                q = q.where(MoneyStock.user_id == user_id)
+            todo = [s for s in (await db.scalars(q)).all() if s.history_from != s.bought_on]
+            for stock in todo:
+                closes: list[tuple[date, int]] = []
+                seen: set[date] = set()
+                try:
+                    for day in money_history.fill_days(stock.bought_on, today):
+                        cached = await deps.redis.exists(
+                            money_stocks.CLOSES_KEY.format(day.isoformat())
+                        )
+                        found = await money_stocks.closes_from(deps.redis, day, today, client)
+                        if not cached and FILL_PAUSE:
+                            await asyncio.sleep(FILL_PAUSE)
+                        if not found or found[0] in seen:
+                            continue
+                        trading_day, by_isin = found
+                        seen.add(trading_day)
+                        if stock.isin and stock.isin in by_isin:
+                            closes.append((trading_day, by_isin[stock.isin]))
+                except httpx.HTTPError as exc:
+                    await money_history.save_filled(db, stock, closes)
+                    await db.commit()
+                    log.warning(
+                        "money.history_fill_stopped",
+                        extra={"stock_id": str(stock.id), "error": type(exc).__name__},
+                    )
+                    return stored + len(closes)
+                stored += await money_history.save_filled(db, stock, closes)
+                stock.history_from = stock.bought_on
+                await db.commit()
+                log.info(
+                    "money.history_filled", extra={"stock_id": str(stock.id), "days": len(closes)}
+                )
+    finally:
+        if own:
+            await client.aclose()
+    return stored
 
 
 REMIND_HOUR = 9

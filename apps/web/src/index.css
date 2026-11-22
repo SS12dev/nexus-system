@@ -17,6 +17,25 @@ body,
   height: 100%;
 }
 
+/* Chart series colours, in their fixed order (the dataviz palette, validated for each theme's
+   panel surface): blue, orange, aqua, yellow, magenta. A series keeps its slot whatever is
+   filtered. */
+:root,
+[data-theme="light"] [data-theme="dark"] {
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+}
+[data-theme="light"] {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+}
+
 /* Native controls (checkboxes, pickers, scrollbars) drawn for the dark theme, ticked in the
    accent colour, with one keyboard focus ring everywhere. */
 html {

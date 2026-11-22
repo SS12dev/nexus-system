@@ -774,6 +774,28 @@ export interface Stock {
   note: string;
 }
 
+/** The investments graph (GET /api/money/investments/history): each holding's value on each
+ * day, null where it wasn't held or its value isn't known. Today's is the live value. */
+export type GrowthRange = "1m" | "3m" | "6m" | "1y" | "3y" | "all";
+export type GrowthGroup = "shares" | "funds" | "deposits" | "retirement" | "other";
+export interface GrowthSeries {
+  id: string;
+  kind: string;
+  group: GrowthGroup;
+  label: string;
+  values: (number | null)[];
+  /** What was paid, for shares and funds where it's known. */
+  costs: (number | null)[];
+}
+export interface Growth {
+  range: GrowthRange;
+  days: string[];
+  series: GrowthSeries[];
+  first_on: string | null;
+  /** Earlier share prices are still being fetched from NSE. */
+  filling: boolean;
+}
+
 export interface Stocks {
   items: Stock[];
   value_paise: number;

@@ -450,6 +450,9 @@ class Parsed:
     ref: str | None = None
     balance_paise: int | None = None
     extra: dict = field(default_factory=dict)
+    # Every account number a statement's heading quotes, best first: the one already known
+    # wins over account_mask (a statement can also quote a card, a customer id or a reference).
+    mask_options: tuple[str, ...] = ()
 
 
 def bank_of(text: str) -> str | None:
@@ -903,7 +906,9 @@ def parse_rows(rows: list[list], name: str, *, wrapped: bool = False) -> list[Pa
         )
     out: list[Parsed] = []
     head = " ".join(str(c) for r in rows[: max(0, start - 1)] for c in r if c)
-    mask = statement_mask(f"{head} {name}")
+    # The heading first; the file name only when the heading names no account.
+    options = statement_masks(head) or statement_masks(name)
+    mask = options[0] if options else None
     kind = "card" if re.search(r"\bcard\b", head, re.I) else "bank"
     institution = bank_of(" ".join(str(c) for r in rows[: start + 1] for c in r if c)) or bank_of(
         name
@@ -982,6 +987,7 @@ def parse_rows(rows: list[list], name: str, *, wrapped: bool = False) -> list[Pa
             account_mask=mask,
             account_kind=kind,
             institution=institution,
+            mask_options=tuple(options),
             ref=str(row[cols["ref"]]).strip() or None
             if "ref" in cols and row[cols["ref"]]
             else None,
@@ -1141,8 +1147,15 @@ def _layout_rows(pdf) -> list[list[str]]:
 
 
 def _table_rows(pdf, first_text: str) -> list[list[str]]:
-    """Rows from ruled tables, after the first page's text (it names the bank and account)."""
-    rows: list[list[str]] = [[line] for line in first_text.splitlines()[:40]]
+    """Rows from ruled tables, after the first page's text above the table (it names the bank
+    and account). The page's own transactions are left out: their references and card numbers
+    aren't the account's."""
+    rows: list[list[str]] = []
+    for line in first_text.splitlines()[:40]:
+        low = line.lower()
+        if "date" in low and any(w in low for w in ("balance", "withdraw", "debit", "amount")):
+            break
+        rows.append([line])
     for page in pdf.pages[:MAX_PDF_PAGES]:
         for table in page.extract_tables():
             rows.extend([" ".join(str(c or "").split()) for c in r] for r in table)
@@ -1181,18 +1194,35 @@ def read_pdf_statement(data: bytes, password: str, name: str) -> list[Parsed]:
     )
 
 
+# A masked number (XXXXXXXX6320, ****6320) is the clearest sign of an account number.
+_MASKED = re.compile(r"(?<![A-Za-z0-9*])[xX*]{2,}[ -]?(\d{4})\b")
+# A number after an account or card label: one run of digits (with masking), or a card's
+# groups of four ("4375 XXXX XXXX 1234"). Never runs on into a date or the next field.
+_LABELLED = re.compile(
+    r"\b(?:a/c|acct|account|card)\b\.?\s*(?:no\.?|number|#)?\s*[:.-]?\s*"
+    r"([xX*\d]{4,20}(?:[ -][xX*\d]{4}){0,3})(?![\d/-]\d)",
+    re.I,
+)
+
+
+def statement_masks(text: str) -> list[str]:
+    """The last four digits of every account number a statement's heading or file name
+    quotes, best first: labelled ones ('Account No : 50100123456789', 'Card No. 4375 XXXX
+    XXXX 1234'), then masked ones anywhere ('XX1234')."""
+    out: list[str] = []
+    for m in _LABELLED.finditer(text):
+        digits = re.sub(r"\D", "", m.group(1))
+        # A label followed by a date or a short code isn't an account number.
+        if len(digits) >= 4 and (len(m.group(1)) >= 8 or re.search(r"[xX*]", m.group(1))):
+            out.append(digits[-4:])
+    out += [m.group(1) for m in _MASKED.finditer(text)]
+    return list(dict.fromkeys(out))
+
+
 def statement_mask(text: str) -> str | None:
-    """The last four digits of the account a statement is for, from the lines above its table
-    or its file name ('Account No : 50100123456789', 'XX1234', 'Card No. 4375 XXXX XXXX 1234')."""
-    m = re.search(
-        r"(?:a/?c|account|card)\s*(?:no\.?|number|#)?\s*[:.-]?\s*([x*\d][x*\d -]{5,24}\d)",
-        text,
-        re.I,
-    ) or re.search(r"[xX*]{2,}(\d{4})\b", text)
-    if not m:
-        return None
-    digits = re.sub(r"\D", "", m.group(1))
-    return digits[-4:] if len(digits) >= 4 else None
+    """The best guess at the account a statement is for (see statement_masks)."""
+    found = statement_masks(text)
+    return found[0] if found else None
 
 
 def statement_merchant(narration: str) -> str:
