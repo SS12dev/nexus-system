@@ -15,13 +15,31 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import google, money, money_history, money_links, money_mail, money_salary
+from nexus_common import (
+    google,
+    money,
+    money_history,
+    money_links,
+    money_mail,
+    money_salary,
+    money_tracking,
+)
 from nexus_common import money_store as store
 from nexus_common.models import (
     MoneyAccount,
@@ -30,6 +48,7 @@ from nexus_common.models import (
     MoneyHolding,
     MoneyImport,
     MoneyMailbox,
+    MoneyMailStatement,
     MoneyTxn,
     utcnow,
 )
@@ -661,6 +680,12 @@ class AccountOut(BaseModel):
     last_on: date | None
 
 
+@router.get("/tracking")
+async def tracking(user: OwnerUser, db: DbDep) -> dict:
+    """What Money has read for each account, month by month, and what would fill the gaps."""
+    return await money_tracking.view(db, user.id, local_today(user))
+
+
 @router.get("/accounts", response_model=list[AccountOut])
 async def list_accounts(user: OwnerUser, db: DbDep) -> list[AccountOut]:
     stats = {
@@ -947,6 +972,116 @@ async def import_file(
     log.info("money.imported", extra={"user_id": str(user.id), "kind": kind, **counts})
     await store.changed(redis, user.id, **counts)
     return _import(row, cfg)
+
+
+# --- Statements found in the mail -------------------------------------------------------------
+
+
+def _mail_statement(r: MoneyMailStatement, labels: dict) -> dict:
+    return {
+        "id": str(r.id),
+        "received_at": r.received_at,
+        "institution": r.institution,
+        "mask": r.mask,
+        "period_from": r.period_from,
+        "period_to": r.period_to,
+        "status": r.status,
+        "mailbox": labels.get(r.mailbox_id, "Your sign-in Gmail"),
+    }
+
+
+@router.get("/mail-statements")
+async def mail_statements(user: OwnerUser, db: DbDep) -> list[dict]:
+    """Statement PDFs banks emailed: new ones first, then the last few imported."""
+    rows = (
+        await db.scalars(
+            select(MoneyMailStatement)
+            .where(MoneyMailStatement.user_id == user.id, MoneyMailStatement.status != "dismissed")
+            .order_by(MoneyMailStatement.received_at.desc())
+            .limit(40)
+        )
+    ).all()
+    labels = {b.id: b.email_masked for b in await money_mail.mailboxes(db, user.id)}
+    new = [r for r in rows if r.status == "new"]
+    done = [r for r in rows if r.status == "imported"][:6]
+    return [_mail_statement(r, labels) for r in new + done]
+
+
+class MailImportIn(BaseModel):
+    # Used once, in memory, to open the PDF; never stored or logged.
+    password: str = Field(default="", max_length=100)
+    replace: bool = True
+    account_id: uuid.UUID | None = None
+
+
+@router.post("/mail-statements/{statement_id}/import", response_model=ImportOut)
+async def import_mail_statement(
+    statement_id: uuid.UUID,
+    body: MailImportIn,
+    request: Request,
+    user: OwnerUser,
+    db: DbDep,
+    cfg: SettingsDep,
+    redis: RedisDep,
+) -> ImportOut:
+    """Fetch an emailed statement's PDF, open it with the typed password and read it in place
+    of what earlier imports read for those dates. The file is never kept."""
+    uid = user.id
+    if wait := await hit(redis, "money-import", str(uid), IMPORTS_PER_HOUR, 3600):
+        raise too_many(wait, "imports")
+    row = await db.get(MoneyMailStatement, statement_id)
+    if row is None or row.user_id != uid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement not found.")
+    if body.account_id:
+        account = await db.get(MoneyAccount, body.account_id)
+        if account is None or account.user_id != uid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found.")
+    try:
+        name, data = await money_mail.fetch_statement_pdf(
+            db, cfg, uid, row.mailbox_id, row.message_id, request.app.state.google_http
+        )
+    except money_mail.StatementGone as exc:
+        await db.commit()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    await db.commit()  # a refreshed Gmail token is kept
+    try:
+        what, pw = await asyncio.to_thread(money.open_pdf, data, [body.password.strip()])
+        if what == "cas":
+            raise money.StatementError(
+                "That's a mutual fund statement: upload it under Import instead."
+            )
+        rows = await asyncio.to_thread(money.read_pdf_statement, data, pw, name)
+        del pw
+        counts = await store.ingest(
+            db, cfg, uid, rows, source="statement", account_id=body.account_id,
+            replace=body.replace,
+        )  # fmt: skip
+    except money.StatementError as exc:
+        await db.rollback()
+        log.info("money.mail_statement_failed", extra={"user_id": str(uid)})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    finally:
+        del data
+    imp = await store.record_import(
+        db, cfg, uid, kind="statement", origin="gmail", filename=name, status="done",
+        counts=counts, account_id=body.account_id,
+    )  # fmt: skip
+    row = await db.get(MoneyMailStatement, statement_id)
+    row.status, row.import_id = "imported", imp.id
+    await db.commit()
+    log.info("money.mail_statement_imported", extra={"user_id": str(uid), **counts})
+    await store.changed(redis, uid, **counts)
+    return _import(imp, cfg)
+
+
+@router.post("/mail-statements/{statement_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+async def dismiss_mail_statement(statement_id: uuid.UUID, user: OwnerUser, db: DbDep) -> Response:
+    row = await db.get(MoneyMailStatement, statement_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement not found.")
+    row.status = "dismissed"
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- Deleting everything ---------------------------------------------------------------------

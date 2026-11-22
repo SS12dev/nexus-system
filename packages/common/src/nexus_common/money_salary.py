@@ -25,13 +25,21 @@ SOURCE = "salary"
 # How far either side of the pay day a credit counts as that month's salary, and how close
 # to the expected amount it must be (take-home moves a little with tax and deductions).
 WINDOW_DAYS = 6
+# Salaries come early more often than late (paid before a holiday), so look further back.
+EARLY_DAYS = 10
+# pay_day 0: the last working day (Monday to Friday) of the month.
+LAST_WORKING_DAY = 0
 LOW, HIGH = 0.8, 1.25
 MONTHS_BACK = 24
 NOTE = "Expected from your salary details: no credit like it was read for this month."
 
 
 def pay_date(year: int, month: int, day: int) -> date:
-    return date(year, month, min(max(day, 1), calendar.monthrange(year, month)[1]))
+    last = calendar.monthrange(year, month)[1]
+    if day == LAST_WORKING_DAY:
+        end = date(year, month, last)
+        return end - timedelta(days=max(end.weekday() - 4, 0))
+    return date(year, month, min(max(day, 1), last))
 
 
 def salary_on(rows: list[MoneySalary], day: date) -> MoneySalary | None:
@@ -81,7 +89,7 @@ async def fill(db: AsyncSession, user_id: uuid.UUID, today: date | None = None) 
             if due > today:
                 continue
             key = f"salary:{y:04d}-{m:02d}"
-            lo, hi = due - timedelta(days=WINDOW_DAYS), due + timedelta(days=WINDOW_DAYS)
+            lo, hi = due - timedelta(days=EARLY_DAYS), due + timedelta(days=WINDOW_DAYS)
             q = select(MoneyTxn.id).where(
                 MoneyTxn.user_id == user_id,
                 MoneyTxn.direction == "credit",

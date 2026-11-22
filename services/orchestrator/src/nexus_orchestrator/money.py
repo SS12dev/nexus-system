@@ -160,7 +160,7 @@ class PartlyRead(GoogleError):
 
 def _empty_counts() -> dict:
     return {"messages": 0, "added": 0, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
-            "orders": 0, "orders_matched": 0}  # fmt: skip
+            "orders": 0, "orders_matched": 0, "statements": 0}  # fmt: skip
 
 
 async def _already_read(deps: TurnDeps, user_id: uuid.UUID, ids: list[str]) -> set[str]:
@@ -204,7 +204,7 @@ async def _read_alerts(
         cap = MAX_MESSAGES
     after = f"after:{int(since.timestamp())}"
     ids = await _list_ids(g, f"{money.ALERT_QUERY} {after}", cap)
-    for query in (money.CARD_BILL_QUERY, money.EMI_QUERY):
+    for query in (money.CARD_BILL_QUERY, money.EMI_QUERY, money.STATEMENT_QUERY):
         ids += [i for i in await _list_ids(g, f"{query} {after}", 200) if i not in ids]
     # Order emails (Swiggy, Amazon, a cab...): counted apart so the alert counts stay honest.
     seen = set(ids)
@@ -261,6 +261,7 @@ async def _save_batch(
     bills: list[money.CardBill] = []
     bookings: list[money.EmiBooking] = []
     orders: list[tuple[money_orders.Order, str]] = []
+    statements: list[tuple[money.StatementMail, str, datetime]] = []
     newest: datetime | None = None
     for mid, msg in messages:
         received = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000, UTC)
@@ -268,6 +269,10 @@ async def _save_batch(
         body, _ = message_body(msg.get("payload") or {})
         subject, sender = _header(msg, "subject"), _header(msg, "from")
         day = received.astimezone(tz).date()
+        has_pdf = _pdf_part(msg.get("payload") or {}) is not None
+        if found := money.parse_statement_mail(subject, day, sender, has_pdf=has_pdf):
+            # Offered on the Tracking panel; its password is typed there when it's imported.
+            statements.append((found, mid, received))
         if bill := money.parse_card_bill(subject, body, day, sender=sender):
             bills.append(bill)
         elif booking := money.parse_emi_booking(subject, body, day, sender=sender):
@@ -277,6 +282,10 @@ async def _save_batch(
         elif order := money_orders.parse_order(subject, body, day, sender=sender):
             orders.append((order, mid))
     async with deps.sessionmaker() as db:
+        for found, mid, received in statements:
+            counts["statements"] += await store.record_mail_statement(
+                db, user.id, mailbox_id, mid, received, found
+            )
         for bill in sorted(bills, key=lambda b: b.statement_on):
             counts["bills"] += await store.record_card_bill(db, user.id, bill)
         # Oldest first, so an account's rows arrive in order.
@@ -483,7 +492,7 @@ async def _sync_user(
         await _tell_history(deps, user_id, back_days, counts, error)
     log.info("money.synced", extra={"user_id": str(user_id), **counts})
     if any(counts.get(k) for k in ("added", "matched", "bills", "emis", "orders",
-                                   "orders_matched")) or holdings:  # fmt: skip
+                                   "orders_matched", "statements")) or holdings:  # fmt: skip
         await store.changed(deps.redis, user_id, **counts)
     return counts
 
@@ -606,6 +615,8 @@ async def repair_all(deps: TurnDeps) -> int:
             if fixed is not None:
                 await deps.redis.set(flag, "1")
                 done += 1
+                # Emails this version reads that the last one couldn't: read them again.
+                await sync_user(deps, uid, back_days=money_repair.REREAD_DAYS)
             if (fixed and any(fixed.values())) or any(filled.values()):
                 await store.changed(deps.redis, uid)
         except Exception:

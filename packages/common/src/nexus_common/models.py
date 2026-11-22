@@ -2259,6 +2259,35 @@ class MoneyStock(Base):
     )
 
 
+class MoneyMailStatement(Base):
+    """A bank or card statement PDF found in the person's mail. Its password is typed when it's
+    imported and used once, in memory: never kept, so Money can't open these on its own."""
+
+    __tablename__ = "money_mail_statements"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # None: the sign-in Gmail.
+    mailbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("money_mailboxes.id", ondelete="CASCADE")
+    )
+    message_id: Mapped[str] = mapped_column(String(64))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    institution: Mapped[str | None] = mapped_column(String(60))
+    # The account digits the subject quotes (as many as it shows).
+    mask: Mapped[str | None] = mapped_column(String(8))
+    period_from: Mapped[date | None] = mapped_column(Date)
+    period_to: Mapped[date | None] = mapped_column(Date)
+    # new, imported or dismissed.
+    status: Mapped[str] = mapped_column(String(12), default="new", server_default="new")
+    import_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "message_id", name="uq_money_mail_statements_message"),
+    )
+
+
 class MoneySalary(Base):
     """Take-home pay from a date on: one row per raise. Months with no salary credit read from
     an alert or statement get an expected row (money_salary.fill)."""
@@ -2275,6 +2304,7 @@ class MoneySalary(Base):
         ForeignKey("money_accounts.id", ondelete="SET NULL")
     )
     # The day of the month it usually arrives.
+    # Day of the month it arrives; 0 is the last working day.
     pay_day: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -23,6 +23,8 @@ import type {
   MoneySettings,
   MoneyTxn,
   Plan,
+  Tracking,
+  MailStatement,
   Salaries,
   SalaryIn,
   Savings,
@@ -403,6 +405,11 @@ export const api = {
     request<{ added: number; matched: number; skipped: number; account_label: string | null }>("/api/money/screenshots/save", { method: "POST", body: json(body) }),
   moneyReadHistory: (months: number) => request<{ queued: boolean; months: number }>("/api/money/sync/history", { method: "POST", body: json({ months }) }),
   moneyImports: () => request<MoneyImport[]>("/api/money/imports"),
+  moneyTracking: () => request<Tracking>("/api/money/tracking"),
+  moneyMailStatements: () => request<MailStatement[]>("/api/money/mail-statements"),
+  moneyImportMailStatement: (id: string, body: { password: string; replace: boolean; account_id?: string }) =>
+    request<MoneyImport>(`/api/money/mail-statements/${id}/import`, { method: "POST", body: json(body) }),
+  moneyDismissMailStatement: (id: string) => request<void>(`/api/money/mail-statements/${id}/dismiss`, { method: "POST" }),
   moneyImport: (file: File, opts: { password?: string; remember?: boolean; account_id?: string; replace?: boolean } = {}) => {
     const form = new FormData();
     form.append("file", file);

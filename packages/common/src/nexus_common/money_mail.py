@@ -6,6 +6,7 @@ Nexus account. Tokens are encrypted like the sign-in grant's (nexus_common.googl
 is sealed with Money's key, and only a masked form ("ba•••@gmail.com") is ever shown or logged.
 """
 
+import base64
 import hashlib
 import logging
 import uuid
@@ -154,3 +155,71 @@ async def remove(
                 await client.aclose()
     await db.delete(box)
     await db.flush()
+
+
+GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+
+class StatementGone(Exception):
+    """The statement email or its PDF can't be fetched any more (deleted, or access ended)."""
+
+
+def _pdf_part(payload: dict) -> dict | None:
+    stack = [payload]
+    while stack:
+        part = stack.pop()
+        name = (part.get("filename") or "").lower()
+        if name.endswith(".pdf") and (part.get("body") or {}).get("attachmentId"):
+            return part
+        stack += part.get("parts") or []
+    return None
+
+
+async def fetch_statement_pdf(
+    db: AsyncSession,
+    settings: Settings,
+    user_id: uuid.UUID,
+    mailbox_id: uuid.UUID | None,
+    message_id: str,
+    http: httpx.AsyncClient | None = None,
+) -> tuple[str, bytes]:
+    """The PDF attached to a statement email, from the mailbox it came to: (file name, bytes).
+    Read here and dropped by the caller; never stored. Raises StatementGone."""
+    try:
+        if mailbox_id:
+            box = await db.get(MoneyMailbox, mailbox_id)
+            if box is None or box.user_id != user_id:
+                raise StatementGone("That mailbox isn't connected any more.")
+            token = await access_token(db, settings, box, http)
+        else:
+            token = await google.access_token(db, settings, user_id, "gmail", http)
+    except google.GoogleNotConnected:
+        raise StatementGone(
+            "Google no longer lets Money read that mailbox. Connect it again."
+        ) from None
+    client = http or httpx.AsyncClient(timeout=30)
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        resp = await client.get(
+            f"{GMAIL_API}/messages/{message_id}", params={"format": "full"}, headers=headers
+        )
+        if resp.status_code == 404:
+            raise StatementGone("That email isn't in the mailbox any more.")
+        resp.raise_for_status()
+        part = _pdf_part(resp.json().get("payload") or {})
+        if part is None:
+            raise StatementGone("That email has no PDF attached.")
+        att = await client.get(
+            f"{GMAIL_API}/messages/{message_id}/attachments/{part['body']['attachmentId']}",
+            headers=headers,
+        )
+        att.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise StatementGone(f"Couldn't fetch it from Gmail ({type(exc).__name__}).") from exc
+    finally:
+        if http is None:
+            await client.aclose()
+    data = att.json().get("data", "")
+    return part.get("filename") or "statement.pdf", base64.urlsafe_b64decode(
+        data + "=" * (-len(data) % 4)
+    )

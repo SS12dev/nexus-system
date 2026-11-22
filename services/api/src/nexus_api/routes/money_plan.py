@@ -536,7 +536,8 @@ class SalaryIn(BaseModel):
     from_on: date
     employer: str | None = Field(default=None, max_length=80)
     account_id: uuid.UUID | None = None
-    pay_day: int = Field(default=1, ge=1, le=31)
+    # 0 is the last working day of the month.
+    pay_day: int = Field(default=0, ge=0, le=31)
 
 
 class SalaryPatch(BaseModel):
@@ -544,7 +545,7 @@ class SalaryPatch(BaseModel):
     from_on: date | None = None
     employer: str | None = Field(default=None, max_length=80)
     account_id: uuid.UUID | None = None
-    pay_day: int | None = Field(default=None, ge=1, le=31)
+    pay_day: int | None = Field(default=None, ge=0, le=31)
 
 
 def _salary_out(row: MoneySalary) -> dict:

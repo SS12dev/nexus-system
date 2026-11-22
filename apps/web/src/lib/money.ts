@@ -938,3 +938,45 @@ export function mergeScreenshotRows<T extends Pick<ScreenshotRow, "occurred_on" 
   }
   return out.sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : a.occurred_on > b.occurred_on ? -1 : 0));
 }
+
+/** One account's month on the Tracking panel: how many rows came from each source. */
+export interface TrackingMonth {
+  month: string;
+  alerts?: number;
+  statements?: number;
+  expected?: number;
+  other?: number;
+}
+
+export interface TrackingAccount {
+  id: string;
+  label: string;
+  kind: "bank" | "card";
+  status: "ok" | "stale" | "gaps" | "empty";
+  todo: string;
+  last_alert_on: string | null;
+  last_statement_on: string | null;
+  credit_alerts: boolean;
+  months: TrackingMonth[];
+}
+
+export interface Tracking {
+  months: string[];
+  accounts: TrackingAccount[];
+  unassigned: number;
+  mail: { label: string; on: boolean; checked_at: string | null; read_until: string | null; error: string | null }[];
+  needs_attention: number;
+  statements_waiting: number;
+}
+
+/** A statement PDF a bank emailed, waiting to be imported with its password. */
+export interface MailStatement {
+  id: string;
+  received_at: string;
+  institution: string | null;
+  mask: string | null;
+  period_from: string | null;
+  period_to: string | null;
+  status: "new" | "imported";
+  mailbox: string;
+}

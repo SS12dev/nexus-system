@@ -1,6 +1,6 @@
-import { CalendarClock, CreditCard, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, PiggyBank, Repeat, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { CalendarClock, CreditCard, HandCoins, LayoutDashboard, Landmark, LineChart, ListOrdered, Lock, Mail, Radar, Repeat, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "../components/Feedback";
 import { Guide, GuideHeading } from "../components/Guide";
 import { OrdersToConfirm } from "../components/money/Orders";
@@ -13,6 +13,7 @@ import { PlanView } from "../components/money/Plan";
 import { SavingsView } from "../components/money/Savings";
 import { SetupView } from "../components/money/Setup";
 import { SubscriptionsView } from "../components/money/Subscriptions";
+import { TrackingStrip, TrackingView } from "../components/money/Tracking";
 import { TransactionsView } from "../components/money/Transactions";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
@@ -50,6 +51,7 @@ export function MoneyPage() {
           <Route path="savings" element={<SavingsView />} />
           <Route path="investments" element={<Navigate to="/money/savings" replace />} />
           <Route path="plan" element={<PlanView />} />
+          <Route path="tracking" element={<TrackingView />} />
           <Route path="setup" element={<SetupView />} />
           <Route path="*" element={<Navigate to="/money" replace />} />
         </Routes>
@@ -58,21 +60,37 @@ export function MoneyPage() {
   );
 }
 
+/** Five places, plus Tracking. Pages that belong together share a tab and switch with the row
+ * under it (Accounts: accounts and subscriptions; Plan: forecast and health checks). */
 const TABS = [
-  { to: "/money", label: "Overview", icon: LayoutDashboard },
-  { to: "/money/health", label: "Health", icon: ShieldCheck },
-  { to: "/money/accounts", label: "Accounts", icon: CreditCard },
-  { to: "/money/transactions", label: "Transactions", icon: ListOrdered },
-  { to: "/money/budgets", label: "Budgets", icon: PiggyBank },
-  { to: "/money/subscriptions", label: "Subscriptions", icon: Repeat },
-  { to: "/money/savings", label: "Savings", icon: Landmark },
-  { to: "/money/plan", label: "Plan", icon: LineChart },
-  { to: "/money/setup", label: "Import and settings", icon: Settings2 },
+  { to: "/money", label: "Overview", icon: LayoutDashboard, paths: ["/money", "/money/budgets"] },
+  { to: "/money/transactions", label: "Transactions", icon: ListOrdered, paths: ["/money/transactions"] },
+  { to: "/money/accounts", label: "Accounts", icon: CreditCard, paths: ["/money/accounts", "/money/subscriptions"] },
+  { to: "/money/savings", label: "Savings", icon: Landmark, paths: ["/money/savings"] },
+  { to: "/money/plan", label: "Plan", icon: LineChart, paths: ["/money/plan", "/money/health"] },
+  { to: "/money/tracking", label: "Tracking", icon: Radar, paths: ["/money/tracking", "/money/setup"] },
 ];
+
+const SUBTABS: Record<string, { to: string; label: string }[]> = {
+  "/money/accounts": [
+    { to: "/money/accounts", label: "Accounts, cards and loans" },
+    { to: "/money/subscriptions", label: "Subscriptions and bills" },
+  ],
+  "/money/plan": [
+    { to: "/money/plan", label: "Forecast and goals" },
+    { to: "/money/health", label: "Health checks" },
+  ],
+  "/money/tracking": [
+    { to: "/money/tracking", label: "What Money can see" },
+    { to: "/money/setup", label: "Import and settings" },
+  ],
+};
 
 function Header() {
   const path = useLocation().pathname.replace(/\/$/, "");
   const home = path === "/money";
+  const tab = TABS.find((t) => t.paths.includes(path)) ?? TABS[0];
+  const sub = SUBTABS[tab.to];
   const nav = useRef<HTMLElement>(null);
   useEffect(() => {
     // On a phone the tab row scrolls: keep the open tab in view.
@@ -121,7 +139,7 @@ function Header() {
           </div>
           <div>
             <GuideHeading>Health: are you safe?</GuideHeading>
-            The Health tab checks the things that keep you safe: an emergency fund, how much you keep each month, EMIs and
+            Plan › Health checks looks at the things that keep you safe: an emergency fund, how much you keep each month, EMIs and
             card balances, bills covered and insurance. It also says how much is safe to spend for the rest of the month
             after your saving target.
           </div>
@@ -138,28 +156,44 @@ function Header() {
           </div>
           <div>
             <GuideHeading>Getting started</GuideHeading>
-            Open <Link to="/money/setup" className="text-sky-300 hover:text-sky-200">Import and settings</Link>: upload a
-            recent statement for history, then switch on alert emails to stay current.
+            Open <Link to="/money/tracking" className="text-sky-300 hover:text-sky-200">Tracking</Link>: it shows, account by
+            account and month by month, what Money has read and what's missing. Switch on alert emails to stay current
+            and add a statement for history or for banks that don't email.
           </div>
         </Guide>
       )}
-      <nav ref={nav} className="-mx-4 mb-5 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Money">
-        {TABS.map((t) => (
-          <NavLink
-            key={t.to}
-            to={t.to}
-            end={t.to === "/money"}
-            className={({ isActive }) =>
-              `flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm ${
-                isActive ? "border-sky-500/60 bg-sky-500/15 text-sky-100" : "border-edge text-slate-300 hover:bg-edge/60"
-              }`
-            }
-          >
-            <t.icon size={14} />
-            {t.label}
-          </NavLink>
-        ))}
+      <nav ref={nav} className={`-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none] ${sub ? "mb-2" : "mb-5"}`} aria-label="Money">
+        {TABS.map((t) => {
+          const on = t === tab;
+          return (
+            <Link
+              key={t.to}
+              to={t.to}
+              aria-current={on ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm ${
+                on ? "border-sky-500/60 bg-sky-500/15 text-sky-100" : "border-edge text-slate-300 hover:bg-edge/60"
+              }`}
+            >
+              <t.icon size={14} />
+              {t.label}
+            </Link>
+          );
+        })}
       </nav>
+      {sub && (
+        <nav className="-mx-4 mb-5 flex gap-4 overflow-x-auto border-b border-edge px-4 [scrollbar-width:none]" aria-label={`${tab?.label} sections`}>
+          {sub.map((x) => (
+            <Link
+              key={x.to}
+              to={x.to}
+              aria-current={x.to === path ? "page" : undefined}
+              className={`-mb-px shrink-0 border-b-2 pb-2 text-sm ${x.to === path ? "border-sky-400 text-slate-100" : "border-transparent text-slate-400 hover:text-slate-200"}`}
+            >
+              {x.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </>
   );
 }
@@ -180,6 +214,7 @@ function OverviewView({ latest }: { latest: string }) {
   const gain = data.funds_cost_paise ? data.funds_value_paise - data.funds_cost_paise : null;
   return (
     <>
+      <TrackingStrip />
       {month === latest && <HealthStrip />}
       <OrdersToConfirm />
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -305,7 +340,7 @@ function OverviewView({ latest }: { latest: string }) {
 
 function SyncLine({ on, at }: { on: boolean; at: string | null }) {
   return (
-    <Link to="/money/setup" className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200">
+    <Link to="/money/tracking" className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200">
       <Mail size={13} />
       {on ? (at ? `Alert emails checked ${formatAgo(at)}` : "Reading alert emails…") : "Alert emails off"}
     </Link>

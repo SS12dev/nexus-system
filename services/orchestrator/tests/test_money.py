@@ -143,7 +143,7 @@ async def test_sync_reads_alerts_once_and_logs_no_details(
     counts = await money.sync_user(deps, user)
     assert counts == {
         "messages": 3, "added": 2, "matched": 0, "skipped": 0, "bills": 0, "emis": 0,
-        "orders": 0, "orders_matched": 0}  # fmt: skip
+        "orders": 0, "orders_matched": 0, "statements": 0}  # fmt: skip
     query = google.sent("GET", f"{GMAIL}/messages").url.params["q"]
     assert "debited" in query and "after:" in query and "from:hdfcbank" in query
     assert "-category:promotions" not in query
@@ -713,3 +713,37 @@ async def test_the_one_off_repair_runs_once_and_salary_fills_hourly(
     assert await redis.exists(f"money:repaired:{money_repair.VERSION}:{user}")
     # Once per version: the next hour only keeps the salary rows current.
     assert await money.repair_all(deps) == 0
+
+
+async def test_statement_emails_are_noted_for_import(deps, user, sessionmaker):
+    from nexus_common.models import MoneyMailStatement
+
+    msg = {
+        "internalDate": str(int(datetime(2026, 11, 22, 2, 37, tzinfo=UTC).timestamp() * 1000)),
+        "payload": {
+            "headers": [
+                {"name": "Subject",
+                 "value": "Bank Statement from 01-03-2026 to 22-11-2026 for XXXXXXXXXX20"},
+                {"name": "From", "value": "ICICI Bank <estatement@icici.bank.in>"},
+            ],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64("Your e-statement is attached.")}},
+                {"filename": "Statement.pdf", "body": {"attachmentId": "a1"}},
+            ],
+        },
+    }  # fmt: skip
+    async with sessionmaker() as db:
+        u = await db.get(User, user)
+        db.expunge(u)
+    counts = money._empty_counts()
+    for _ in range(2):  # read twice, noted once
+        await money._save_batch(deps, u, UTC, [("m1", msg)], counts, None, False)
+    assert counts["statements"] == 1
+    async with sessionmaker() as db:
+        row = (await db.scalars(select(MoneyMailStatement))).one()
+    assert (row.institution, row.mask, row.period_to, row.status) == (
+        "ICICI Bank",
+        "20",
+        date(2026, 11, 22),
+        "new",
+    )

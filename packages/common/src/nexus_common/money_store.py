@@ -8,7 +8,7 @@ import dataclasses
 import logging
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from redis.asyncio import Redis
@@ -26,6 +26,7 @@ from nexus_common.models import (
     MoneyHolding,
     MoneyImport,
     MoneyLoan,
+    MoneyMailStatement,
     MoneySalary,
     MoneySettings,
     MoneyStock,
@@ -222,6 +223,25 @@ async def _known_account(
             if institution and not row.institution:
                 row.institution = institution
             return row
+    if len(mask) == 3:
+        # Some banks quote only three digits ("Account XX320"): the one account of that kind
+        # at that bank ending with them.
+        ends = [
+            row
+            for row in (
+                await db.scalars(
+                    select(MoneyAccount).where(
+                        MoneyAccount.user_id == user_id, MoneyAccount.kind == kind
+                    )
+                )
+            ).all()
+            if row.mask
+            and len(row.mask) > 3
+            and row.mask.endswith(mask)
+            and (not institution or not row.institution or row.institution == institution)
+        ]
+        if len(ends) == 1:
+            return ends[0]
     return None
 
 
@@ -341,6 +361,38 @@ async def _clear_period(
         extra={"user_id": str(user_id), "accounts": len(targets), "removed": len(ids)},
     )
     return len(ids)
+
+
+async def record_mail_statement(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    mailbox_id: uuid.UUID | None,
+    message_id: str,
+    received_at: datetime,
+    found: money.StatementMail,
+) -> bool:
+    """Note a statement PDF found in the mail, once. True when it's new."""
+    if await db.scalar(
+        select(MoneyMailStatement.id).where(
+            MoneyMailStatement.user_id == user_id, MoneyMailStatement.message_id == message_id
+        )
+    ):
+        return False
+    db.add(
+        MoneyMailStatement(
+            user_id=user_id,
+            mailbox_id=mailbox_id,
+            message_id=message_id[:64],
+            received_at=received_at,
+            institution=found.institution,
+            mask=(found.mask or "")[-8:] or None,
+            period_from=found.period_from,
+            period_to=found.period_to,
+            created_at=utcnow(),
+        )
+    )
+    await db.flush()
+    return True
 
 
 async def ingest(
