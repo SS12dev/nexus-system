@@ -300,7 +300,7 @@ _HANDLE_NAMES = {
     "bookmyshow": "BookMyShow",
     "zerodha": "Zerodha", "groww": "Groww", "phonepe": "PhonePe", "paytm": "Paytm",
     "openai": "OpenAI", "anthropic": "Anthropic", "github": "GitHub", "youtube": "YouTube",
-    "nobroker": "NoBroker", "makemytrip": "MakeMyTrip", "dmart": "DMart",
+    "nobroker": "NoBroker", "makemytrip": "MakeMyTrip", "dmart": "DMart", "google": "Google",
 }  # fmt: skip
 
 
@@ -995,6 +995,12 @@ def parse_rows(rows: list[list], name: str, *, wrapped: bool = False) -> list[Pa
             row = list(row) + [None] * (max(cols.values()) + 1 - len(row))
         when = _row_date(row[cols["date"]])
         narration = " ".join(str(row[cols["narration"]] or "").split())
+        section = _STATEMENT_OF.search(" ".join(str(c or "") for c in row)) if not when else None
+        if section and out and section.group(1)[-4:] != mask:
+            # ICICI follows the account with its PPF's own transactions: another account, and
+            # its deposits are the transfers already read here. Stop at the first account (a
+            # heading repeated on each page names the same one).
+            break
         if when is None:
             # A description's second line: text under the description and nothing else.
             others = [
@@ -1223,6 +1229,8 @@ def _layout_rows(pdf) -> list[list[str]]:
     return out + [row for _, _, row in placed]
 
 
+# An opening balance carried over: a dated line, but not a transaction.
+_CARRIED = re.compile(r"^(?:b/f|brought\s+forward|opening\s+balance)\b", re.I)
 # How far (points) a wrapped description line can sit from its transaction's line.
 WRAP_REACH = 30
 
@@ -1231,42 +1239,68 @@ def _centred(
     placed: list[tuple[int, float, list[str]]], date_col: int, text_col: int
 ) -> list[list[str]]:
     """Some banks (ICICI) centre each row's cells vertically, so a description that wraps has
-    lines above its transaction's date as well as below. When the first transaction has a
-    description line above it, give each such line to the nearest transaction's description
-    instead of the one before; otherwise leave the rows as they are (parse_rows joins lines
-    below)."""
+    as many lines above its transaction's date line as below it. When the first transaction
+    has a description line above it, split the lines between each two transactions that way:
+    the first as many as the upper one had above go below it, the rest above the lower one.
+    (Going by distance alone fails: the lines are evenly spaced, so a line between two rows
+    sits about as close to either.) Otherwise leave the rows as they are (parse_rows joins
+    lines below)."""
 
     def dated(row: list[str]) -> bool:
         return _row_date(row[date_col]) is not None
 
+    def carried(row: list[str]) -> bool:
+        return any(_CARRIED.match(c) for c in row if c)
+
     def loose(row: list[str]) -> bool:
         return bool(row[text_col]) and not any(c for i, c in enumerate(row) if i != text_col and c)
 
-    first = next((k for k, (_, _, r) in enumerate(placed) if dated(r)), None)
+    # The opening balance line ("B/F") has no description to wrap, so look at the first real
+    # transaction after it.
+    first = next((k for k, (_, _, r) in enumerate(placed) if dated(r) and not carried(r)), None)
     if not first or not loose(placed[first - 1][2]):
         return [row for _, _, row in placed]
-    above: dict[int, list[str]] = {}
-    below: dict[int, list[str]] = {}
-    keep: list[int] = []
-    for k, (page, top, row) in enumerate(placed):
-        if not loose(row):
-            keep.append(k)
-            continue
-        near = [
-            (abs(t - top), j)
-            for j, (p, t, r) in enumerate(placed)
-            if p == page and dated(r) and abs(t - top) <= WRAP_REACH
-        ]
-        if not near:
-            keep.append(k)  # a page footer or a note: parse_rows decides
-            continue
-        _, j = min(near)
-        (above if top < placed[j][1] else below).setdefault(j, []).append(row[text_col])
+
+    def near(k: int, j: int) -> bool:
+        return placed[k][0] == placed[j][0] and abs(placed[k][1] - placed[j][1]) <= WRAP_REACH
+
+    above: dict[int, list[int]] = {}
+    below: dict[int, list[int]] = {}
+    prev: int | None = None  # the transaction the lines so far may belong under
+    gap: list[int] = []
+
+    def settle(nxt: int | None) -> None:
+        """Share the loose lines in `gap` between `prev` (below it) and `nxt` (above it)."""
+        share = len(above.get(prev, [])) if prev is not None else 0
+        for n, k in enumerate(gap):
+            if n < share and prev is not None and near(k, prev):
+                below.setdefault(prev, []).append(k)
+            elif nxt is not None and near(k, nxt):
+                above.setdefault(nxt, []).append(k)
+            elif prev is not None and near(k, prev):
+                below.setdefault(prev, []).append(k)
+        gap.clear()
+
+    for k, (_, _, row) in enumerate(placed):
+        if loose(row):
+            gap.append(k)
+        elif dated(row) and not carried(row):
+            settle(k)
+            prev = k
+        else:
+            settle(None)
+            prev = None
+    settle(None)
+    taken = {k for ks in (*above.values(), *below.values()) for k in ks}
     out = []
-    for k in keep:
-        row = list(placed[k][2])
+    for k, (_, _, row) in enumerate(placed):
+        if k in taken:
+            continue
+        row = list(row)
         if k in above or k in below:
-            row[text_col] = " ".join([*above.get(k, []), row[text_col], *below.get(k, [])]).strip()
+            text = [placed[i][2][text_col] for i in above.get(k, [])]
+            text += [row[text_col]] + [placed[i][2][text_col] for i in below.get(k, [])]
+            row[text_col] = " ".join(t for t in text if t)
         out.append(row)
     return out
 
@@ -1330,11 +1364,20 @@ _LABELLED = re.compile(
 )
 
 
+# The account a statement's transactions are for, named above the table ("Statement of
+# Transactions in Savings Account Number: 000101234567"); a summary above it lists others too.
+_STATEMENT_OF = re.compile(
+    r"statement\s+of\s+(?:transactions|account)\b.{0,40}?\b(?:account|a/c)\s*"
+    r"(?:no\.?|number)?\s*:?\s*[xX*]*(\d{4,20})\b",
+    re.I,
+)
+
+
 def statement_masks(text: str) -> list[str]:
     """The last four digits of every account number a statement's heading or file name
     quotes, best first: labelled ones ('Account No : 50100123456789', 'Card No. 4375 XXXX
     XXXX 1234'), then masked ones anywhere ('XX1234')."""
-    out: list[str] = []
+    out: list[str] = [m.group(1)[-4:] for m in _STATEMENT_OF.finditer(text)]
     for m in _LABELLED.finditer(text):
         digits = re.sub(r"\D", "", m.group(1))
         # A label followed by a date or a short code isn't an account number.
@@ -1350,18 +1393,44 @@ def statement_mask(text: str) -> str | None:
     return found[0] if found else None
 
 
+# ICICI cuts the payee in a UPI line to ten characters ("UPI/ANITA MENO/...") and puts the
+# whole name last ("/ANITA MENON"); "ALIAS ..." after it repeats the name.
+_SHORT_NAME = 10
+# A company's bulk credit names the payer last ("CMS/ REGULAR SALARY NOV26/ACME TECHNOL").
+_NAMED_LAST = re.compile(r"/([A-Za-z][A-Za-z.&' ]{1,60}?)\s*$")
+
+
+def _whole_name(short: str, last: str) -> str:
+    """The whole payee name in an ICICI line's last part, which can run straight on from a
+    reference ("...a1b2c3ANITA MENON"); `short` when it isn't there."""
+    at = last.lower().find(short.lower())
+    if at < 0:
+        return short
+    whole = re.split(r"\s+alias\b", last[at:], maxsplit=1, flags=re.I)[0].strip()
+    return whole if len(whole) <= 60 and not re.search(r"\d", whole) else short
+
+
 def statement_merchant(narration: str) -> str:
     """The payee inside a statement narration: 'UPI-SWIGGY-swiggy@icici-ICIC0001-4321...'
-    -> 'Swiggy'; 'POS 1234XXXX AMAZON PAY' -> 'Amazon'."""
+    -> 'Swiggy'; 'POS 1234XXXX AMAZON PAY' -> 'Amazon'; 'CMS/ SALARY NOV/ACME' -> 'Acme'."""
     text = re.sub(r"^(?:to|by)\s+transfer-", "", narration.strip(), flags=re.I)
-    m = re.match(r"^(?:upi|imps|neft|rtgs|ach|nach)(?:\s*cr|\s*dr)?[-/:]", text, re.I)
+    if re.match(r"^(?:nfs|atm)/?\s*cash\s*wdl|^atm\s+(?:wdl|cash)", text, re.I):
+        return "ATM cash"
+    if re.match(r"^cms\s*/", text, re.I) and (m := _NAMED_LAST.search(text)):
+        # A company's bulk credit (salary): the payer comes last.
+        return clean_merchant(m.group(1))
+    m = re.match(r"^(?:upi|imps|neft|rtgs|ach|nach|vin)(?:\s*cr|\s*dr)?[-/:]", text, re.I)
     if m:
         # The first part that names someone: not a bank's IFSC, a reference or a direction.
         for part in re.split(r"[-/]", text[m.end() :]):
             part = part.strip()
             if len(part) >= 2 and not re.fullmatch(
-                r"[A-Za-z]{4}0[A-Za-z0-9]{6}|[\d ]+|p2[am]|[dc]r", part, re.I
+                r"[A-Za-z]{4}0[A-Za-z0-9]{6}|[\d ]+|p2[am]|[dc]r|upi(?:\s*transaction)?",
+                part,
+                re.I,
             ):
+                if len(part) == _SHORT_NAME:
+                    part = _whole_name(part, text.rsplit("/", 1)[-1])
                 return clean_merchant(part)
     m = re.match(r"^(?:pos|ecom|ecs)\s+(?:\d+x+\d*\s+)?(.+)$", text, re.I)
     if m:
