@@ -158,6 +158,8 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                    "cred club", "cred.club", "credclub", "payment received",
                    "thank you for your payment",
                    "self transfer", "own account", "sweep")),
+    # Pay-later apps: repaying what they lent, like a loan.
+    ("Loans and EMIs", ("lazypay", "simpl pay", "getsimpl", "slice pay", "zestmoney")),
     ("Subscriptions", ("netflix", "spotify", "prime video", "hotstar", "youtube premium",
                        "apple.com/bill", "apple media", "apple services", "google play",
                        "googleplay", "youtube", "icloud", "openai", "chatgpt", "anthropic",
@@ -178,9 +180,12 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                   "reliance digital", "decathlon", "ikea", "tata cliq", "snapdeal", "lenskart",
                   "bambu", "robu", "thingiverse", "sony", "apple india", "vijay sales")),
     ("Bills and utilities", ("electricity", "bescom", "msedcl", "tata power", "adani elec",
+                             "kseb", "kerala state elec", "tneb", "tangedco", "bses", "cesc",
+                             "torrent power", "uppcl", "tsspdcl", "apspdcl", "wbsedcl",
                              "airtel", "jio", "vodafone", "vi prepaid", "bsnl", "act fibernet",
                              "broadband", "gas", "water bill", "dth", "tatasky", "tata play",
-                             "postpaid", "recharge", "bbps", "bill pay", "billdesk")),
+                             "postpaid", "recharge", "bbps", "bill pay", "billdesk",
+                             "google pay bill", "gpayrecharge")),
     ("Rent and housing", ("rent", "nobroker", "housing.com", "maintenance", "society",
                           "nestaway")),
     ("Entertainment", ("bookmyshow", "pvr", "inox", "district", "steam", "playstation",
@@ -189,7 +194,7 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                 "hospital", "clinic", "diagnostic", "lab", "cult.fit", "cultfit", "gym",
                 "healthify")),
     ("Education", ("coursera", "udemy", "edx", "school", "college", "university", "tuition",
-                   "kindle", "books")),
+                   "kindle", "books", "gregmat", "greg mat", "magoosh", "ets gre", "toefl")),
     ("Investments", ("zerodha", "groww", "kuvera", "coin by", "upstox", "mutual fund",
                      "recurring deposit", "rd instal", "rd install", "fixed deposit",
                      "sip", "nps", "ppf", "camsonline", "kfintech", "indmoney", "smallcase",
@@ -300,7 +305,9 @@ _HANDLE_NAMES = {
     "bookmyshow": "BookMyShow",
     "zerodha": "Zerodha", "groww": "Groww", "phonepe": "PhonePe", "paytm": "Paytm",
     "openai": "OpenAI", "anthropic": "Anthropic", "github": "GitHub", "youtube": "YouTube",
-    "nobroker": "NoBroker", "makemytrip": "MakeMyTrip", "dmart": "DMart", "google": "Google",
+    "nobroker": "NoBroker", "makemytrip": "MakeMyTrip", "dmart": "DMart",
+    # Google Pay's bill and recharge handle (electricity, mobile): a bill, not Google itself.
+    "gpayrecharge": "Google Pay bills", "google": "Google",
 }  # fmt: skip
 
 
@@ -1416,6 +1423,9 @@ def statement_merchant(narration: str) -> str:
     text = re.sub(r"^(?:to|by)\s+transfer-", "", narration.strip(), flags=re.I)
     if re.match(r"^(?:nfs|atm)/?\s*cash\s*wdl|^atm\s+(?:wdl|cash)", text, re.I):
         return "ATM cash"
+    if re.search(r"gpayrecharge", text, re.I):
+        # Paid through Google Pay's bills (electricity, recharges); the line names only Google.
+        return "Google Pay bills"
     if re.match(r"^cms\s*/", text, re.I) and (m := _NAMED_LAST.search(text)):
         # A company's bulk credit (salary): the payer comes last.
         return clean_merchant(m.group(1))
@@ -1663,7 +1673,7 @@ def summarise(txns: list[Txn]) -> dict:
 class Subscription:
     merchant: str
     category: str
-    cadence: str  # "monthly" or "yearly"
+    cadence: str  # "monthly", "bimonthly" or "yearly"
     typical_paise: int
     last_on: date
     next_on: date
@@ -1704,7 +1714,7 @@ MANAGE_URLS = {
 }
 # Repeating payments that are bills rather than subscriptions to review.
 BILL_CATEGORIES = ("Rent and housing", "Bills and utilities", "Investments")
-CADENCE_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
+CADENCE_MONTHS = {"monthly": 1, "bimonthly": 2, "quarterly": 3, "yearly": 12}
 
 
 def manage_url(merchant: str) -> str | None:
@@ -1759,8 +1769,12 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
     found: list[Subscription] = []
     for merchant, items in by.items():
         items.sort(key=lambda t: t.occurred_on)
+        # A utility bill changes with use (electricity in summer), so its amounts needn't agree;
+        # many electricity boards bill every two months.
+        metered = items[-1].category == "Bills and utilities"
         for cadence, lo, hi, need, step in (
             ("monthly", 25, 35, 3, 30),
+            ("bimonthly", 52, 72, 3, 61),
             ("yearly", 350, 380, 2, 365),
         ):
             # The longest recent run of similar amounts at this spacing.
@@ -1777,15 +1791,16 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
             # The earlier payments must agree; the latest may be a new price (up to double).
             older = run[1:]
             usual = int(statistics.median(t.amount_paise for t in older))
-            if any(abs(t.amount_paise - usual) > usual * 0.15 for t in older):
+            spread = 0.6 if metered else 0.15
+            if any(abs(t.amount_paise - usual) > usual * spread for t in older):
                 continue
             latest = run[0].amount_paise
-            if not usual / 2 <= latest <= usual * 2:
+            if not usual / 2 <= latest <= usual * 2 and not metered:
                 continue
-            changed = abs(latest - usual) > usual * 0.15
+            changed = abs(latest - usual) > usual * 0.15 and not metered
             typical = latest if changed else int(statistics.median(t.amount_paise for t in run))
             last = run[0].occurred_on
-            nxt = add_months(last, 1 if cadence == "monthly" else 12)
+            nxt = add_months(last, CADENCE_MONTHS[cadence])
             if (today - last).days > step * 2:
                 continue
             found.append(
@@ -1797,7 +1812,7 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
                     last_on=last,
                     next_on=nxt,
                     count=len(run),
-                    monthly_paise=typical if cadence == "monthly" else typical // 12,
+                    monthly_paise=per_month(typical, cadence),
                     last_paise=latest,
                     previous_paise=run[1].amount_paise,
                 )

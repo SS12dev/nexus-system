@@ -2,7 +2,7 @@ import { AlertTriangle, BellRing, Check, ExternalLink, HelpCircle, OctagonAlert,
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { api } from "../../lib/api";
-import { CADENCE_LABEL, dayLabel, isoToday, rupees, whenLabel, type Cadence, type Subscription, type SubscriptionSave } from "../../lib/money";
+import { CADENCE_LABEL, CADENCE_MONTHS, dayLabel, isoToday, rupees, whenLabel, type Cadence, type Subscription, type SubscriptionSave } from "../../lib/money";
 import { toast } from "../Feedback";
 import { FormDialog, moneyText, read, type Field } from "./FormDialog";
 import { Empty, Spinner, Stat, useAccounts, useMoney } from "./parts";
@@ -301,7 +301,7 @@ function Alert({ s, onOpen }: { s: Subscription; onOpen: () => void }) {
         ) : (
           <>
             <b className="text-slate-100">{s.merchant} went up</b> from {rupees(s.previous_paise ?? 0, { whole: true })} to {rupees(s.amount_paise, { whole: true })}
-            {`, ${rupees(Math.abs(s.price_change_paise) * (12 / ({ monthly: 1, quarterly: 3, yearly: 12 } as const)[s.cadence]), { whole: true })}\u00a0more a year.`}
+            {`, ${rupees(Math.abs(s.price_change_paise) * (12 / CADENCE_MONTHS[s.cadence]), { whole: true })}\u00a0more a year.`}
           </>
         )}
       </span>

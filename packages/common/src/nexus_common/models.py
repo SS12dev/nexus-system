@@ -2379,7 +2379,7 @@ class MoneySubscription(Base):
     manual: Mapped[bool] = mapped_column(Boolean, default=False)
     category: Mapped[str] = mapped_column(String(40), default="Subscriptions")
     amount_paise: Mapped[int | None] = mapped_column(BigInteger)
-    # monthly, quarterly or yearly.
+    # monthly, bimonthly (every two months: many electricity boards), quarterly or yearly.
     cadence: Mapped[str] = mapped_column(String(12), default="monthly")
     next_on: Mapped[date | None] = mapped_column(Date)
     # Days before a renewal to remind; 0 means no reminder.

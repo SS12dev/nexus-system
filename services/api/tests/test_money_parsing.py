@@ -375,6 +375,22 @@ def test_find_subscriptions():
     subs = money.find_subscriptions(txns, TODAY)
     by = {s.merchant: s for s in subs}
     assert set(by) == {"Netflix", "Amazon Prime"}
+    # An electricity board billing every two months, more in summer.
+    txns += [
+        _t("2026-05-12", 182000, "Kseb", "Bills and utilities"),
+        _t("2026-07-10", 141000, "Kseb", "Bills and utilities"),
+        _t("2026-09-11", 98000, "Kseb", "Bills and utilities"),
+        _t("2026-11-09", 104000, "Kseb", "Bills and utilities"),
+    ]
+    kseb = next(s for s in money.find_subscriptions(txns, TODAY) if s.merchant == "Kseb")
+    assert kseb.cadence == "bimonthly" and kseb.next_on == date(2027, 1, 9)
+    assert kseb.count == 4 and kseb.monthly_paise == kseb.typical_paise // 2
+    assert money.categorise("KSEB", "UPI/KSEB/kseb@sbi/Bill payment") == "Bills and utilities"
+    gpay = "UPI/Google Ind/gpayrecharge@o/UPI/AXIS BANK/500000000009/ICI0a0b/Google India Digital"
+    assert money.statement_merchant(gpay) == "Google Pay bills"
+    assert money.categorise("Google Pay bills", gpay) == "Bills and utilities"
+    assert money.categorise("Lazypay", "UPI/lazypay/lazypay.payu@a/Lazypay re") == "Loans and EMIs"
+    assert money.categorise("Greg Mat", "GREG MAT autopay") == "Education"
     assert by["Netflix"].cadence == "monthly" and by["Netflix"].next_on == date(2026, 12, 5)
     assert by["Netflix"].count == 4
     assert by["Amazon Prime"].cadence == "yearly"

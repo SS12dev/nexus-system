@@ -104,7 +104,7 @@ export interface MoneyAccount {
 }
 
 export type SubStatus = "new" | "active" | "cancelled" | "ignored";
-export type Cadence = "monthly" | "quarterly" | "yearly";
+export type Cadence = "monthly" | "bimonthly" | "quarterly" | "yearly";
 
 export interface Subscription {
   key: string;
@@ -732,7 +732,8 @@ export function whenLabel(day: string, now = new Date()): string {
   return n > 0 ? `in ${n} days` : `${-n} days ago`;
 }
 
-export const CADENCE_LABEL: Record<Cadence, string> = { monthly: "Monthly", quarterly: "Every 3 months", yearly: "Yearly" };
+export const CADENCE_LABEL: Record<Cadence, string> = { monthly: "Monthly", bimonthly: "Every 2 months", quarterly: "Every 3 months", yearly: "Yearly" };
+export const CADENCE_MONTHS: Record<Cadence, number> = { monthly: 1, bimonthly: 2, quarterly: 3, yearly: 12 };
 
 export const BILL_LABEL: Record<BillStatus, string> = {
   none: "No bill read yet",
