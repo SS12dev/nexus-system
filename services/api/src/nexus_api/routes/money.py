@@ -678,6 +678,7 @@ class AccountOut(BaseModel):
     label: str
     count: int
     last_on: date | None
+    hidden: bool = False
 
 
 @router.get("/tracking")
@@ -713,6 +714,7 @@ async def list_accounts(user: OwnerUser, db: DbDep) -> list[AccountOut]:
             label=store.account_label(a),
             count=stats.get(a.id, (0, None))[0],
             last_on=stats.get(a.id, (0, None))[1],
+            hidden=a.hidden,
         )
         for a in rows
     ]
@@ -977,7 +979,9 @@ async def import_file(
 # --- Statements found in the mail -------------------------------------------------------------
 
 
-def _mail_statement(r: MoneyMailStatement, labels: dict) -> dict:
+def _mail_statement(
+    r: MoneyMailStatement, labels: dict, gone: set | frozenset = frozenset()
+) -> dict:
     return {
         "id": str(r.id),
         "received_at": r.received_at,
@@ -985,7 +989,8 @@ def _mail_statement(r: MoneyMailStatement, labels: dict) -> dict:
         "mask": r.mask,
         "period_from": r.period_from,
         "period_to": r.period_to,
-        "status": r.status,
+        # "covered": a statement read in already spans its dates.
+        "status": "covered" if r.id in gone else r.status,
         "mailbox": labels.get(r.mailbox_id, "Your sign-in Gmail"),
     }
 
@@ -1003,8 +1008,9 @@ async def mail_statements(user: OwnerUser, db: DbDep) -> list[dict]:
     ).all()
     labels = {b.id: b.email_masked for b in await money_mail.mailboxes(db, user.id)}
     new = [r for r in rows if r.status == "new"]
+    gone = await money_tracking.covered(db, user.id, new)
     done = [r for r in rows if r.status == "imported"][:6]
-    return [_mail_statement(r, labels) for r in new + done]
+    return [_mail_statement(r, labels, gone) for r in new + done]
 
 
 class MailImportIn(BaseModel):

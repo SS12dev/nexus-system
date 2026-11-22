@@ -49,7 +49,8 @@ export function OrdersToConfirm() {
 }
 
 function OrderRow({ order, onAnswer }: { order: OrderToConfirm; onAnswer: (o: OrderToConfirm, body: OrderPaid, done: string) => Promise<void> }) {
-  const accounts = useAccounts();
+  // A hidden account (one you've stopped using) isn't offered for new payments.
+  const accounts = useAccounts().filter((a) => !a.hidden);
   const [busy, setBusy] = useState(false);
   const run = async (body: OrderPaid, done: string) => {
     setBusy(true);

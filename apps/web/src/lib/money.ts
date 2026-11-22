@@ -100,6 +100,7 @@ export interface MoneyAccount {
   label: string;
   count: number;
   last_on: string | null;
+  hidden?: boolean;
 }
 
 export type SubStatus = "new" | "active" | "cancelled" | "ignored";
@@ -977,6 +978,7 @@ export interface MailStatement {
   mask: string | null;
   period_from: string | null;
   period_to: string | null;
-  status: "new" | "imported";
+  /** covered: a statement already read in spans its dates, so there's nothing to add. */
+  status: "new" | "imported" | "covered";
   mailbox: string;
 }

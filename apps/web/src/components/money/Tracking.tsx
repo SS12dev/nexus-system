@@ -176,6 +176,7 @@ function MailStatements() {
   const { data } = useMoney(api.moneyMailStatements);
   if (!data || !data.length) return null;
   const fresh = data.filter((s) => s.status === "new");
+  const covered = data.filter((s) => s.status === "covered");
   return (
     <Card title="Statements in your mail">
       <p className="mb-3 text-xs leading-relaxed text-slate-400">
@@ -185,6 +186,15 @@ function MailStatements() {
       <ul className="space-y-3">
         {fresh.map((s) => (
           <MailStatementRow key={s.id} s={s} />
+        ))}
+        {covered.map((s) => (
+          <li key={s.id} className="flex items-center gap-2 text-sm text-slate-400">
+            <CheckCircle2 size={14} className="shrink-0 text-slate-500" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{describe(s)}</span>
+            <span className="text-xs" title="A statement you read in already spans these dates, so there's nothing to add">
+              already covered
+            </span>
+          </li>
         ))}
         {data
           .filter((s) => s.status === "imported")
