@@ -232,7 +232,7 @@ function OverviewView({ latest }: { latest: string }) {
           label="Came in"
           value={rupees(data.income_paise, { whole: true })}
           sub={data.net_paise >= 0 ? `${rupees(data.net_paise, { whole: true })} left over` : `${rupees(-data.net_paise, { whole: true })} more out than in`}
-          title="Left over: what came in, less spending and investing"
+          title="Left over: what came in, less spending and investing. A salary paid in the last days of a month counts towards the next month, the one it pays for."
         />
         <Stat
           label="Subscriptions and bills"
@@ -252,6 +252,11 @@ function OverviewView({ latest }: { latest: string }) {
           title={data.funds_cost_paise ? `${rupees(data.funds_cost_paise, { whole: true })} put in` : undefined}
         />
       </div>
+      {data.salary_from && (
+        <p className="-mt-2 mb-4 text-xs text-slate-500">
+          "Came in" includes your salary paid on {dayLabel(data.salary_from)}. A salary paid in the last days of a month counts towards the next month, the one it pays for.
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="grid min-w-0 content-start gap-4">
           <Card title={`Where it went in ${monthLabel(month)}`}>

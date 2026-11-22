@@ -32,6 +32,9 @@ LAST_WORKING_DAY = 0
 LOW, HIGH = 0.8, 1.25
 MONTHS_BACK = 24
 NOTE = "Expected from your salary details: no credit like it was read for this month."
+# A salary paid in the last days of a month is what the next month runs on (paid on 30 Oct,
+# spent in November), so month totals count it there. Applies when the pay day is this late.
+LATE_PAY_DAY = 20
 
 
 def pay_date(year: int, month: int, day: int) -> date:
@@ -50,6 +53,28 @@ def salary_on(rows: list[MoneySalary], day: date) -> MoneySalary | None:
 
 def current(rows: list[MoneySalary], today: date) -> MoneySalary | None:
     return salary_on(rows, today)
+
+
+def pays_next_month(
+    rows: list[MoneySalary], on: date, amount_paise: int, account_id: str | None
+) -> date | None:
+    """The first of next month when a credit on `on` is a salary paid late in its month (on or
+    a few days before a late pay day, about the expected amount, into the salary's account),
+    so it counts towards the month it pays for. None otherwise."""
+    pay = None
+    for r in sorted(rows, key=lambda r: r.from_on):
+        if r.from_on <= pay_date(on.year, on.month, r.pay_day):
+            pay = r
+    if pay is None or (pay.pay_day != LAST_WORKING_DAY and pay.pay_day < LATE_PAY_DAY):
+        return None
+    due = pay_date(on.year, on.month, pay.pay_day)
+    if on < due - timedelta(days=EARLY_DAYS):
+        return None
+    if not pay.monthly_paise * LOW <= amount_paise <= pay.monthly_paise * HIGH:
+        return None
+    if pay.account_id and account_id and str(pay.account_id) != str(account_id):
+        return None
+    return date(on.year + (on.month == 12), on.month % 12 + 1, 1)
 
 
 def _months(start: date, end: date):

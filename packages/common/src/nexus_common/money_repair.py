@@ -31,7 +31,8 @@ log = logging.getLogger(__name__)
 # 2: ICICI card alerts (thrown away for the OTP warning in their footer) read again.
 # 3: Google Pay bill payments (electricity, recharges) named and filed as bills; pay-later
 #    repayments and GRE prep given their categories.
-VERSION = 3
+# 4: a debit card's currency-conversion fee (DCC) filed as a fee, not found as a subscription.
+VERSION = 4
 # How far back alerts are read again when a new version's reading fixes call for it.
 REREAD_DAYS = 45
 
