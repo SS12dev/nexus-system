@@ -4,6 +4,7 @@ import type {
   AdviceAction,
   OrderPaid,
   OrderToConfirm,
+  Suggestions,
   AccountView,
   Asset,
   AssetIn,
@@ -389,6 +390,10 @@ export const api = {
   moneyDeleteStock: (id: string) => request<void>(`/api/money/stocks/${id}`, { method: "DELETE" }),
   moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
   moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string; moved?: number }>("/api/money/accounts", { method: "POST", body: json(body) }),
+  moneySuggestions: () => request<Suggestions>("/api/money/suggestions"),
+  moneyAnswerSuggestion: (key: string, choice: string) =>
+    request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice }) }),
+  moneyAcceptSuggestions: () => request<Suggestions & { accepted: number }>("/api/money/suggestions/accept-all", { method: "POST" }),
   moneyOrdersToConfirm: () => request<{ items: OrderToConfirm[] }>("/api/money/orders/to-confirm"),
   moneyOrderPaid: (id: string, body: OrderPaid) =>
     request<{ items: OrderToConfirm[] }>(`/api/money/orders/${id}/paid`, { method: "POST", body: json(body) }),

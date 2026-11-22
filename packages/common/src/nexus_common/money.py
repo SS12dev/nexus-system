@@ -300,7 +300,8 @@ def merchant_key(merchant: str) -> str:
 _HANDLE_NAMES = {
     "swiggy": "Swiggy", "zomato": "Zomato", "amazon": "Amazon", "flipkart": "Flipkart",
     "uber": "Uber", "olacabs": "Ola", "netflix": "Netflix", "spotify": "Spotify",
-    "bigbasket": "BigBasket", "blinkit": "Blinkit", "zepto": "Zepto", "irctc": "IRCTC",
+    "bigbasket": "BigBasket", "blinkit": "Blinkit", "blink commerce": "Blinkit",
+    "zepto": "Zepto", "irctc": "IRCTC",
     "airtel": "Airtel", "jiomart": "JioMart", "jio": "Jio", "myntra": "Myntra",
     "bookmyshow": "BookMyShow",
     "zerodha": "Zerodha", "groww": "Groww", "phonepe": "PhonePe", "paytm": "Paytm",
@@ -1763,7 +1764,8 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
             t.direction == "debit"
             and not t.excluded
             and t.merchant != "Unknown"
-            and t.category not in ("Transfers", "Income", "Loans and EMIs")
+            # Bank fees repeat (a forex markup on every foreign charge) but aren't renewals.
+            and t.category not in ("Transfers", "Income", "Loans and EMIs", "Fees and charges")
         ):
             by[t.merchant].append(t)
     found: list[Subscription] = []
@@ -1772,6 +1774,11 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
         # A utility bill changes with use (electricity in summer), so its amounts needn't agree;
         # many electricity boards bill every two months.
         metered = items[-1].category == "Bills and utilities"
+        if metered:
+            # The same biller also takes small top-ups (a ₹49 recharge beside the power bill):
+            # only the bills themselves make the run.
+            big = max(t.amount_paise for t in items)
+            items = [t for t in items if t.amount_paise >= big // 4]
         for cadence, lo, hi, need, step in (
             ("monthly", 25, 35, 3, 30),
             ("bimonthly", 52, 72, 3, 61),
@@ -1788,6 +1795,10 @@ def find_subscriptions(txns: list[Txn], today: date) -> list[Subscription]:
                 run.append(t)
             if len(run) < need:
                 continue
+            # A shop used far more often than the run (Zepto most weeks) isn't a subscription,
+            # however regular some of its orders look.
+            if sum(1 for t in items if t.occurred_on >= run[-1].occurred_on) > 2 * len(run) + 1:
+                break
             # The earlier payments must agree; the latest may be a new price (up to double).
             older = run[1:]
             usual = int(statistics.median(t.amount_paise for t in older))

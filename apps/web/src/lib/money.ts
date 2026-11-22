@@ -678,6 +678,27 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
   salary: "Expected from your salary details (Plan): no credit like it was read for this month. It goes by itself once the real one is read.",
 };
 
+/** One of Money's one-tap questions, with its best guess (a choice id) when it has one. */
+export interface Suggestion {
+  key: string;
+  kind: "order" | "subscription" | "rent" | "category" | "emi" | "yearly";
+  merchant: string;
+  amount_paise: number;
+  on: string | null;
+  cadence?: Cadence;
+  count?: number;
+  plan?: string;
+  why: string;
+  choices: { id: string; label: string }[];
+  guess: string | null;
+}
+
+export interface Suggestions {
+  items: Suggestion[];
+  /** Orders matched to payments without asking, this time. */
+  matched: number;
+}
+
 /** An order from a shop's email that no bank or card payment explains yet. */
 export interface OrderToConfirm {
   id: string;

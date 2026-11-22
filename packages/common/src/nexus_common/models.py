@@ -2077,6 +2077,8 @@ class MoneySettings(Base):
     last_error: Mapped[str | None] = mapped_column(String(300))
     # The forecast's assumptions (money_plan.Assumptions as a dict); empty means defaults.
     plan: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # Money's one-tap questions already answered: question key -> the answer picked.
+    answered: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

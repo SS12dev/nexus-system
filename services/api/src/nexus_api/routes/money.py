@@ -38,6 +38,7 @@ from nexus_common import (
     money_links,
     money_mail,
     money_salary,
+    money_suggest,
     money_tracking,
 )
 from nexus_common import money_store as store
@@ -376,6 +377,47 @@ async def _own_txn(db, user_id: uuid.UUID, txn_id: uuid.UUID) -> MoneyTxn:
     if t is None or t.user_id != user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transaction not found.")
     return t
+
+
+@router.get("/suggestions")
+async def suggestions(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+    """Money's one-tap questions, each with its best guess. Orders a statement or later alert
+    now explains are matched first, without asking."""
+    out = await money_suggest.suggestions(db, user.id, local_today(user), user.name)
+    if out["matched"]:
+        await db.commit()
+        await store.changed(redis, user.id)
+    return out
+
+
+class SuggestionIn(BaseModel):
+    key: str = Field(max_length=200)
+    choice: str = Field(max_length=80)
+
+
+@router.post("/suggestions/answer")
+async def answer_suggestion(
+    body: SuggestionIn, user: OwnerUser, db: DbDep, redis: RedisDep
+) -> dict:
+    today = local_today(user)
+    try:
+        done = await money_suggest.answer(db, user.id, body.key, body.choice, today, user.name)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    await db.commit()
+    await store.changed(redis, user.id)
+    return {"done": done, **await money_suggest.suggestions(db, user.id, today, user.name)}
+
+
+@router.post("/suggestions/accept-all")
+async def accept_suggestions(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+    """Take Money's guess for every question that has one."""
+    today = local_today(user)
+    n = await money_suggest.accept_all(db, user.id, today, user.name)
+    await db.commit()
+    await store.changed(redis, user.id)
+    log.info("money.suggestions_accepted", extra={"user_id": str(user.id), "count": n})
+    return {"accepted": n, **await money_suggest.suggestions(db, user.id, today, user.name)}
 
 
 @router.get("/orders/to-confirm")
