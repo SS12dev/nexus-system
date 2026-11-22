@@ -57,7 +57,7 @@ from nexus_common.organiser import local_today
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/money", tags=["money"])
 
-MAX_FILE_MB = 10
+MAX_FILE_MB = 25  # a year-long statement with logos on every page
 IMPORTS_PER_HOUR = 30
 SYNCS_PER_HOUR = 12
 MONTH = r"^\d{4}-(0[1-9]|1[0-2])$"
