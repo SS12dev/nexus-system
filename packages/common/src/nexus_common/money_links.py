@@ -107,7 +107,12 @@ async def link(
         (
             await db.scalars(
                 select(MoneyTxn)
-                .where(MoneyTxn.user_id == user_id, MoneyTxn.occurred_on >= lo)
+                .where(
+                    MoneyTxn.user_id == user_id,
+                    MoneyTxn.occurred_on >= lo,
+                    # An expected salary row isn't money that moved; it never pairs.
+                    MoneyTxn.source != "salary",
+                )
                 .order_by(MoneyTxn.occurred_on, MoneyTxn.created_at)
             )
         ).all()

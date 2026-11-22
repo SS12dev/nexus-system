@@ -8,6 +8,7 @@ import { Guide, GuideHeading } from "../Guide";
 import { ForecastChart, SERIES } from "./Charts";
 import { FormDialog, moneyText, percentText, read, type Field } from "./FormDialog";
 import { Card, Spinner, Stat, useMoney } from "./parts";
+import { SalaryCard } from "./Salary";
 
 const HORIZONS = [
   { months: 12, label: "1 year" },
@@ -53,7 +54,7 @@ export function PlanView() {
         </div>
         <div>
           <GuideHeading>Each month after</GuideHeading>
-          Income and spending start from your last three full months (or your own figures) and grow with the raise and
+          Income and spending start from your last three full months (income from today's salary when you've added it, or your own figures) and grow with the raise and
           inflation you set. EMIs drop off as loans end. Deposits, PPF and EPF follow their own rates; funds grow at the
           expected return.
         </div>
@@ -75,13 +76,13 @@ export function PlanView() {
         <Stat label="Investments and savings" value={rupees(s.funds_paise + s.savings_paise, { whole: true })} sub={`${compact(s.funds_paise)} funds and shares · ${compact(s.savings_paise)} savings`} />
         <Stat label="Loans" value={rupees(-s.debt_paise, { whole: true })} sub="principal still owed" />
       </div>
-      {!i.months_of_history && data.saved_assumptions.income_paise == null && (
+      {!i.months_of_history && data.saved_assumptions.income_paise == null && !data.salary_paise && (
         <div className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-sm text-slate-300">
           <Info size={15} className="mt-0.5 shrink-0 text-amber-300" />
           <span className="min-w-0 flex-1">
             Money hasn't seen a full month of your income and spending yet, so this forecast only grows what you already
             have, with nothing coming in. It fills in on its own as alert emails and statements are read; to forecast
-            now, type your monthly take-home pay and usual spending.
+            now, add your salary below or type your monthly take-home pay and usual spending.
           </span>
           <button onClick={() => setDialog("assumptions")} className="rounded-md border border-edge px-2.5 py-1 text-xs text-slate-200 hover:bg-edge/60">
             Type them now
@@ -209,9 +210,15 @@ export function PlanView() {
             </dl>
             <p className="mt-2 text-xs text-slate-500">
               {i.months_of_history ? `From your last ${Math.min(i.months_of_history, 3)} full months` : "No full month of transactions yet"}
-              {data.saved_assumptions.income_paise != null || data.saved_assumptions.spend_paise != null ? ", with your own figures where set" : ""}.
+              {data.saved_assumptions.income_paise != null || data.saved_assumptions.spend_paise != null
+                ? ", with your own figures where set"
+                : data.salary_paise
+                  ? ", with income from today's salary"
+                  : ""}
+              .
             </p>
           </Card>
+          <SalaryCard />
           {data.insights.length > 0 && (
             <Card title="Worth knowing">
               <ul className="space-y-3">

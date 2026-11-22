@@ -681,3 +681,35 @@ async def test_reading_keeps_what_it_read_when_google_slows_it(
     # One read at a time: a second one while the first runs is skipped.
     await deps.redis.set(money.READING_KEY.format(user), "1")
     assert await money.sync_user(deps, user) is None
+
+
+async def test_the_one_off_repair_runs_once_and_salary_fills_hourly(
+    deps, user, sessionmaker, redis
+):
+    from nexus_common import money_repair
+    from nexus_common.models import MoneySalary
+
+    old = (
+        "UPI txn. Rs.498.97 is debited from your account ending 1298 towards VPA ****@kotakpay "
+        "(ZEPTO MARKETPLACE PRIVATE LIMITED) on 25-10-26. UPI transaction reference no.: "
+        "512345678901. We're here to support you in every step of the way. Warm regards"
+    )
+    async with sessionmaker() as db:
+        db.add(MoneySettings(user_id=user))
+        db.add(MoneyTxn(
+            user_id=user, occurred_on=date(2026, 10, 25), amount_paise=498_97, direction="debit",
+            merchant="Support You In Every Step", category="Other",
+            narration_enc=m.seal(deps.settings, old),
+            channel="upi", source="alert", source_ref="m1", ref="512345678901", dedupe_key="k1",
+            created_at=utcnow()))  # fmt: skip
+        db.add(MoneySalary(user_id=user, monthly_paise=84_000_00, pay_day=1,
+                           from_on=date.today().replace(day=1) - timedelta(days=40)))  # fmt: skip
+        await db.commit()
+    assert await money.repair_all(deps) == 1
+    async with sessionmaker() as db:
+        rows = (await db.scalars(select(MoneyTxn).where(MoneyTxn.user_id == user))).all()
+    assert {r.merchant for r in rows if r.source == "alert"} == {"Zepto"}
+    assert [r.amount_paise for r in rows if r.source == "salary"] == [84_000_00, 84_000_00]
+    assert await redis.exists(f"money:repaired:{money_repair.VERSION}:{user}")
+    # Once per version: the next hour only keeps the salary rows current.
+    assert await money.repair_all(deps) == 0

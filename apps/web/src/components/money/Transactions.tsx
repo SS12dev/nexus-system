@@ -36,7 +36,7 @@ export function TransactionsView({ latest }: { latest: string }) {
   const [page, setPage] = useState<TxnPage | null>(null);
   const [more, setMore] = useState<MoneyTxn[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<"" | "debit" | "credit">("");
   const accounts = useAccounts();
   const categories = useMoneySettings().data?.categories ?? [];
   const names = useMemo(() => new Map(accounts.map((a) => [a.id, a.label])), [accounts]);
@@ -94,13 +94,23 @@ export function TransactionsView({ latest }: { latest: string }) {
         )}
         <ScanLinks />
         <button
-          onClick={() => setAdding((a) => !a)}
+          onClick={() => setAdding((a) => (a === "debit" ? "" : "debit"))}
+          aria-pressed={adding === "debit"}
           className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge"
+          title="A cash spend or anything no email or statement will show"
         >
-          <Plus size={14} /> Add cash spend
+          <Plus size={14} /> Spend
+        </button>
+        <button
+          onClick={() => setAdding((a) => (a === "credit" ? "" : "credit"))}
+          aria-pressed={adding === "credit"}
+          className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-300 hover:bg-edge"
+          title="Money that came in and no email showed: a salary, a refund, rent, a gift"
+        >
+          <Plus size={14} /> Income
         </button>
       </div>
-      {adding && <AddTxn accounts={accounts} categories={categories} onDone={() => setAdding(false)} />}
+      {adding && <AddTxn key={adding} initial={adding} accounts={accounts} categories={categories} onDone={() => setAdding("")} />}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex min-w-48 flex-1 items-center gap-2 rounded-lg border border-edge bg-panel px-3 py-1.5 focus-within:border-sky-500/60">
           <Search size={15} className="shrink-0 text-slate-400" />
@@ -286,7 +296,12 @@ function TxnRow({
                 <PiggyBank size={11} /> savings
               </span>
             )}
-            {txn.note && <span className="truncate italic">{txn.note}</span>}
+            {txn.source === "salary" && (
+              <span className="rounded border border-amber-400/40 px-1 text-[11px] text-amber-200" title={SOURCE_LABEL.salary}>
+                expected
+              </span>
+            )}
+            {txn.note && txn.source !== "salary" && <span className="truncate italic">{txn.note}</span>}
           </span>
         </span>
         <Amount txn={txn} />
@@ -512,13 +527,14 @@ function Links({ txn, busy, save }: { txn: MoneyTxn; busy: boolean; save: (body:
   );
 }
 
-function AddTxn({ accounts, categories, onDone }: { accounts: MoneyAccount[]; categories: string[]; onDone: () => void }) {
+function AddTxn({ initial, accounts, categories, onDone }: { initial: "debit" | "credit"; accounts: MoneyAccount[]; categories: string[]; onDone: () => void }) {
   const today = new Date().toLocaleDateString("en-CA");
   const [day, setDay] = useState(today);
   const [amount, setAmount] = useState("");
   const [merchant, setMerchant] = useState("");
   const [category, setCategory] = useState("");
-  const [direction, setDirection] = useState<"debit" | "credit">("debit");
+  const [direction, setDirection] = useState<"debit" | "credit">(initial);
+  const credit = direction === "credit";
   const [account, setAccount] = useState("");
   const [busy, setBusy] = useState(false);
   const valid = parseRupees(amount) !== null && merchant.trim() !== "";
@@ -548,7 +564,10 @@ function AddTxn({ accounts, categories, onDone }: { accounts: MoneyAccount[]; ca
       }}
     >
       <p className="text-xs text-slate-400 sm:col-span-4">
-        For cash and anything no email or statement will show. Leave the category empty to have it guessed.
+        {credit
+          ? "Money in that no email or statement showed. For a salary, add it once under Plan › Salary instead: each month then fills itself in until the real credit is read."
+          : "For cash and anything no email or statement will show."}{" "}
+        Leave the category empty to have it guessed.
       </p>
       <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} aria-label="Date" className="rounded-md border border-edge bg-ink px-2 py-1 text-base [color-scheme:dark] sm:text-sm" />
       <input
@@ -563,8 +582,8 @@ function AddTxn({ accounts, categories, onDone }: { accounts: MoneyAccount[]; ca
         value={merchant}
         onChange={(e) => setMerchant(e.target.value)}
         maxLength={120}
-        placeholder="Where or who (e.g. Chai stall)"
-        aria-label="Where or who"
+        placeholder={credit ? "From who (e.g. Rent from tenant)" : "Where or who (e.g. Chai stall)"}
+        aria-label={credit ? "From who" : "Where or who"}
         className="rounded-md border border-edge bg-ink px-2 py-1 text-base sm:text-sm"
       />
       <div className="inline-flex rounded-md border border-edge p-0.5" role="radiogroup" aria-label="Money in or out">
@@ -580,8 +599,8 @@ function AddTxn({ accounts, categories, onDone }: { accounts: MoneyAccount[]; ca
           <option key={c}>{c}</option>
         ))}
       </Select>
-      <Select value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Paid from">
-        <option value="">Cash</option>
+      <Select value={account} onChange={(e) => setAccount(e.target.value)} aria-label={credit ? "Paid into" : "Paid from"}>
+        <option value="">{credit ? "Cash in hand" : "Cash"}</option>
         {accounts.map((a) => (
           <option key={a.id} value={a.id}>
             {a.label}
