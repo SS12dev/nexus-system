@@ -6,6 +6,7 @@ nothing here carries amounts or payees, only counts and dates.
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -51,8 +52,10 @@ def assess(
     last_statement: date | None,
     credit_alerts: int,
     today: date,
+    first: date | None = None,
 ) -> tuple[str, str]:
-    """(status, what to do): ok, stale, gaps or empty."""
+    """(status, what to do): ok, stale, gaps or empty. `first` is the earliest transaction
+    read for the account: months before it aren't gaps (a card just opened has none)."""
     seen = [m for m in months if cells.get(m, {}).get("read")]
     if not seen and not last_alert and not last_statement:
         return "empty", (
@@ -60,7 +63,10 @@ def assess(
             "alert emails reach a Gmail connected under Import."
         )
     if last_alert and (today - last_alert).days <= QUIET_DAYS:
-        missing = [m for m in months if m >= _month(last_alert - timedelta(days=60))]
+        since = _month(last_alert - timedelta(days=60))
+        if first is not None:
+            since = max(since, _month(first))
+        missing = [m for m in months if m >= since]
         missing = [m for m in missing if not cells.get(m, {}).get("read")]
         if missing:
             return "gaps", f"Alerts are arriving, but nothing was read for {_names(missing)}."
@@ -92,6 +98,65 @@ def _names(months: list[str]) -> str:
     if len(names) > 3:
         return f"{names[0]} to {names[-1]}"
     return " and ".join(names)
+
+
+def _fits(w: MoneyMailStatement, a: MoneyAccount) -> bool:
+    """The emailed statement names this account: same bank, and its digits end the number."""
+    return bool(
+        w.institution == a.institution
+        and w.mask
+        and any((m or "").endswith(w.mask) for m in (a.mask, a.card_mask))
+    )
+
+
+# A statement's first and last rows can fall a few days inside its period (no spending on
+# the 1st), so a read statement "covers" an emailed one this close to its ends.
+COVER_SLACK_DAYS = 5
+
+
+async def covered(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    waiting: Sequence[MoneyMailStatement],
+    accounts: Sequence[MoneyAccount] | None = None,
+) -> set[uuid.UUID]:
+    """The emailed statements whose whole period a statement already read in covers (an
+    uploaded year that spans the month the bank emailed): nothing left to read from them."""
+    dated = [w for w in waiting if w.period_from and w.period_to and w.mask]
+    if not dated:
+        return set()
+    if accounts is None:
+        accounts = (
+            await db.scalars(select(MoneyAccount).where(MoneyAccount.user_id == user_id))
+        ).all()
+    spans = {
+        account_id: (lo, hi)
+        for account_id, lo, hi in (
+            await db.execute(
+                select(
+                    MoneyTxn.account_id,
+                    func.min(MoneyTxn.occurred_on),
+                    func.max(MoneyTxn.occurred_on),
+                )
+                .where(MoneyTxn.user_id == user_id, MoneyTxn.source == "statement")
+                .group_by(MoneyTxn.account_id)
+            )
+        ).all()
+    }
+    slack = timedelta(days=COVER_SLACK_DAYS)
+    out: set[uuid.UUID] = set()
+    for w in dated:
+        for a in accounts:
+            span = spans.get(a.id)
+            if (
+                span
+                and _fits(w, a)
+                and span[0] <= w.period_from + slack
+                and span[1] >= w.period_to - slack
+            ):
+                out.add(w.id)
+                break
+    return out
 
 
 async def view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
@@ -130,6 +195,15 @@ async def view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
             )
         ).all()
     }
+    firsts: dict[uuid.UUID | None, date] = dict(
+        (
+            await db.execute(
+                select(MoneyTxn.account_id, func.min(MoneyTxn.occurred_on))
+                .where(MoneyTxn.user_id == user_id, MoneyTxn.source != "salary")
+                .group_by(MoneyTxn.account_id)
+            )
+        ).all()
+    )
     credits = dict(
         (
             await db.execute(
@@ -150,16 +224,12 @@ async def view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
             )
         )
     ).all()
+    gone = await covered(db, user_id, waiting, accounts)
+    waiting = [w for w in waiting if w.id not in gone]
 
     def emailed(a: MoneyAccount) -> MoneyMailStatement | None:
         """The newest statement in the mail that looks like this account's."""
-        fits = [
-            w
-            for w in waiting
-            if w.institution == a.institution
-            and w.mask
-            and any((m or "").endswith(w.mask) for m in (a.mask, a.card_mask))
-        ]
+        fits = [w for w in waiting if _fits(w, a)]
         return max(fits, key=lambda w: w.received_at) if fits else None
 
     items = []
@@ -167,7 +237,14 @@ async def view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
         cells = grid.get(a.id, {})
         last_alert, last_statement = lasts.get((a.id, "alert")), lasts.get((a.id, "statement"))
         status, todo = assess(
-            a.kind, months, cells, last_alert, last_statement, credits.get(a.id, 0), today
+            a.kind,
+            months,
+            cells,
+            last_alert,
+            last_statement,
+            credits.get(a.id, 0),
+            today,
+            first=firsts.get(a.id),
         )
         if a.hidden and status == "empty":
             continue

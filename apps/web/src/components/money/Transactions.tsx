@@ -110,7 +110,7 @@ export function TransactionsView({ latest }: { latest: string }) {
           <Plus size={14} /> Income
         </button>
       </div>
-      {adding && <AddTxn key={adding} initial={adding} accounts={accounts} categories={categories} onDone={() => setAdding("")} />}
+      {adding && <AddTxn key={adding} initial={adding} accounts={accounts.filter((a) => !a.hidden)} categories={categories} onDone={() => setAdding("")} />}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex min-w-48 flex-1 items-center gap-2 rounded-lg border border-edge bg-panel px-3 py-1.5 focus-within:border-sky-500/60">
           <Search size={15} className="shrink-0 text-slate-400" />

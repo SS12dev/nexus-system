@@ -365,3 +365,34 @@ async def test_import_a_statement_from_the_mail(app, owner, sessionmaker, settin
     assert tracking["mail"][0]["label"] == "Your sign-in Gmail"
     nov = next(m for m in hdfc["months"] if m["month"] == "2026-11")
     assert nov.get("statements", 0) > 0
+
+    # The bank emails the same week again: what was read in already covers it.
+    async with sessionmaker() as db:
+        db.add(MoneyMailStatement(
+            user_id=uid, message_id="m-again", received_at=utcnow(), institution="HDFC Bank",
+            mask="1298", period_from=date(2026, 11, 1), period_to=date(2026, 11, 8),
+            created_at=utcnow()))  # fmt: skip
+        await db.commit()
+    listed = (await owner.get("/api/money/mail-statements")).json()
+    assert [s["status"] for s in listed] == ["covered", "imported"]
+    assert (await owner.get("/api/money/tracking")).json()["statements_waiting"] == 0
+
+
+def test_a_new_card_has_no_gaps_before_its_first_spend():
+    from nexus_common import money_tracking as mt
+
+    today = date(2026, 11, 22)
+    months = mt.months_back(today)
+    cells = {"2026-11": {"alerts": 3, "read": 3}}
+    first = date(2026, 11, 14)
+    # Without knowing when it began, Sep and Oct look missing; a card first used in November
+    # has nothing to miss.
+    assert mt.assess("card", months, cells, first, None, 0, today)[0] == "gaps"
+    assert mt.assess("card", months, cells, first, None, 0, today, first=first) == (
+        "ok",
+        "Alert emails are arriving.",
+    )
+    # An older account still shows a real gap.
+    cells["2026-09"] = {"alerts": 2, "read": 2}
+    status, todo = mt.assess("card", months, cells, first, None, 0, today, first=date(2026, 9, 3))
+    assert status == "gaps" and "Oct 2026" in todo
