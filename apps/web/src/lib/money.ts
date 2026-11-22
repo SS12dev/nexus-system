@@ -537,6 +537,8 @@ export interface MoneyOverview {
   month: string;
   spent_paise: number;
   income_paise: number;
+  /** A salary paid at the end of last month, counted here because it pays for this month. */
+  salary_from?: string | null;
   net_paise: number;
   categories: { category: string; spent_paise: number }[];
   merchants: { merchant: string; spent_paise: number; count: number }[];
@@ -688,15 +690,35 @@ export interface Suggestion {
   cadence?: Cadence;
   count?: number;
   plan?: string;
+  /** A payment to a person, not a shop. */
+  person?: boolean;
+  /** The newest payment's account, how it was paid and the bank's own words. */
+  account?: string | null;
+  how?: string | null;
+  note?: string | null;
+  /** The first payment the question covers, when there are several. */
+  first_on?: string | null;
+  /** The payments behind the question, newest first. */
+  details: SuggestionDetail[];
   why: string;
   choices: { id: string; label: string }[];
   guess: string | null;
+}
+
+export interface SuggestionDetail {
+  on: string;
+  amount_paise: number;
+  account: string | null;
+  how: string | null;
+  note: string;
 }
 
 export interface Suggestions {
   items: Suggestion[];
   /** Orders matched to payments without asking, this time. */
   matched: number;
+  /** Payments to your own name filed as transfers without asking, this time. */
+  filed?: number;
 }
 
 /** An order from a shop's email that no bank or card payment explains yet. */

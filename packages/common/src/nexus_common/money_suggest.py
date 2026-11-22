@@ -13,6 +13,7 @@ amounts.
 """
 
 import logging
+import re
 import statistics
 import uuid
 from collections import Counter, defaultdict
@@ -22,8 +23,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus_common import money
+from nexus_common import money_plan as plan
 from nexus_common import money_store as store
 from nexus_common.models import MoneyAccount, MoneyLoan, MoneySettings, MoneyTxn, utcnow
+from nexus_common.settings import Settings, get_settings
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +70,32 @@ CATEGORY_CHOICES = (
 )  # fmt: skip
 
 
+# Answers anyone can give: not now (asked again after a week).
+LATER = "later"
+LATER_DAYS = 7
+# How many of a question's payments it lists, newest first.
+DETAILS = 6
+HOW = {"upi": "UPI", "card": "Card", "autopay": "Autopay", "netbanking": "Net banking",
+       "cash": "Cash", "neft": "NEFT", "imps": "IMPS"}  # fmt: skip
+# Words that mark a shop or a firm, not a person, in a payee's name.
+_FIRM = re.compile(
+    r"\b(?:the|and|co|company|ltd|limited|pvt|private|llp|inc|india|store|stores|shop|mart"
+    r"|cafe|restaurant|kitchen|foods?|bakery|sweets|hotel|dhaba|medical|medicals|pharmacy"
+    r"|chemist|clinic|hospital|enterprises?|traders?|trading|services|solutions|agency"
+    r"|motors|centre|center|general|place|bazaar|super|market|fuels?|petroleum|digital"
+    r"|technologies|tech|labs?|club|bank|finance|online|retail|wholesale|collection)\b",
+    re.I,
+)
+# Person-to-person answers: what money to someone usually is.
+PERSON_CHOICES = (
+    ("Transfers", "Not spending (lent or my own)"),
+    ("Food and dining", "Food or a shared bill"),
+    ("Transport", "Cab, auto or driver"),
+    ("Shopping", "Bought something"),
+    ("Rent and housing", "Rent or house help"),
+    ("Other", "Other spending"),
+)
+
 EVERY = {
     "monthly": "every month",
     "bimonthly": "every two months",
@@ -77,6 +106,86 @@ EVERY = {
 
 def _choice(id_: str, label: str) -> dict:
     return {"id": id_, "label": label}
+
+
+def looks_like_person(merchant: str) -> bool:
+    """Two to four plain words with no shop or firm word: a person's name, as UPI shows it."""
+    words = merchant.split()
+    return (
+        2 <= len(words) <= 4
+        and all(w.isalpha() and len(w) > 1 for w in words)
+        and not _FIRM.search(merchant)
+    )
+
+
+def _wording(cfg: Settings, t: MoneyTxn) -> str:
+    """The bank's own line for a payment, short, with long numbers cut to their last digits."""
+    text = " ".join(money.unseal(cfg, t.narration_enc).split())
+    text = re.sub(r"\d{6,}", lambda m: "…" + m.group()[-4:], text)
+    return text[:90] + ("…" if len(text) > 90 else "")
+
+
+def _context(rows: list[MoneyTxn], labels: dict, cfg: Settings) -> dict:
+    """When, from where, how and the bank's words, for the newest payment, and the list."""
+    if not rows:
+        return {"details": []}
+    rows = sorted(rows, key=lambda t: t.occurred_on, reverse=True)
+    details = [
+        {
+            "on": t.occurred_on,
+            "amount_paise": t.amount_paise,
+            "account": labels.get(t.account_id),
+            "how": HOW.get(t.channel or ""),
+            "note": _wording(cfg, t),
+        }
+        for t in rows[:DETAILS]
+    ]
+    return {
+        **{k: details[0][k] for k in ("account", "how", "note")},
+        "first_on": rows[-1].occurred_on,
+        "details": details,
+    }
+
+
+def solve_rate_bp(principal_paise: int, emi_paise: int, months: int) -> int:
+    """The yearly rate (basis points) at which `months` instalments of `emi_paise` repay
+    `principal_paise`: what a bank's EMI really costs. 0 when it's no-cost (or less)."""
+    if emi_paise * months <= principal_paise:
+        return 0
+    lo, hi = 0, 60_00
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if plan.emi_for(principal_paise, mid, months) < emi_paise:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+async def file_own(db: AsyncSession, user_id: uuid.UUID, owner: str | None) -> int:
+    """Payments to the person's own name (to an account of theirs Money may not know) are
+    transfers, not spending: filed so without asking."""
+    if not owner:
+        return 0
+    rows = (
+        await db.scalars(
+            select(MoneyTxn).where(
+                MoneyTxn.user_id == user_id,
+                MoneyTxn.category == "Other",
+                MoneyTxn.category_by == "auto",
+                MoneyTxn.pair_id.is_(None),
+            )
+        )
+    ).all()
+    n = 0
+    for t in rows:
+        if money.is_self_payee(t.merchant, owner):
+            t.category = "Transfers"
+            n += 1
+    if n:
+        await db.flush()
+        log.info("money.own_transfers_filed", extra={"user_id": str(user_id), "count": n})
+    return n
 
 
 async def match_orders(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -152,7 +261,9 @@ async def _accounts(db: AsyncSession, user_id: uuid.UUID) -> list[MoneyAccount]:
     )
 
 
-async def _orders(db: AsyncSession, user_id: uuid.UUID, today: date, accounts) -> list[dict]:
+async def _orders(
+    db: AsyncSession, user_id: uuid.UUID, today: date, accounts, cfg: Settings
+) -> list[dict]:
     rows = (
         await db.scalars(
             select(MoneyTxn)
@@ -203,6 +314,8 @@ async def _orders(db: AsyncSession, user_id: uuid.UUID, today: date, accounts) -
                 "merchant": t.merchant,
                 "amount_paise": t.amount_paise,
                 "on": t.occurred_on,
+                "note": _wording(cfg, t) if t.narration_enc else None,
+                "details": [],
                 "why": why,
                 "choices": choices,
                 "guess": f"account:{guess}" if guess else None,
@@ -211,8 +324,14 @@ async def _orders(db: AsyncSession, user_id: uuid.UUID, today: date, accounts) -
     return items
 
 
-async def _subscriptions(db: AsyncSession, user_id: uuid.UUID, today: date) -> list[dict]:
+async def _subscriptions(
+    db: AsyncSession, user_id: uuid.UUID, today: date, txns: list[MoneyTxn], labels, cfg
+) -> list[dict]:
     view = await store.subscriptions_view(db, user_id, today)
+    by_key: dict[str, list[MoneyTxn]] = defaultdict(list)
+    for t in txns:
+        if t.direction == "debit":
+            by_key[money.merchant_key(t.merchant)].append(t)
     items = []
     for s in view["items"]:
         if s["status"] != "new":
@@ -220,6 +339,7 @@ async def _subscriptions(db: AsyncSession, user_id: uuid.UUID, today: date) -> l
         kept = s["category"] in KEPT_CATEGORIES
         items.append(
             {
+                **_context(by_key.get(money.merchant_key(s["merchant"]), []), labels, cfg),
                 "key": f"subscription:{money.merchant_key(s['merchant'])}",
                 "kind": "subscription",
                 "merchant": s["merchant"],
@@ -239,7 +359,7 @@ async def _subscriptions(db: AsyncSession, user_id: uuid.UUID, today: date) -> l
     return items
 
 
-def _rent(txns: list[MoneyTxn], rules: dict, owner: str | None) -> list[dict]:
+def _rent(txns: list[MoneyTxn], rules: dict, owner: str | None, labels, cfg) -> list[dict]:
     """Money to the same person most months, about the same each time: often rent, hidden as a
     transfer (transfers aren't spending)."""
     by: dict[str, list[MoneyTxn]] = defaultdict(list)
@@ -269,6 +389,7 @@ def _rent(txns: list[MoneyTxn], rules: dict, owner: str | None) -> list[dict]:
         last = max(rows, key=lambda t: t.occurred_on)
         items.append(
             {
+                **_context(rows, labels, cfg),
                 "key": f"rent:{money.merchant_key(merchant)}",
                 "kind": "rent",
                 "merchant": merchant,
@@ -287,7 +408,9 @@ def _rent(txns: list[MoneyTxn], rules: dict, owner: str | None) -> list[dict]:
     return items
 
 
-def _unfiled(txns: list[MoneyTxn], rules: dict, today: date) -> list[dict]:
+def _unfiled(
+    txns: list[MoneyTxn], rules: dict, today: date, owner: str | None, labels, cfg
+) -> list[dict]:
     """The shops in "Other" that add up most: one tap files every payment there, now and later."""
     spend: dict[str, list[MoneyTxn]] = defaultdict(list)
     for t in txns:
@@ -298,6 +421,7 @@ def _unfiled(txns: list[MoneyTxn], rules: dict, today: date) -> list[dict]:
             and t.occurred_on >= today - OTHER_WINDOW
             and t.merchant != "Unknown"
             and money.merchant_key(t.merchant) not in rules
+            and not money.is_self_payee(t.merchant, owner)
         ):
             spend[t.merchant].append(t)
     top = sorted(spend.items(), key=lambda kv: -sum(t.amount_paise for t in kv[1]))
@@ -306,24 +430,51 @@ def _unfiled(txns: list[MoneyTxn], rules: dict, today: date) -> list[dict]:
         total = sum(t.amount_paise for t in rows)
         if total < OTHER_FLOOR_PAISE or len(items) >= OTHER_ASKED:
             break
+        person = looks_like_person(merchant) and all(t.channel == "upi" for t in rows)
+        guess, why = (
+            None,
+            "Filed under Other. Your answer files every payment there, now and later.",
+        )
+        if person:
+            choices = [_choice(c, label) for c, label in PERSON_CHOICES]
+            why = (
+                "A payment to a person. Your answer files every payment to them the same way; "
+                "you can change one later."
+            )
+        else:
+            choices = [_choice(c, c) for c in CATEGORY_CHOICES] + [
+                _choice("Other", "Leave as Other")
+            ]
+            if money.merchant_key(merchant).startswith("google") and all(
+                t.channel == "upi" and t.amount_paise >= 1_000_00 for t in rows
+            ):
+                # Bills paid in Google Pay (electricity, phone) can reach the bank as "Google".
+                guess = "Bills and utilities"
+                why = (
+                    "Bills paid in Google Pay (electricity, phone) often reach the bank as "
+                    "just Google."
+                )
         items.append(
             {
+                **_context(rows, labels, cfg),
                 "key": f"category:{money.merchant_key(merchant)}",
                 "kind": "category",
+                "person": person,
                 "merchant": merchant,
                 "amount_paise": total,
                 "on": max(t.occurred_on for t in rows),
                 "count": len(rows),
-                "why": "Filed under Other. Your answer files every payment there, now and later.",
-                "choices": [_choice(c, c) for c in CATEGORY_CHOICES]
-                + [_choice("Other", "Leave as Other")],
-                "guess": None,
+                "why": why,
+                "choices": choices,
+                "guess": guess,
             }
         )
     return items
 
 
-async def _emis(db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn]) -> list[dict]:
+async def _emis(
+    db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn], labels, cfg
+) -> list[dict]:
     """Card purchases turned into EMIs whose term the bank's email didn't give."""
     loans = (await db.scalars(select(MoneyLoan).where(MoneyLoan.user_id == user_id))).all()
     items = []
@@ -343,14 +494,15 @@ async def _emis(db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn]) -> l
             continue
         items.append(
             {
+                **_context([t], labels, cfg),
                 "key": f"emi:{t.id}",
                 "kind": "emi",
                 "merchant": t.merchant,
                 "amount_paise": t.amount_paise,
                 "on": t.occurred_on,
                 "why": (
-                    "The bank's email didn't say how many months. "
-                    "Your answer adds the EMI under Loans."
+                    "The bank's email didn't say how many months. Add the monthly instalment "
+                    "if you know it (the bank's app shows it) and Money works out the interest."
                 ),
                 "choices": [_choice(str(m), f"{m} months") for m in EMI_MONTHS],
                 "guess": None,
@@ -360,7 +512,7 @@ async def _emis(db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn]) -> l
 
 
 async def _yearly(
-    db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn], today: date
+    db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn], today: date, labels, cfg
 ) -> list[dict]:
     """A recent single charge at a shop that sells yearly plans (PlayStation Plus): a year's
     subscription Money can't see repeat until next year."""
@@ -384,6 +536,7 @@ async def _yearly(
         plan = next(name for seller, name in PLAN_SELLERS.items() if key.startswith(seller))
         items.append(
             {
+                **_context([t], labels, cfg),
                 "key": f"yearly:{t.id}",
                 "kind": "yearly",
                 "merchant": t.merchant,
@@ -408,12 +561,21 @@ async def _yearly(
 async def suggestions(
     db: AsyncSession, user_id: uuid.UUID, today: date, owner: str | None = None
 ) -> dict:
-    """Everything Money wants a tap on, most useful first. Matches orders first (flushes)."""
+    """Everything Money wants a tap on, most useful first. Does the sure things first (orders
+    matched to payments, payments to the person's own name filed as transfers; flushes)."""
+    cfg = get_settings()
     matched = await match_orders(db, user_id)
+    filed = await file_own(db, user_id, owner)
     prefs = await db.get(MoneySettings, user_id)
     rules = (prefs.rules if prefs else None) or {}
     answered = (prefs.answered if prefs else None) or {}
     accounts = await _accounts(db, user_id)
+    labels = {
+        a.id: store.account_label(a)
+        for a in (
+            await db.scalars(select(MoneyAccount).where(MoneyAccount.user_id == user_id))
+        ).all()
+    }
     txns = list(
         (
             await db.scalars(
@@ -424,19 +586,34 @@ async def suggestions(
         ).all()
     )
     items = (
-        await _emis(db, user_id, txns)
-        + await _yearly(db, user_id, txns, today)
-        + _rent(txns, rules, owner)
-        + await _subscriptions(db, user_id, today)
-        + await _orders(db, user_id, today, accounts)
-        + _unfiled(txns, rules, today)
+        await _emis(db, user_id, txns, labels, cfg)
+        + await _yearly(db, user_id, txns, today, labels, cfg)
+        + _rent(txns, rules, owner, labels, cfg)
+        + await _subscriptions(db, user_id, today, txns, labels, cfg)
+        + await _orders(db, user_id, today, accounts, cfg)
+        + _unfiled(txns, rules, today, owner, labels, cfg)
     )
-    items = [i for i in items if i["key"] not in answered]
-    return {"items": items, "matched": matched}
+    items = [i for i in items if _open(answered.get(i["key"]), today)]
+    return {"items": items, "matched": matched, "filed": filed}
+
+
+def _open(answer: str | None, today: date) -> bool:
+    """Not answered, or put off until a day that has come."""
+    if answer is None:
+        return True
+    if answer.startswith(f"{LATER}:"):
+        return date.fromisoformat(answer.split(":", 1)[1]) <= today
+    return False
 
 
 async def answer(
-    db: AsyncSession, user_id: uuid.UUID, key: str, choice: str, today: date, owner: str | None
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    key: str,
+    choice: str,
+    today: date,
+    owner: str | None,
+    amount_paise: int | None = None,
 ) -> str:
     """Apply one answer the way the person would by hand, and remember it. Returns what was
     done, to show. Raises ValueError for a question or choice that no longer fits."""
@@ -444,10 +621,28 @@ async def answer(
     item = current.get(key)
     if item is None:
         raise ValueError("That's already been answered.")
-    return await _apply(db, user_id, item, choice, today)
+    if choice == LATER:
+        await _remember(db, user_id, key, f"{LATER}:{today + timedelta(days=LATER_DAYS)}")
+        log.info("money.suggestion_later", extra={"user_id": str(user_id), "kind": item["kind"]})
+        return f"Money will ask about {item['merchant']} again in a week"
+    return await _apply(db, user_id, item, choice, today, amount_paise)
 
 
-async def _apply(db: AsyncSession, user_id: uuid.UUID, item: dict, choice: str, today: date) -> str:
+async def _remember(db: AsyncSession, user_id: uuid.UUID, key: str, value: str) -> None:
+    prefs = await store.settings_for(db, user_id)
+    prefs.answered = {**(prefs.answered or {}), key: value}
+    prefs.updated_at = utcnow()
+    await db.flush()
+
+
+async def _apply(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    item: dict,
+    choice: str,
+    today: date,
+    amount_paise: int | None = None,
+) -> str:
     if choice not in {c["id"] for c in item["choices"]}:
         raise ValueError("Pick one of the answers offered.")
     key = item["key"]
@@ -483,6 +678,16 @@ async def _apply(db: AsyncSession, user_id: uuid.UUID, item: dict, choice: str, 
     elif kind == "emi":
         txn = await db.get(MoneyTxn, uuid.UUID(ref))
         months = int(choice)
+        principal = txn.amount_paise
+        if amount_paise is not None and not principal // (months * 2) <= amount_paise <= principal:
+            raise ValueError("That instalment doesn't fit the purchase. Check the amount.")
+        rate = solve_rate_bp(principal, amount_paise, months) if amount_paise else 0
+        emi = amount_paise or -(-principal // months)
+        note = (
+            "Added from Money's question; rate worked out from your monthly instalment."
+            if amount_paise
+            else "Added from Money's question. Taken as no-cost; edit the rate if it isn't."
+        )
         db.add(
             MoneyLoan(
                 user_id=user_id,
@@ -490,18 +695,20 @@ async def _apply(db: AsyncSession, user_id: uuid.UUID, item: dict, choice: str, 
                 name=f"EMI {merchant}"[:120],
                 account_id=txn.account_id,
                 lender=None,
-                principal_paise=txn.amount_paise,
-                rate_bp=0,
+                principal_paise=principal,
+                rate_bp=rate,
                 months=months,
-                emi_paise=-(-txn.amount_paise // months),
+                emi_paise=emi,
                 first_due_on=money.add_months(txn.occurred_on, 1),
                 status="active",
-                note="Added from Money's question. Taken as no-cost; edit the rate if it isn't.",
+                note=note,
                 created_at=utcnow(),
                 updated_at=utcnow(),
             )
         )
-        done = f"EMI added: {months} months"
+        done = f"EMI added: {months} months of {money.rupees(emi)}"
+        if amount_paise:
+            done += f", about {rate / 100:.1f}% a year" if rate else ", no interest"
     elif kind == "yearly" and choice in ("yearly", "monthly"):
         txn = await db.get(MoneyTxn, uuid.UUID(ref))
         step = 12 if choice == "yearly" else 1
@@ -519,10 +726,7 @@ async def _apply(db: AsyncSession, user_id: uuid.UUID, item: dict, choice: str, 
         done = f"{item['plan']} added; you'll be reminded before it renews"
     else:
         done = "Noted"
-    prefs = await store.settings_for(db, user_id)
-    prefs.answered = {**(prefs.answered or {}), key: choice}
-    prefs.updated_at = utcnow()
-    await db.flush()
+    await _remember(db, user_id, key, choice)
     log.info("money.suggestion_answered", extra={"user_id": str(user_id), "kind": kind})
     return done
 

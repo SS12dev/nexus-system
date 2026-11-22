@@ -1,7 +1,7 @@
-import { Check, Loader2, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
-import { CADENCE_LABEL, dayLabel, rupees, type Suggestion, type Suggestions } from "../../lib/money";
+import { CADENCE_LABEL, dayLabel, parseRupees, rupees, type Suggestion, type Suggestions } from "../../lib/money";
 import { toast } from "../Feedback";
 import { useMoney } from "./parts";
 
@@ -18,12 +18,110 @@ function question(s: Suggestion): string {
     case "rent":
       return `${s.merchant}, about ${amount} most months: is it rent?`;
     case "category":
+      if (s.person) return `What was the ${amount} to ${s.merchant} for?${s.count && s.count > 1 ? ` (${s.count} payments)` : ""}`;
       return `What is ${s.merchant}? ${amount} over ${s.count ?? "a few"} payment${s.count === 1 ? "" : "s"}`;
     case "emi":
       return `${s.merchant}, ${amount} on EMI: for how many months?`;
     case "yearly":
       return `${s.merchant}, ${amount}${s.on ? ` on ${dayLabel(s.on)}` : ""}: does it renew${s.plan ? ` (${s.plan})` : ""}?`;
   }
+}
+
+/** When, from where and how: "5 Nov · ICICI Salary ••1234 · UPI", or for repeats
+ * "Last 21 Nov, since 21 Jun · …". */
+function where(s: Suggestion): string {
+  const latest = s.details[0];
+  const when = latest
+    ? s.details.length > 1 && s.first_on && s.first_on !== latest.on
+      ? `Last ${dayLabel(latest.on)}, since ${dayLabel(s.first_on)}`
+      : dayLabel(latest.on)
+    : s.on
+      ? dayLabel(s.on)
+      : "";
+  return [when, s.account, s.how].filter(Boolean).join(" · ");
+}
+
+type Answer = (key: string, choice: string, amount?: number) => void;
+
+function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; answer: Answer }) {
+  const [open, setOpen] = useState(false);
+  const [instalment, setInstalment] = useState("");
+  const amount = instalment.trim() ? parseRupees(instalment) : undefined;
+  const badAmount = amount === null;
+  const context = where(s);
+  return (
+    <li className="min-w-0 rounded-lg border border-edge bg-panel px-3 py-2.5">
+      <p className="text-sm text-slate-100">{question(s)}</p>
+      {context && <p className="mt-0.5 text-xs text-slate-400">{context}</p>}
+      {s.note && (
+        <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500" title={s.note}>
+          {s.note}
+        </p>
+      )}
+      {s.why && <p className="mt-0.5 text-xs text-slate-500">{s.why}</p>}
+      {s.details.length > 1 && (
+        <>
+          <button onClick={() => setOpen(!open)} className="mt-1 flex items-center gap-1 text-xs text-sky-300 hover:text-sky-200" aria-expanded={open}>
+            <ChevronDown size={12} className={open ? "rotate-180" : ""} aria-hidden />
+            {open ? "Hide the payments" : `See the ${s.count && s.count > s.details.length ? `latest ${s.details.length}` : s.details.length} payments`}
+          </button>
+          {open && (
+            <ul className="mt-1 grid gap-0.5 text-xs">
+              {s.details.map((d, i) => (
+                <li key={i} className="flex min-w-0 gap-2 text-slate-400">
+                  <span className="w-14 shrink-0">{dayLabel(d.on)}</span>
+                  <span className="w-20 shrink-0 text-right tabular-nums text-slate-200">{rupees(d.amount_paise)}</span>
+                  <span className="min-w-0 flex-1 truncate" title={d.note}>
+                    {[d.account, d.how, d.note].filter(Boolean).join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {s.kind === "emi" && (
+        <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          Monthly instalment, if you know it
+          <input
+            inputMode="decimal"
+            value={instalment}
+            onChange={(e) => setInstalment(e.target.value)}
+            placeholder="e.g. 7450.50"
+            aria-invalid={badAmount}
+            className={`w-28 rounded-md border bg-ink px-2 py-1 text-sm text-slate-100 ${badAmount ? "border-rose-500" : "border-edge"}`}
+          />
+          {badAmount && <span className="text-rose-300">Type an amount like 7450.50</span>}
+        </label>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {s.choices.map((c) => {
+          const guess = c.id === s.guess;
+          return (
+            <button
+              key={c.id}
+              onClick={() => answer(s.key, c.id, amount ?? undefined)}
+              disabled={busy !== null || badAmount}
+              className={`flex items-center gap-1 rounded-full px-3 py-1 text-sm disabled:opacity-50 ${
+                guess ? "bg-sky-500 font-medium text-ink hover:bg-sky-400" : "border border-edge text-slate-200 hover:bg-edge"
+              }`}
+            >
+              {guess && (busy === s.key ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} aria-hidden />)}
+              {c.label}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => answer(s.key, "later")}
+          disabled={busy !== null}
+          title="Hides this question for a week"
+          className="ml-auto px-1 py-1 text-xs text-slate-500 hover:text-slate-300 disabled:opacity-50"
+        >
+          Not sure, ask later
+        </button>
+      </div>
+    </li>
+  );
 }
 
 /** Money's one-tap questions: what it worked out from your mail and statements, with its best
@@ -70,31 +168,12 @@ export function MoneySuggests() {
           </button>
         )}
       </div>
-      <p className="mt-1 mb-3 text-sm text-slate-400">A tap each. The highlighted answer is Money's guess. Anything it was sure of, it has already done.</p>
-      <ul className="grid gap-2">
+      <p className="mt-1 mb-3 text-sm text-slate-400">
+        A tap each. The highlighted answer is Money's guess. Anything it was sure of, it has already done. Not sure? "Ask later" hides a question for a week.
+      </p>
+      <ul className="grid grid-cols-1 gap-2">
         {shown.map((s) => (
-          <li key={s.key} className="rounded-lg border border-edge bg-panel px-3 py-2.5">
-            <p className="text-sm text-slate-100">{question(s)}</p>
-            {s.why && <p className="mt-0.5 text-xs text-slate-500">{s.why}</p>}
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {s.choices.map((c) => {
-                const guess = c.id === s.guess;
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => void take(() => api.moneyAnswerSuggestion(s.key, c.id), s.key)}
-                    disabled={busy !== null}
-                    className={`flex items-center gap-1 rounded-full px-3 py-1 text-sm disabled:opacity-50 ${
-                      guess ? "bg-sky-500 font-medium text-ink hover:bg-sky-400" : "border border-edge text-slate-200 hover:bg-edge"
-                    }`}
-                  >
-                    {guess && (busy === s.key ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} aria-hidden />)}
-                    {c.label}
-                  </button>
-                );
-              })}
-            </div>
-          </li>
+          <Question key={s.key} s={s} busy={busy} answer={(key, choice, amount) => void take(() => api.moneyAnswerSuggestion(key, choice, amount), key)} />
         ))}
       </ul>
       {list.length > SHOWN && (

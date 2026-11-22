@@ -391,8 +391,8 @@ export const api = {
   moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
   moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string; moved?: number }>("/api/money/accounts", { method: "POST", body: json(body) }),
   moneySuggestions: () => request<Suggestions>("/api/money/suggestions"),
-  moneyAnswerSuggestion: (key: string, choice: string) =>
-    request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice }) }),
+  moneyAnswerSuggestion: (key: string, choice: string, amount_paise?: number) =>
+    request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice, amount_paise }) }),
   moneyAcceptSuggestions: () => request<Suggestions & { accepted: number }>("/api/money/suggestions/accept-all", { method: "POST" }),
   moneyOrdersToConfirm: () => request<{ items: OrderToConfirm[] }>("/api/money/orders/to-confirm"),
   moneyOrderPaid: (id: string, body: OrderPaid) =>

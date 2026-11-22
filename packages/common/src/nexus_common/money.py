@@ -200,7 +200,9 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                      "sip", "nps", "ppf", "camsonline", "kfintech", "indmoney", "smallcase",
                      "icclzerodha", "bse limited", "nse clearing")),
     ("Fees and charges", ("charges", "fee", "penalty", "gst on", "annual fee", "late payment",
-                          "interest charged", "sms alert")),
+                          "interest charged", "sms alert",
+                          # Dynamic currency conversion: a debit card's fee after a foreign charge.
+                          "txn dcc", "dcc+st", "dcc markup", "cross currency markup")),
     ("Cash", ("atm", "cash withdrawal", "cwdr", "nwd")),
     ("Income", ("salary", "sal cr", "payroll", "interest credit", "int.pd", "dividend",
                 "refund", "cashback", "reversal")),
@@ -1587,6 +1589,8 @@ class Txn:
     account_id: str | None = None
     # How it was paid; "autopay" (an e-mandate or standing instruction) marks a repeating one.
     channel: str = "other"
+    # When a late-month salary is counted towards the next month, the day it really came.
+    paid_on: date | None = None
 
 
 def month_bounds(month: str) -> tuple[date, date]:

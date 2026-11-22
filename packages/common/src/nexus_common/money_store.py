@@ -789,7 +789,18 @@ async def set_rule(db: AsyncSession, user_id: uuid.UUID, merchant: str, category
     return len(rows)
 
 
-async def load(db: AsyncSession, user_id: uuid.UUID, start: date, end: date) -> list[money.Txn]:
+async def load(
+    db: AsyncSession, user_id: uuid.UUID, start: date, end: date, *, pay_months: bool = False
+) -> list[money.Txn]:
+    """Transactions from `start` up to `end`. With `pay_months`, a salary paid in the last days
+    of a month is dated the first of the next month (the month it pays for), for month totals;
+    its real date stays in `paid_on`."""
+    salaries = []
+    if pay_months:
+        salaries = list(
+            (await db.scalars(select(MoneySalary).where(MoneySalary.user_id == user_id))).all()
+        )
+    since = start - timedelta(days=money_salary.EARLY_DAYS + 3) if salaries else start
     rows = (
         await db.execute(
             select(
@@ -803,15 +814,23 @@ async def load(db: AsyncSession, user_id: uuid.UUID, start: date, end: date) -> 
                 MoneyTxn.channel,
             ).where(
                 MoneyTxn.user_id == user_id,
-                MoneyTxn.occurred_on >= start,
+                MoneyTxn.occurred_on >= since,
                 MoneyTxn.occurred_on < end,
             )
         )
     ).all()
-    return [
-        money.Txn(*r[:6], account_id=str(r[6]) if r[6] else None, channel=r[7] or "other")
-        for r in rows
-    ]
+    out = []
+    for r in rows:
+        t = money.Txn(*r[:6], account_id=str(r[6]) if r[6] else None, channel=r[7] or "other")
+        if salaries and money.income(t):
+            moved = money_salary.pays_next_month(
+                salaries, t.occurred_on, t.amount_paise, t.account_id
+            )
+            if moved:
+                t = dataclasses.replace(t, occurred_on=moved, paid_on=t.occurred_on)
+        if start <= t.occurred_on < end:
+            out.append(t)
+    return out
 
 
 def shift_month(month: str, by: int) -> str:
@@ -825,10 +844,16 @@ async def overview(db: AsyncSession, user_id: uuid.UUID, month: str, today: date
     start, end = money.month_bounds(month)
     first = money.month_bounds(shift_month(month, -(TREND_MONTHS - 1)))[0]
     txns = await load(
-        db, user_id, min(first, today - SUBSCRIPTION_LOOKBACK), max(end, today + timedelta(days=1))
+        db,
+        user_id,
+        min(first, today - SUBSCRIPTION_LOOKBACK),
+        max(end, today + timedelta(days=1)),
+        pay_months=True,
     )
     this = [t for t in txns if start <= t.occurred_on < end]
     summary = money.summarise(this)
+    # A salary from the end of last month counted here, to say so beside "Came in".
+    salary_from = max((t.paid_on for t in this if t.paid_on), default=None)
     trend = []
     for i in range(TREND_MONTHS - 1, -1, -1):
         m = shift_month(month, -i)
@@ -854,6 +879,7 @@ async def overview(db: AsyncSession, user_id: uuid.UUID, month: str, today: date
     return {
         "month": month,
         **summary,
+        "salary_from": salary_from,
         "trend": trend,
         "budgets": [
             {
@@ -1761,7 +1787,7 @@ async def history(db: AsyncSession, user_id: uuid.UUID, today: date, months: int
     before the first transaction so an empty start doesn't drag the averages down."""
     this_month = f"{today.year:04d}-{today.month:02d}"
     first = money.month_bounds(shift_month(this_month, -months))[0]
-    txns = await load(db, user_id, first, money.month_bounds(this_month)[0])
+    txns = await load(db, user_id, first, money.month_bounds(this_month)[0], pay_months=True)
     h = plan.History()
     if not txns:
         return h
@@ -1912,7 +1938,9 @@ async def health_view(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict
         and s["next_on"]
         and today < s["next_on"] < month_end
     ]
-    this_month = money.summarise(await load(db, user_id, month_start, today + timedelta(days=1)))
+    this_month = money.summarise(
+        await load(db, user_id, month_start, today + timedelta(days=1), pay_months=True)
+    )
     snap = plan.Snapshot(
         income_paise=income,
         spend_paise=spend,

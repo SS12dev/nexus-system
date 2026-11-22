@@ -384,7 +384,7 @@ async def suggestions(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
     """Money's one-tap questions, each with its best guess. Orders a statement or later alert
     now explains are matched first, without asking."""
     out = await money_suggest.suggestions(db, user.id, local_today(user), user.name)
-    if out["matched"]:
+    if out["matched"] or out["filed"]:
         await db.commit()
         await store.changed(redis, user.id)
     return out
@@ -393,6 +393,8 @@ async def suggestions(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
 class SuggestionIn(BaseModel):
     key: str = Field(max_length=200)
     choice: str = Field(max_length=80)
+    # An EMI's monthly instalment, when known: Money works out the interest from it.
+    amount_paise: int | None = Field(default=None, gt=0, le=10**12)
 
 
 @router.post("/suggestions/answer")
@@ -401,7 +403,9 @@ async def answer_suggestion(
 ) -> dict:
     today = local_today(user)
     try:
-        done = await money_suggest.answer(db, user.id, body.key, body.choice, today, user.name)
+        done = await money_suggest.answer(
+            db, user.id, body.key, body.choice, today, user.name, body.amount_paise
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     await db.commit()
