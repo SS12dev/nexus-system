@@ -242,6 +242,83 @@ async def test_shares_are_priced_at_nse_close_and_the_list_cached(
     assert money_stocks.load(await deps.redis.get(money_stocks.CACHE_KEY)) == quotes
 
 
+async def test_share_history_is_filled_from_nse_and_recorded_nightly(
+    deps, user, sessionmaker, monkeypatch
+):
+    import io
+    import zipfile
+
+    from nexus_common import money_history
+    from nexus_common.models import MoneySnapshot, MoneyStock
+
+    monkeypatch.setattr(money, "FILL_PAUSE", 0)
+    today = date(2026, 11, 23)  # a Monday
+    head = "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,FinInstrmNm,ClsPric"
+    asked: list[str] = []
+    down = {"on": False}
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if down["on"]:
+            return httpx.Response(503)
+        name = request.url.path.rsplit("/", 1)[-1]
+        if "BhavCopy" not in name:
+            return httpx.Response(404)
+        stamp = name.split("_")[6]
+        day = date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))
+        if day.day == 1:  # a holiday on the 1st: the next trading day's file is used
+            return httpx.Response(404)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("b.csv", f"{head}\n{day},{day},CM,NSE,STK,1,INE844O01030,GUJGASLTD,EQ,"
+                                f"GUJARAT GAS LTD,{400 + day.month}")  # fmt: skip
+        return httpx.Response(200, content=buf.getvalue())
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    async with sessionmaker() as db:
+        db.add(MoneyStock(
+            user_id=user, symbol="GUJENERGY", name="GUJARAT ENERGY LTD", isin="INE844O01030",
+            quantity=Decimal("10"), avg_price_paise=307_10, bought_on=date(2026, 6, 1),
+            price_paise=226_40, price_on=date(2026, 11, 20)))  # fmt: skip
+        await db.commit()
+
+    stored = await money.fill_share_history(deps, user, today=today, client=client)
+    days = money_history.fill_days(date(2026, 6, 1), today)
+    # The weekly days fall on Sundays and move to Monday; the last Monday is today, which is
+    # the live price, so it's left out.
+    assert stored == len(days) - 1
+    async with sessionmaker() as db:
+        rows = (await db.scalars(select(MoneySnapshot).order_by(MoneySnapshot.day))).all()
+        s = (await db.scalars(select(MoneyStock))).one()
+        assert s.history_from == date(2026, 6, 1)
+    assert rows[0].day == date(2026, 6, 2)  # 1 June had no file
+    assert rows[0].value_paise == 10 * 406_00 and rows[0].cost_paise == 10 * 307_10
+    assert all(r.filled for r in rows)
+
+    # Done: nothing is fetched again.
+    asked.clear()
+    assert await money.fill_share_history(deps, user, today=today, client=client) == 0
+    assert asked == []
+
+    # NSE failing part way keeps what came in, and leaves the share to try again tonight.
+    async with sessionmaker() as db:
+        s = (await db.scalars(select(MoneyStock))).one()
+        s.history_from, s.bought_on = None, date(2025, 1, 1)
+        await db.commit()
+    down["on"] = True
+    await money.fill_share_history(deps, user, today=today, client=client)
+    async with sessionmaker() as db:
+        assert (await db.scalars(select(MoneyStock))).one().history_from is None
+
+    # The nightly run stores today's value next to the filled-in ones.
+    assert await money.record_history(deps) == 1
+    async with sessionmaker() as db:
+        latest = (await db.scalars(select(MoneySnapshot).where(
+            MoneySnapshot.day == date(2026, 11, 20)))).one()  # fmt: skip
+        assert (latest.value_paise, latest.filled) == (10 * 226_40, False)
+    await client.aclose()
+
+
 async def test_assistant_uses_money_unless_switched_off(deps, user, sessionmaker, settings):
     async def emit(*args, **kwargs):
         pass

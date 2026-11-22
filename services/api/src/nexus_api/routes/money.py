@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
-from nexus_common import google, money, money_links, money_mail
+from nexus_common import google, money, money_history, money_links, money_mail
 from nexus_common import money_store as store
 from nexus_common.models import (
     MoneyAccount,
@@ -784,6 +784,16 @@ async def investments(user: OwnerUser, db: DbDep) -> dict:
         "as_of": max((h.as_of for h in rows if h.as_of), default=None),
         "nav_date": max((h.nav_date for h in rows if h.nav_date), default=None),
     }
+
+
+@router.get("/investments/history")
+async def investments_history(
+    user: OwnerUser,
+    db: DbDep,
+    range: Annotated[Literal["1m", "3m", "6m", "1y", "3y", "all"], Query()] = "1y",  # noqa: A002
+) -> dict:
+    """Each share, fund and saving's value on each day of the Savings graph."""
+    return await money_history.view(db, user.id, local_today(user), range)
 
 
 # --- Imports ---------------------------------------------------------------------------------

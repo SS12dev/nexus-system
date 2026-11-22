@@ -17,8 +17,8 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from nexus_api.deps import DbDep, OwnerUser, RedisDep
-from nexus_common import money_stocks
+from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep
+from nexus_common import money_history, money_stocks
 from nexus_common import money_store as store
 from nexus_common.models import MoneyStock, utcnow
 from nexus_common.organiser import local_today
@@ -91,7 +91,9 @@ async def search(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def add_stock(body: StockIn, user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+async def add_stock(
+    body: StockIn, user: OwnerUser, db: DbDep, redis: RedisDep, queue: QueueDep
+) -> dict:
     symbol = body.symbol.upper()
     quotes = await _quotes(redis, local_today(user))
     quote = quotes.get(symbol)
@@ -130,12 +132,19 @@ async def add_stock(body: StockIn, user: OwnerUser, db: DbDep, redis: RedisDep) 
     await db.commit()
     log.info("money.stock_added", extra={"user_id": str(user.id)})
     await store.changed(redis, user.id)
+    if row.bought_on:
+        await queue.enqueue_share_history(user.id)
     return store.stock_out(row)
 
 
 @router.patch("/{stock_id}")
 async def edit_stock(
-    stock_id: uuid.UUID, body: StockPatch, user: OwnerUser, db: DbDep, redis: RedisDep
+    stock_id: uuid.UUID,
+    body: StockPatch,
+    user: OwnerUser,
+    db: DbDep,
+    redis: RedisDep,
+    queue: QueueDep,
 ) -> dict:
     row = await _own(db, user.id, stock_id)
     fields = body.model_dump(exclude_unset=True)
@@ -143,17 +152,29 @@ async def edit_stock(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Say how many shares you hold.")
     if "note" in fields:
         fields["note"] = " ".join((fields["note"] or "").split())
+    # The filled-in history was valued from these; fill it again from the new ones.
+    refill = any(
+        getattr(row, k) != fields[k]
+        for k in ("quantity", "avg_price_paise", "bought_on")
+        if k in fields
+    )
     for name, value in fields.items():
         setattr(row, name, value)
+    if refill:
+        await money_history.forget(db, user.id, row.id, filled_only=True)
+        row.history_from = None
     row.updated_at = utcnow()
     await db.commit()
     await store.changed(redis, user.id)
+    if refill and row.bought_on:
+        await queue.enqueue_share_history(user.id)
     return store.stock_out(row)
 
 
 @router.delete("/{stock_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_stock(stock_id: uuid.UUID, user: OwnerUser, db: DbDep, redis: RedisDep):
     row = await _own(db, user.id, stock_id)
+    await money_history.forget(db, user.id, row.id)
     await db.delete(row)
     await db.commit()
     log.info("money.stock_removed", extra={"user_id": str(user.id)})

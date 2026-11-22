@@ -32,6 +32,7 @@ class RecordingQueue:
         self.money_syncs: list[uuid.UUID] = []
         self.money_history: list[int | None] = []
         self.briefs: list = []
+        self.share_histories: list[uuid.UUID] = []
         self.fail = False
 
     async def enqueue_telegram(self, update):
@@ -43,6 +44,9 @@ class RecordingQueue:
     async def enqueue_money_sync(self, user_id, back_days=None):
         self.money_syncs.append(user_id)
         self.money_history.append(back_days)
+
+    async def enqueue_share_history(self, user_id):
+        self.share_histories.append(user_id)
 
     async def enqueue_brief(self, user_id):
         self.briefs.append(user_id)
