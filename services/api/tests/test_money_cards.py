@@ -207,3 +207,43 @@ async def test_two_cards_share_one_limit(owner, sessionmaker, settings):
     stop = await owner.patch(f"/api/money/accounts/{rupay['id']}/details",
                              json={"limit_with_id": None})  # fmt: skip
     assert stop.status_code == 200 and stop.json()["limit_with_id"] is None
+
+
+async def test_an_account_made_under_other_digits_merges_in(owner, sessionmaker, settings):
+    bank = (await owner.post("/api/money/accounts", json={
+        "kind": "bank", "institution": "ICICI Bank", "mask": "6320"})).json()  # fmt: skip
+    async with sessionmaker() as db:
+        user = await _user(db)
+        # An alert on the real account, then a statement that quoted other digits.
+        await store.ingest(db, settings, user.id, [
+            money.Parsed(date(2026, 3, 2), 500_00, "debit", "Zepto", "UPI-ZEPTO",
+                         account_mask="6320", institution="ICICI Bank"),
+        ], source="alert")  # fmt: skip
+        await store.ingest(db, settings, user.id, [
+            money.Parsed(date(2026, 3, 2), 500_00, "debit", "Zepto", "UPI/ZEPTO/1",
+                         account_mask="3443", institution="ICICI Bank"),
+            money.Parsed(date(2026, 3, 5), 85_000_00, "credit", "Acme", "NEFT ACME SALARY",
+                         account_mask="3443", institution="ICICI Bank", balance_paise=90_000_00),
+        ], source="statement")  # fmt: skip
+        await db.commit()
+        other = await db.scalar(select(MoneyAccount).where(MoneyAccount.mask == "3443"))
+
+    wrong = await owner.post(
+        f"/api/money/accounts/{other.id}/merge", json={"into_id": str(other.id)}
+    )
+    assert wrong.status_code == 422
+    resp = await owner.post(f"/api/money/accounts/{other.id}/merge", json={"into_id": bank["id"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"moved": 1, "matched": 1, "into": "ICICI Bank ••6320"}
+
+    async with sessionmaker() as db:
+        (only,) = (await db.scalars(select(MoneyAccount))).all()
+        assert only.aliases == ["3443"] and only.balance_paise == 90_000_00
+        assert len((await db.scalars(select(MoneyTxn))).all()) == 2
+        # The next statement with those digits lands on the real account.
+        await store.ingest(db, settings, user.id, [
+            money.Parsed(date(2026, 4, 2), 200_00, "debit", "Uber", "UPI/UBER/2",
+                         account_mask="3443", institution="ICICI Bank"),
+        ], source="statement")  # fmt: skip
+        await db.commit()
+        assert len((await db.scalars(select(MoneyAccount))).all()) == 1

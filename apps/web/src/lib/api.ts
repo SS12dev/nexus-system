@@ -317,6 +317,8 @@ export const api = {
   moneyForgetSubscription: (key: string) =>
     request<void>(`/api/money/subscriptions/${encodeURIComponent(key)}`, { method: "DELETE" }),
   moneyBalances: () => request<Balances>("/api/money/balances"),
+  moneyMergeAccount: (id: string, into_id: string) =>
+    request<{ moved: number; matched: number; into: string }>(`/api/money/accounts/${id}/merge`, { method: "POST", body: json({ into_id }) }),
   moneyEditAccount: (id: string, body: AccountEdit) =>
     request<AccountView>(`/api/money/accounts/${id}/details`, { method: "PATCH", body: json(body) }),
   moneySavings: () => request<Savings>("/api/money/savings"),

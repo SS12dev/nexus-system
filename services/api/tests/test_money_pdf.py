@@ -134,6 +134,9 @@ def test_reads_a_card_statement_pdf():
 
 
 async def test_upload_a_locked_pdf_and_the_password_is_not_kept(owner, sessionmaker):
+    # An account the statement doesn't name: its rows go on a new one, and the import says so.
+    await owner.post("/api/money/accounts", json={
+        "kind": "bank", "institution": "HDFC Bank", "mask": "9999"})  # fmt: skip
     data = _bank_pdf("open sesame")
     send = {"file": ("Acct_Statement.pdf", data, "application/pdf")}
     locked = await owner.post("/api/money/imports", files=send)
@@ -146,6 +149,7 @@ async def test_upload_a_locked_pdf_and_the_password_is_not_kept(owner, sessionma
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["counts"]["added"] == 3
+    assert resp.json()["counts"]["new_accounts"] == 1
     async with sessionmaker() as db:
         assert len((await db.scalars(select(MoneyTxn))).all()) == 3
         prefs = (await db.scalars(select(MoneySettings))).one()
