@@ -23,6 +23,7 @@ import { PeoplePage } from "./pages/PeoplePage";
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { BriefPage } from "./pages/BriefPage";
 import { MoneyPage } from "./pages/MoneyPage";
+import { HabitsPage } from "./pages/HabitsPage";
 import { OrganiserPage } from "./pages/OrganiserPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -97,6 +98,7 @@ export function App() {
         <Route path="advice" element={<AdvicePage />} />
         <Route path="organiser/*" element={<OrganiserPage />} />
         <Route path="money/*" element={<MoneyPage />} />
+        <Route path="habits" element={<HabitsPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route path="apps" element={<AppsPage />} />
         <Route path="mind" element={<MindPage />} />

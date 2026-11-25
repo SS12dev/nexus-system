@@ -1,9 +1,10 @@
-import { Check, ChevronDown, Loader2, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2, ShoppingBasket, Sparkles } from "lucide-react";
+import { Link } from "react-router";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { CADENCE_LABEL, dayLabel, parseRupees, rupees, type Suggestion, type Suggestions } from "../../lib/money";
 import { toast } from "../Feedback";
-import { OrderShot } from "./OrderShot";
+import { OrderShot, OrderShots } from "./OrderShot";
 import { useMoney } from "./parts";
 
 const SHOWN = 4;
@@ -176,8 +177,11 @@ export function MoneySuggests() {
   const [busy, setBusy] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   useEffect(() => setItems(null), [data]);
-  const list = items ?? data?.items ?? [];
-  if (!list.length) return null;
+  // "What did you buy?" is asked in Habits, all orders together.
+  const every = items ?? data?.items ?? [];
+  const list = every.filter((s) => s.kind !== "basket");
+  const baskets = every.length - list.length;
+  if (!list.length) return baskets ? <BasketsLink count={baskets} /> : null;
   const guesses = list.filter((s) => s.guess).length;
   const take = async (call: () => Promise<Suggestions & { done?: string; accepted?: number }>, key: string) => {
     setBusy(key);
@@ -223,6 +227,88 @@ export function MoneySuggests() {
         <button onClick={() => setAll(!all)} className="mt-2 text-sm text-sky-300 hover:text-sky-200">
           {all ? "Show fewer" : `Show all ${list.length}`}
         </button>
+      )}
+      {baskets > 0 && <BasketsLink count={baskets} inline />}
+    </section>
+  );
+}
+
+function BasketsLink({ count, inline = false }: { count: number; inline?: boolean }) {
+  return (
+    <p className={inline ? "mt-2 text-sm text-slate-400" : "mb-4 text-sm text-slate-400"}>
+      {count} order{count === 1 ? "" : "s"} waiting on "What did you buy?" in{" "}
+      <Link to="/habits" className="text-sky-300 hover:text-sky-200">
+        Habits
+      </Link>
+      .
+    </p>
+  );
+}
+
+/** Habits › What did you buy: every quick-commerce order since the catch-up began, in one
+ * card. Screenshots of several orders are read in one go and matched to their payments; a tap
+ * files one order; "Skip these" stops asking about the ones waiting. After the catch-up only
+ * new orders are asked. */
+export function OrdersCatchUp() {
+  const { data, reload } = useMoney(api.moneySuggestions);
+  const [items, setItems] = useState<Suggestion[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  useEffect(() => setItems(null), [data]);
+  const list = (items ?? data?.items ?? []).filter((s) => s.kind === "basket");
+  if (!data) return null;
+  const from = data.baskets_from ? dayLabel(data.baskets_from) : null;
+  const take = async (call: () => Promise<Suggestions & { done?: string; skipped?: number }>, key: string) => {
+    setBusy(key);
+    try {
+      const r = await call();
+      setItems(r.items);
+      toast(r.done ?? `Skipped ${r.skipped} order${r.skipped === 1 ? "" : "s"}; new ones will still be asked`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+      reload();
+    } finally {
+      setBusy(null);
+    }
+  };
+  const shown = all ? list : list.slice(0, 3);
+  return (
+    <section className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 sm:p-4" aria-labelledby="catch-up">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 id="catch-up" className="flex items-center gap-2 font-medium text-slate-100">
+          <ShoppingBasket size={16} className="text-sky-300" aria-hidden /> What did you buy?
+          {list.length > 0 && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-normal text-sky-200">{list.length}</span>}
+        </h2>
+        {list.length > 1 && (
+          <button
+            onClick={() => void take(api.moneySkipBaskets, "skip")}
+            disabled={busy !== null}
+            className="ml-auto text-sm text-slate-400 hover:text-slate-200 disabled:opacity-50"
+            title="Stops asking about these orders. New orders are still asked."
+          >
+            Skip these {list.length}
+          </button>
+        )}
+      </div>
+      <p className="mt-1 mb-3 text-sm text-slate-400">
+        {list.length
+          ? `Your Zepto, Blinkit and Instamart orders${from ? ` since ${from}` : ""} that Money doesn't know the contents of. Catch up once, quickest with screenshots of several orders at a time (one each, showing the items and total); after that Money only asks about each new order.`
+          : `All caught up${from ? ` since ${from}` : ""}. Money asks about each new order as it comes in.`}
+      </p>
+      {list.length > 0 && (
+        <>
+          <OrderShots onSaved={reload} className="mb-3" />
+          <ul className="grid grid-cols-1 gap-2">
+            {shown.map((s) => (
+              <Question key={s.key} s={s} busy={busy} onSaved={reload} answer={(key, choice, amount, text) => void take(() => api.moneyAnswerSuggestion(key, choice, amount, text), key)} />
+            ))}
+          </ul>
+          {list.length > 3 && (
+            <button onClick={() => setAll(!all)} className="mt-2 text-sm text-sky-300 hover:text-sky-200">
+              {all ? "Show fewer" : `Show all ${list.length}`}
+            </button>
+          )}
+        </>
       )}
     </section>
   );

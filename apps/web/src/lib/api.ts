@@ -402,6 +402,7 @@ export const api = {
     request<{ items: BoughtItem[] }>(`/api/money/transactions/${id}/items`, { method: "PUT", body: json(body) }),
   moneyUpdateItem: (id: string, kind: string) =>
     request<BoughtItem>(`/api/money/items/${id}`, { method: "PATCH", body: json({ kind }) }),
+  moneySkipBaskets: () => request<Suggestions & { skipped: number }>("/api/money/suggestions/skip-baskets", { method: "POST" }),
   moneyAcceptSuggestions: () => request<Suggestions & { accepted: number }>("/api/money/suggestions/accept-all", { method: "POST" }),
   moneyOrdersToConfirm: () => request<{ items: OrderToConfirm[] }>("/api/money/orders/to-confirm"),
   moneyOrderPaid: (id: string, body: OrderPaid) =>

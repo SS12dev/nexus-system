@@ -5,7 +5,6 @@ import { toast } from "../components/Feedback";
 import { Guide, GuideHeading } from "../components/Guide";
 import { MoneySuggests } from "../components/money/Suggestions";
 import { BudgetMeter, CategoryBars, TrendBars } from "../components/money/Charts";
-import { DayByDay } from "../components/money/Daily";
 import { Card, Empty, MonthPicker, Spinner, Stat, useMoney, useMoneySettings } from "../components/money/parts";
 import { AccountsView } from "../components/money/Accounts";
 import { HealthStrip, HealthView } from "../components/money/Health";
@@ -128,21 +127,12 @@ function Header() {
             this merchant”: the rest of that merchant's transactions, and future ones, follow.
           </div>
           <div>
-            <GuideHeading>Day by day, habits and what you bought</GuideHeading>
-            The calendar shows each day's everyday spending (without rent, EMIs, bills and subscriptions), so habits aren't
-            hidden by the big fixed payments. Zomato's order emails list what you ordered: Money keeps the items and the
-            restaurant, and splits each order into meals, desserts and drinks. For Zepto, Blinkit, Instamart and similar,
-            whose emails don't list items, Money suggests asks “What did you buy?”: one tap, type the items, or use a
-            screenshot of the order. The model on your own computer reads the screenshot's items, fees and total (the image
-            isn't kept), Money finds the payment by its total and date, and you check the list before it's saved. Habits and
-            leaks then shows where the money goes, and a tip appears only once the numbers behind it are in.
-          </div>
-          <div>
-            <GuideHeading>Cigarettes and tobacco</GuideHeading>
-            Payments at paan shops and tobacconists are filed under Smoking and tobacco, and cigarettes inside an order count
-            too. A shop paid by UPI under a person's name is asked about once in Money suggests. The card under Habits shows
-            this month against last, the days you bought, how long since the last, a year at the current pace, and a monthly
-            limit to cut down to (it's also a budget).
+            <GuideHeading>Day by day and habits</GuideHeading>
+            The spending calendar, leaks, what was in your orders and cigarettes live in the{" "}
+            <Link to="/habits" className="text-sky-300 hover:text-sky-200">
+              Habits
+            </Link>{" "}
+            tab, built from the same transactions.
           </div>
           <div>
             <GuideHeading>Accounts, cards and loans</GuideHeading>
@@ -275,7 +265,6 @@ function OverviewView({ latest }: { latest: string }) {
           "Came in" includes your salary paid on {dayLabel(data.salary_from)}. A salary paid in the last days of a month counts towards the next month, the one it pays for.
         </p>
       )}
-      <DayByDay month={month} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="grid min-w-0 content-start gap-4">
           <Card title={`Where it went in ${monthLabel(month)}`}>

@@ -744,6 +744,8 @@ export interface Suggestions {
   matched: number;
   /** Payments to your own name filed as transfers without asking, this time. */
   filed?: number;
+  /** "What did you buy?" asks about orders from this day on: a one-off catch-up, then new ones. */
+  baskets_from?: string;
 }
 
 /** An order from a shop's email that no bank or card payment explains yet. */
@@ -1072,7 +1074,20 @@ export interface Daily {
   delivery: BasketSummary;
   delivery_last: { orders: number; spent_paise: number };
   tips: { kind: string; text: string }[];
+  streaks: Streaks;
   smoking: Smoking;
+}
+
+/** Runs to keep going, as of today. Days since: null when there's none in the last 90 days. */
+export interface Streaks {
+  /** Days in a row with everyday spending at or under your usual day. */
+  under: number;
+  under_best: number;
+  usual_paise: number;
+  delivery: number | null;
+  basket: number | null;
+  smoke: number | null;
+  tracked_days: number;
 }
 
 /** Cigarettes and tobacco in a month: payments filed under Smoking and tobacco (paan shops,

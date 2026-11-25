@@ -421,7 +421,7 @@ async def suggestions(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
     """Money's one-tap questions, each with its best guess. Orders a statement or later alert
     now explains are matched first, without asking."""
     out = await money_suggest.suggestions(db, user.id, local_today(user), user.name)
-    if out["matched"] or out["filed"]:
+    if out["matched"] or out["filed"] or out["changed"]:
         await db.commit()
         await store.changed(redis, user.id)
     return out
@@ -450,6 +450,16 @@ async def answer_suggestion(
     await db.commit()
     await store.changed(redis, user.id)
     return {"done": done, **await money_suggest.suggestions(db, user.id, today, user.name)}
+
+
+@router.post("/suggestions/skip-baskets")
+async def skip_baskets(user: OwnerUser, db: DbDep, redis: RedisDep) -> dict:
+    """Stop asking "what did you buy?" about the orders waiting now (new ones are still asked)."""
+    today = local_today(user)
+    n = await money_suggest.skip_baskets(db, user.id, today, user.name)
+    await db.commit()
+    await store.changed(redis, user.id)
+    return {"skipped": n, **await money_suggest.suggestions(db, user.id, today, user.name)}
 
 
 @router.post("/suggestions/accept-all")

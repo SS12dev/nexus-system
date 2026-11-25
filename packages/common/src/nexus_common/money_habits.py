@@ -424,6 +424,7 @@ async def daily(
         "tips": _tips(
             basket, last_basket, small, weekdays, delivery, last_delivery, counted_days or 1
         ),
+        "streaks": await streaks(db, user_id, today),
         "smoking": await _smoking(
             db,
             cfg,
@@ -606,3 +607,91 @@ async def order_candidates(
         )
     )
     return match, rows[:SHOT_CANDIDATES]
+
+
+# --- Streaks -------------------------------------------------------------------------------------
+
+STREAK_DAYS = 90
+
+
+def _run(days: list[bool]) -> int:
+    """How many in a row are True, from the end."""
+    n = 0
+    for ok in reversed(days):
+        if not ok:
+            break
+        n += 1
+    return n
+
+
+def _best(days: list[bool]) -> int:
+    best = n = 0
+    for ok in days:
+        n = n + 1 if ok else 0
+        best = max(best, n)
+    return best
+
+
+async def streaks(db: AsyncSession, user_id: uuid.UUID, today: date) -> dict:
+    """Runs to keep going, as of today (whatever month is shown): days in a row with everyday
+    spending at or under the usual day, and days since the last food delivery, quick-commerce
+    order and cigarettes. Yesterday is the latest whole day; today counts once it's in."""
+    lo = today - timedelta(days=STREAK_DAYS)
+    rows = list(
+        (
+            await db.scalars(
+                select(MoneyTxn).where(
+                    MoneyTxn.user_id == user_id,
+                    MoneyTxn.occurred_on >= lo,
+                    MoneyTxn.occurred_on <= today,
+                )
+            )
+        ).all()
+    )
+    if not rows:
+        return {"under": 0, "under_best": 0, "usual_paise": 0, "delivery": None,
+                "basket": None, "smoke": None, "tracked_days": 0}  # fmt: skip
+    first = min(t.occurred_on for t in rows)
+    spent: dict[date, int] = defaultdict(int)
+    last: dict[str, date] = {}
+    for t in rows:
+        cost = _cost(t)
+        if cost <= 0:
+            continue
+        if t.category not in FIXED:
+            spent[t.occurred_on] += cost
+        for name, hit in (
+            ("delivery", is_delivery(t.merchant)),
+            ("basket", money_items.is_basket(t.merchant)),
+            ("smoke", t.category == SMOKING),
+        ):
+            if hit and (name not in last or t.occurred_on > last[name]):
+                last[name] = t.occurred_on
+    # Cigarettes inside orders count too.
+    inside = await db.scalar(
+        select(MoneyTxn.occurred_on)
+        .join(MoneyItem, MoneyItem.txn_id == MoneyTxn.id)
+        .where(MoneyItem.user_id == user_id, MoneyItem.kind == "tobacco",
+               MoneyTxn.occurred_on >= lo, MoneyTxn.occurred_on <= today)
+        .order_by(MoneyTxn.occurred_on.desc())
+        .limit(1)
+    )  # fmt: skip
+    if inside and ("smoke" not in last or inside > last["smoke"]):
+        last["smoke"] = inside
+    whole = [first + timedelta(days=i) for i in range((today - first).days)]
+    usual = sum(spent.get(d, 0) for d in whole) // len(whole) if whole else 0
+    under = [spent.get(d, 0) <= usual for d in whole]
+    if spent.get(today, 0) > usual:
+        # Today is already over: the run is broken now, not tomorrow.
+        under.append(False)
+    month_start = today.replace(day=1)
+    this_month = [ok for d, ok in zip(whole, under, strict=False) if d >= month_start]
+    return {
+        "under": _run(under) if len(whole) >= 7 else 0,
+        "under_best": _best(this_month),
+        "usual_paise": usual,
+        "delivery": (today - last["delivery"]).days if "delivery" in last else None,
+        "basket": (today - last["basket"]).days if "basket" in last else None,
+        "smoke": (today - last["smoke"]).days if "smoke" in last else None,
+        "tracked_days": (today - first).days,
+    }
