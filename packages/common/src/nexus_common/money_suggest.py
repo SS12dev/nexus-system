@@ -50,8 +50,8 @@ OTHER_ASKED = 5
 EMI_FLOOR_PAISE = 3_000_00
 EMI_MONTHS = (3, 6, 9, 12, 18, 24)
 YEARLY_FLOOR_PAISE = 500_00
-# Quick-commerce orders asked "what did you buy?": a one-off catch-up from the start of the
-# month when Money first asked (remembered under BASKETS_FROM), then each new order. Older orders
+# Quick-commerce orders asked "what did you buy?": a one-off catch-up on the month before Money
+# first asked (the start is remembered under BASKETS_FROM), then each new order. Older orders
 # are never asked, so the questions don't go on and on.
 BASKETS_FROM = "baskets:from"
 # Skips the rest of the catch-up.
@@ -544,12 +544,12 @@ async def _emis(
 
 
 def baskets_from(answered: dict, today: date) -> date:
-    """The first day of the "what did you buy?" catch-up: the start of the month Money first
-    asked in (a week back, so the first days of a month still catch up on the last one)."""
+    """The first day of the "what did you buy?" catch-up: one month before Money first asked
+    (for a new person, about when they started), so there's a month of orders to learn from."""
     try:
         return date.fromisoformat(answered[BASKETS_FROM])
     except (KeyError, TypeError, ValueError):
-        return (today - timedelta(days=7)).replace(day=1)
+        return money.add_months(today, -1)
 
 
 async def _baskets(

@@ -241,7 +241,7 @@ async def test_orders_are_asked_once_from_the_catch_up_on(owner, sessionmaker):
     async with sessionmaker() as db:
         user = await _user(db)
         today = local_today(user)
-        start = (today - timedelta(days=7)).replace(day=1)
+        start = money.add_months(today, -1)
         db.add_all([
             _txn(user.id, start, merchant="Zepto", category="Groceries", amount_paise=200_00),
             _txn(user.id, today, merchant="Blinkit", category="Groceries", amount_paise=150_00),

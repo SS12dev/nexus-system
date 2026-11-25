@@ -56,7 +56,7 @@ export function HabitsPage() {
           <div>
             <GuideHeading>What did you buy?</GuideHeading>
             Zomato's emails list what you ordered, so those are read for you. Zepto, Blinkit and Instamart send none, so Money asks.
-            It catches up once on this month's orders, then asks only about each new one. Screenshots are quickest: pick several at
+            It catches up once on the month before it first asked, then asks only about each new one. Screenshots are quickest: pick several at
             once (one per order, showing the items and the total). The model on your own computer reads each one, Money finds its
             payment by the total and date, and you check the list before it's saved. The images aren't kept.
           </div>
