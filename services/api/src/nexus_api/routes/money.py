@@ -34,7 +34,9 @@ from nexus_api.ratelimit import hit, too_many
 from nexus_common import (
     google,
     money,
+    money_habits,
     money_history,
+    money_items,
     money_links,
     money_mail,
     money_salary,
@@ -48,6 +50,7 @@ from nexus_common.models import (
     MoneyBudget,
     MoneyHolding,
     MoneyImport,
+    MoneyItem,
     MoneyMailbox,
     MoneyMailStatement,
     MoneyTxn,
@@ -63,6 +66,12 @@ IMPORTS_PER_HOUR = 30
 SYNCS_PER_HOUR = 12
 MONTH = r"^\d{4}-(0[1-9]|1[0-2])$"
 Category = Annotated[str, Field(max_length=40)]
+
+
+def _item_kinds() -> list[dict]:
+    return [
+        {"kind": k, "label": label, "need": need} for k, (label, need) in money_items.KINDS.items()
+    ]
 
 
 def _category(value: str) -> str:
@@ -86,6 +95,8 @@ class SettingsOut(BaseModel):
     last_error: str | None
     rules: int
     categories: list[str]
+    # Kinds of things bought (money_items.KINDS): {kind, label, need}.
+    item_kinds: list[dict] = []
 
 
 class SettingsIn(BaseModel):
@@ -114,6 +125,7 @@ async def get_settings(user: OwnerUser, db: DbDep, cfg: SettingsDep) -> Settings
         last_error=prefs.last_error,
         rules=len(prefs.rules or {}),
         categories=list(money.CATEGORIES),
+        item_kinds=_item_kinds(),
     )
     await db.commit()
     return out
@@ -205,6 +217,18 @@ async def overview(
     return out
 
 
+@router.get("/daily")
+async def daily(
+    user: OwnerUser,
+    db: DbDep,
+    cfg: SettingsDep,
+    month: Annotated[str | None, Query(pattern=MONTH)] = None,
+) -> dict:
+    """Day by day: what each day of the month cost, the habits under it, and what went into
+    quick-commerce baskets."""
+    return await money_habits.daily(db, cfg, user.id, _month(user, month), local_today(user))
+
+
 # --- Transactions ----------------------------------------------------------------------------
 
 
@@ -227,6 +251,8 @@ class TxnOut(BaseModel):
     pair_kind: str | None = None
     asset_id: uuid.UUID | None = None
     narration: str | None = None
+    # Where on a platform it was bought (the restaurant on Zomato).
+    place: str | None = None
 
 
 class Linked(BaseModel):
@@ -243,6 +269,10 @@ class Linked(BaseModel):
 class TxnDetail(TxnOut):
     paired: Linked | None = None
     saving: str | None = None
+    # What was bought (money_items), from the order email or the person.
+    items: list[dict] = []
+    # A quick-commerce order: "what did you buy?" applies.
+    basket: bool = False
 
 
 def _txn(t: MoneyTxn, cfg=None) -> TxnOut:
@@ -264,6 +294,7 @@ def _txn(t: MoneyTxn, cfg=None) -> TxnOut:
         pair_kind=t.pair_kind,
         asset_id=t.asset_id,
         narration=money.unseal(cfg, t.narration_enc) if cfg else None,
+        place=t.place,
     )
 
 
@@ -286,6 +317,8 @@ async def _detail(db, t: MoneyTxn, cfg) -> TxnDetail:
         **_txn(t, cfg).model_dump(),
         paired=await _linked(db, other) if other is not None else None,
         saving=(asset.name or asset.kind.upper()) if asset is not None else None,
+        items=await money_habits.items_of(db, cfg, t.id),
+        basket=money_items.is_basket(t.merchant),
     )
 
 
@@ -323,7 +356,9 @@ async def list_transactions(
         where.append(MoneyTxn.merchant == merchant)
     if q and q.strip():
         like = "%" + re.sub(r"([%_\\])", r"\\\1", q.strip()) + "%"
-        where.append(MoneyTxn.merchant.ilike(like) | MoneyTxn.note.ilike(like))
+        where.append(
+            MoneyTxn.merchant.ilike(like) | MoneyTxn.note.ilike(like) | MoneyTxn.place.ilike(like)
+        )
     total, spent, income = (
         await db.execute(
             select(
@@ -395,6 +430,8 @@ class SuggestionIn(BaseModel):
     choice: str = Field(max_length=80)
     # An EMI's monthly instalment, when known: Money works out the interest from it.
     amount_paise: int | None = Field(default=None, gt=0, le=10**12)
+    # What was bought, typed ("milk 60, chips 40"), for a quick-commerce order.
+    text: str | None = Field(default=None, max_length=1000)
 
 
 @router.post("/suggestions/answer")
@@ -404,7 +441,7 @@ async def answer_suggestion(
     today = local_today(user)
     try:
         done = await money_suggest.answer(
-            db, user.id, body.key, body.choice, today, user.name, body.amount_paise
+            db, user.id, body.key, body.choice, today, user.name, body.amount_paise, body.text
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
@@ -452,6 +489,69 @@ async def order_paid(
     log.info("money.order_paid", extra={"user_id": str(user.id), "how": body.how})
     await store.changed(redis, user.id)
     return {"items": await store.orders_to_confirm(db, user.id, local_today(user))}
+
+
+class ItemsIn(BaseModel):
+    """What was bought: typed items ("milk 60, chips 40"), or one kind for the whole order.
+    Neither clears them."""
+
+    text: str | None = Field(default=None, max_length=1000)
+    kind: str | None = Field(default=None, max_length=16)
+
+
+@router.put("/transactions/{txn_id}/items")
+async def set_items(
+    txn_id: uuid.UUID,
+    body: ItemsIn,
+    user: OwnerUser,
+    db: DbDep,
+    cfg: SettingsDep,
+    redis: RedisDep,
+) -> dict:
+    t = await _own_txn(db, user.id, txn_id)
+    if body.kind is not None and body.kind not in money_items.KINDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown kind.")
+    if body.text and body.text.strip():
+        bought = money_items.parse_typed(body.text)
+        if not bought:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                'Type what you bought, like "milk 60, chips 40, coke".',
+            )
+    elif body.kind:
+        bought = [money_items.Item("", None, 1, body.kind)]
+    else:
+        bought = []
+    await money_habits.save_items(db, cfg, user.id, t.id, bought, "you")
+    await db.commit()
+    log.info("money.items_set", extra={"user_id": str(user.id), "count": len(bought)})
+    await store.changed(redis, user.id)
+    return {"items": await money_habits.items_of(db, cfg, t.id)}
+
+
+class ItemPatch(BaseModel):
+    kind: str = Field(max_length=16)
+
+
+@router.patch("/items/{item_id}")
+async def update_item(
+    item_id: uuid.UUID,
+    body: ItemPatch,
+    user: OwnerUser,
+    db: DbDep,
+    cfg: SettingsDep,
+    redis: RedisDep,
+) -> dict:
+    """Correct one item's kind (Money read "Bread Pakoda" as bread)."""
+    row = await db.get(MoneyItem, item_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Item not found.")
+    if body.kind not in money_items.KINDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown kind.")
+    row.kind, row.source = body.kind, "you"
+    await db.commit()
+    await store.changed(redis, user.id)
+    return money_habits.item_out(cfg, row)
 
 
 @router.get("/transactions/{txn_id}", response_model=TxnDetail)

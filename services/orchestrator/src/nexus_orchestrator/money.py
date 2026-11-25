@@ -217,7 +217,9 @@ async def _read_alerts(
     counts["skipped"] = len(done & seen)
     # Gmail lists newest first; read oldest first so the mark can follow.
     todo = [i for i in reversed(ids) if i not in done]
-    todo_orders = [i for i in reversed(order_ids) if i not in done]
+    # Reading back reads order emails again too: one read before items were kept gives them now
+    # (money_store.record_order keeps the row and adds what's missing).
+    todo_orders = [i for i in reversed(order_ids) if back_days or i not in done]
     tz = zone(user)
     pace = Pace(READS_PER_SECOND)
     gate = asyncio.Semaphore(PARALLEL)

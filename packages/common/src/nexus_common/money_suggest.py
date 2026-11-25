@@ -3,8 +3,9 @@ with its best guess ready, so keeping Money right takes taps, not chores.
 
 What it is sure of it does itself (orders matched to payments read later). The rest is asked
 once: how an order was paid, whether a repeating payment is a subscription, whether monthly
-money to a person is rent, what an unfiled shop is, how long a card EMI runs, and whether a
-one-off charge at a shop that sells plans is a yearly one. Each answer is applied the way the
+money to a person is rent, what an unfiled shop is, how long a card EMI runs, whether a
+one-off charge at a shop that sells plans is a yearly one, and what was bought in a recent
+quick-commerce order whose email didn't list it (money_items). Each answer is applied the way the
 person would have done it by hand (a rule for the merchant, a subscription decision, a loan),
 and remembered so it isn't asked again.
 
@@ -22,10 +23,17 @@ from datetime import date, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money
+from nexus_common import money, money_habits, money_items
 from nexus_common import money_plan as plan
 from nexus_common import money_store as store
-from nexus_common.models import MoneyAccount, MoneyLoan, MoneySettings, MoneyTxn, utcnow
+from nexus_common.models import (
+    MoneyAccount,
+    MoneyItem,
+    MoneyLoan,
+    MoneySettings,
+    MoneyTxn,
+    utcnow,
+)
 from nexus_common.settings import Settings, get_settings
 
 log = logging.getLogger(__name__)
@@ -42,6 +50,23 @@ OTHER_ASKED = 5
 EMI_FLOOR_PAISE = 3_000_00
 EMI_MONTHS = (3, 6, 9, 12, 18, 24)
 YEARLY_FLOOR_PAISE = 500_00
+# Quick-commerce orders asked "what did you buy?": recent ones only, a few at a time.
+BASKET_WINDOW = timedelta(days=35)
+BASKETS_ASKED = 6
+# Answers at a shop that must agree before its usual kind is offered as the guess.
+BASKET_USUAL = 3
+BASKET_CHOICES = (
+    ("staples", "Groceries and staples"),
+    ("fresh", "Fruit, veg or meat"),
+    ("dairy", "Milk, bread, eggs"),
+    ("snacks", "Snacks and sweets"),
+    ("drinks", "Cold drinks"),
+    ("instant", "Instant or frozen food"),
+    ("household", "Home and personal care"),
+    ("mixed", "A bit of everything"),
+)
+# The answer that carries typed items ("milk 60, chips 40").
+TYPED = "items"
 
 # Shops that sell yearly plans: a single charge there may be a subscription renewing next year.
 PLAN_SELLERS = {
@@ -241,6 +266,8 @@ async def match_orders(db: AsyncSession, user_id: uuid.UUID) -> int:
             pay.category = order.category
         # The order email's key, so reading that email again finds this payment.
         pay.alt_key = order.dedupe_key
+        pay.place = pay.place or order.place
+        await money_habits.move_items(db, order.id, pay.id)
         gone.append(order.id)
     if gone:
         await db.execute(delete(MoneyTxn).where(MoneyTxn.id.in_(gone)))
@@ -511,6 +538,93 @@ async def _emis(
     return items
 
 
+async def _baskets(
+    db: AsyncSession, user_id: uuid.UUID, today: date, txns: list[MoneyTxn]
+) -> list[dict]:
+    """Recent quick-commerce orders whose email didn't list the items: "what did you buy?".
+    One tap files the whole order as one kind; typing the items splits it."""
+    rows = [
+        t
+        for t in txns
+        if t.direction == "debit"
+        and not t.excluded
+        and t.category not in money.NOT_SPENDING
+        and t.occurred_on >= today - BASKET_WINDOW
+        and money_items.is_basket(t.merchant)
+        # An order nobody's payment explains is asked "how did you pay?" first.
+        and not (t.source == "receipt" and t.account_id is None and t.channel != "cash")
+    ]
+    if not rows:
+        return []
+    told = set(
+        (
+            await db.scalars(
+                select(MoneyItem.txn_id).where(
+                    MoneyItem.user_id == user_id, MoneyItem.txn_id.in_([t.id for t in rows])
+                )
+            )
+        ).all()
+    )
+    rows = sorted((t for t in rows if t.id not in told), key=lambda t: t.occurred_on, reverse=True)
+    if not rows:
+        return []
+    # What the person usually buys at each shop: the main kind of each order they told Money
+    # about. Guessed only when their recent answers there agree, so "Accept all" stays right.
+    told_rows = (
+        await db.execute(
+            select(
+                MoneyTxn.id,
+                MoneyTxn.merchant,
+                MoneyTxn.amount_paise,
+                MoneyItem.kind,
+                MoneyItem.price_paise,
+                MoneyItem.quantity,
+            )  # fmt: skip
+            .join(MoneyTxn, MoneyTxn.id == MoneyItem.txn_id)
+            .where(
+                MoneyItem.user_id == user_id,
+                MoneyItem.source == "you",
+                MoneyTxn.occurred_on >= today - timedelta(days=180),
+            )
+        )
+    ).all()
+    orders: dict[uuid.UUID, tuple[str, int, list]] = {}
+    for txn_id, merchant, amount, kind, price, quantity in told_rows:
+        orders.setdefault(txn_id, (merchant, amount, []))[2].append((kind, price, quantity))
+    usual: dict[str, Counter] = defaultdict(Counter)
+    for merchant, amount, its in orders.values():
+        split = money_items.shares(its, amount)
+        usual[merchant][max(split, key=split.get) if split else "mixed"] += 1
+    offered = {k for k, _ in BASKET_CHOICES}
+    items = []
+    for t in rows[:BASKETS_ASKED]:
+        seen = usual[t.merchant]
+        top = seen.most_common(1)
+        guess = (
+            top[0][0]
+            if top
+            and top[0][0] in offered
+            and top[0][1] >= BASKET_USUAL
+            and top[0][1] >= sum(seen.values()) * 2 / 3
+            else None
+        )
+        items.append(
+            {
+                "key": f"basket:{t.id}",
+                "kind": "basket",
+                "merchant": t.merchant,
+                "amount_paise": t.amount_paise,
+                "on": t.occurred_on,
+                "details": [],
+                "why": ("What you usually buy here is highlighted. " if guess else "")
+                + "One tap files the whole order; typing the items splits it.",
+                "choices": [_choice(k, label) for k, label in BASKET_CHOICES],
+                "guess": guess,
+            }
+        )
+    return items
+
+
 async def _yearly(
     db: AsyncSession, user_id: uuid.UUID, txns: list[MoneyTxn], today: date, labels, cfg
 ) -> list[dict]:
@@ -592,6 +706,7 @@ async def suggestions(
         + await _subscriptions(db, user_id, today, txns, labels, cfg)
         + await _orders(db, user_id, today, accounts, cfg)
         + _unfiled(txns, rules, today, owner, labels, cfg)
+        + await _baskets(db, user_id, today, txns)
     )
     items = [i for i in items if _open(answered.get(i["key"]), today)]
     return {"items": items, "matched": matched, "filed": filed}
@@ -614,6 +729,7 @@ async def answer(
     today: date,
     owner: str | None,
     amount_paise: int | None = None,
+    text: str | None = None,
 ) -> str:
     """Apply one answer the way the person would by hand, and remember it. Returns what was
     done, to show. Raises ValueError for a question or choice that no longer fits."""
@@ -625,7 +741,7 @@ async def answer(
         await _remember(db, user_id, key, f"{LATER}:{today + timedelta(days=LATER_DAYS)}")
         log.info("money.suggestion_later", extra={"user_id": str(user_id), "kind": item["kind"]})
         return f"Money will ask about {item['merchant']} again in a week"
-    return await _apply(db, user_id, item, choice, today, amount_paise)
+    return await _apply(db, user_id, item, choice, today, amount_paise, text)
 
 
 async def _remember(db: AsyncSession, user_id: uuid.UUID, key: str, value: str) -> None:
@@ -642,8 +758,10 @@ async def _apply(
     choice: str,
     today: date,
     amount_paise: int | None = None,
+    text: str | None = None,
 ) -> str:
-    if choice not in {c["id"] for c in item["choices"]}:
+    typed = item["kind"] == "basket" and choice == TYPED
+    if not typed and choice not in {c["id"] for c in item["choices"]}:
         raise ValueError("Pick one of the answers offered.")
     key = item["key"]
     kind, _, ref = key.partition(":")
@@ -709,6 +827,20 @@ async def _apply(
         done = f"EMI added: {months} months of {money.rupees(emi)}"
         if amount_paise:
             done += f", about {rate / 100:.1f}% a year" if rate else ", no interest"
+    elif kind == "basket":
+        txn = await db.get(MoneyTxn, uuid.UUID(ref))
+        if typed:
+            bought = money_items.parse_typed(text or "")
+            if not bought:
+                raise ValueError('Type what you bought, like "milk 60, chips 40, coke".')
+            kinds = {money_items.KINDS[i.kind][0].lower() for i in bought if i.kind != "other"}
+            done = f"{merchant}: {len(bought)} item{'s' if len(bought) != 1 else ''} saved"
+            if kinds:
+                done += f" ({', '.join(sorted(kinds))})"
+        else:
+            bought = [money_items.Item("", None, 1, choice)]
+            done = f"{merchant}: {money_items.KINDS[choice][0].lower()}"
+        await money_habits.save_items(db, get_settings(), user_id, txn.id, bought, "you")
     elif kind == "yearly" and choice in ("yearly", "monthly"):
         txn = await db.get(MoneyTxn, uuid.UUID(ref))
         step = 12 if choice == "yearly" else 1

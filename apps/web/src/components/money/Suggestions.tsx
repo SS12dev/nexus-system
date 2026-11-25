@@ -24,6 +24,8 @@ function question(s: Suggestion): string {
       return `${s.merchant}, ${amount} on EMI: for how many months?`;
     case "yearly":
       return `${s.merchant}, ${amount}${s.on ? ` on ${dayLabel(s.on)}` : ""}: does it renew${s.plan ? ` (${s.plan})` : ""}?`;
+    case "basket":
+      return `What did you buy on ${s.merchant}, ${amount}${s.on ? ` on ${dayLabel(s.on)}` : ""}?`;
   }
 }
 
@@ -41,11 +43,13 @@ function where(s: Suggestion): string {
   return [when, s.account, s.how].filter(Boolean).join(" · ");
 }
 
-type Answer = (key: string, choice: string, amount?: number) => void;
+type Answer = (key: string, choice: string, amount?: number, text?: string) => void;
 
 function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; answer: Answer }) {
   const [open, setOpen] = useState(false);
   const [instalment, setInstalment] = useState("");
+  const [bought, setBought] = useState("");
+  const [typing, setTyping] = useState(false);
   const amount = instalment.trim() ? parseRupees(instalment) : undefined;
   const badAmount = amount === null;
   const context = where(s);
@@ -94,6 +98,30 @@ function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; ans
           {badAmount && <span className="text-rose-300">Type an amount like 7450.50</span>}
         </label>
       )}
+      {s.kind === "basket" && typing && (
+        <form
+          className="mt-2 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (bought.trim()) answer(s.key, "items", undefined, bought.trim());
+          }}
+        >
+          <input
+            value={bought}
+            onChange={(e) => setBought(e.target.value)}
+            maxLength={1000}
+            autoFocus
+            placeholder="milk 60, chips 40, coke"
+            aria-label={`What you bought on ${s.merchant}`}
+            className="min-w-0 flex-1 rounded-md border border-edge bg-ink px-2.5 py-1 text-base text-slate-100 sm:max-w-sm sm:text-sm"
+          />
+          {bought.trim() && (
+            <button type="submit" disabled={busy !== null} className="rounded-md bg-sky-500 px-3 py-1 text-sm font-medium text-ink hover:bg-sky-400 disabled:opacity-50">
+              Save items
+            </button>
+          )}
+        </form>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {s.choices.map((c) => {
           const guess = c.id === s.guess;
@@ -111,6 +139,11 @@ function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; ans
             </button>
           );
         })}
+        {s.kind === "basket" && !typing && (
+          <button onClick={() => setTyping(true)} className="px-1 py-1 text-xs text-sky-300 hover:text-sky-200">
+            Type the items
+          </button>
+        )}
         <button
           onClick={() => answer(s.key, "later")}
           disabled={busy !== null}
@@ -173,7 +206,7 @@ export function MoneySuggests() {
       </p>
       <ul className="grid grid-cols-1 gap-2">
         {shown.map((s) => (
-          <Question key={s.key} s={s} busy={busy} answer={(key, choice, amount) => void take(() => api.moneyAnswerSuggestion(key, choice, amount), key)} />
+          <Question key={s.key} s={s} busy={busy} answer={(key, choice, amount, text) => void take(() => api.moneyAnswerSuggestion(key, choice, amount, text), key)} />
         ))}
       </ul>
       {list.length > SHOWN && (
