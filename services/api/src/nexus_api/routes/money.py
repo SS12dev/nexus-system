@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 
 from nexus_api.deps import DbDep, OwnerUser, QueueDep, RedisDep, SettingsDep
 from nexus_api.ratelimit import hit, too_many
+from nexus_api.routes import money_onboard as onboard
 from nexus_common import (
     google,
     money,
@@ -42,6 +43,7 @@ from nexus_common import (
     money_salary,
     money_suggest,
     money_tracking,
+    money_vision,
 )
 from nexus_common import money_store as store
 from nexus_common.models import (
@@ -491,10 +493,18 @@ async def order_paid(
     return {"items": await store.orders_to_confirm(db, user.id, local_today(user))}
 
 
-class ItemsIn(BaseModel):
-    """What was bought: typed items ("milk 60, chips 40"), or one kind for the whole order.
-    Neither clears them."""
+class ItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(default=1, ge=1, le=99)
+    price_paise: int | None = Field(default=None, ge=0, le=10_00_000_00)
+    kind: str = Field(max_length=16)
 
+
+class ItemsIn(BaseModel):
+    """What was bought: the items as reviewed from an order screenshot, typed items ("milk 60,
+    chips 40"), or one kind for the whole order. None of them clears them."""
+
+    items: list[ItemIn] | None = Field(default=None, max_length=money_items.MAX_ITEMS)
     text: str | None = Field(default=None, max_length=1000)
     kind: str | None = Field(default=None, max_length=16)
 
@@ -511,7 +521,17 @@ async def set_items(
     t = await _own_txn(db, user.id, txn_id)
     if body.kind is not None and body.kind not in money_items.KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown kind.")
-    if body.text and body.text.strip():
+    if body.items:
+        if any(i.kind not in money_items.KINDS for i in body.items):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown kind.")
+        bought = [
+            money_items.Item(
+                " ".join(i.name.split()), i.price_paise, 1 if i.kind == "fees" else i.quantity,
+                i.kind,
+            )
+            for i in body.items
+        ]  # fmt: skip
+    elif body.text and body.text.strip():
         bought = money_items.parse_typed(body.text)
         if not bought:
             raise HTTPException(
@@ -527,6 +547,101 @@ async def set_items(
     log.info("money.items_set", extra={"user_id": str(user.id), "count": len(bought)})
     await store.changed(redis, user.id)
     return {"items": await money_habits.items_of(db, cfg, t.id)}
+
+
+def _shot_txn(t: MoneyTxn, has: bool) -> dict:
+    return {
+        "id": str(t.id),
+        "occurred_on": t.occurred_on,
+        "merchant": t.merchant,
+        "place": t.place,
+        "amount_paise": t.amount_paise,
+        "category": t.category,
+        "has_items": has,
+    }
+
+
+@router.post("/orders/screenshot")
+async def read_order_screenshot(
+    user: OwnerUser,
+    db: DbDep,
+    cfg: SettingsDep,
+    redis: RedisDep,
+    file: Annotated[UploadFile, File()],
+    txn_id: Annotated[uuid.UUID | None, Form()] = None,
+) -> dict:
+    """Read one screenshot of an order (Zepto, Blinkit, any shop's bill) with the on-device
+    vision model: its items, fees and total, and the payment it belongs to (the one given, the
+    one that fits its total and date, or a few to pick from). Saves nothing; the image is read
+    in memory and dropped."""
+    if wait := await hit(redis, "money-shot", str(user.id), onboard.READS_PER_HOUR, 3600):
+        raise too_many(wait, "screenshots")
+    given = await _own_txn(db, user.id, txn_id) if txn_id else None
+    data = await file.read(onboard.MAX_IMAGE_MB * 1024 * 1024 + 1)
+    if len(data) > onboard.MAX_IMAGE_MB * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Screenshots up to {onboard.MAX_IMAGE_MB} MB.",
+        )
+    if onboard._image_kind(data) is None:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "That isn't a PNG, JPEG or WebP image. Phone screenshots are PNG or JPEG.",
+        )
+    today = local_today(user)
+    await db.commit()
+    try:
+        raw = await money_vision.read_order(cfg, data, today)
+    except money_vision.VisionError as exc:
+        log.info("money.order_shot_unread", extra={"user_id": str(user.id)})
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
+    order = money_vision.clean_order(raw, today)
+    if given is not None:
+        match, candidates = given, [given]
+    else:
+        match, candidates = await money_habits.order_candidates(
+            db, user.id, shop=order.shop, on=order.occurred_on,
+            total_paise=order.total_paise, today=today,
+        )  # fmt: skip
+    told = set(
+        (
+            await db.scalars(
+                select(MoneyItem.txn_id).where(
+                    MoneyItem.user_id == user.id,
+                    MoneyItem.txn_id.in_([t.id for t in candidates] or [uuid.uuid4()]),
+                )
+            )
+        ).all()
+    )
+    log.info(
+        "money.order_shot_read",
+        extra={
+            "user_id": str(user.id),
+            "items": len(order.items),
+            "dropped": order.dropped,
+            "matched": match is not None,
+            "candidates": len(candidates),
+        },
+    )
+    return {
+        "shop": order.shop,
+        "occurred_on": order.occurred_on,
+        "total_paise": order.total_paise,
+        "listed_paise": order.listed_paise,
+        "dropped": order.dropped,
+        "items": [
+            {
+                "name": i.name,
+                "quantity": i.quantity,
+                "price_paise": i.price_paise,
+                "kind": i.kind,
+                "kind_label": money_items.KINDS[i.kind][0],
+            }
+            for i in order.items
+        ],
+        "match": _shot_txn(match, match.id in told) if match else None,
+        "candidates": [_shot_txn(t, t.id in told) for t in candidates],
+    }
 
 
 class ItemPatch(BaseModel):

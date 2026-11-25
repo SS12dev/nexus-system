@@ -2,9 +2,10 @@
 into kinds finer than a category, so Money can say where the money goes inside "Groceries":
 staples and fresh food, or snacks, cold drinks and delivery fees.
 
-Items come from the order email when it lists them (read without asking), or from the person's
-one-tap answer to "what did you buy?" (money_suggest). Kinds come from a word list; nothing here
-goes to an AI model.
+Items come from the order email when it lists them (read without asking), from a screenshot of
+the order read by the on-device vision model (money_vision.read_order), or from the person's
+one-tap answer to "what did you buy?" (money_suggest). Kinds come from a word list first; nothing
+here goes to an AI model.
 
 Pure: no database or network here.
 """
@@ -30,11 +31,16 @@ KINDS: dict[str, tuple[str, bool]] = {
     "meals": ("Ready meals", False),
     "sweets": ("Desserts and bakes", False),
     "gadgets": ("Gadgets, gifts and other", False),
+    "tobacco": ("Cigarettes and tobacco", False),
     "fees": ("Delivery, handling and tips", False),
     "mixed": ("A bit of everything", True),
     "other": ("Other items", True),
 }
-TREATS = frozenset(k for k, (_, need) in KINDS.items() if not need and k != "gadgets")
+# The impulse buys worth trimming first. Tobacco is counted on its own (money_habits.smoking),
+# not as a treat.
+TREATS = frozenset(
+    k for k, (_, need) in KINDS.items() if not need and k not in ("gadgets", "tobacco")
+)
 
 # Shops where one order is a basket of different things: these get "what did you buy?".
 # Matched against the merchant's key (money.merchant_key).
@@ -54,6 +60,19 @@ def is_basket(merchant: str) -> bool:
 # ("milk chocolate" is a snack, "cold coffee" a drink, "hair oil" personal care, "coffee
 # powder" a staple).
 _WORDS: list[tuple[str, tuple[str, ...]]] = [
+    # Help to quit is health, before tobacco and the "gum" in snacks.
+    ("health", ("nicotex", "nicorette", "nicotine gum", "nicotine patch", "nicotine lozenge")),
+    ("tobacco", ("cigarette", "cigarettes", "cigs", "cigar", "cigars",
+                 "e-cigarette", "vape", "tobacco", "gold flake", "goldflake", "marlboro",
+                 "classic milds", "classic mild", "classic regular", "classic ice burst",
+                 "classic connect", "classic verve", "itc classic", "wills navy cut",
+                 "navy cut", "benson", "bristol", "four square", "capstan", "red and white",
+                 "red & white", "dunhill", "davidoff", "parliament", "lucky strike", "esse",
+                 "insignia", "ultra mild", "ultra milds", "indie mint", "flake excel",
+                 "beedi", "bidi", "gutkha", "gutka", "pan masala", "paan masala",
+                 "rajnigandha", "vimal", "khaini", "zarda", "hookah", "shisha",
+                 "rolling paper", "rolling papers", "rizla", "ocb", "smoking paper",
+                 "lighter", "zippo", "ashtray")),
     ("fees", ("delivery fee", "delivery charge", "handling fee", "handling charge",
               "small cart", "small order", "platform fee", "convenience fee", "packaging",
               "packing charge", "late night", "surge", "rain fee", "tip", "delivery partner",

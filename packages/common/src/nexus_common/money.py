@@ -120,6 +120,7 @@ CATEGORIES = (
     "Bills and utilities",
     "Rent and housing",
     "Entertainment",
+    "Smoking and tobacco",
     "Subscriptions",
     "Health",
     "Travel",
@@ -164,6 +165,14 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                        "apple.com/bill", "apple media", "apple services", "google play",
                        "googleplay", "youtube", "icloud", "openai", "chatgpt", "anthropic",
                        "notion", "github", "jiocinema", "sonyliv", "zee5", "audible", "linkedin")),
+    # Paan shops and tobacconists. "pan" alone is too common a word ("company", "japan"), and
+    # "paan" needs spaces round it so a paani puri stall isn't one.
+    ("Smoking and tobacco", (" paan ", "paanwala", " panwala", " pan wala", " pan shop",
+                             " pan bhandar", " pan corner", " pan center",
+                             " pan centre", " pan house", " pan palace", " pan stall",
+                             " pan point", " pan parlour", " pan parlor", " pan bhandaar",
+                             " pan mahal", " pan kendra", " pan gali", " pan beedi",
+                             "tobacco", "cigarette", " beedi ", " bidi ")),
     ("Food and dining", ("swiggy", "zomato", "eatsure", "dominos", "domino's", "mcdonald",
                          "kfc", "starbucks", "cafe", "restaurant", "pizza", "burger", "chaayos",
                          "third wave", "blue tokai", "haldiram", "barbeque", "waffle", "bakery",
