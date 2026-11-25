@@ -14,6 +14,8 @@ import type {
   ScreenshotReading,
   ScreenshotSave,
   Balances,
+  BoughtItem,
+  Daily,
   Investments,
   Loan,
   LoanIn,
@@ -391,8 +393,13 @@ export const api = {
   moneyBanks: () => request<{ banks: string[] }>("/api/money/banks"),
   moneyAddAccount: (body: NewAccount) => request<{ id: string; label: string; moved?: number }>("/api/money/accounts", { method: "POST", body: json(body) }),
   moneySuggestions: () => request<Suggestions>("/api/money/suggestions"),
-  moneyAnswerSuggestion: (key: string, choice: string, amount_paise?: number) =>
-    request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice, amount_paise }) }),
+  moneyAnswerSuggestion: (key: string, choice: string, amount_paise?: number, text?: string) =>
+    request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice, amount_paise, text }) }),
+  moneyDaily: (month?: string) => request<Daily>(`/api/money/daily${orgQuery({ month })}`),
+  moneySetItems: (id: string, body: { text?: string; kind?: string }) =>
+    request<{ items: BoughtItem[] }>(`/api/money/transactions/${id}/items`, { method: "PUT", body: json(body) }),
+  moneyUpdateItem: (id: string, kind: string) =>
+    request<BoughtItem>(`/api/money/items/${id}`, { method: "PATCH", body: json({ kind }) }),
   moneyAcceptSuggestions: () => request<Suggestions & { accepted: number }>("/api/money/suggestions/accept-all", { method: "POST" }),
   moneyOrdersToConfirm: () => request<{ items: OrderToConfirm[] }>("/api/money/orders/to-confirm"),
   moneyOrderPaid: (id: string, body: OrderPaid) =>

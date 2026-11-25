@@ -15,6 +15,26 @@ export interface MoneySettings {
   categories: string[];
   /** Other Gmail accounts alerts are read from, with masked addresses. */
   mailboxes: Mailbox[];
+  /** Kinds of things bought, for "what did you buy?". */
+  item_kinds?: ItemKind[];
+}
+
+export interface ItemKind {
+  kind: string;
+  label: string;
+  /** A basic a household buys anyway; the rest are treats, convenience and fees. */
+  need: boolean;
+}
+
+/** One thing bought in an order, from the order email or told by you. */
+export interface BoughtItem {
+  id: string;
+  name: string;
+  quantity: number;
+  price_paise: number | null;
+  kind: string;
+  kind_label: string;
+  source: "email" | "you";
 }
 
 export interface Mailbox {
@@ -45,9 +65,14 @@ export interface MoneyTxn {
   /** The saving this went into or came back from. */
   asset_id: string | null;
   narration?: string | null;
+  /** Where on a platform it was bought (the restaurant on Zomato). */
+  place?: string | null;
   /** Details only: the other half of the pair and the saving's name. */
   paired?: Linked | null;
   saving?: string | null;
+  /** Details only: what was bought, and whether it's a quick-commerce order. */
+  items?: BoughtItem[];
+  basket?: boolean;
 }
 
 export type PairKind = "transfer" | "card" | "refund";
@@ -683,7 +708,7 @@ export const SOURCE_LABEL: Record<MoneyTxn["source"], string> = {
 /** One of Money's one-tap questions, with its best guess (a choice id) when it has one. */
 export interface Suggestion {
   key: string;
-  kind: "order" | "subscription" | "rent" | "category" | "emi" | "yearly";
+  kind: "order" | "subscription" | "rent" | "category" | "emi" | "yearly" | "basket";
   merchant: string;
   amount_paise: number;
   on: string | null;
@@ -1026,3 +1051,51 @@ export interface MailStatement {
   status: "new" | "imported" | "covered";
   mailbox: string;
 }
+
+/** Day by day (/api/money/daily): each day of a month and the habits under it. "Everyday"
+ * spending leaves out rent, EMIs, bills and subscriptions. */
+export interface Daily {
+  month: string;
+  days: DailyDay[];
+  counted_days: number;
+  spent_paise: number;
+  everyday_paise: number;
+  everyday_average_paise: number;
+  no_spend_days: number;
+  biggest: { on: string; everyday_paise: number } | null;
+  /** Monday is 0. Averages of everyday spending over the last eight weeks. */
+  weekdays: { weekday: number; average_paise: number; days: number }[];
+  small: { count: number; spent_paise: number };
+  frequent: { merchant: string; count: number; spent_paise: number }[];
+  baskets: BasketSummary;
+  baskets_last: { orders: number; spent_paise: number };
+  delivery: BasketSummary;
+  delivery_last: { orders: number; spent_paise: number };
+  tips: { kind: string; text: string }[];
+}
+
+export interface DailyDay {
+  on: string;
+  spent_paise: number;
+  everyday_paise: number;
+  fixed_paise: number;
+  count: number;
+  future: boolean;
+  items: { id: string; merchant: string; place: string | null; amount_paise: number; category: string; fixed: boolean; basket: boolean; kinds: string[] }[];
+}
+
+export interface BasketSummary {
+  orders: number;
+  spent_paise: number;
+  average_paise: number;
+  /** Spent on orders whose contents Money knows (from the email or your answer). */
+  told_paise: number;
+  untold: number;
+  fees_paise: number;
+  treats_paise: number;
+  by_kind: { kind: string; label: string; need: boolean; spent_paise: number }[];
+  /** The restaurants (or sellers) ordered from most, when the emails name them. */
+  places: { place: string; count: number; spent_paise: number }[];
+}
+
+export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

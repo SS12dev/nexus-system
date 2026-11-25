@@ -8,6 +8,7 @@ Run once per person (the orchestrator keeps a Redis flag per version):
 - (version 2) alerts read again from mail for the last REREAD_DAYS, for emails an earlier
   version couldn't read (the orchestrator does the reading);
 - (version 3) statement lines paid through Google Pay's bills named "Google Pay bills";
+- (version 5) order emails read again for the items in them and the restaurant;
 - two emails about one payment (a card's "debited" and the autopay's "bill paid", or one alert
   in two mailboxes) made one row.
 
@@ -32,9 +33,11 @@ log = logging.getLogger(__name__)
 # 3: Google Pay bill payments (electricity, recharges) named and filed as bills; pay-later
 #    repayments and GRE prep given their categories.
 # 4: a debit card's currency-conversion fee (DCC) filed as a fee, not found as a subscription.
-VERSION = 4
-# How far back alerts are read again when a new version's reading fixes call for it.
-REREAD_DAYS = 45
+# 5: order emails read again so the items bought and the restaurant are kept (money_items).
+VERSION = 5
+# How far back alerts are read again when a new version's reading fixes call for it: four
+# months, so the habits view has last month and more to compare with.
+REREAD_DAYS = 120
 
 
 def _payee_lost(old: str, cleaned: str) -> bool:

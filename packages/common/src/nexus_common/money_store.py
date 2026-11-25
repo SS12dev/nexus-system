@@ -15,7 +15,14 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_links, money_orders, money_salary, money_stocks
+from nexus_common import (
+    money,
+    money_habits,
+    money_links,
+    money_orders,
+    money_salary,
+    money_stocks,
+)
 from nexus_common import money_plan as plan
 from nexus_common.events import Event, publish
 from nexus_common.models import (
@@ -25,6 +32,7 @@ from nexus_common.models import (
     MoneyGoal,
     MoneyHolding,
     MoneyImport,
+    MoneyItem,
     MoneyLoan,
     MoneyMailStatement,
     MoneySalary,
@@ -125,6 +133,7 @@ async def merge_account(
         )
         if twin is not None:
             taken.add(twin.id)
+            await money_habits.move_items(db, t.id, twin.id)
             await db.delete(t)
             matched += 1
         else:
@@ -583,7 +592,12 @@ async def record_order(
             .order_by(MoneyTxn.occurred_on)
         )
     ).all()
-    if any(key in (t.dedupe_key, t.alt_key) for t in nearby):
+    if seen := next((t for t in nearby if key in (t.dedupe_key, t.alt_key)), None):
+        # Read before; the items are kept if they weren't then (an email read again for history).
+        if order.place and not seen.place:
+            seen.place = order.place
+        if order.items and not await money_habits.has_items(db, seen.id):
+            await money_habits.save_items(db, cfg, user_id, seen.id, order.items, "email")
         return "skipped"
     prefs = await settings_for(db, user_id)
     rules = prefs.rules or {}
@@ -604,6 +618,9 @@ async def record_order(
     )
     if twins:
         twin = twins[0]
+        twin.place = twin.place or order.place
+        if order.items:
+            await money_habits.save_items(db, cfg, user_id, twin.id, order.items, "email")
         if twin.merchant == order.shop:
             return "skipped"
         twin.merchant = order.shop[:120]
@@ -620,26 +637,28 @@ async def record_order(
                 | (MoneyAccount.card_mask == order.card_mask),
             )
         )
-    db.add(
-        MoneyTxn(
-            user_id=user_id,
-            account_id=account.id if account else None,
-            occurred_on=order.occurred_on,
-            amount_paise=order.amount_paise,
-            direction="debit",
-            merchant=order.shop[:120],
-            category=category,
-            category_by="rule" if rules.get(money.merchant_key(order.shop)) else "auto",
-            narration_enc=money.seal(cfg, ""),
-            channel=p.channel,
-            source="receipt",
-            source_ref=source_ref[:64],
-            ref=(order.order_no or "")[:40] or None,
-            dedupe_key=key,
-            created_at=utcnow(),
-        )
+    row = MoneyTxn(
+        user_id=user_id,
+        account_id=account.id if account else None,
+        occurred_on=order.occurred_on,
+        amount_paise=order.amount_paise,
+        direction="debit",
+        merchant=order.shop[:120],
+        category=category,
+        category_by="rule" if rules.get(money.merchant_key(order.shop)) else "auto",
+        narration_enc=money.seal(cfg, ""),
+        channel=p.channel,
+        source="receipt",
+        source_ref=source_ref[:64],
+        ref=(order.order_no or "")[:40] or None,
+        place=order.place,
+        dedupe_key=key,
+        created_at=utcnow(),
     )
+    db.add(row)
     await db.flush()
+    if order.items:
+        await money_habits.save_items(db, cfg, user_id, row.id, order.items, "email")
     return "added"
 
 
@@ -1047,6 +1066,7 @@ async def delete_all(db: AsyncSession, user_id: uuid.UUID) -> None:
         MoneyLoan,
         MoneyAsset,
         MoneySubscription,
+        MoneyItem,
         MoneyTxn,
         MoneyImport,
         MoneyBudget,
@@ -2047,6 +2067,7 @@ async def upcoming_payments(
 def _sealed_columns():
     return [
         (MoneyTxn, MoneyTxn.id, MoneyTxn.narration_enc),
+        (MoneyItem, MoneyItem.id, MoneyItem.name_enc),
         (MoneySettings, MoneySettings.user_id, MoneySettings.cas_password_enc),
         (MoneyImport, MoneyImport.id, MoneyImport.filename_enc),
         (MoneyAsset, MoneyAsset.id, MoneyAsset.account_no_enc),

@@ -16,6 +16,7 @@ import {
 } from "../../lib/money";
 import { confirmAction, toast } from "../Feedback";
 import { Select } from "../Select";
+import { Bought } from "./Bought";
 import { OrdersToConfirm } from "./Orders";
 import { Empty, MonthPicker, Spinner, useAccounts, useMoneySettings, useMoneyVersion } from "./parts";
 
@@ -276,7 +277,10 @@ function TxnRow({
     <li className={txn.excluded ? "opacity-70" : ""}>
       <button onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-edge/40">
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-slate-100">{txn.merchant}</span>
+          <span className="block truncate text-sm text-slate-100">
+            {txn.merchant}
+            {txn.place && <span className="text-slate-400"> · {txn.place}</span>}
+          </span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             <span className="text-slate-400">{txn.category}</span>
             {account && <span>{account}</span>}
@@ -412,6 +416,7 @@ function TxnDetail({ txn, categories }: { txn: MoneyTxn; categories: string[] })
           </button>
         )}
       </div>
+      {full && (full.basket || (full.items?.length ?? 0) > 0) && <Bought txn={full} onChange={(items) => setFull({ ...full, items })} />}
       {full && <Links txn={full} busy={busy} save={save} />}
       {full?.narration && (
         <p className="break-words rounded-md bg-ink/60 px-2.5 py-1.5 font-mono text-xs text-slate-400" title="What the bank wrote">

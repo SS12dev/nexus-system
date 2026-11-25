@@ -2170,6 +2170,8 @@ class MoneyTxn(Base):
     # Left out of totals (a refund pair, a transfer between own accounts...).
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    # Where on a platform it was bought (the restaurant on Zomato), from the order email.
+    place: Mapped[str | None] = mapped_column(String(120))
     # The other half of a pair (money_links): the same money leaving one of the person's
     # accounts and arriving in another ("transfer"), a bank paying a card bill ("card"), or a
     # refund of an earlier purchase ("refund").
@@ -2188,6 +2190,32 @@ class MoneyTxn(Base):
         Index("ix_money_txns_user_day", "user_id", "occurred_on"),
         Index("ix_money_txns_account", "account_id"),
         Index("ix_money_txns_asset", "asset_id"),
+    )
+
+
+class MoneyItem(Base):
+    """One thing bought in an order (milk, crisps, a delivery fee), read from the order email
+    or told by the person ("what did you buy?"). The name is encrypted (money.seal); the kind
+    (money_items.KINDS) and price are what the habits view adds up."""
+
+    __tablename__ = "money_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    txn_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("money_txns.id", ondelete="CASCADE"))
+    name_enc: Mapped[str] = mapped_column(Text, default="")
+    quantity: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # As the email or the person gave it; None when only the kind is known.
+    price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(16))
+    # email (read from the order email) or you (answered or edited by the person).
+    source: Mapped[str] = mapped_column(String(8), default="email")
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_money_items_txn", "txn_id"),
+        Index("ix_money_items_user", "user_id"),
     )
 
 

@@ -7,15 +7,16 @@ amount is already in Money, in which case it only gives that payment the shop's 
 bank's alert arrives later it joins the order's row instead of adding a second one
 (money_store.ingest). An order nobody's payment explains is asked about: "how did you pay?".
 
-Pure: no database or network here. Only the shop, total, date, order number and payment mode are
-kept; never the items, address or name in the email.
+Pure: no database or network here. The shop, total, date, order number, payment mode and the
+items bought (money_items: names are stored encrypted) are kept; never the address or name in
+the email.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
-from nexus_common import money
+from nexus_common import money, money_items
 
 # Sender address fragment -> (shop, category). The category is the usual one; the person's own
 # rule for the shop still wins (money.categorise).
@@ -120,6 +121,10 @@ class Order:
     paid_by: str
     card_mask: str | None = None
     order_no: str | None = None
+    # What the email says was bought, fees included; [] when it doesn't list them.
+    items: list[money_items.Item] = field(default_factory=list)
+    # The restaurant or seller on a platform ("Urban Paratha" on Zomato), when the email says.
+    place: str | None = None
 
 
 def shop_of(sender: str) -> tuple[str, str | None] | None:
@@ -174,6 +179,24 @@ def paid_by(text: str) -> tuple[str, str | None]:
     return "unknown", None
 
 
+_PLACE = (
+    re.compile(r"\border from\s+(.{2,80}?)\s*$", re.I),
+    re.compile(r"\b(?:ordering|order(?:ed)?) from\s+(.{2,80}?)(?:\s+was\b|[.!\n]|$)", re.I),
+)
+
+
+def place_of(subject: str, body: str, shop: str) -> str | None:
+    """The restaurant or seller an order on a platform was from: "Your Zomato order from Urban
+    Paratha" -> "Urban Paratha". None when it's the shop itself or not said."""
+    for text in (subject, body[:2000]):
+        for pattern in _PLACE:
+            if m := pattern.search(text):
+                name = " ".join(m.group(1).split()).strip(" -|,.")
+                if name and money.merchant_key(name) != money.merchant_key(shop):
+                    return name[:120]
+    return None
+
+
 def parse_order(subject: str, body: str, received: date, sender: str = "") -> Order | None:
     """Read one order or receipt email. None for anything else: a bank alert, a cancellation or
     refund, a promotion, or an email with no total."""
@@ -202,7 +225,17 @@ def parse_order(subject: str, body: str, received: date, sender: str = "") -> Or
         paid_by=how,
         card_mask=mask,
         order_no=m.group(1)[:40] if m else None,
+        items=_items(body, shop[1]),
+        place=place_of(subject, body, shop[0]),
     )
+
+
+def _items(body: str, category: str | None) -> list[money_items.Item]:
+    items = money_items.parse_items(body)
+    if category == "Food and dining":
+        for it in items:
+            it.kind = money_items.food_kind(it.name)
+    return items
 
 
 CHANNEL = {"cash": "cash", "upi": "upi", "card": "card", "netbanking": "neft"}
