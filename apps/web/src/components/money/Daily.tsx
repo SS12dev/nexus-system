@@ -151,7 +151,7 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
     <div className="min-w-0 rounded-lg bg-ink/40 px-2 py-1.5">
       <p className="truncate text-[11px] text-slate-500">{label}</p>
       <p className="truncate text-sm font-semibold tabular-nums text-slate-100">{value}</p>
-      {sub && <p className="truncate text-[11px] text-slate-500">{sub}</p>}
+      {sub && <p className="text-[11px] leading-tight text-slate-500">{sub}</p>}
     </div>
   );
 }
@@ -431,7 +431,7 @@ function Smoking({ data }: { data: Daily }) {
             <Fact
               label="Days bought"
               value={`${s.days} of ${data.counted_days}`}
-              sub={s.days ? `About ${rupees(s.average_paise, { whole: true })} a time` : undefined}
+              sub={s.days ? `${rupees(s.average_paise, { whole: true })} each` : undefined}
             />
             <Fact label="Since the last" value={since} sub={s.last_on ? dayLabel(s.last_on) : undefined} />
           </div>
@@ -481,6 +481,7 @@ function Smoking({ data }: { data: Daily }) {
       ) : (
         <p className="text-sm text-slate-400">Nothing tracked yet this month or last.</p>
       )}
+      <PackCount data={data} />
       <div className="mt-3 border-t border-edge/60 pt-3 text-sm">
         {limit && !editing ? (
           <>
@@ -540,5 +541,48 @@ function Smoking({ data }: { data: Daily }) {
         <p className="mt-2 text-xs text-slate-500">Free help to quit or cut down: the national quitline, 1800-11-2356.</p>
       </div>
     </Card>
+  );
+}
+
+/** How many a day, from the packs in your orders: each pack is taken as finished when the next
+ * one is bought, so the gaps between packs give the rate. */
+function PackCount({ data }: { data: Daily }) {
+  const p = data.smoking.packs;
+  const n = (x: number) => (x >= 10 || Number.isInteger(x) ? x.toFixed(0) : x.toFixed(1));
+  return (
+    <section aria-labelledby="packs-h" className="mt-3 border-t border-edge/60 pt-3">
+      <h3 id="packs-h" className="mb-1 text-xs text-slate-400">
+        From your packs
+      </h3>
+      {p.per_day ? (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <Fact
+              label="A day"
+              value={`About ${n(p.per_day)}`}
+              sub={p.per_day_last_month ? `Last month ${n(p.per_day_last_month)}` : undefined}
+            />
+            <Fact label={`A ${p.usual_size}-pack lasts`} value={`${n(p.pack_days ?? 0)} days`} />
+            <Fact label="Next pack due" value={p.next_on ? dayLabel(p.next_on) : "–"} sub={`${p.sticks_month} this month`} />
+          </div>
+          {p.tips.length > 0 && (
+            <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
+              {p.tips.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-slate-500">
+          {p.packs.length
+            ? `${p.packs.length === 1 ? "One pack so far" : `${p.packs.length} packs so far`}. Once there's a next one, Money counts each pack as finished then and works out how many a day.`
+            : 'Cigarettes in your Zepto or Blinkit orders are counted as packs (the 10s or 20s in the name). Read the order screenshot, or type it like "classic milds 20s 360", and each new pack marks the last one finished.'}
+        </p>
+      )}
+      {p.assumed && (
+        <p className="mt-1 text-xs text-slate-500">Where an order didn't say the pack size, Money took your usual {p.usual_size}.</p>
+      )}
+    </section>
   );
 }

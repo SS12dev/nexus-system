@@ -1090,6 +1090,26 @@ export interface Smoking {
   year_paise: number | null;
   budget_paise: number | null;
   shops: { merchant: string; count: number; spent_paise: number }[];
+  packs: Packs;
+}
+
+/** Cigarettes counted from the packs in your orders, each taken as finished when the next is
+ * bought. Rates are sticks a day; null until there are two packs to go on. */
+export interface Packs {
+  /** Newest first; assumed when the pack size wasn't written on the item. */
+  packs: { on: string; sticks: number; assumed: boolean }[];
+  usual_size: number;
+  sticks_month: number;
+  per_day: number | null;
+  per_day_month: number | null;
+  per_day_last_month: number | null;
+  pack_days: number | null;
+  next_on: string | null;
+  stick_paise: number | null;
+  /** Loose buys at paan shops this month, as sticks at your usual price a stick. */
+  loose_sticks: number;
+  assumed: boolean;
+  tips: string[];
 }
 
 export const SMOKING = "Smoking and tobacco";

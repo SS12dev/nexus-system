@@ -8,7 +8,14 @@ from datetime import date, timedelta
 
 from sqlalchemy import select
 
-from nexus_common import money, money_habits, money_items, money_suggest, money_vision
+from nexus_common import (
+    money,
+    money_habits,
+    money_items,
+    money_smokes,
+    money_suggest,
+    money_vision,
+)
 from nexus_common.models import MoneyBudget, MoneyTxn, User, utcnow
 from nexus_common.organiser import local_today
 
@@ -160,6 +167,9 @@ async def test_order_screenshot_is_matched_saved_and_counted(
     assert smoke["days"] == 1 and smoke["last_on"] == on.isoformat()
     assert smoke["budget_paise"] == 2_000_00
     assert smoke["shops"] == [{"merchant": "Sharma Paan Corner", "count": 1, "spent_paise": 190_00}]
+    # One pack so far, its size not written: the usual 10, and no rate until the next.
+    packs = smoke["packs"]
+    assert (packs["sticks_month"], packs["assumed"], packs["per_day"]) == (10, True, None)
     that = next(d for d in day["days"] if d["on"] == on.isoformat())
     assert that["tobacco_paise"] == 380_00
     # Cigarettes aren't counted with the treats (snacks, drinks and fees) in the baskets.
@@ -190,3 +200,38 @@ async def test_order_screenshot_without_a_clear_payment_offers_a_pick(
             db, user.id, shop="Zepto", on=None, total_paise=250_00, today=today
         )
         assert match is not None and match.merchant == "Zepto"
+
+
+def test_packs_give_sticks_a_day():
+    assert money_smokes.pack_size("Gold Flake Kings 10s") == 10
+    assert money_smokes.pack_size("Marlboro Advance (Pack of 20)") == 20
+    assert money_smokes.pack_size("Classic Milds 20 Sticks") == 20
+    assert money_smokes.pack_size("Wills Navy Cut") is None
+    assert not money_smokes.is_sticks("Bic Lighter")
+    assert not money_smokes.is_sticks("Rajnigandha Pan Masala")
+    today = date(2026, 11, 25)
+    # A 20-pack every 4 days in October, every 2 in November.
+    days = [today - timedelta(days=d) for d in (56, 52, 48, 44, 40, 36, 32, 28)]
+    days += [today - timedelta(days=d) for d in (24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2)]
+    buys = [money_smokes.Buy(d, "Classic Milds 20s", 1, 360_00) for d in days]
+    # Unsized: the usual 20.
+    buys.append(money_smokes.Buy(today, "Classic Milds", 1, None))
+    got = money_smokes.consumption(
+        buys, start=date(2026, 11, 1), end=date(2026, 12, 1), stop=today + timedelta(days=1),
+        last_start=date(2026, 10, 1), today=today, loose_paise=360_00, budget_paise=2_000_00,
+    )  # fmt: skip
+    assert got["usual_size"] == 20 and got["stick_paise"] == 18_00
+    assert got["per_day_last_month"] == 5.0 and got["per_day_month"] == 10.0
+    assert got["packs"][0] == {"on": today, "sticks": 20, "assumed": True}
+    assert got["next_on"] is not None and got["next_on"] > today
+    assert got["loose_sticks"] == 20 and got["assumed"]
+    text = " ".join(got["tips"])
+    assert "up from 5 last month" in text
+    assert "limit covers about" in text
+    assert "loose" in text.lower()
+    # One pack: no rate yet, and no tips.
+    one = money_smokes.consumption(
+        buys[:1], start=date(2026, 11, 1), end=date(2026, 12, 1), stop=today,
+        last_start=date(2026, 10, 1), today=today,
+    )  # fmt: skip
+    assert one["per_day"] is None and one["tips"] == []

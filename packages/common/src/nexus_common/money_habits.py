@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_items
+from nexus_common import money, money_items, money_smokes
 from nexus_common.models import MoneyBudget, MoneyItem, MoneyTxn, utcnow
 from nexus_common.settings import Settings
 
@@ -426,6 +426,7 @@ async def daily(
         ),
         "smoking": await _smoking(
             db,
+            cfg,
             user_id,
             rows,
             smoke,
@@ -456,6 +457,7 @@ def _tobacco_by_day(rows: list[MoneyTxn], kinds: dict) -> dict[date, int]:
 
 async def _smoking(
     db: AsyncSession,
+    cfg: Settings,
     user_id: uuid.UUID,
     rows: list[MoneyTxn],
     smoke: dict[date, int],
@@ -488,7 +490,35 @@ async def _smoking(
         )
     )
     spent = sum(month_days.values())
+    # Packs: the cigarettes in orders, a few months back so each pack's gap to the next is known.
+    since = min(last_start, stop - timedelta(days=money_smokes.RATE_DAYS + 35))
+    found = (
+        await db.execute(
+            select(MoneyTxn.id, MoneyTxn.occurred_on, MoneyTxn.amount_paise, MoneyItem.name_enc,
+                   MoneyItem.quantity, MoneyItem.price_paise)
+            .join(MoneyTxn, MoneyTxn.id == MoneyItem.txn_id)
+            .where(MoneyItem.user_id == user_id, MoneyItem.kind == "tobacco",
+                   MoneyTxn.occurred_on >= since, MoneyTxn.occurred_on < end)
+        )
+    ).all()  # fmt: skip
+    buys = []
+    for _id, on, amount, name_enc, qty, price in found:
+        name = money.unseal(cfg, name_enc) if name_enc else ""
+        if money_smokes.is_sticks(name):
+            # A whole order answered as "Cigarettes" has no price of its own: its payment's.
+            buys.append(money_smokes.Buy(on, name, qty or 1, price if name else amount))
+    itemised = {f[0] for f in found}
+    loose = sum(
+        _cost(t)
+        for t in rows
+        if start <= t.occurred_on < stop and t.category == SMOKING and t.id not in itemised
+    )
+    packs = money_smokes.consumption(
+        buys, start=start, end=end, stop=stop, last_start=last_start, today=today,
+        loose_paise=loose, budget_paise=budget,
+    )  # fmt: skip
     return {
+        "packs": packs,
         "spent_paise": spent,
         "last_month_paise": last_month,
         "days": len(month_days),
