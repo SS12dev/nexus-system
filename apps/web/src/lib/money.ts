@@ -1072,6 +1072,78 @@ export interface Daily {
   delivery: BasketSummary;
   delivery_last: { orders: number; spent_paise: number };
   tips: { kind: string; text: string }[];
+  smoking: Smoking;
+}
+
+/** Cigarettes and tobacco in a month: payments filed under Smoking and tobacco (paan shops,
+ * tobacconists) plus the tobacco in orders whose items Money knows. */
+export interface Smoking {
+  spent_paise: number;
+  last_month_paise: number;
+  /** Days something was bought, and counted days without. */
+  days: number;
+  free_days: number;
+  average_paise: number;
+  last_on: string | null;
+  days_since: number | null;
+  /** A year at the pace of the last eight weeks; null until there are two weeks to go on. */
+  year_paise: number | null;
+  budget_paise: number | null;
+  shops: { merchant: string; count: number; spent_paise: number }[];
+  packs: Packs;
+}
+
+/** Cigarettes counted from the packs in your orders, each taken as finished when the next is
+ * bought. Rates are sticks a day; null until there are two packs to go on. */
+export interface Packs {
+  /** Newest first; assumed when the pack size wasn't written on the item. */
+  packs: { on: string; sticks: number; assumed: boolean }[];
+  usual_size: number;
+  sticks_month: number;
+  per_day: number | null;
+  per_day_month: number | null;
+  per_day_last_month: number | null;
+  pack_days: number | null;
+  next_on: string | null;
+  stick_paise: number | null;
+  /** Loose buys at paan shops this month, as sticks at your usual price a stick. */
+  loose_sticks: number;
+  assumed: boolean;
+  tips: string[];
+}
+
+export const SMOKING = "Smoking and tobacco";
+
+/** An order screenshot as read by the model on your computer, for review before saving. */
+export interface OrderReading {
+  shop: string | null;
+  occurred_on: string | null;
+  total_paise: number | null;
+  /** What the items and fees read add up to. */
+  listed_paise: number;
+  dropped: number;
+  items: ReadItem[];
+  /** The payment it belongs to, when exactly one fits its total and date. */
+  match: OrderPayment | null;
+  candidates: OrderPayment[];
+}
+
+export interface ReadItem {
+  name: string;
+  quantity: number;
+  price_paise: number | null;
+  kind: string;
+  kind_label: string;
+}
+
+export interface OrderPayment {
+  id: string;
+  occurred_on: string;
+  merchant: string;
+  place: string | null;
+  amount_paise: number;
+  category: string;
+  has_items: boolean;
 }
 
 export interface DailyDay {
@@ -1079,6 +1151,8 @@ export interface DailyDay {
   spent_paise: number;
   everyday_paise: number;
   fixed_paise: number;
+  /** Spent on cigarettes and tobacco that day. */
+  tobacco_paise: number;
   count: number;
   future: boolean;
   items: { id: string; merchant: string; place: string | null; amount_paise: number; category: string; fixed: boolean; basket: boolean; kinds: string[] }[];

@@ -1,9 +1,11 @@
 import { Lightbulb, ShoppingBasket, Table2, UtensilsCrossed } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../../lib/api";
-import { compact, dayLabel, rupees, WEEKDAYS, type BasketSummary, type Daily, type DailyDay } from "../../lib/money";
+import { compact, dayLabel, parseRupees, rupees, SMOKING, WEEKDAYS, type BasketSummary, type Daily, type DailyDay } from "../../lib/money";
+import { toast } from "../Feedback";
 import { SERIES } from "./Charts";
+import { OrderShot } from "./OrderShot";
 import { Card, useMoney } from "./parts";
 
 /** Sequential, one hue: a day's everyday spend as the strength of the series blue over the
@@ -31,7 +33,10 @@ export function DayByDay({ month }: { month: string }) {
   return (
     <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <Calendar data={data} />
-      <Habits data={data} />
+      <div className="grid min-w-0 content-start gap-4">
+        <Habits data={data} />
+        <Smoking data={data} />
+      </div>
     </div>
   );
 }
@@ -146,7 +151,7 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
     <div className="min-w-0 rounded-lg bg-ink/40 px-2 py-1.5">
       <p className="truncate text-[11px] text-slate-500">{label}</p>
       <p className="truncate text-sm font-semibold tabular-nums text-slate-100">{value}</p>
-      {sub && <p className="truncate text-[11px] text-slate-500">{sub}</p>}
+      {sub && <p className="text-[11px] leading-tight text-slate-500">{sub}</p>}
     </div>
   );
 }
@@ -260,6 +265,7 @@ function Habits({ data }: { data: Daily }) {
         untold={(n) => `${n} order${n === 1 ? " is" : "s are"} waiting on "What did you buy?" in Money suggests: a tap each.`}
         onPlace={txns}
       />
+      <OrderShot label="Add order screenshots" className="-mt-1 mb-3" />
       <div className="rounded-lg bg-ink/40 px-2.5 py-1.5 text-xs" title="Everyday spends under ₹300 each">
         <p className="flex items-baseline gap-2">
           <span className="text-slate-300">Small spends</span>
@@ -342,7 +348,9 @@ function Orders({
                   <div className="flex items-baseline gap-2">
                     <span className="min-w-0 flex-1 truncate text-slate-300">
                       {k.label}
-                      {!k.need && k.kind !== "meals" && <span className="ml-1.5 text-slate-500">{k.kind === "fees" ? "· avoidable" : "· treat"}</span>}
+                      {!k.need && !["meals", "tobacco", "gadgets"].includes(k.kind) && (
+                        <span className="ml-1.5 text-slate-500">{k.kind === "fees" ? "· avoidable" : "· treat"}</span>
+                      )}
                     </span>
                     <span className="tabular-nums text-slate-200">{rupees(k.spent_paise, { whole: true })}</span>
                   </div>
@@ -373,6 +381,207 @@ function Orders({
         </>
       ) : (
         <p className="text-xs text-slate-500">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+/** Cigarettes and tobacco: what they cost this month against last, on how many days, how long
+ * since the last purchase, what the recent pace comes to in a year, and a monthly limit to keep
+ * to. Plain facts to manage it by; no lectures. */
+function Smoking({ data }: { data: Daily }) {
+  const s = data.smoking;
+  const navigate = useNavigate();
+  const [limit, setLimit] = useState<number | null>(s.budget_paise);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  useEffect(() => setLimit(s.budget_paise), [s.budget_paise]);
+  const tracked = s.spent_paise > 0 || s.last_month_paise > 0 || s.last_on !== null;
+  const typed = text.trim() ? parseRupees(text) : null;
+  const saveLimit = async () => {
+    if (!typed) return;
+    try {
+      await api.moneySetBudget(SMOKING, typed);
+      setLimit(typed);
+      setEditing(false);
+      setText("");
+      toast(`Limit set: ${rupees(typed, { whole: true })} a month`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const shown = data.days.filter((d) => !d.future);
+  const bought = shown.filter((d) => d.tobacco_paise > 0);
+  const left = limit ? limit - s.spent_paise : 0;
+  const since = s.days_since == null ? "Not lately" : s.days_since === 0 ? "Today" : `${s.days_since} day${s.days_since === 1 ? "" : "s"}`;
+  return (
+    <Card title="Cigarettes and tobacco">
+      <p className="-mt-1 mb-3 text-xs text-slate-500">
+        Payments at paan shops and tobacconists, and cigarettes in your Zepto or Blinkit orders. A shop paid by UPI under a person's name
+        shows up in Money suggests once: answer "Cigarettes or a paan shop" and every payment there counts from then on.
+      </p>
+      {tracked ? (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <Fact
+              label="This month"
+              value={rupees(s.spent_paise, { whole: true })}
+              sub={s.last_month_paise ? `Last month ${rupees(s.last_month_paise, { whole: true })}` : undefined}
+            />
+            <Fact
+              label="Days bought"
+              value={`${s.days} of ${data.counted_days}`}
+              sub={s.days ? `${rupees(s.average_paise, { whole: true })} each` : undefined}
+            />
+            <Fact label="Since the last" value={since} sub={s.last_on ? dayLabel(s.last_on) : undefined} />
+          </div>
+          {shown.length > 0 && (
+            <div className="mt-3">
+              <ol aria-label="Days with a purchase this month" className="flex flex-wrap gap-0.5">
+                {shown.map((d) => (
+                  <li
+                    key={d.on}
+                    title={`${dayLabel(d.on)}: ${d.tobacco_paise ? rupees(d.tobacco_paise, { whole: true }) : "none"}`}
+                    className="h-3 w-3 rounded-sm border border-edge/70"
+                    style={d.tobacco_paise ? { backgroundColor: SERIES, borderColor: SERIES } : undefined}
+                  />
+                ))}
+              </ol>
+              <p className="mt-1 text-xs text-slate-500">
+                {bought.length
+                  ? `Bought on ${bought.map((d) => dayLabel(d.on).split(" ")[0]).join(", ")}; ${s.free_days} day${s.free_days === 1 ? "" : "s"} without.`
+                  : "Nothing bought so far this month."}
+              </p>
+            </div>
+          )}
+          {s.year_paise != null && s.year_paise > 0 && (
+            <p className="mt-2 text-sm text-slate-300">
+              At the pace of the last few weeks that's about{" "}
+              <span className="font-semibold text-slate-100">{rupees(s.year_paise, { whole: true })}</span> a year.
+            </p>
+          )}
+          {s.shops.length > 0 && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Mostly at:{" "}
+              {s.shops.map((p, i) => (
+                <span key={p.merchant}>
+                  {i > 0 && ", "}
+                  <button
+                    onClick={() => navigate(`/money/transactions?${new URLSearchParams({ month: data.month, q: p.merchant })}`)}
+                    className="text-slate-300 hover:text-white"
+                  >
+                    {p.merchant}
+                  </button>{" "}
+                  {p.count}×
+                </span>
+              ))}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-sm text-slate-400">Nothing tracked yet this month or last.</p>
+      )}
+      <PackCount data={data} />
+      <div className="mt-3 border-t border-edge/60 pt-3 text-sm">
+        {limit && !editing ? (
+          <>
+            <p className="flex items-baseline gap-2">
+              <span className="text-slate-300">Monthly limit {rupees(limit, { whole: true })}</span>
+              <span className="ml-auto tabular-nums text-slate-100">
+                {left >= 0 ? `${rupees(left, { whole: true })} left` : `${rupees(-left, { whole: true })} over`}
+              </span>
+            </p>
+            <div
+              className="mt-1 h-1.5 rounded-full bg-edge/60"
+              role="img"
+              aria-label={`${Math.round((s.spent_paise / limit) * 100)}% of the limit used`}
+            >
+              <div
+                className="h-1.5 rounded-full"
+                style={{ width: `${Math.min(100, (s.spent_paise / limit) * 100)}%`, backgroundColor: left >= 0 ? SERIES : "#d03b3b" }}
+              />
+            </div>
+            <button onClick={() => setEditing(true)} className="mt-1 text-xs text-sky-300 hover:text-sky-200">
+              Change the limit
+            </button>
+          </>
+        ) : (
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveLimit();
+            }}
+          >
+            <label htmlFor="smoke-limit" className="text-xs text-slate-400">
+              {limit ? "New monthly limit" : "Set a monthly limit to cut down to"}
+            </label>
+            <input
+              id="smoke-limit"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              inputMode="decimal"
+              placeholder={s.last_month_paise ? String(Math.round((s.last_month_paise * 0.75) / 100)) : "1500"}
+              className="w-24 rounded-md border border-edge bg-ink px-2 py-1 text-base sm:text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!typed}
+              className="rounded-md border border-edge px-2.5 py-1 text-sm text-slate-200 hover:bg-edge disabled:opacity-50"
+            >
+              Save
+            </button>
+            {limit && (
+              <button type="button" onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:text-slate-200">
+                Cancel
+              </button>
+            )}
+          </form>
+        )}
+        <p className="mt-2 text-xs text-slate-500">Free help to quit or cut down: the national quitline, 1800-11-2356.</p>
+      </div>
+    </Card>
+  );
+}
+
+/** How many a day, from the packs in your orders: each pack is taken as finished when the next
+ * one is bought, so the gaps between packs give the rate. */
+function PackCount({ data }: { data: Daily }) {
+  const p = data.smoking.packs;
+  const n = (x: number) => (x >= 10 || Number.isInteger(x) ? x.toFixed(0) : x.toFixed(1));
+  return (
+    <section aria-labelledby="packs-h" className="mt-3 border-t border-edge/60 pt-3">
+      <h3 id="packs-h" className="mb-1 text-xs text-slate-400">
+        From your packs
+      </h3>
+      {p.per_day ? (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <Fact
+              label="A day"
+              value={`About ${n(p.per_day)}`}
+              sub={p.per_day_last_month ? `Last month ${n(p.per_day_last_month)}` : undefined}
+            />
+            <Fact label={`A ${p.usual_size}-pack lasts`} value={`${n(p.pack_days ?? 0)} days`} />
+            <Fact label="Next pack due" value={p.next_on ? dayLabel(p.next_on) : "–"} sub={`${p.sticks_month} this month`} />
+          </div>
+          {p.tips.length > 0 && (
+            <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
+              {p.tips.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-slate-500">
+          {p.packs.length
+            ? `${p.packs.length === 1 ? "One pack so far" : `${p.packs.length} packs so far`}. Once there's a next one, Money counts each pack as finished then and works out how many a day.`
+            : 'Cigarettes in your Zepto or Blinkit orders are counted as packs (the 10s or 20s in the name). Read the order screenshot, or type it like "classic milds 20s 360", and each new pack marks the last one finished.'}
+        </p>
+      )}
+      {p.assumed && (
+        <p className="mt-1 text-xs text-slate-500">Where an order didn't say the pack size, Money took your usual {p.usual_size}.</p>
       )}
     </section>
   );

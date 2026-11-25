@@ -9,6 +9,7 @@ Run once per person (the orchestrator keeps a Redis flag per version):
   version couldn't read (the orchestrator does the reading);
 - (version 3) statement lines paid through Google Pay's bills named "Google Pay bills";
 - (version 5) order emails read again for the items in them and the restaurant;
+- (version 6) categories worked out again for the new Smoking and tobacco category;
 - two emails about one payment (a card's "debited" and the autopay's "bill paid", or one alert
   in two mailboxes) made one row.
 
@@ -34,7 +35,8 @@ log = logging.getLogger(__name__)
 #    repayments and GRE prep given their categories.
 # 4: a debit card's currency-conversion fee (DCC) filed as a fee, not found as a subscription.
 # 5: order emails read again so the items bought and the restaurant are kept (money_items).
-VERSION = 5
+# 6: paan shops and tobacconists filed under Smoking and tobacco (a new category).
+VERSION = 6
 # How far back alerts are read again when a new version's reading fixes call for it: four
 # months, so the habits view has last month and more to compare with.
 REREAD_DAYS = 120

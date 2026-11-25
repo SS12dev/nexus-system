@@ -20,6 +20,10 @@ import { Bought } from "./Bought";
 import { OrdersToConfirm } from "./Orders";
 import { Empty, MonthPicker, Spinner, useAccounts, useMoneySettings, useMoneyVersion } from "./parts";
 
+/** Categories where a payment is often a bill of several things, so "What you bought" is
+ * offered on it (a supermarket bill, a paan shop) as well as on quick-commerce orders. */
+const ITEMISED = new Set(["Groceries", "Shopping", "Smoking and tobacco", "Food and dining", "Health"]);
+
 const PAGE = 100;
 
 /** Every transaction, newest first, filtered by month, category, account, direction or words.
@@ -416,7 +420,7 @@ function TxnDetail({ txn, categories }: { txn: MoneyTxn; categories: string[] })
           </button>
         )}
       </div>
-      {full && (full.basket || (full.items?.length ?? 0) > 0) && <Bought txn={full} onChange={(items) => setFull({ ...full, items })} />}
+      {full && (full.basket || (full.items?.length ?? 0) > 0 || (full.direction === "debit" && ITEMISED.has(full.category))) && <Bought txn={full} onChange={(items) => setFull({ ...full, items })} />}
       {full && <Links txn={full} busy={busy} save={save} />}
       {full?.narration && (
         <p className="break-words rounded-md bg-ink/60 px-2.5 py-1.5 font-mono text-xs text-slate-400" title="What the bank wrote">

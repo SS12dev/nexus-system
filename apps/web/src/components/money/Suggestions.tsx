@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { CADENCE_LABEL, dayLabel, parseRupees, rupees, type Suggestion, type Suggestions } from "../../lib/money";
 import { toast } from "../Feedback";
+import { OrderShot } from "./OrderShot";
 import { useMoney } from "./parts";
 
 const SHOWN = 4;
@@ -45,11 +46,12 @@ function where(s: Suggestion): string {
 
 type Answer = (key: string, choice: string, amount?: number, text?: string) => void;
 
-function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; answer: Answer }) {
+function Question({ s, busy, answer, onSaved }: { s: Suggestion; busy: string | null; answer: Answer; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [instalment, setInstalment] = useState("");
   const [bought, setBought] = useState("");
   const [typing, setTyping] = useState(false);
+  const [shot, setShot] = useState(false);
   const amount = instalment.trim() ? parseRupees(instalment) : undefined;
   const badAmount = amount === null;
   const context = where(s);
@@ -98,6 +100,9 @@ function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; ans
           {badAmount && <span className="text-rose-300">Type an amount like 7450.50</span>}
         </label>
       )}
+      {s.kind === "basket" && shot && (
+        <OrderShot txnId={s.key.slice("basket:".length)} label="Choose screenshots of the order" onSaved={onSaved} className="mt-2" />
+      )}
       {s.kind === "basket" && typing && (
         <form
           className="mt-2 flex flex-wrap items-center gap-2"
@@ -142,6 +147,11 @@ function Question({ s, busy, answer }: { s: Suggestion; busy: string | null; ans
         {s.kind === "basket" && !typing && (
           <button onClick={() => setTyping(true)} className="px-1 py-1 text-xs text-sky-300 hover:text-sky-200">
             Type the items
+          </button>
+        )}
+        {s.kind === "basket" && !typing && !shot && (
+          <button onClick={() => setShot(true)} className="px-1 py-1 text-xs text-sky-300 hover:text-sky-200">
+            Use a screenshot
           </button>
         )}
         <button
@@ -206,7 +216,7 @@ export function MoneySuggests() {
       </p>
       <ul className="grid grid-cols-1 gap-2">
         {shown.map((s) => (
-          <Question key={s.key} s={s} busy={busy} answer={(key, choice, amount, text) => void take(() => api.moneyAnswerSuggestion(key, choice, amount, text), key)} />
+          <Question key={s.key} s={s} busy={busy} onSaved={reload} answer={(key, choice, amount, text) => void take(() => api.moneyAnswerSuggestion(key, choice, amount, text), key)} />
         ))}
       </ul>
       {list.length > SHOWN && (

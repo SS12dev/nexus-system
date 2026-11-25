@@ -14,8 +14,8 @@ from datetime import date, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus_common import money, money_items
-from nexus_common.models import MoneyItem, MoneyTxn, utcnow
+from nexus_common import money, money_items, money_smokes
+from nexus_common.models import MoneyBudget, MoneyItem, MoneyTxn, utcnow
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,9 @@ DELIVERY = ("swiggy", "zomato", "eatsure", "eatclub", "box8", "faasos", "dominos
 # Baskets need this share of their spend told (by email or by the person) before Money breaks
 # them down; below it the split would mislead.
 TOLD_ENOUGH = 0.5
+# Cigarettes and tobacco: a category for paan shops and tobacconists (money.CATEGORIES), and an
+# item kind inside baskets and bills (money_items.KINDS).
+SMOKING = "Smoking and tobacco"
 
 
 def is_delivery(merchant: str) -> bool:
@@ -307,15 +310,9 @@ async def daily(
     )
     this = [t for t in rows if start <= t.occurred_on < end]
     before = [t for t in rows if last_start <= t.occurred_on < start]
-    kinds = await _kinds_by_txn(
-        db,
-        user_id,
-        [
-            t.id
-            for t in this + before
-            if money_items.is_basket(t.merchant) or is_delivery(t.merchant)
-        ],
-    )
+    # Items can be on any payment (a shop's bill read from a screenshot), not only baskets.
+    kinds = await _kinds_by_txn(db, user_id, [t.id for t in rows if _cost(t) > 0])
+    smoke = _tobacco_by_day(rows, kinds)
     counted_days = max((stop - start).days, 0) if start <= today else 0
     if today >= end:
         counted_days = (end - start).days
@@ -336,6 +333,7 @@ async def daily(
                 "spent_paise": spent,
                 "everyday_paise": everyday,
                 "fixed_paise": spent - everyday,
+                "tobacco_paise": smoke.get(d, 0),
                 "count": len(spends),
                 "future": d > today,
                 "items": [
@@ -426,6 +424,115 @@ async def daily(
         "tips": _tips(
             basket, last_basket, small, weekdays, delivery, last_delivery, counted_days or 1
         ),
+        "smoking": await _smoking(
+            db,
+            cfg,
+            user_id,
+            rows,
+            smoke,
+            start=start,
+            end=end,
+            stop=stop,
+            today=today,
+            counted_days=counted_days,
+            last_start=last_start,
+        ),  # fmt: skip
+    }
+
+
+def _tobacco_by_day(rows: list[MoneyTxn], kinds: dict) -> dict[date, int]:
+    """What went on cigarettes and tobacco each day: whole payments filed under Smoking and
+    tobacco, and the tobacco share of any order whose items Money knows."""
+    out: dict[date, int] = defaultdict(int)
+    for t in rows:
+        cost = _cost(t)
+        if cost <= 0:
+            continue
+        if t.category == SMOKING:
+            out[t.occurred_on] += cost
+        elif kinds.get(t.id):
+            out[t.occurred_on] += money_items.shares(kinds[t.id], t.amount_paise).get("tobacco", 0)
+    return {d: v for d, v in out.items() if v > 0}
+
+
+async def _smoking(
+    db: AsyncSession,
+    cfg: Settings,
+    user_id: uuid.UUID,
+    rows: list[MoneyTxn],
+    smoke: dict[date, int],
+    *,
+    start: date,
+    end: date,
+    stop: date,
+    today: date,
+    counted_days: int,
+    last_start: date,
+) -> dict:
+    """Cigarettes and tobacco for the month: what they cost, on how many days, how long since
+    the last purchase, what the recent pace comes to in a year, and the monthly limit if one is
+    set. Facts, not a lecture."""
+    month_days = {d: v for d, v in smoke.items() if start <= d < stop}
+    last_month = sum(v for d, v in smoke.items() if last_start <= d < start)
+    bought = sorted(d for d in smoke if d <= today)
+    # The recent pace: the last eight weeks, or since Money's records begin if that's shorter.
+    first = rows[0].occurred_on if rows else today
+    pace_from = max(stop - timedelta(days=WEEKDAY_WINDOW), first)
+    pace_days = max((stop - pace_from).days, 1)
+    pace = sum(v for d, v in smoke.items() if pace_from <= d < stop)
+    shops: dict[str, list[int]] = defaultdict(list)
+    for t in rows:
+        if start <= t.occurred_on < end and t.category == SMOKING and _cost(t) > 0:
+            shops[t.merchant].append(t.amount_paise)
+    budget = await db.scalar(
+        select(MoneyBudget.monthly_paise).where(
+            MoneyBudget.user_id == user_id, MoneyBudget.category == SMOKING
+        )
+    )
+    spent = sum(month_days.values())
+    # Packs: the cigarettes in orders, a few months back so each pack's gap to the next is known.
+    since = min(last_start, stop - timedelta(days=money_smokes.RATE_DAYS + 35))
+    found = (
+        await db.execute(
+            select(MoneyTxn.id, MoneyTxn.occurred_on, MoneyTxn.amount_paise, MoneyItem.name_enc,
+                   MoneyItem.quantity, MoneyItem.price_paise)
+            .join(MoneyTxn, MoneyTxn.id == MoneyItem.txn_id)
+            .where(MoneyItem.user_id == user_id, MoneyItem.kind == "tobacco",
+                   MoneyTxn.occurred_on >= since, MoneyTxn.occurred_on < end)
+        )
+    ).all()  # fmt: skip
+    buys = []
+    for _id, on, amount, name_enc, qty, price in found:
+        name = money.unseal(cfg, name_enc) if name_enc else ""
+        if money_smokes.is_sticks(name):
+            # A whole order answered as "Cigarettes" has no price of its own: its payment's.
+            buys.append(money_smokes.Buy(on, name, qty or 1, price if name else amount))
+    itemised = {f[0] for f in found}
+    loose = sum(
+        _cost(t)
+        for t in rows
+        if start <= t.occurred_on < stop and t.category == SMOKING and t.id not in itemised
+    )
+    packs = money_smokes.consumption(
+        buys, start=start, end=end, stop=stop, last_start=last_start, today=today,
+        loose_paise=loose, budget_paise=budget,
+    )  # fmt: skip
+    return {
+        "packs": packs,
+        "spent_paise": spent,
+        "last_month_paise": last_month,
+        "days": len(month_days),
+        "free_days": max(counted_days - len(month_days), 0),
+        "average_paise": spent // len(month_days) if month_days else 0,
+        "last_on": bought[-1] if bought else None,
+        "days_since": (today - bought[-1]).days if bought else None,
+        # A year at the recent pace, once there are two weeks to go on.
+        "year_paise": pace * 365 // pace_days if pace and pace_days >= 14 else None,
+        "budget_paise": budget,
+        "shops": sorted(
+            ({"merchant": m, "count": len(v), "spent_paise": sum(v)} for m, v in shops.items()),
+            key=lambda x: (-x["count"], -x["spent_paise"]),
+        )[:3],
     }
 
 
@@ -433,3 +540,69 @@ def _shift(month: str, by: int) -> str:
     y, m = (int(x) for x in month.split("-"))
     n = y * 12 + (m - 1) + by
     return f"{n // 12:04d}-{n % 12 + 1:02d}"
+
+
+# --- Matching an order screenshot to its payment -------------------------------------------------
+
+# How far either side of the screenshot's date its payment may be, and how far apart in rupees
+# the order's total and the payment may be (a rounded-off total).
+SHOT_DAYS = 3
+SHOT_SLACK_PAISE = 2_00
+SHOT_RECENT = 14
+SHOT_CANDIDATES = 8
+
+
+async def order_candidates(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    shop: str | None,
+    on: date | None,
+    total_paise: int | None,
+    today: date,
+) -> tuple[MoneyTxn | None, list[MoneyTxn]]:
+    """The payment an order screenshot belongs to, when exactly one fits its total and date,
+    and the likeliest payments to pick from otherwise (nearest total first, then quick-commerce
+    shops, then nearest date)."""
+    centre = on or today
+    lo = centre - timedelta(days=SHOT_DAYS if on else SHOT_RECENT)
+    hi = min(centre + timedelta(days=SHOT_DAYS if on else 0), today)
+    rows = [
+        t
+        for t in (
+            await db.scalars(
+                select(MoneyTxn).where(
+                    MoneyTxn.user_id == user_id,
+                    MoneyTxn.direction == "debit",
+                    MoneyTxn.occurred_on >= lo,
+                    MoneyTxn.occurred_on <= hi,
+                )
+            )
+        ).all()
+        if _cost(t) > 0 and t.category not in FIXED
+    ]
+    shop_key = money.merchant_key(shop or "")
+
+    def same_shop(t: MoneyTxn) -> bool:
+        key = money.merchant_key(t.merchant)
+        return bool(shop_key) and (shop_key.split()[0] in key or key.split()[0] in shop_key)
+
+    def near(t: MoneyTxn) -> bool:
+        return total_paise is not None and abs(t.amount_paise - total_paise) <= SHOT_SLACK_PAISE
+
+    fits = [t for t in rows if near(t)]
+    if len(fits) > 1:
+        # Two payments of the same amount: the one at the same shop decides it.
+        fits = [t for t in fits if same_shop(t) or money_items.is_basket(t.merchant)] or fits
+    match = fits[0] if len(fits) == 1 else None
+    if total_paise is None:
+        rows = [t for t in rows if money_items.is_basket(t.merchant) or same_shop(t)] or rows
+    rows.sort(
+        key=lambda t: (
+            not near(t),
+            not (same_shop(t) or money_items.is_basket(t.merchant)),
+            abs(t.amount_paise - total_paise) if total_paise is not None else 0,
+            abs((t.occurred_on - centre).days),
+        )
+    )
+    return match, rows[:SHOT_CANDIDATES]

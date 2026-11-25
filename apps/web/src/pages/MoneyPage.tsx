@@ -132,8 +132,17 @@ function Header() {
             The calendar shows each day's everyday spending (without rent, EMIs, bills and subscriptions), so habits aren't
             hidden by the big fixed payments. Zomato's order emails list what you ordered: Money keeps the items and the
             restaurant, and splits each order into meals, desserts and drinks. For Zepto, Blinkit, Instamart and similar,
-            whose emails don't list items, Money suggests asks “What did you buy?”: one tap, or type the items. Habits and
+            whose emails don't list items, Money suggests asks “What did you buy?”: one tap, type the items, or use a
+            screenshot of the order. The model on your own computer reads the screenshot's items, fees and total (the image
+            isn't kept), Money finds the payment by its total and date, and you check the list before it's saved. Habits and
             leaks then shows where the money goes, and a tip appears only once the numbers behind it are in.
+          </div>
+          <div>
+            <GuideHeading>Cigarettes and tobacco</GuideHeading>
+            Payments at paan shops and tobacconists are filed under Smoking and tobacco, and cigarettes inside an order count
+            too. A shop paid by UPI under a person's name is asked about once in Money suggests. The card under Habits shows
+            this month against last, the days you bought, how long since the last, a year at the current pace, and a monthly
+            limit to cut down to (it's also a budget).
           </div>
           <div>
             <GuideHeading>Accounts, cards and loans</GuideHeading>

@@ -63,6 +63,7 @@ BASKET_CHOICES = (
     ("drinks", "Cold drinks"),
     ("instant", "Instant or frozen food"),
     ("household", "Home and personal care"),
+    ("tobacco", "Cigarettes"),
     ("mixed", "A bit of everything"),
 )
 # The answer that carries typed items ("milk 60, chips 40").
@@ -91,7 +92,7 @@ KEPT_CATEGORIES = {
 }  # fmt: skip
 CATEGORY_CHOICES = (
     "Food and dining", "Groceries", "Shopping", "Bills and utilities", "Health",
-    "Entertainment", "Transport", "Travel", "Education", "Subscriptions",
+    "Entertainment", "Transport", "Travel", "Education", "Subscriptions", "Smoking and tobacco",
 )  # fmt: skip
 
 
@@ -118,6 +119,7 @@ PERSON_CHOICES = (
     ("Transport", "Cab, auto or driver"),
     ("Shopping", "Bought something"),
     ("Rent and housing", "Rent or house help"),
+    ("Smoking and tobacco", "Cigarettes or a paan shop"),
     ("Other", "Other spending"),
 )
 

@@ -15,6 +15,8 @@ import type {
   ScreenshotSave,
   Balances,
   BoughtItem,
+  OrderReading,
+  ReadItem,
   Daily,
   Investments,
   Loan,
@@ -396,7 +398,7 @@ export const api = {
   moneyAnswerSuggestion: (key: string, choice: string, amount_paise?: number, text?: string) =>
     request<Suggestions & { done: string }>("/api/money/suggestions/answer", { method: "POST", body: json({ key, choice, amount_paise, text }) }),
   moneyDaily: (month?: string) => request<Daily>(`/api/money/daily${orgQuery({ month })}`),
-  moneySetItems: (id: string, body: { text?: string; kind?: string }) =>
+  moneySetItems: (id: string, body: { text?: string; kind?: string; items?: Omit<ReadItem, "kind_label">[] }) =>
     request<{ items: BoughtItem[] }>(`/api/money/transactions/${id}/items`, { method: "PUT", body: json(body) }),
   moneyUpdateItem: (id: string, kind: string) =>
     request<BoughtItem>(`/api/money/items/${id}`, { method: "PATCH", body: json({ kind }) }),
@@ -408,6 +410,12 @@ export const api = {
   advice: () => request<Advice>("/api/advice"),
   adviceState: (key: string, action: AdviceAction, days?: number) =>
     request<Advice>("/api/advice/state", { method: "POST", body: json({ key, action, days }) }),
+  moneyReadOrderShot: (file: File, txnId?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (txnId) form.append("txn_id", txnId);
+    return request<OrderReading>("/api/money/orders/screenshot", { method: "POST", body: form });
+  },
   moneyReadScreenshot: (file: File) => {
     const form = new FormData();
     form.append("file", file);

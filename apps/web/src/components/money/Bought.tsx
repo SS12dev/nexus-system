@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { rupees, type BoughtItem, type MoneyTxn } from "../../lib/money";
 import { toast } from "../Feedback";
 import { Select } from "../Select";
+import { OrderShot } from "./OrderShot";
 import { useMoneySettings } from "./parts";
 
 /** A transaction's "What you bought": the items read from its order email or told by you, each
@@ -35,8 +36,8 @@ export function Bought({ txn, onChange }: { txn: MoneyTxn; onChange: (items: Bou
         {items.length
           ? fromEmail
             ? `Read from the order email${priced ? "" : "; it gives no prices, so the order is split by item count"}. Change a kind if Money got it wrong.`
-            : "As you told Money. Type again to replace it."
-          : "Money doesn't know what was in this order yet. Pick what it mostly was, or type the items."}
+            : "As you told Money. A screenshot or typing again replaces it."
+          : "Money doesn't know what was in this order yet. Read it from a screenshot of the order, pick what it mostly was, or type the items."}
       </p>
       {items.length > 0 && (
         <ul className="mb-2 space-y-1">
@@ -110,6 +111,7 @@ export function Bought({ txn, onChange }: { txn: MoneyTxn; onChange: (items: Bou
           </button>
         )}
       </form>
+      <OrderShot txnId={txn.id} onSaved={(saved) => onChange(saved)} className="mt-2" />
     </section>
   );
 }

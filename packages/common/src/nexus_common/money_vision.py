@@ -3,8 +3,9 @@
 Most people check their money in a phone app, not net banking, so a screenshot of the app's
 transaction list, balance or card summary is the easiest history to give. The image goes to
 Ollama on the same machine (never a cloud model), the answer comes back as structured JSON, and
-`clean` checks every field before anything is shown. Nothing is saved until the person has
-reviewed the rows; the image itself is never stored or logged.
+`clean` checks every field before anything is shown. Order screenshots (what was in a Zepto or
+Blinkit basket) are read the same way (`read_order`, `clean_order`). Nothing is saved until the
+person has reviewed it; the image itself is never stored or logged.
 """
 
 import base64
@@ -15,7 +16,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from nexus_common import money
+from nexus_common import money, money_items
 from nexus_common.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -171,24 +172,168 @@ def _date_any(text: str | None) -> date | None:
         return None
 
 
+# --- Order screenshots ---------------------------------------------------------------------------
+# A Zepto, Blinkit or Instamart order (or any shop's bill) as the app shows it: the items with
+# what each line cost, the fees on top and the total paid. Their order emails don't list items
+# (or don't arrive at all), so a screenshot is the quickest way to say what was in a basket.
+
+ORDER_KINDS = tuple(k for k in money_items.KINDS if k not in ("mixed", "fees"))
+
+ORDER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "shop": {"type": "string"},
+        "date": {"type": ["string", "null"]},
+        "total_paid": {"type": ["number", "null"]},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                    "price": {"type": ["number", "null"]},
+                    "kind": {"type": "string", "enum": list(ORDER_KINDS)},
+                },
+                "required": ["name", "quantity", "price", "kind"],
+            },
+        },
+        "fees": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "amount": {"type": "number"}},
+                "required": ["name", "amount"],
+            },
+        },
+    },
+    "required": ["shop", "date", "total_paid", "items", "fees"],
+}
+
+ORDER_SYSTEM = (
+    "You read screenshots of Indian shopping and delivery apps (Zepto, Blinkit, Swiggy "
+    "Instamart, BigBasket, Flipkart Minutes, Amazon, Zomato, Swiggy) and of shop bills, and "
+    "copy out the order exactly as shown, as JSON. Never invent an item or a price that isn't "
+    "visible: use null instead. Amounts are in rupees as plain numbers (1,234.50 -> 1234.5)."
+)
+
+
+def order_prompt(today: date) -> str:
+    kinds = ", ".join(f"{k} ({money_items.KINDS[k][0]})" for k in ORDER_KINDS)
+    return (
+        f"Today is {today:%A %d %B %Y}. Read this order.\n"
+        "- shop: the app or shop's name (Zepto, Blinkit...), or '' if not shown.\n"
+        "- date: the order date as YYYY-MM-DD ('Today', 'Yesterday' or '12 Nov' made into a "
+        "full date using today's date; a date without a year is the most recent one not "
+        "after today), or null.\n"
+        "- total_paid: the final amount paid (Grand total, To pay, Paid, Bill total), or null.\n"
+        "- items: every product line, top to bottom: name as shown (with its pack size), "
+        "quantity (1 if not shown), price = what that line cost after discounts (the price "
+        "charged, not the struck-out MRP; for 2 x 45 that's 90), or null; kind: the best of "
+        f"{kinds}.\n"
+        "- fees: delivery, handling, small-cart, platform, late-night, rain or packaging fees "
+        "and tips actually charged (skip ones shown as free or struck out), with their "
+        "amounts. Never list discounts, savings, coupons, taxes already in prices, or totals "
+        "as items or fees."
+    )
+
+
+@dataclass
+class Order:
+    shop: str | None
+    occurred_on: date | None
+    total_paise: int | None
+    items: list[money_items.Item]
+    dropped: int
+
+    @property
+    def listed_paise(self) -> int:
+        return sum(i.price_paise or 0 for i in self.items)
+
+
+def clean_order(raw: dict, today: date) -> Order:
+    """What the model read from an order, checked: names with letters, quantities 1-99, real
+    prices, a date no later than today. Kinds come from Money's word list first and the model's
+    pick only where the words don't know the item."""
+    raw = raw if isinstance(raw, dict) else {}
+    items: list[money_items.Item] = []
+    dropped = 0
+    for it in (raw.get("items") or [])[: money_items.MAX_ITEMS]:
+        if not isinstance(it, dict):
+            dropped += 1
+            continue
+        name = " ".join(str(it.get("name") or "").split())[:120]
+        if len(name) < 2 or not any(c.isalpha() for c in name):
+            dropped += 1
+            continue
+        try:
+            qty = int(it.get("quantity") or 1)
+        except (TypeError, ValueError):
+            qty = 1
+        qty = min(max(qty, 1), 99)
+        price = _paise(it.get("price"))
+        if price is not None and price > 10_00_000_00:
+            price = None
+        kind = money_items.kind_of(name)
+        if kind == "other" and it.get("kind") in ORDER_KINDS:
+            kind = it["kind"]
+        if kind == "fees":
+            # A fee the model put among the items.
+            items.append(money_items.Item(name, price, 1, "fees"))
+            continue
+        items.append(money_items.Item(name, price, qty, kind))
+    for fee in (raw.get("fees") or [])[:10]:
+        if not isinstance(fee, dict):
+            continue
+        name = " ".join(str(fee.get("name") or "").split())[:60] or "Fees"
+        amount = _paise(fee.get("amount"))
+        if amount is None or amount > 10_000_00:
+            dropped += 1
+            continue
+        items.append(money_items.Item(name, amount, 1, "fees"))
+    total = _paise(raw.get("total_paid"))
+    shop = " ".join(str(raw.get("shop") or "").split())[:60] or None
+    return Order(shop, _date(raw.get("date"), today), total, items, dropped)
+
+
 async def read(
     settings: Settings, image: bytes, today: date, *, http: httpx.AsyncClient | None = None
 ) -> dict:
-    """Ask the on-device vision model to read one screenshot. Returns the raw JSON answer."""
+    """Ask the on-device vision model to read one banking-app screenshot. Returns the raw JSON
+    answer."""
+    return await _ask(settings, image, SYSTEM, prompt(today), SCHEMA, http)
+
+
+async def read_order(
+    settings: Settings, image: bytes, today: date, *, http: httpx.AsyncClient | None = None
+) -> dict:
+    """Ask the on-device vision model to read one order screenshot. Returns the raw JSON
+    answer; `clean_order` checks it."""
+    return await _ask(settings, image, ORDER_SYSTEM, order_prompt(today), ORDER_SCHEMA, http)
+
+
+async def _ask(
+    settings: Settings,
+    image: bytes,
+    system: str,
+    text: str,
+    schema: dict,
+    http: httpx.AsyncClient | None,
+) -> dict:
     base = settings.ollama_base_url.rstrip("/")
     model = settings.money_vision_model or settings.graph_local_model
     body = {
         "model": model,
         "stream": False,
-        "format": SCHEMA,
+        "format": schema,
         "think": False,
         "keep_alive": "5m",
         "options": {"temperature": 0, "num_ctx": 16384},
         "messages": [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": system},
             {
                 "role": "user",
-                "content": prompt(today),
+                "content": text,
                 "images": [base64.b64encode(image).decode()],
             },
         ],
