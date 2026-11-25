@@ -50,9 +50,12 @@ OTHER_ASKED = 5
 EMI_FLOOR_PAISE = 3_000_00
 EMI_MONTHS = (3, 6, 9, 12, 18, 24)
 YEARLY_FLOOR_PAISE = 500_00
-# Quick-commerce orders asked "what did you buy?": recent ones only, a few at a time.
-BASKET_WINDOW = timedelta(days=35)
-BASKETS_ASKED = 6
+# Quick-commerce orders asked "what did you buy?": a one-off catch-up from the start of the
+# month when Money first asked (remembered under BASKETS_FROM), then each new order. Older orders
+# are never asked, so the questions don't go on and on.
+BASKETS_FROM = "baskets:from"
+# Skips the rest of the catch-up.
+SKIP = "skip"
 # Answers at a shop that must agree before its usual kind is offered as the guess.
 BASKET_USUAL = 3
 BASKET_CHOICES = (
@@ -540,18 +543,28 @@ async def _emis(
     return items
 
 
+def baskets_from(answered: dict, today: date) -> date:
+    """The first day of the "what did you buy?" catch-up: the start of the month Money first
+    asked in (a week back, so the first days of a month still catch up on the last one)."""
+    try:
+        return date.fromisoformat(answered[BASKETS_FROM])
+    except (KeyError, TypeError, ValueError):
+        return (today - timedelta(days=7)).replace(day=1)
+
+
 async def _baskets(
-    db: AsyncSession, user_id: uuid.UUID, today: date, txns: list[MoneyTxn]
+    db: AsyncSession, user_id: uuid.UUID, today: date, txns: list[MoneyTxn], since: date
 ) -> list[dict]:
-    """Recent quick-commerce orders whose email didn't list the items: "what did you buy?".
-    One tap files the whole order as one kind; typing the items splits it."""
+    """Quick-commerce orders since `since` whose email didn't list the items: "what did you
+    buy?". One tap files the whole order as one kind; typing the items or a screenshot splits
+    it."""
     rows = [
         t
         for t in txns
         if t.direction == "debit"
         and not t.excluded
         and t.category not in money.NOT_SPENDING
-        and t.occurred_on >= today - BASKET_WINDOW
+        and t.occurred_on >= since
         and money_items.is_basket(t.merchant)
         # An order nobody's payment explains is asked "how did you pay?" first.
         and not (t.source == "receipt" and t.account_id is None and t.channel != "cash")
@@ -599,7 +612,7 @@ async def _baskets(
         usual[merchant][max(split, key=split.get) if split else "mixed"] += 1
     offered = {k for k, _ in BASKET_CHOICES}
     items = []
-    for t in rows[:BASKETS_ASKED]:
+    for t in rows:
         seen = usual[t.merchant]
         top = seen.most_common(1)
         guess = (
@@ -685,6 +698,10 @@ async def suggestions(
     prefs = await db.get(MoneySettings, user_id)
     rules = (prefs.rules if prefs else None) or {}
     answered = (prefs.answered if prefs else None) or {}
+    since = baskets_from(answered, today)
+    started = BASKETS_FROM not in answered
+    if started:
+        await _remember(db, user_id, BASKETS_FROM, since.isoformat())
     accounts = await _accounts(db, user_id)
     labels = {
         a.id: store.account_label(a)
@@ -708,10 +725,16 @@ async def suggestions(
         + await _subscriptions(db, user_id, today, txns, labels, cfg)
         + await _orders(db, user_id, today, accounts, cfg)
         + _unfiled(txns, rules, today, owner, labels, cfg)
-        + await _baskets(db, user_id, today, txns)
+        + await _baskets(db, user_id, today, txns, since)
     )
     items = [i for i in items if _open(answered.get(i["key"]), today)]
-    return {"items": items, "matched": matched, "filed": filed}
+    return {
+        "items": items,
+        "matched": matched,
+        "filed": filed,
+        "baskets_from": since,
+        "changed": started,
+    }
 
 
 def _open(answer: str | None, today: date) -> bool:
@@ -763,7 +786,8 @@ async def _apply(
     text: str | None = None,
 ) -> str:
     typed = item["kind"] == "basket" and choice == TYPED
-    if not typed and choice not in {c["id"] for c in item["choices"]}:
+    skipped = item["kind"] == "basket" and choice == SKIP
+    if not typed and not skipped and choice not in {c["id"] for c in item["choices"]}:
         raise ValueError("Pick one of the answers offered.")
     key = item["key"]
     kind, _, ref = key.partition(":")
@@ -829,6 +853,8 @@ async def _apply(
         done = f"EMI added: {months} months of {money.rupees(emi)}"
         if amount_paise:
             done += f", about {rate / 100:.1f}% a year" if rate else ", no interest"
+    elif kind == "basket" and skipped:
+        done = f"{merchant}: skipped"
     elif kind == "basket":
         txn = await db.get(MoneyTxn, uuid.UUID(ref))
         if typed:
@@ -863,6 +889,19 @@ async def _apply(
     await _remember(db, user_id, key, choice)
     log.info("money.suggestion_answered", extra={"user_id": str(user_id), "kind": kind})
     return done
+
+
+async def skip_baskets(db: AsyncSession, user_id: uuid.UUID, today: date, owner: str | None) -> int:
+    """Stop asking "what did you buy?" about every order waiting now; new orders are still
+    asked. Returns how many were skipped."""
+    items = (await suggestions(db, user_id, today, owner))["items"]
+    n = 0
+    for item in items:
+        if item["kind"] == "basket":
+            await _remember(db, user_id, item["key"], SKIP)
+            n += 1
+    log.info("money.baskets_skipped", extra={"user_id": str(user_id), "count": n})
+    return n
 
 
 async def accept_all(db: AsyncSession, user_id: uuid.UUID, today: date, owner: str | None) -> int:

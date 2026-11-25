@@ -262,7 +262,7 @@ function Habits({ data }: { data: Daily }) {
         summary={data.baskets}
         last={data.baskets_last}
         empty="No Zepto, Blinkit, Instamart or similar orders this month."
-        untold={(n) => `${n} order${n === 1 ? " is" : "s are"} waiting on "What did you buy?" in Money suggests: a tap each.`}
+        untold={(n) => `${n} order${n === 1 ? " is" : "s are"} waiting on "What did you buy?" above: a tap each, or screenshots.`}
         onPlace={txns}
       />
       <OrderShot label="Add order screenshots" className="-mt-1 mb-3" />

@@ -235,3 +235,68 @@ def test_packs_give_sticks_a_day():
         last_start=date(2026, 10, 1), today=today,
     )  # fmt: skip
     assert one["per_day"] is None and one["tips"] == []
+
+
+async def test_orders_are_asked_once_from_the_catch_up_on(owner, sessionmaker):
+    async with sessionmaker() as db:
+        user = await _user(db)
+        today = local_today(user)
+        start = (today - timedelta(days=7)).replace(day=1)
+        db.add_all([
+            _txn(user.id, start, merchant="Zepto", category="Groceries", amount_paise=200_00),
+            _txn(user.id, today, merchant="Blinkit", category="Groceries", amount_paise=150_00),
+            _txn(user.id, today, merchant="Instamart", category="Groceries", amount_paise=90_00),
+            # Before the catch-up: never asked.
+            _txn(user.id, start - timedelta(days=1), merchant="Zepto", category="Groceries",
+                 amount_paise=300_00),
+        ])  # fmt: skip
+        await db.commit()
+
+    got = (await owner.get("/api/money/suggestions")).json()
+    assert got["baskets_from"] == start.isoformat()
+    asked = [s for s in got["items"] if s["kind"] == "basket"]
+    assert sorted(s["amount_paise"] for s in asked) == [90_00, 150_00, 200_00]
+    # Skipping one, then the rest: none asked again.
+    r = await owner.post(
+        "/api/money/suggestions/answer", json={"key": asked[0]["key"], "choice": "skip"}
+    )
+    assert r.status_code == 200, r.text
+    r = await owner.post("/api/money/suggestions/skip-baskets")
+    assert r.json()["skipped"] == 2
+    assert not [s for s in r.json()["items"] if s["kind"] == "basket"]
+    # A new order afterwards is asked; the catch-up start stays where it was.
+    async with sessionmaker() as db:
+        user = await _user(db)
+        db.add(_txn(user.id, today, merchant="Zepto", category="Groceries", amount_paise=75_00))
+        await db.commit()
+    got = (await owner.get("/api/money/suggestions")).json()
+    assert [s["amount_paise"] for s in got["items"] if s["kind"] == "basket"] == [75_00]
+    assert got["baskets_from"] == start.isoformat()
+
+
+async def test_streaks(owner, sessionmaker):
+    async with sessionmaker() as db:
+        user = await _user(db)
+        today = date(2026, 11, 25)
+        days = [today - timedelta(days=d) for d in range(30, 0, -1)]
+        # A ₹100 coffee most days; a ₹900 dinner five days ago breaks the run.
+        db.add_all([_txn(user.id, d, merchant="Cafe", category="Food and dining",
+                         amount_paise=100_00) for d in days])  # fmt: skip
+        db.add_all([
+            _txn(user.id, today - timedelta(days=5), merchant="Fancy Dinner",
+                 category="Food and dining", amount_paise=900_00),
+            _txn(user.id, today - timedelta(days=9), merchant="Swiggy",
+                 category="Food and dining", amount_paise=300_00),
+            _txn(user.id, today - timedelta(days=2), merchant="Blinkit", category="Groceries",
+                 amount_paise=30_00),
+            _txn(user.id, today - timedelta(days=4), merchant="Ravi Paan Shop",
+                 category="Smoking and tobacco", amount_paise=20_00),
+            # Rent is fixed, not everyday: it doesn't break a run.
+            _txn(user.id, today - timedelta(days=1), merchant="Landlord",
+                 category="Rent and housing", amount_paise=15_000_00),
+        ])  # fmt: skip
+        await db.commit()
+        got = await money_habits.streaks(db, user.id, today)
+    assert got["under"] == 4  # days 4, 3, 2 and 1 ago
+    assert (got["delivery"], got["basket"], got["smoke"]) == (9, 2, 4)
+    assert got["tracked_days"] == 30

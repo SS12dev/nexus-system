@@ -78,6 +78,7 @@ export const COMMANDS: Command[] = [
   { id: "org-tasks", label: "Tasks", keywords: "todo due organiser", section: "Go to", to: "/organiser/tasks" },
   { id: "org-review", label: "Weekly review", keywords: "sunday plan organiser", section: "Go to", to: "/organiser/review" },
   { id: "money", label: "Money", keywords: "spending finance budget bank transactions expenses", section: "Go to", to: "/money", owner: true },
+  { id: "habits", label: "Habits", keywords: "daily spending calendar streaks leaks orders cigarettes smoking", section: "Go to", to: "/habits", owner: true },
   { id: "money-health", label: "Money health", keywords: "safe spend emergency fund saving insurance", section: "Go to", to: "/money/health", owner: true },
   { id: "money-accounts", label: "Accounts and cards", keywords: "money bank balance credit card bill", section: "Go to", to: "/money/accounts", owner: true },
   { id: "money-subs", label: "Subscriptions", keywords: "money renewals netflix recurring", section: "Go to", to: "/money/subscriptions", owner: true },

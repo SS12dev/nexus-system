@@ -22,6 +22,7 @@ import {
   Trash2,
   Users,
   Wallet,
+  Flame,
   X,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -244,6 +245,11 @@ export function Shell() {
           {isOwner(user) && (
             <NavLink to="/money" className={navClass} title={tip("Money")}>
               <Wallet size={16} className="shrink-0" /> <span className={label}>Money</span>
+            </NavLink>
+          )}
+          {isOwner(user) && (
+            <NavLink to="/habits" className={navClass} title={tip("Habits")}>
+              <Flame size={16} className="shrink-0" /> <span className={label}>Habits</span>
             </NavLink>
           )}
           <NavLink to="/library" className={navClass} title={tip("Library")}>

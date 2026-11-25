@@ -1,5 +1,5 @@
-import { ImagePlus, Loader2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { ImagePlus, Images, Loader2, X } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { dayLabel, rupees, type BoughtItem, type OrderPayment, type OrderReading, type ReadItem } from "../../lib/money";
 import { toast } from "../Feedback";
@@ -7,6 +7,8 @@ import { Select } from "../Select";
 import { useMoneySettings } from "./parts";
 
 const MAX_SHOTS = 4;
+// Orders read in one go when catching up.
+const MAX_BATCH = 20;
 
 /** Read what was in an order from screenshots of it (Zepto, Blinkit, Instamart, any shop's
  * bill): the model on your own computer reads the items, fees and total, Money finds the
@@ -26,7 +28,6 @@ export function OrderShot({
   onSaved?: (items: BoughtItem[], txnId: string) => void;
   className?: string;
 }) {
-  const kinds = useMoneySettings().data?.item_kinds ?? [];
   const input = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState<OrderReading | null>(null);
   const [items, setItems] = useState<ReadItem[]>([]);
@@ -128,13 +129,62 @@ export function OrderShot({
     );
   }
 
+  return (
+    <Review
+      reading={reading}
+      items={items}
+      setItems={setItems}
+      payment={payment}
+      setPayment={setPayment}
+      fixed={Boolean(txnId)}
+      busy={busy}
+      onSave={() => void save()}
+      onCancel={reset}
+      onAddMore={items.length < 60 ? () => input.current?.click() : undefined}
+      className={className}
+    >
+      {picker}
+    </Review>
+  );
+}
+
+/** One order as read, to check before saving: each line with its kind (change it) and a way to
+ * remove it, what they add up to against what was paid, and the payment it goes on. */
+function Review({
+  reading,
+  items,
+  setItems,
+  payment,
+  setPayment,
+  fixed,
+  busy,
+  onSave,
+  onCancel,
+  onAddMore,
+  className = "",
+  children,
+}: {
+  reading: OrderReading;
+  items: ReadItem[];
+  setItems: (items: ReadItem[]) => void;
+  payment: string;
+  setPayment: (id: string) => void;
+  fixed: boolean;
+  busy: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  onAddMore?: () => void;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const kinds = useMoneySettings().data?.item_kinds ?? [];
   const total = reading.total_paise;
   const listed = items.reduce((s, i) => s + (i.price_paise ?? 0), 0);
   const short = total != null && listed > 0 && listed < total * 0.9;
   const chosen = reading.candidates.find((c) => c.id === payment) ?? (reading.match?.id === payment ? reading.match : null);
   return (
     <section aria-label="Check the order" className={`rounded-md border border-edge/70 bg-ink/40 p-2.5 ${className}`}>
-      {picker}
+      {children}
       <p className="mb-2 text-xs text-slate-400">
         Read{reading.shop ? ` from ${reading.shop}` : ""}
         {reading.occurred_on ? `, ${dayLabel(reading.occurred_on)}` : ""}. Check the list: change a kind, or remove a line that isn't right.
@@ -183,27 +233,27 @@ export function OrderShot({
         {total != null && listed > total * 1.02 && " The rest came off as discounts, so each line counts for its share of what you paid."}
         {reading.dropped > 0 && ` ${reading.dropped} line${reading.dropped === 1 ? " was" : "s were"} unreadable and left out.`}
       </p>
-      {!txnId && <Payment reading={reading} payment={payment} onPick={setPayment} />}
+      {!fixed && <Payment reading={reading} payment={payment} onPick={setPayment} />}
       {chosen?.has_items && <p className="mb-2 text-xs text-slate-400">That payment already has items; these replace them.</p>}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           disabled={busy || !payment || !items.length}
-          onClick={() => void save()}
+          onClick={onSave}
           className="rounded-md bg-sky-500 px-3 py-1 text-sm font-medium text-ink hover:bg-sky-400 disabled:opacity-50"
         >
           Save {items.length} item{items.length === 1 ? "" : "s"}
         </button>
-        {items.length < 60 && (
+        {onAddMore && (
           <button
             type="button"
-            onClick={() => input.current?.click()}
+            onClick={onAddMore}
             className="flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1 text-sm text-slate-200 hover:bg-edge"
           >
             <ImagePlus size={14} /> Add another screenshot
           </button>
         )}
-        <button type="button" onClick={reset} className="px-2 py-1 text-sm text-slate-400 hover:text-slate-200">
+        <button type="button" onClick={onCancel} className="px-2 py-1 text-sm text-slate-400 hover:text-slate-200">
           Cancel
         </button>
       </div>
@@ -269,4 +319,106 @@ function mergeItems(a: ReadItem[], b: ReadItem[]): ReadItem[] {
 
 function key(i: ReadItem): string {
   return `${i.name.toLowerCase()}|${i.quantity}|${i.price_paise ?? ""}`;
+}
+
+/** Many orders at once, one screenshot each (the screen that shows the items and the total):
+ * each is read in turn, matched to its payment, and checked before it's saved. For catching up
+ * on a month of orders in one go. */
+export function OrderShots({ onSaved, className = "" }: { onSaved?: () => void; className?: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [orders, setOrders] = useState<{ reading: OrderReading; items: ReadItem[]; payment: string }[]>([]);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const readAll = async (files: File[]) => {
+    const got: typeof orders = [];
+    for (const [i, file] of files.entries()) {
+      setProgress({ done: i, total: files.length });
+      try {
+        const r = await api.moneyReadOrderShot(file);
+        if (r.items.length) got.push({ reading: r, items: r.items, payment: r.match?.id ?? "" });
+        else toast(`${file.name}: no items could be read`, "error");
+      } catch (e) {
+        toast(`${file.name}: ${(e as Error).message}`, "error");
+      }
+    }
+    setProgress(null);
+    if (input.current) input.current.value = "";
+    setOrders((o) => [...o, ...got]);
+  };
+
+  const update = (i: number, change: Partial<(typeof orders)[number]>) => setOrders((o) => o.map((x, j) => (j === i ? { ...x, ...change } : x)));
+  const drop = (i: number) => setOrders((o) => o.filter((_, j) => j !== i));
+  const save = async (i: number) => {
+    const o = orders[i];
+    setBusy(i);
+    try {
+      const body = o.items.map(({ name, quantity, price_paise, kind }) => ({ name, quantity, price_paise, kind }));
+      const saved = (await api.moneySetItems(o.payment, { items: body })).items;
+      toast(`Saved ${saved.length} item${saved.length === 1 ? "" : "s"}`);
+      drop(i);
+      onSaved?.();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  // Two screenshots matched to the same payment: only the first can be saved there as it is.
+  const taken = new Set<string>();
+
+  return (
+    <div className={className}>
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])].slice(0, MAX_BATCH);
+          if (files.length) void readAll(files);
+        }}
+      />
+      {progress ? (
+        <p className="flex items-center gap-2 text-sm text-slate-300" role="status">
+          <Loader2 size={14} className="animate-spin" />
+          Reading {Math.min(progress.done + 1, progress.total)} of {progress.total} on your computer… 10 to 30 seconds each.
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          className="flex items-center gap-1.5 rounded-md bg-sky-500 px-3 py-1 text-sm font-medium text-ink hover:bg-sky-400"
+        >
+          <Images size={14} /> {orders.length ? "Add more screenshots" : "Read screenshots of several orders"}
+        </button>
+      )}
+      {orders.length > 0 && (
+        <ul className="mt-2 space-y-2">
+          {orders.map((o, i) => {
+            const twice = Boolean(o.payment) && taken.has(o.payment);
+            if (o.payment) taken.add(o.payment);
+            return (
+              <li key={`${o.reading.shop}-${o.reading.occurred_on}-${o.reading.total_paise}-${i}`}>
+                <Review
+                  reading={o.reading}
+                  items={o.items}
+                  setItems={(items) => update(i, { items })}
+                  payment={o.payment}
+                  setPayment={(payment) => update(i, { payment })}
+                  fixed={false}
+                  busy={busy !== null}
+                  onSave={() => void save(i)}
+                  onCancel={() => drop(i)}
+                >
+                  {twice && <p className="mb-2 text-xs text-slate-300">Another screenshot above went to this payment too. Pick the right one.</p>}
+                </Review>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
